@@ -4,13 +4,15 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIPCHandlers } from './ipc/handlers'
 import { Conductor } from './conductor/Conductor'
+import { IPC_CHANNELS } from '../shared/ipc-channels'
 
 // Global conductor instance
 let conductor: Conductor
+let mainWindow: BrowserWindow | null = null
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -27,11 +29,11 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  window.on('ready-to-show', () => {
+    window.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
@@ -39,10 +41,12 @@ function createWindow(): void {
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    window.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return window
 }
 
 // This method will be called when Electron has finished
@@ -58,14 +62,35 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Initialize conductor
-  conductor = new Conductor()
+  // Initialize conductor with event handlers
+  conductor = new Conductor({
+    events: {
+      onSessionUpdate: (params) => {
+        // Forward session updates to renderer
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          const update = params.update
+          // Convert to AgentMessage format for renderer
+          if ('sessionUpdate' in update) {
+            const content: Array<{ type: 'text'; text: string }> = []
+            if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+              content.push({ type: 'text', text: update.content.text })
+            }
+            mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE, {
+              sessionId: params.sessionId,
+              content,
+              done: false,
+            })
+          }
+        }
+      },
+    },
+  })
   await conductor.initialize()
 
   // Register IPC handlers
   registerIPCHandlers(conductor)
 
-  createWindow()
+  mainWindow = createWindow()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

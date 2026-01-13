@@ -48,12 +48,12 @@ export function registerIPCHandlers(conductor: Conductor): void {
     const agent = conductor.getCurrentAgent()
     const isRunning = conductor.isAgentRunning()
     if (!isRunning || !agent) {
-      return { state: 'stopped' }
+      return { state: 'stopped' as const }
     }
     return {
-      state: 'running',
+      state: 'running' as const,
       agentId: agent.id,
-      agentName: agent.name,
+      sessionCount: 0, // TODO: track session count
     }
   })
 
