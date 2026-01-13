@@ -1,276 +1,714 @@
 #!/usr/bin/env npx tsx
 /**
- * CLI test script for ACP communication
- * Usage: pnpm test:acp "Your prompt here" [--agent=opencode] [--cwd=/path/to/dir] [--log=path]
+ * Multica CLI - Test and interact with Conductor
+ *
+ * Usage:
+ *   pnpm cli                           # Interactive mode
+ *   pnpm cli prompt "message"          # One-shot prompt
+ *   pnpm cli sessions                  # List sessions
+ *   pnpm cli resume <id>               # Resume and enter interactive mode
+ *
+ * Interactive commands:
+ *   /help          Show help
+ *   /sessions      List sessions
+ *   /new [cwd]     Create new session
+ *   /resume <id>   Resume session
+ *   /delete <id>   Delete session
+ *   /history       Show current session history
+ *   /agent <name>  Switch agent
+ *   /agents        List available agents
+ *   /status        Show current status
+ *   /cancel        Cancel current request
+ *   /quit          Exit
  */
-import { resolve, join } from 'node:path'
+import * as readline from 'node:readline'
+import { resolve, join, basename } from 'node:path'
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { Conductor } from './conductor'
+import { SessionStore } from './session/SessionStore'
 import { DEFAULT_AGENTS } from './config'
+import type { MulticaSession, AgentConfig } from '../shared/types'
 
-interface ParsedArgs {
-  prompt: string
-  agent: string
-  cwd: string
-  logFile: string | null
+// ANSI colors
+const c = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
 }
 
-function parseArgs(args: string[]): ParsedArgs {
-  let prompt = ''
-  let agent = 'opencode'
-  let cwd = process.cwd()
+interface CLIState {
+  conductor: Conductor
+  sessionStore: SessionStore
+  currentSession: MulticaSession | null
+  currentAgent: AgentConfig | null
+  isProcessing: boolean
+  isCancelling: boolean
+  logFile: string | null
+  sessionLog: Array<{ timestamp: string; type: string; data: unknown }>
+}
+
+function print(msg: string) {
+  console.log(msg)
+}
+
+function printError(msg: string) {
+  console.log(`${c.red}Error: ${msg}${c.reset}`)
+}
+
+function printSuccess(msg: string) {
+  console.log(`${c.green}${msg}${c.reset}`)
+}
+
+function printInfo(msg: string) {
+  console.log(`${c.cyan}${msg}${c.reset}`)
+}
+
+function printDim(msg: string) {
+  console.log(`${c.dim}${msg}${c.reset}`)
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleString()
+}
+
+function truncate(str: string, len: number): string {
+  if (str.length <= len) return str
+  return str.slice(0, len - 3) + '...'
+}
+
+// ============ Commands ============
+
+async function cmdHelp() {
+  print(`
+${c.bold}Multica CLI${c.reset} - Test Conductor functionality
+
+${c.bold}Commands:${c.reset}
+  ${c.cyan}/help${c.reset}              Show this help
+  ${c.cyan}/sessions${c.reset}          List all sessions
+  ${c.cyan}/new [cwd]${c.reset}         Create new session in directory (default: current)
+  ${c.cyan}/resume <id>${c.reset}       Resume an existing session
+  ${c.cyan}/delete <id>${c.reset}       Delete a session
+  ${c.cyan}/history${c.reset}           Show current session message history
+  ${c.cyan}/agent <name>${c.reset}      Switch to a different agent
+  ${c.cyan}/agents${c.reset}            List available agents
+  ${c.cyan}/status${c.reset}            Show current status
+  ${c.cyan}/cancel${c.reset}            Cancel current request
+  ${c.cyan}/quit${c.reset}              Exit CLI
+
+${c.bold}Usage:${c.reset}
+  Type any text to send as a prompt to the current session.
+  Press Ctrl+C to cancel a running request.
+  Press Ctrl+C twice to force quit.
+`)
+}
+
+async function cmdSessions(state: CLIState) {
+  const sessions = await state.sessionStore.list()
+
+  if (sessions.length === 0) {
+    printInfo('No sessions found.')
+    return
+  }
+
+  print(`\n${c.bold}Sessions:${c.reset}`)
+  print(`${'─'.repeat(80)}`)
+
+  for (const s of sessions) {
+    const isCurrent = state.currentSession?.id === s.id
+    const marker = isCurrent ? `${c.green}→${c.reset}` : ' '
+    const status =
+      s.status === 'active'
+        ? `${c.green}●${c.reset}`
+        : s.status === 'error'
+          ? `${c.red}●${c.reset}`
+          : `${c.dim}●${c.reset}`
+
+    const title = s.title || basename(s.workingDirectory)
+    const agent = DEFAULT_AGENTS[s.agentId]?.name || s.agentId
+    const shortId = s.id.slice(0, 8)
+
+    print(
+      `${marker} ${status} ${c.bold}${truncate(title, 30)}${c.reset}  ${c.dim}[${shortId}]${c.reset}`
+    )
+    print(`    ${c.dim}Agent: ${agent} | Dir: ${truncate(s.workingDirectory, 40)}${c.reset}`)
+    print(`    ${c.dim}Updated: ${formatDate(s.updatedAt)} | Messages: ${s.messageCount}${c.reset}`)
+  }
+  print(`${'─'.repeat(80)}`)
+}
+
+async function cmdNewSession(state: CLIState, cwd?: string) {
+  const targetCwd = cwd ? resolve(cwd) : process.cwd()
+
+  if (!existsSync(targetCwd)) {
+    printError(`Directory does not exist: ${targetCwd}`)
+    return
+  }
+
+  // Ensure agent is running
+  if (!state.conductor.isAgentRunning()) {
+    const agentId = state.currentAgent?.id || 'opencode'
+    const config = DEFAULT_AGENTS[agentId]
+    if (!config) {
+      printError(`Unknown agent: ${agentId}`)
+      return
+    }
+    printInfo(`Starting ${config.name}...`)
+    await state.conductor.startAgent(config)
+    state.currentAgent = config
+  }
+
+  printInfo(`Creating session in ${targetCwd}...`)
+  const session = await state.conductor.createSession(targetCwd)
+  state.currentSession = session
+
+  printSuccess(`Session created: ${session.id.slice(0, 8)}`)
+  printInfo(`Working directory: ${session.workingDirectory}`)
+}
+
+async function cmdResumeSession(state: CLIState, sessionId: string) {
+  if (!sessionId) {
+    printError('Usage: /resume <session-id>')
+    return
+  }
+
+  // Find session by partial ID
+  const sessions = await state.sessionStore.list()
+  const match = sessions.find((s) => s.id.startsWith(sessionId))
+
+  if (!match) {
+    printError(`Session not found: ${sessionId}`)
+    return
+  }
+
+  // Ensure agent is running
+  const agentConfig = DEFAULT_AGENTS[match.agentId]
+  if (!agentConfig) {
+    printError(`Unknown agent: ${match.agentId}`)
+    return
+  }
+
+  if (!state.conductor.isAgentRunning() || state.currentAgent?.id !== agentConfig.id) {
+    printInfo(`Starting ${agentConfig.name}...`)
+    await state.conductor.startAgent(agentConfig)
+    state.currentAgent = agentConfig
+  }
+
+  printInfo(`Resuming session ${match.id.slice(0, 8)}...`)
+  const session = await state.conductor.resumeSession(match.id)
+  state.currentSession = session
+
+  printSuccess(`Session resumed: ${session.id.slice(0, 8)}`)
+  printInfo(`Working directory: ${session.workingDirectory}`)
+  printDim('Note: Agent state is not restored. Previous messages are stored for display.')
+}
+
+async function cmdDeleteSession(state: CLIState, sessionId: string) {
+  if (!sessionId) {
+    printError('Usage: /delete <session-id>')
+    return
+  }
+
+  const sessions = await state.sessionStore.list()
+  const match = sessions.find((s) => s.id.startsWith(sessionId))
+
+  if (!match) {
+    printError(`Session not found: ${sessionId}`)
+    return
+  }
+
+  await state.conductor.deleteSession(match.id)
+
+  if (state.currentSession?.id === match.id) {
+    state.currentSession = null
+  }
+
+  printSuccess(`Session deleted: ${match.id.slice(0, 8)}`)
+}
+
+async function cmdHistory(state: CLIState) {
+  if (!state.currentSession) {
+    printError('No active session. Use /new or /resume first.')
+    return
+  }
+
+  const data = await state.sessionStore.get(state.currentSession.id)
+  if (!data || data.updates.length === 0) {
+    printInfo('No messages in this session.')
+    return
+  }
+
+  print(`\n${c.bold}Session History:${c.reset}`)
+  print(`${'─'.repeat(80)}`)
+
+  for (const stored of data.updates) {
+    const update = stored.update.update
+    if (!update || !('sessionUpdate' in update)) continue
+
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+        if (update.content.type === 'text') {
+          process.stdout.write(update.content.text)
+        }
+        break
+      case 'tool_call':
+        print(`\n${c.yellow}🔧 ${update.title}${c.reset}`)
+        break
+      case 'tool_call_update':
+        if (update.status === 'completed') {
+          print(`${c.dim}   ✓ completed${c.reset}`)
+        }
+        break
+    }
+  }
+  print(`\n${'─'.repeat(80)}`)
+}
+
+async function cmdAgents() {
+  print(`\n${c.bold}Available Agents:${c.reset}`)
+  for (const [id, config] of Object.entries(DEFAULT_AGENTS)) {
+    const status = config.enabled ? `${c.green}enabled${c.reset}` : `${c.dim}disabled${c.reset}`
+    print(`  ${c.cyan}${id}${c.reset} - ${config.name} (${status})`)
+    print(`    ${c.dim}Command: ${config.command} ${config.args.join(' ')}${c.reset}`)
+  }
+}
+
+async function cmdSwitchAgent(state: CLIState, agentId: string) {
+  if (!agentId) {
+    printError('Usage: /agent <name>')
+    return
+  }
+
+  const config = DEFAULT_AGENTS[agentId]
+  if (!config) {
+    printError(`Unknown agent: ${agentId}`)
+    print(`Available: ${Object.keys(DEFAULT_AGENTS).join(', ')}`)
+    return
+  }
+
+  printInfo(`Stopping current agent...`)
+  await state.conductor.stopAgent()
+
+  printInfo(`Starting ${config.name}...`)
+  await state.conductor.startAgent(config)
+  state.currentAgent = config
+  state.currentSession = null
+
+  printSuccess(`Switched to ${config.name}`)
+  printInfo('Use /new to create a session with this agent.')
+}
+
+async function cmdStatus(state: CLIState) {
+  print(`\n${c.bold}Status:${c.reset}`)
+
+  // Agent
+  if (state.currentAgent) {
+    print(`  Agent: ${c.green}${state.currentAgent.name}${c.reset}`)
+    print(`    Running: ${state.conductor.isAgentRunning() ? `${c.green}Yes${c.reset}` : `${c.red}No${c.reset}`}`)
+  } else {
+    print(`  Agent: ${c.dim}None${c.reset}`)
+  }
+
+  // Session
+  if (state.currentSession) {
+    print(`  Session: ${c.green}${state.currentSession.id.slice(0, 8)}${c.reset}`)
+    print(`    Directory: ${state.currentSession.workingDirectory}`)
+    print(`    Status: ${state.currentSession.status}`)
+  } else {
+    print(`  Session: ${c.dim}None${c.reset}`)
+  }
+
+  // Processing
+  if (state.isProcessing) {
+    print(`  ${c.yellow}Processing request...${c.reset}`)
+  }
+}
+
+async function cmdCancel(state: CLIState) {
+  if (!state.isProcessing) {
+    printInfo('No request in progress.')
+    return
+  }
+
+  if (!state.currentSession) {
+    printInfo('No active session.')
+    return
+  }
+
+  printInfo('Sending cancel request...')
+  await state.conductor.cancelRequest(state.currentSession.id)
+  state.isCancelling = true
+}
+
+// ============ Prompt Handling ============
+
+async function sendPrompt(state: CLIState, content: string): Promise<void> {
+  if (!state.currentSession) {
+    printError('No active session. Use /new or /resume first.')
+    return
+  }
+
+  if (state.isProcessing) {
+    printError('Already processing a request. Use /cancel to abort.')
+    return
+  }
+
+  state.isProcessing = true
+  state.isCancelling = false
+
+  print(`\n${c.blue}🤖 Agent:${c.reset}`)
+
+  try {
+    const stopReason = await state.conductor.sendPrompt(state.currentSession.id, content)
+    print(`\n\n${c.dim}[${stopReason}]${c.reset}\n`)
+  } catch (err) {
+    printError(`${err}`)
+  } finally {
+    state.isProcessing = false
+  }
+}
+
+// ============ Main ============
+
+async function runInteractiveMode(state: CLIState) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+
+  // Handle Ctrl+C
+  let ctrlCCount = 0
+  rl.on('SIGINT', async () => {
+    ctrlCCount++
+    if (ctrlCCount >= 2) {
+      print('\n\nForce quit.')
+      await cleanup(state)
+      process.exit(0)
+    }
+
+    if (state.isProcessing && state.currentSession) {
+      print('\n')
+      await cmdCancel(state)
+      setTimeout(() => {
+        ctrlCCount = 0
+      }, 2000)
+    } else {
+      print('\nPress Ctrl+C again to quit.')
+      setTimeout(() => {
+        ctrlCCount = 0
+      }, 2000)
+    }
+  })
+
+  print(`\n${c.bold}Multica CLI${c.reset} - Type /help for commands\n`)
+
+  // Show status
+  await cmdStatus(state)
+  print('')
+
+  const prompt = () => {
+    const sessionMarker = state.currentSession
+      ? `${c.green}[${state.currentSession.id.slice(0, 8)}]${c.reset}`
+      : `${c.dim}[no session]${c.reset}`
+    const agentMarker = state.currentAgent ? state.currentAgent.id : 'none'
+
+    rl.question(`${sessionMarker} ${c.dim}${agentMarker}${c.reset} > `, async (input) => {
+      const trimmed = input.trim()
+
+      if (!trimmed) {
+        prompt()
+        return
+      }
+
+      try {
+        if (trimmed.startsWith('/')) {
+          const [cmd, ...args] = trimmed.slice(1).split(/\s+/)
+          const arg = args.join(' ')
+
+          switch (cmd.toLowerCase()) {
+            case 'help':
+            case 'h':
+            case '?':
+              await cmdHelp()
+              break
+            case 'sessions':
+            case 'ls':
+              await cmdSessions(state)
+              break
+            case 'new':
+            case 'n':
+              await cmdNewSession(state, arg || undefined)
+              break
+            case 'resume':
+            case 'r':
+              await cmdResumeSession(state, arg)
+              break
+            case 'delete':
+            case 'rm':
+              await cmdDeleteSession(state, arg)
+              break
+            case 'history':
+            case 'hist':
+              await cmdHistory(state)
+              break
+            case 'agent':
+            case 'a':
+              await cmdSwitchAgent(state, arg)
+              break
+            case 'agents':
+              await cmdAgents()
+              break
+            case 'status':
+            case 's':
+              await cmdStatus(state)
+              break
+            case 'cancel':
+            case 'c':
+              await cmdCancel(state)
+              break
+            case 'quit':
+            case 'exit':
+            case 'q':
+              print('Goodbye!')
+              await cleanup(state)
+              process.exit(0)
+            default:
+              printError(`Unknown command: /${cmd}`)
+              print('Type /help for available commands.')
+          }
+        } else {
+          await sendPrompt(state, trimmed)
+        }
+      } catch (err) {
+        printError(`${err}`)
+      }
+
+      prompt()
+    })
+  }
+
+  prompt()
+}
+
+async function runOneShotPrompt(state: CLIState, prompt: string, options: { cwd?: string }) {
+  const cwd = options.cwd || process.cwd()
+
+  // Start default agent
+  const agentId = 'opencode'
+  const config = DEFAULT_AGENTS[agentId]
+  if (!config) {
+    printError(`Unknown agent: ${agentId}`)
+    process.exit(1)
+  }
+
+  printInfo(`Starting ${config.name}...`)
+  await state.conductor.startAgent(config)
+  state.currentAgent = config
+
+  // Create session
+  printInfo(`Creating session in ${cwd}...`)
+  const session = await state.conductor.createSession(cwd)
+  state.currentSession = session
+
+  // Send prompt
+  print(`\n${c.blue}User:${c.reset} ${prompt}`)
+  print(`\n${c.blue}Agent:${c.reset}`)
+
+  await sendPrompt(state, prompt)
+
+  await cleanup(state)
+  process.exit(0)
+}
+
+async function cleanup(state: CLIState) {
+  if (state.logFile && state.sessionLog.length > 0) {
+    writeFileSync(state.logFile, JSON.stringify(state.sessionLog, null, 2))
+    printInfo(`Session log saved to: ${state.logFile}`)
+  }
+  await state.conductor.stopAgent()
+}
+
+async function main() {
+  const args = process.argv.slice(2)
+
+  // Parse global options
   let logFile: string | null = null
+  let cwd = process.cwd()
+  const filteredArgs: string[] = []
 
   for (const arg of args) {
-    if (arg.startsWith('--agent=')) {
-      agent = arg.slice(8)
-    } else if (arg.startsWith('--cwd=')) {
-      cwd = resolve(arg.slice(6))
-    } else if (arg.startsWith('--log=')) {
+    if (arg.startsWith('--log=')) {
       logFile = resolve(arg.slice(6))
     } else if (arg === '--log') {
-      // Default log file location
       const logsDir = join(process.cwd(), 'logs')
       if (!existsSync(logsDir)) {
         mkdirSync(logsDir, { recursive: true })
       }
-      logFile = join(logsDir, `acp-session-${Date.now()}.json`)
-    } else if (!arg.startsWith('-')) {
-      prompt = arg
+      logFile = join(logsDir, `cli-session-${Date.now()}.json`)
+    } else if (arg.startsWith('--cwd=')) {
+      cwd = resolve(arg.slice(6))
+    } else {
+      filteredArgs.push(arg)
     }
   }
 
-  return { prompt, agent, cwd, logFile }
-}
+  // Storage path for sessions
+  const storagePath = join(homedir(), '.multica', 'sessions')
 
-async function main() {
-  const { prompt, agent: agentId, cwd, logFile } = parseArgs(process.argv.slice(2))
+  // Create session store and conductor
+  const sessionStore = new SessionStore(storagePath)
+  await sessionStore.initialize()
 
-  if (!prompt) {
-    console.log('Usage: pnpm test:acp "Your prompt here" [options]')
-    console.log('')
-    console.log('Options:')
-    console.log('  --agent=NAME   Agent to use (default: opencode)')
-    console.log('  --cwd=PATH     Working directory for the agent')
-    console.log('  --log          Save session log to logs/ directory')
-    console.log('  --log=PATH     Save session log to specified file')
-    console.log('')
-    console.log('Examples:')
-    console.log('  pnpm test:acp "What is 2+2?"')
-    console.log('  pnpm test:acp "List files" --cwd=/tmp')
-    console.log('  pnpm test:acp "Hello" --agent=codex --log')
-    process.exit(1)
-  }
-
-  const agentConfig = DEFAULT_AGENTS[agentId]
-
-  if (!agentConfig) {
-    console.error(`Unknown agent: ${agentId}`)
-    console.log('Available agents:', Object.keys(DEFAULT_AGENTS).join(', '))
-    process.exit(1)
-  }
-
-  if (!existsSync(cwd)) {
-    console.error(`Directory does not exist: ${cwd}`)
-    process.exit(1)
-  }
-
-  console.log(`\n🚀 Starting ${agentConfig.name}...`)
-  if (logFile) {
-    console.log(`📄 Logging to: ${logFile}`)
-  }
-
-  // Track tool calls for displaying updates
   const toolCalls = new Map<string, string>()
 
-  // Session log for debugging
-  interface SessionLogEntry {
-    timestamp: string
-    type: 'session_update' | 'error' | 'info'
-    data: unknown
-  }
-  const sessionLog: SessionLogEntry[] = []
-
-  function log(type: SessionLogEntry['type'], data: unknown) {
-    sessionLog.push({
-      timestamp: new Date().toISOString(),
-      type,
-      data,
-    })
-  }
-
-  // Track current session for cancellation
-  let currentSessionId: string | null = null
-  let isCancelling = false
-
   const conductor = new Conductor({
-    skipPersistence: true, // CLI mode: don't persist sessions
+    storagePath,
     events: {
       onSessionUpdate: (params) => {
-      // Log the raw update for debugging
-      log('session_update', params)
-
-      const update = params.update
-      switch (update.sessionUpdate) {
-        case 'agent_message_chunk':
-          if (update.content.type === 'text') {
-            process.stdout.write(update.content.text)
-          } else {
-            console.log(`[${update.content.type}]`)
-          }
-          break
-
-        case 'tool_call': {
-          toolCalls.set(update.toolCallId, update.title)
-          console.log(`\n┌─ 🔧 ${update.title} [${update.status}]`)
-          if (update.kind) {
-            console.log(`│  Kind: ${update.kind}`)
-          }
-          if (update.rawInput) {
-            const input = typeof update.rawInput === 'string'
-              ? update.rawInput
-              : JSON.stringify(update.rawInput, null, 2)
-            const lines = input.split('\n')
-            lines.forEach((line, i) => {
-              if (i < 10) console.log(`│  ${line}`)
-              else if (i === 10) console.log(`│  ... (${lines.length - 10} more lines)`)
-            })
-          }
-          break
-        }
-
-        case 'tool_call_update': {
-          const title = toolCalls.get(update.toolCallId) || update.toolCallId
-          const status = update.status || 'updating'
-
-          // Show status change
-          if (update.status) {
-            console.log(`├─ 🔧 ${title} [${status}]`)
-          }
-
-          // Show output content
-          if (update.content && Array.isArray(update.content)) {
-            for (const content of update.content) {
-              if (content.type === 'content') {
-                // content.content can be an array of content blocks
-                const blocks = content.content
-                if (Array.isArray(blocks)) {
-                  for (const c of blocks) {
-                    if (c.type === 'text' && c.text) {
-                      const lines = c.text.split('\n')
-                      lines.slice(0, 15).forEach(line => console.log(`│  ${line}`))
-                      if (lines.length > 15) {
-                        console.log(`│  ... (${lines.length - 15} more lines)`)
-                      }
-                    }
-                  }
-                }
-              } else if (content.type === 'terminal') {
-                console.log(`│  [Terminal: ${content.terminalId}]`)
-              } else if (content.type === 'diff') {
-                console.log(`│  [Diff: ${content.path}]`)
-              }
+        const update = params.update
+        switch (update.sessionUpdate) {
+          case 'agent_message_chunk':
+            if (update.content.type === 'text') {
+              process.stdout.write(update.content.text)
+            } else {
+              print(`[${update.content.type}]`)
             }
-          }
+            break
 
-          // Show raw output if available
-          if (update.rawOutput) {
-            const output = typeof update.rawOutput === 'string'
-              ? update.rawOutput
-              : JSON.stringify(update.rawOutput, null, 2)
-            const lines = output.split('\n')
-            lines.slice(0, 15).forEach(line => console.log(`│  ${line}`))
-            if (lines.length > 15) {
-              console.log(`│  ... (${lines.length - 15} more lines)`)
+          case 'tool_call': {
+            toolCalls.set(update.toolCallId, update.title)
+            print(`\n${c.yellow}┌─ 🔧 ${update.title}${c.reset} ${c.dim}[${update.status}]${c.reset}`)
+            if (update.kind) {
+              print(`${c.dim}│  Kind: ${update.kind}${c.reset}`)
             }
+            if (update.rawInput) {
+              const input =
+                typeof update.rawInput === 'string'
+                  ? update.rawInput
+                  : JSON.stringify(update.rawInput, null, 2)
+              const lines = input.split('\n')
+              lines.slice(0, 10).forEach((line) => print(`${c.dim}│  ${line}${c.reset}`))
+              if (lines.length > 10) print(`${c.dim}│  ... (${lines.length - 10} more lines)${c.reset}`)
+            }
+            break
           }
 
-          if (status === 'completed') {
-            console.log(`└─ ✓ ${title} completed`)
+          case 'tool_call_update': {
+            const title = toolCalls.get(update.toolCallId) || update.toolCallId
+            if (update.status === 'completed') {
+              print(`${c.dim}└─ ✓ ${title} completed${c.reset}`)
+            } else if (update.status) {
+              print(`${c.dim}├─ ${title} [${update.status}]${c.reset}`)
+            }
+            break
           }
-          break
+
+          case 'agent_thought_chunk':
+            if (update.content.type === 'text') {
+              print(`${c.magenta}💭 ${update.content.text}${c.reset}`)
+            }
+            break
+
+          case 'plan':
+            print(`\n${c.cyan}📋 Plan: ${'title' in update ? update.title : 'Thinking...'}${c.reset}`)
+            break
         }
-
-        case 'agent_thought_chunk':
-          if (update.content.type === 'text') {
-            process.stdout.write(`💭 ${update.content.text}`)
-          }
-          break
-
-        case 'plan':
-          console.log(`\n📋 Plan: ${'title' in update ? update.title : 'Thinking...'}`)
-          break
-
-        default:
-          // Ignore other update types
-          break
-      }
       },
     },
   })
 
-  // Handle Ctrl+C gracefully - send cancel request to agent
-  const handleSigint = async () => {
-    if (isCancelling) {
-      console.log('\n⚠️  Force quit...')
-      process.exit(1)
-    }
-
-    isCancelling = true
-    console.log('\n\n🛑 Cancelling request...')
-
-    if (currentSessionId) {
-      try {
-        await conductor.cancelRequest(currentSessionId)
-        console.log('✓ Cancel request sent to agent')
-      } catch (err) {
-        console.error('Failed to send cancel:', err)
-      }
-    }
-
-    // Save log before exit
-    if (logFile && sessionLog.length > 0) {
-      writeFileSync(logFile, JSON.stringify(sessionLog, null, 2))
-      console.log(`📄 Session log saved to: ${logFile}`)
-    }
-
-    await conductor.stopAgent()
-    process.exit(0)
+  const state: CLIState = {
+    conductor,
+    sessionStore,
+    currentSession: null,
+    currentAgent: null,
+    isProcessing: false,
+    isCancelling: false,
+    logFile,
+    sessionLog: [],
   }
 
-  process.on('SIGINT', () => {
-    handleSigint().catch(console.error)
-  })
+  // Handle subcommands
+  const subcommand = filteredArgs[0]
 
-  try {
-    // Start the agent
-    await conductor.startAgent(agentConfig)
-
-    // Create a session with specified working directory
-    console.log(`📁 Working directory: ${cwd}`)
-    const session = await conductor.createSession(cwd)
-    currentSessionId = session.id
-    console.log(`📝 Session: ${session.id}`)
-
-    // Send the prompt
-    console.log(`\n💬 User: ${prompt}\n`)
-    console.log('🤖 Agent:')
-
-    const stopReason = await conductor.sendPrompt(session.id, prompt)
-
-    console.log(`\n\n✅ Completed (${stopReason})`)
-  } catch (error) {
-    console.error('\n❌ Error:', error)
-    process.exit(1)
-  } finally {
-    // Save session log if requested
-    if (logFile && sessionLog.length > 0) {
-      writeFileSync(logFile, JSON.stringify(sessionLog, null, 2))
-      console.log(`\n📄 Session log saved to: ${logFile}`)
+  switch (subcommand) {
+    case 'prompt':
+    case 'p': {
+      const prompt = filteredArgs.slice(1).join(' ')
+      if (!prompt) {
+        printError('Usage: pnpm cli prompt "your message"')
+        process.exit(1)
+      }
+      await runOneShotPrompt(state, prompt, { cwd })
+      break
     }
-    await conductor.stopAgent()
-    process.exit(0)
+
+    case 'sessions':
+    case 'ls': {
+      await cmdSessions(state)
+      process.exit(0)
+    }
+
+    case 'resume':
+    case 'r': {
+      const sessionId = filteredArgs[1]
+      if (!sessionId) {
+        printError('Usage: pnpm cli resume <session-id>')
+        process.exit(1)
+      }
+      await cmdResumeSession(state, sessionId)
+      await runInteractiveMode(state)
+      break
+    }
+
+    case 'agents': {
+      await cmdAgents()
+      process.exit(0)
+    }
+
+    case 'help':
+    case '--help':
+    case '-h': {
+      print(`
+${c.bold}Multica CLI${c.reset}
+
+${c.bold}Usage:${c.reset}
+  pnpm cli                          Interactive mode
+  pnpm cli prompt "message"         One-shot prompt
+  pnpm cli sessions                 List sessions
+  pnpm cli resume <id>              Resume session
+  pnpm cli agents                   List available agents
+
+${c.bold}Options:${c.reset}
+  --cwd=PATH    Working directory
+  --log         Save session log
+  --log=PATH    Save session log to specific file
+
+${c.bold}Examples:${c.reset}
+  pnpm cli                                  # Start interactive mode
+  pnpm cli prompt "What is 2+2?"            # Quick prompt
+  pnpm cli prompt "List files" --cwd=/tmp   # Prompt with cwd
+  pnpm cli sessions                         # List all sessions
+  pnpm cli resume abc123                    # Resume session by ID prefix
+`)
+      process.exit(0)
+    }
+
+    default: {
+      // Interactive mode
+      await runInteractiveMode(state)
+    }
   }
 }
 
-main().catch(console.error)
+main().catch((err) => {
+  printError(`${err}`)
+  process.exit(1)
+})

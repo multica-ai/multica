@@ -9,8 +9,8 @@
  *           ├── {session-id}.json  # Complete session data
  *           └── ...
  */
-import { app } from 'electron'
 import { join } from 'path'
+import { homedir } from 'os'
 import { existsSync, mkdirSync } from 'fs'
 import { readFile, writeFile, unlink } from 'fs/promises'
 import { randomUUID } from 'crypto'
@@ -23,6 +23,22 @@ import type {
   ListSessionsOptions,
 } from '../../shared/types'
 
+/**
+ * Get default storage path
+ * Uses Electron's userData in GUI mode, fallback to ~/.multica for CLI
+ */
+function getDefaultStoragePath(): string {
+  try {
+    // Try to use Electron's app.getPath if available
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { app } = require('electron')
+    return join(app.getPath('userData'), 'sessions')
+  } catch {
+    // Fallback for CLI mode
+    return join(homedir(), '.multica', 'sessions')
+  }
+}
+
 export class SessionStore {
   private basePath: string
   private indexPath: string
@@ -33,7 +49,7 @@ export class SessionStore {
   private loadedSessions: Map<string, SessionData> = new Map()
 
   constructor(basePath?: string) {
-    this.basePath = basePath ?? join(app.getPath('userData'), 'sessions')
+    this.basePath = basePath ?? getDefaultStoragePath()
     this.indexPath = join(this.basePath, 'index.json')
     this.dataPath = join(this.basePath, 'data')
   }

@@ -19,7 +19,8 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test:acp": "tsx src/main/cli.ts"
+    "cli": "tsx src/main/cli.ts",
+    "test:acp": "tsx src/main/cli.ts prompt"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.13.0",

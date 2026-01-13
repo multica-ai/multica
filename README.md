@@ -28,38 +28,58 @@ pnpm dev
 pnpm typecheck
 ```
 
-## CLI Test Command
+## CLI
 
-Test the ACP communication directly from the command line:
+Multica includes a comprehensive CLI for testing and interacting with agents:
 
 ```bash
-pnpm test:acp "Your prompt here" [options]
+pnpm cli                          # Interactive mode
+pnpm cli prompt "message"         # One-shot prompt
+pnpm cli sessions                 # List sessions
+pnpm cli resume <id>              # Resume session
+pnpm cli agents                   # List available agents
+```
+
+### Interactive Mode
+
+Start an interactive REPL session:
+
+```bash
+pnpm cli
+```
+
+Available commands in interactive mode:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help |
+| `/sessions` | List all sessions |
+| `/new [cwd]` | Create new session (default: current directory) |
+| `/resume <id>` | Resume session by ID prefix |
+| `/delete <id>` | Delete a session |
+| `/history` | Show current session message history |
+| `/agent <name>` | Switch to a different agent |
+| `/agents` | List available agents |
+| `/status` | Show current status |
+| `/cancel` | Cancel current request |
+| `/quit` | Exit CLI |
+
+### One-Shot Prompt
+
+Send a single prompt and exit:
+
+```bash
+pnpm cli prompt "What is 2+2?"
+pnpm cli prompt "List files" --cwd=/tmp
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--agent=NAME` | Agent to use (default: `opencode`) |
 | `--cwd=PATH` | Working directory for the agent |
 | `--log` | Save session log to `logs/` directory |
 | `--log=PATH` | Save session log to specified file |
-
-### Examples
-
-```bash
-# Basic usage
-pnpm test:acp "What is 2+2?"
-
-# Use a specific agent
-pnpm test:acp "Hello" --agent=codex
-
-# Specify working directory
-pnpm test:acp "List all TypeScript files" --cwd=/path/to/project
-
-# Save session log for debugging
-pnpm test:acp "Explain this codebase" --log
-```
 
 ### Cancellation
 
