@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+
+/* Custom theme configuration */
+@theme {
+  --color-primary: #6366f1;
+  --color-primary-dark: #4f46e5;
+  --color-background: #0f0f0f;
+  --color-surface: #1a1a1a;
+  --color-surface-hover: #252525;
+  --color-border: #2e2e2e;
+  --color-text: #ffffff;
+  --color-text-muted: #a1a1aa;
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  @apply bg-[var(--color-background)] text-[var(--color-text)] antialiased;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+}
+
+/* Draggable title bar region for macOS */
+.titlebar-drag-region {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-[var(--color-border)] rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-[var(--color-text-muted)];
+}
