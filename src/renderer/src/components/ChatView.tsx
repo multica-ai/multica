@@ -1,7 +1,7 @@
 /**
  * Chat view component - displays messages and tool calls
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { StoredSessionUpdate } from '../../../shared/types'
 
 interface ChatViewProps {
@@ -254,32 +254,153 @@ interface ToolCallCardProps {
 }
 
 function ToolCallCard({ toolCall }: ToolCallCardProps) {
-  const statusIcon =
-    toolCall.status === 'completed' ? (
-      <span className="text-green-500">✓</span>
-    ) : toolCall.status === 'running' ? (
-      <LoadingDots />
-    ) : (
-      <span className="text-yellow-500">●</span>
-    )
+  const [expanded, setExpanded] = useState(false)
+
+  // Get icon based on tool kind
+  const icon = getToolIcon(toolCall.kind, toolCall.title)
+
+  // Get clean title
+  const cleanTitle = getCleanTitle(toolCall.title, toolCall.kind)
+
+  // Status styling
+  const statusConfig = {
+    completed: { icon: '✓', color: 'text-green-500', bg: 'bg-green-500/10' },
+    failed: { icon: '✗', color: 'text-red-500', bg: 'bg-red-500/10' },
+    running: { icon: null, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    in_progress: { icon: null, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    pending: { icon: '○', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+  }
+  const status = statusConfig[toolCall.status as keyof typeof statusConfig] || statusConfig.pending
+
+  const hasDetails = toolCall.input || toolCall.output
 
   return (
-    <div className="rounded border border-[var(--color-border)] bg-[var(--color-background)] p-2 text-xs">
-      <div className="flex items-center gap-2">
-        {statusIcon}
-        <span className="font-medium">{toolCall.title}</span>
-        {toolCall.kind && (
-          <span className="text-[var(--color-text-muted)]">({toolCall.kind})</span>
+    <div
+      className={`rounded-lg border border-[var(--color-border)] ${status.bg} overflow-hidden text-xs`}
+    >
+      {/* Header - always visible */}
+      <div
+        className={`flex items-center gap-2 px-3 py-2 ${hasDetails ? 'cursor-pointer hover:bg-black/5' : ''}`}
+        onClick={() => hasDetails && setExpanded(!expanded)}
+      >
+        {/* Tool icon */}
+        <span className="text-base">{icon}</span>
+
+        {/* Title */}
+        <span className="flex-1 font-medium truncate">{cleanTitle}</span>
+
+        {/* Status */}
+        <span className={`flex items-center gap-1 ${status.color}`}>
+          {status.icon ? (
+            <span>{status.icon}</span>
+          ) : (
+            <LoadingDots />
+          )}
+          <span className="text-[10px] uppercase">{toolCall.status}</span>
+        </span>
+
+        {/* Expand icon */}
+        {hasDetails && (
+          <span className={`text-[var(--color-text-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}>
+            ▼
+          </span>
         )}
       </div>
-      {toolCall.input && (
-        <pre className="mt-1 max-h-24 overflow-auto rounded bg-black/20 p-1 text-[var(--color-text-muted)]">
-          {toolCall.input.slice(0, 200)}
-          {toolCall.input.length > 200 && '...'}
-        </pre>
+
+      {/* Details - collapsible */}
+      {expanded && hasDetails && (
+        <div className="border-t border-[var(--color-border)] bg-black/10 px-3 py-2 space-y-2">
+          {toolCall.input && (
+            <div>
+              <div className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Input</div>
+              <pre className="max-h-32 overflow-auto rounded bg-black/20 p-2 text-[var(--color-text-muted)] whitespace-pre-wrap break-all">
+                {toolCall.input}
+              </pre>
+            </div>
+          )}
+          {toolCall.output && (
+            <div>
+              <div className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Output</div>
+              <pre className="max-h-32 overflow-auto rounded bg-black/20 p-2 text-[var(--color-text-muted)] whitespace-pre-wrap break-all">
+                {toolCall.output.slice(0, 500)}
+                {toolCall.output.length > 500 && '...'}
+              </pre>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
+}
+
+function getToolIcon(kind?: string, title?: string): string {
+  const lowerKind = kind?.toLowerCase() || ''
+  const lowerTitle = title?.toLowerCase() || ''
+
+  // Match by kind first
+  if (lowerKind.includes('search') || lowerKind.includes('grep') || lowerKind.includes('glob')) {
+    return '🔍'
+  }
+  if (lowerKind.includes('file') || lowerKind.includes('read') || lowerKind.includes('write')) {
+    return '📄'
+  }
+  if (lowerKind.includes('edit')) {
+    return '✏️'
+  }
+  if (lowerKind.includes('bash') || lowerKind.includes('shell') || lowerKind.includes('command')) {
+    return '⌨️'
+  }
+
+  // Match by title
+  if (lowerTitle.includes('list') || lowerTitle.includes('ls')) {
+    return '📁'
+  }
+  if (lowerTitle.includes('read')) {
+    return '📖'
+  }
+  if (lowerTitle.includes('write') || lowerTitle.includes('create')) {
+    return '📝'
+  }
+  if (lowerTitle.includes('edit') || lowerTitle.includes('replace')) {
+    return '✏️'
+  }
+  if (lowerTitle.includes('run') || lowerTitle.includes('exec') || lowerTitle.includes('bash')) {
+    return '⌨️'
+  }
+  if (lowerTitle.includes('search') || lowerTitle.includes('find') || lowerTitle.includes('grep')) {
+    return '🔍'
+  }
+  if (lowerTitle.includes('glob')) {
+    return '🔍'
+  }
+
+  return '🔧'
+}
+
+function getCleanTitle(title?: string, kind?: string): string {
+  if (!title) return kind || 'Tool Call'
+
+  // If title is too long or looks like a command, try to extract meaningful part
+  const cleanTitle = title.trim()
+
+  // If it starts with "Run " and has a long command, shorten it
+  if (cleanTitle.startsWith('Run ') && cleanTitle.length > 50) {
+    const cmd = cleanTitle.slice(4).split(' ')[0]
+    return `Run ${cmd}`
+  }
+
+  // If it's a file path, show just the filename
+  if (cleanTitle.includes('/') && !cleanTitle.includes(' ')) {
+    const parts = cleanTitle.split('/')
+    return parts[parts.length - 1] || cleanTitle
+  }
+
+  // Truncate if too long
+  if (cleanTitle.length > 60) {
+    return cleanTitle.slice(0, 57) + '...'
+  }
+
+  return cleanTitle
 }
 
 function LoadingDots() {
