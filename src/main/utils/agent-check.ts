@@ -17,7 +17,7 @@ export interface AgentCheckResult {
 
 // Install hints for each agent
 const INSTALL_HINTS: Record<string, string> = {
-  'claude-code': 'npm install -g @anthropic-ai/claude-code',
+  'claude-code': 'npm install -g @zed-industries/claude-code-acp',
   opencode: 'go install github.com/anomalyco/opencode@latest',
   codex: 'npm install -g @openai/codex',
   gemini: 'npm install -g @google/gemini-cli',
