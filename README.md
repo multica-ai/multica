@@ -6,26 +6,23 @@ Multica uses the [Agent Client Protocol (ACP)](https://github.com/anthropics/age
 
 ## Supported Agents
 
-| Agent | Command | Notes |
-|-------|---------|-------|
-| [OpenCode](https://github.com/anomalyco/opencode) | `opencode acp` | |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp` | Community ACP wrapper |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` | |
+| Agent | Command | Install |
+|-------|---------|---------|
+| [OpenCode](https://github.com/opencode-ai/opencode) | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp` | `npm install -g codex-acp` |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` | `npm install -g @google/gemini-cli` |
 
-## Setup
+## Quick Start
 
 ```bash
+# Install dependencies
 pnpm install
-```
 
-## Development
+# Check which agents are installed
+pnpm cli doctor
 
-```bash
-# Start Electron app in dev mode
-pnpm dev
-
-# Type check
-pnpm typecheck
+# Start interactive mode
+pnpm cli
 ```
 
 ## CLI
@@ -49,13 +46,13 @@ Start an interactive REPL session:
 pnpm cli
 ```
 
-Available commands in interactive mode:
+Available commands:
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show help |
-| `/sessions` | List all sessions |
 | `/new [cwd]` | Create new session (default: current directory) |
+| `/sessions` | List all sessions |
 | `/resume <id>` | Resume session by ID prefix |
 | `/delete <id>` | Delete a session |
 | `/history` | Show current session message history |
@@ -83,11 +80,7 @@ Check if agents are installed on your system:
 pnpm cli doctor
 ```
 
-This will show:
-- Installation status for each agent
-- Path to the installed binary
-- Version information (when available)
-- Install commands for missing agents
+Shows installation status, binary path, version, and install hints for missing agents.
 
 ### Options
 
@@ -102,17 +95,22 @@ This will show:
 - Press `Ctrl+C` once to send a cancel request to the agent
 - Press `Ctrl+C` twice to force quit
 
+## Development
+
+```bash
+# Start Electron app in dev mode
+pnpm dev
+
+# Type check
+pnpm typecheck
+```
+
 ## Build
 
 ```bash
-# macOS
-pnpm build:mac
-
-# Windows
-pnpm build:win
-
-# Linux
-pnpm build:linux
+pnpm build:mac      # macOS
+pnpm build:win      # Windows
+pnpm build:linux    # Linux
 ```
 
 ## Architecture
