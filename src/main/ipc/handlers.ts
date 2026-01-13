@@ -5,6 +5,7 @@
 import { ipcMain, dialog } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
+import { checkAgents } from '../utils/agent-check'
 import type { Conductor } from '../conductor/Conductor'
 import type { ListSessionsOptions, MulticaSession } from '../../shared/types'
 
@@ -120,6 +121,12 @@ export function registerIPCHandlers(conductor: Conductor): void {
     }
 
     return result.filePaths[0]
+  })
+
+  // --- System handlers ---
+
+  ipcMain.handle(IPC_CHANNELS.SYSTEM_CHECK_AGENTS, async () => {
+    return checkAgents()
   })
 
   console.log('[IPC] All handlers registered')

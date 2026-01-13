@@ -32,6 +32,7 @@ export interface AppActions {
   // Agent actions
   startAgent: (agentId: string) => Promise<void>
   stopAgent: () => Promise<void>
+  switchAgent: (agentId: string) => Promise<void>
   sendPrompt: (content: string) => Promise<void>
   cancelRequest: () => Promise<void>
 
@@ -202,6 +203,22 @@ export function useApp(): AppState & AppActions {
     }
   }, [loadAgentStatus])
 
+  const switchAgent = useCallback(async (agentId: string) => {
+    try {
+      setError(null)
+      // Stop current agent first
+      await window.electronAPI.stopAgent()
+      // Clear current session (it's bound to the old agent)
+      setCurrentSession(null)
+      setSessionUpdates([])
+      // Start new agent
+      await window.electronAPI.startAgent(agentId)
+      await loadAgentStatus()
+    } catch (err) {
+      setError(`Failed to switch agent: ${err}`)
+    }
+  }, [loadAgentStatus])
+
   const sendPrompt = useCallback(async (content: string) => {
     if (!currentSession) {
       setError('No active session')
@@ -266,6 +283,7 @@ export function useApp(): AppState & AppActions {
     deleteSession,
     startAgent,
     stopAgent,
+    switchAgent,
     sendPrompt,
     cancelRequest,
     clearError,

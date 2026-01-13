@@ -15,6 +15,16 @@ export interface AgentMessage {
   done: boolean
 }
 
+export interface AgentCheckResult {
+  id: string
+  name: string
+  command: string
+  installed: boolean
+  path?: string
+  version?: string
+  installHint?: string
+}
+
 export interface ElectronAPI {
   // Agent lifecycle
   startAgent(agentId: string): Promise<{ success: boolean; agentId: string }>
@@ -40,6 +50,9 @@ export interface ElectronAPI {
 
   // Dialog
   selectDirectory(): Promise<string | null>
+
+  // System
+  checkAgents(): Promise<AgentCheckResult[]>
 
   // Event listeners (return unsubscribe function)
   onAgentMessage(callback: (message: AgentMessage) => void): () => void

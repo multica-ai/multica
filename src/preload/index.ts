@@ -44,6 +44,9 @@ const electronAPI: ElectronAPI = {
   // Dialog
   selectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
 
+  // System
+  checkAgents: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_AGENTS),
+
   // Event listeners
   onAgentMessage: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, message: unknown) =>

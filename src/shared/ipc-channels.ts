@@ -27,6 +27,9 @@ export const IPC_CHANNELS = {
   // Dialog
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
 
+  // System
+  SYSTEM_CHECK_AGENTS: 'system:check-agents',
+
   // File system (V2)
   FILE_APPROVAL_REQUEST: 'file:approval-request',
   FILE_APPROVAL_RESPONSE: 'file:approval-response',

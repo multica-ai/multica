@@ -3,7 +3,7 @@
  */
 import { useState, useEffect } from 'react'
 import { useApp } from './hooks/useApp'
-import { SessionList, ChatView, MessageInput, StatusBar } from './components'
+import { SessionList, ChatView, MessageInput, StatusBar, Settings } from './components'
 
 function App(): React.JSX.Element {
   const {
@@ -21,6 +21,7 @@ function App(): React.JSX.Element {
     deleteSession,
     startAgent,
     stopAgent,
+    switchAgent,
     sendPrompt,
     cancelRequest,
     clearError,
@@ -29,6 +30,9 @@ function App(): React.JSX.Element {
   // New session dialog state
   const [showNewSession, setShowNewSession] = useState(false)
   const [newSessionCwd, setNewSessionCwd] = useState('')
+
+  // Settings dialog state
+  const [showSettings, setShowSettings] = useState(false)
 
   // Auto-show new session dialog when agent is running but no session
   useEffect(() => {
@@ -101,6 +105,7 @@ function App(): React.JSX.Element {
             currentSession={currentSession}
             onStartAgent={() => startAgent('opencode')}
             onStopAgent={stopAgent}
+            onOpenSettings={() => setShowSettings(true)}
           />
 
           {/* Chat view */}
@@ -171,6 +176,14 @@ function App(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      {/* Settings dialog */}
+      <Settings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        currentAgentId={agentStatus.state === 'running' ? agentStatus.agentId : null}
+        onSwitchAgent={switchAgent}
+      />
     </div>
   )
 }
