@@ -32,18 +32,21 @@ export function Settings({ isOpen, onClose, currentAgentId, onSwitchAgent }: Set
 
   useEffect(() => {
     if (isOpen) {
+      // Reset selection when opening
+      setSelectedAgent(currentAgentId)
       loadAgents()
     }
-  }, [isOpen])
+  }, [isOpen, currentAgentId])
 
+  // Auto-select first installed agent if none selected
   useEffect(() => {
-    // Auto-select current agent or first installed agent
     if (agents.length > 0 && !selectedAgent) {
-      const current = agents.find(a => a.id === currentAgentId && a.installed)
       const firstInstalled = agents.find(a => a.installed)
-      setSelectedAgent(current?.id || firstInstalled?.id || null)
+      if (firstInstalled) {
+        setSelectedAgent(firstInstalled.id)
+      }
     }
-  }, [agents, currentAgentId, selectedAgent])
+  }, [agents, selectedAgent])
 
   async function loadAgents() {
     setLoading(true)
