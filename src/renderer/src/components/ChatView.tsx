@@ -7,9 +7,11 @@ import type { StoredSessionUpdate } from '../../../shared/types'
 interface ChatViewProps {
   updates: StoredSessionUpdate[]
   isProcessing: boolean
+  hasSession: boolean
+  onNewSession?: () => void
 }
 
-export function ChatView({ updates, isProcessing }: ChatViewProps) {
+export function ChatView({ updates, isProcessing, hasSession, onNewSession }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom when new messages arrive
@@ -25,9 +27,19 @@ export function ChatView({ updates, isProcessing }: ChatViewProps) {
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold">Multica</h1>
-          <p className="text-[var(--color-text-muted)]">
-            Start a conversation with your coding agent
+          <p className="mb-4 text-[var(--color-text-muted)]">
+            {hasSession
+              ? 'Start a conversation with your coding agent'
+              : 'Create a session to start chatting'}
           </p>
+          {!hasSession && onNewSession && (
+            <button
+              onClick={onNewSession}
+              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-white transition-colors hover:bg-[var(--color-primary-dark)]"
+            >
+              New Session
+            </button>
+          )}
         </div>
       </div>
     )

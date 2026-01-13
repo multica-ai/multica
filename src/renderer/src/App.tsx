@@ -1,7 +1,7 @@
 /**
  * Main App component
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from './hooks/useApp'
 import { SessionList, ChatView, MessageInput, StatusBar } from './components'
 
@@ -29,6 +29,14 @@ function App(): React.JSX.Element {
   // New session dialog state
   const [showNewSession, setShowNewSession] = useState(false)
   const [newSessionCwd, setNewSessionCwd] = useState('')
+
+  // Auto-show new session dialog when agent is running but no session
+  useEffect(() => {
+    if (agentStatus.state === 'running' && !currentSession && sessions.length === 0) {
+      setNewSessionCwd('')
+      setShowNewSession(true)
+    }
+  }, [agentStatus.state, currentSession, sessions.length])
 
   const handleNewSession = () => {
     setNewSessionCwd(process.cwd?.() || '')
@@ -96,7 +104,12 @@ function App(): React.JSX.Element {
           />
 
           {/* Chat view */}
-          <ChatView updates={sessionUpdates} isProcessing={isProcessing} />
+          <ChatView
+            updates={sessionUpdates}
+            isProcessing={isProcessing}
+            hasSession={!!currentSession}
+            onNewSession={handleNewSession}
+          />
 
           {/* Input */}
           <MessageInput
