@@ -27,7 +27,6 @@ import { resolve, join, basename } from 'node:path'
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { Conductor } from './conductor'
-import { SessionStore } from './session/SessionStore'
 import { DEFAULT_AGENTS } from './config'
 import type { MulticaSession, AgentConfig } from '../shared/types'
 
@@ -46,7 +45,6 @@ const c = {
 
 interface CLIState {
   conductor: Conductor
-  sessionStore: SessionStore
   currentSession: MulticaSession | null
   currentAgent: AgentConfig | null
   isProcessing: boolean
@@ -113,7 +111,7 @@ ${c.bold}Usage:${c.reset}
 }
 
 async function cmdSessions(state: CLIState) {
-  const sessions = await state.sessionStore.list()
+  const sessions = await state.conductor.listSessions()
 
   if (sessions.length === 0) {
     printInfo('No sessions found.')
@@ -182,7 +180,7 @@ async function cmdResumeSession(state: CLIState, sessionId: string) {
   }
 
   // Find session by partial ID
-  const sessions = await state.sessionStore.list()
+  const sessions = await state.conductor.listSessions()
   const match = sessions.find((s) => s.id.startsWith(sessionId))
 
   if (!match) {
@@ -218,7 +216,7 @@ async function cmdDeleteSession(state: CLIState, sessionId: string) {
     return
   }
 
-  const sessions = await state.sessionStore.list()
+  const sessions = await state.conductor.listSessions()
   const match = sessions.find((s) => s.id.startsWith(sessionId))
 
   if (!match) {
@@ -241,7 +239,7 @@ async function cmdHistory(state: CLIState) {
     return
   }
 
-  const data = await state.sessionStore.get(state.currentSession.id)
+  const data = await state.conductor.getSessionData(state.currentSession.id)
   if (!data || data.updates.length === 0) {
     printInfo('No messages in this session.')
     return
@@ -680,10 +678,6 @@ async function main() {
   // Storage path for sessions
   const storagePath = join(homedir(), '.multica', 'sessions')
 
-  // Create session store and conductor
-  const sessionStore = new SessionStore(storagePath)
-  await sessionStore.initialize()
-
   const toolCalls = new Map<string, string>()
 
   const conductor = new Conductor({
@@ -742,9 +736,11 @@ async function main() {
     },
   })
 
+  // Initialize conductor (loads session index)
+  await conductor.initialize()
+
   const state: CLIState = {
     conductor,
-    sessionStore,
     currentSession: null,
     currentAgent: null,
     isProcessing: false,
