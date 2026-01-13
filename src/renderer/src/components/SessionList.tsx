@@ -89,62 +89,60 @@ interface SessionItemProps {
 
 function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps) {
   return (
-    <li>
+    <li
+      onClick={onSelect}
+      className={`group flex cursor-pointer items-start gap-2 rounded-lg p-2 transition-colors ${
+        isActive
+          ? 'bg-[var(--color-primary)] text-white'
+          : 'hover:bg-[var(--color-surface-hover)]'
+      }`}
+    >
+      {/* Status indicator */}
+      <span
+        className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${
+          session.status === 'active'
+            ? 'bg-green-500'
+            : session.status === 'error'
+              ? 'bg-red-500'
+              : 'bg-gray-500'
+        }`}
+      />
+
+      {/* Content */}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">
+          {getSessionTitle(session)}
+        </div>
+        <div
+          className={`truncate text-xs ${
+            isActive ? 'text-white/70' : 'text-[var(--color-text-muted)]'
+          }`}
+        >
+          {session.agentId} · {formatDate(session.updatedAt)}
+        </div>
+      </div>
+
+      {/* Delete button */}
       <button
-        onClick={onSelect}
-        className={`group flex w-full items-start gap-2 rounded-lg p-2 text-left transition-colors ${
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete()
+        }}
+        className={`flex-shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 ${
           isActive
-            ? 'bg-[var(--color-primary)] text-white'
+            ? 'hover:bg-white/20'
             : 'hover:bg-[var(--color-surface-hover)]'
         }`}
+        title="Delete session"
       >
-        {/* Status indicator */}
-        <span
-          className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${
-            session.status === 'active'
-              ? 'bg-green-500'
-              : session.status === 'error'
-                ? 'bg-red-500'
-                : 'bg-gray-500'
-          }`}
-        />
-
-        {/* Content */}
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
-            {getSessionTitle(session)}
-          </div>
-          <div
-            className={`truncate text-xs ${
-              isActive ? 'text-white/70' : 'text-[var(--color-text-muted)]'
-            }`}
-          >
-            {session.agentId} · {formatDate(session.updatedAt)}
-          </div>
-        </div>
-
-        {/* Delete button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-          className={`flex-shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 ${
-            isActive
-              ? 'hover:bg-white/20'
-              : 'hover:bg-[var(--color-surface-hover)]'
-          }`}
-          title="Delete session"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
-        </button>
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+          />
+        </svg>
       </button>
     </li>
   )
