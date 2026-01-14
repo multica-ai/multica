@@ -1,4 +1,4 @@
-export { SessionList } from './SessionList'
+export { AppSidebar } from './AppSidebar'
 export { ChatView } from './ChatView'
 export { MessageInput } from './MessageInput'
 export { StatusBar } from './StatusBar'

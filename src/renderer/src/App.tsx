@@ -3,8 +3,19 @@
  */
 import { useState, useEffect } from 'react'
 import { useApp } from './hooks/useApp'
-import { SessionList, ChatView, MessageInput, StatusBar, Settings } from './components'
+import { ChatView, MessageInput, StatusBar, Settings } from './components'
+import { AppSidebar } from './components/AppSidebar'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { SidebarProvider } from '@/components/ui/sidebar'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -74,9 +85,6 @@ function AppContent(): React.JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-[var(--color-background)] text-[var(--color-text)]">
-      {/* Title bar drag region (macOS) */}
-      <div className="titlebar-drag-region h-8 flex-shrink-0" />
-
       {/* Error banner */}
       {error && (
         <div className="flex items-center justify-between bg-red-600 px-4 py-2 text-sm text-white">
@@ -88,9 +96,9 @@ function AppContent(): React.JSX.Element {
       )}
 
       {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
+      <SidebarProvider className="flex-1 overflow-hidden">
         {/* Sidebar */}
-        <SessionList
+        <AppSidebar
           sessions={sessions}
           currentSessionId={currentSession?.id ?? null}
           onSelect={handleSelectSession}
@@ -125,58 +133,52 @@ function AppContent(): React.JSX.Element {
             disabled={!currentSession || agentStatus.state !== 'running'}
           />
         </main>
-      </div>
+      </SidebarProvider>
 
       {/* New session dialog */}
-      {showNewSession && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg bg-[var(--color-surface)] p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-semibold">New Session</h2>
+      <Dialog open={showNewSession} onOpenChange={setShowNewSession}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Session</DialogTitle>
+          </DialogHeader>
 
-            <label className="mb-2 block text-sm text-[var(--color-text-muted)]">
-              Working Directory
-            </label>
-            <div className="mb-4 flex gap-2">
-              <input
-                type="text"
-                value={newSessionCwd}
-                onChange={(e) => setNewSessionCwd(e.target.value)}
-                placeholder="Select a directory..."
-                className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)]"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateSession()
-                  if (e.key === 'Escape') setShowNewSession(false)
-                }}
-              />
-              <button
-                onClick={async () => {
-                  const dir = await window.electronAPI.selectDirectory()
-                  if (dir) setNewSessionCwd(dir)
-                }}
-                className="flex-shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-4 py-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-border)]"
-              >
-                Browse...
-              </button>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowNewSession(false)}
-                className="rounded-lg px-4 py-2 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateSession}
-                disabled={!newSessionCwd.trim()}
-                className="rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-white transition-colors hover:bg-[var(--color-primary-dark)] disabled:opacity-50"
-              >
-                Create
-              </button>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">
+                Working Directory
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  value={newSessionCwd}
+                  onChange={(e) => setNewSessionCwd(e.target.value)}
+                  placeholder="Select a directory..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreateSession()
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    const dir = await window.electronAPI.selectDirectory()
+                    if (dir) setNewSessionCwd(dir)
+                  }}
+                >
+                  Browse...
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowNewSession(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateSession} disabled={!newSessionCwd.trim()}>
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Settings dialog */}
       <Settings

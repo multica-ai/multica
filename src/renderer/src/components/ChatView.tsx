@@ -4,6 +4,9 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { StoredSessionUpdate } from '../../../shared/types'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { ChevronDown } from 'lucide-react'
 
 interface ChatViewProps {
   updates: StoredSessionUpdate[]
@@ -34,12 +37,9 @@ export function ChatView({ updates, isProcessing, hasSession, onNewSession }: Ch
               : 'Create a session to start chatting'}
           </p>
           {!hasSession && onNewSession && (
-            <button
-              onClick={onNewSession}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-[var(--color-primary-text)] transition-colors hover:bg-[var(--color-primary-dark)]"
-            >
+            <Button onClick={onNewSession}>
               New Session
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -302,40 +302,70 @@ function ThoughtBlock({ text }: { text: string }) {
   const isLong = text.length > 200
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]/50 p-3">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex w-full items-center gap-2 text-left text-sm text-[var(--color-text-muted)]"
-      >
-        <span className="opacity-60">⊛</span>
-        <span className="font-medium">Thinking</span>
-        {isLong && (
-          <svg
-            className={`ml-auto h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
-      </button>
+    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+      <div className="rounded-lg border bg-card/50 p-3">
+        <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-sm text-muted-foreground">
+          <span className="opacity-60">⊛</span>
+          <span className="font-medium">Thinking</span>
+          {isLong && (
+            <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          )}
+        </CollapsibleTrigger>
 
-      <div className={`mt-2 text-sm text-[var(--color-text-muted)] ${!isExpanded && isLong ? 'line-clamp-3' : ''}`}>
-        <ReactMarkdown
-          components={{
-            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-            code: ({ children }) => (
-              <code className="bg-[var(--color-background)] rounded px-1 py-0.5 text-xs font-mono">
-                {children}
-              </code>
-            ),
-          }}
-        >
-          {text}
-        </ReactMarkdown>
+        <CollapsibleContent>
+          <div className="mt-2 text-sm text-muted-foreground">
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                code: ({ children }) => (
+                  <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
+                    {children}
+                  </code>
+                ),
+              }}
+            >
+              {text}
+            </ReactMarkdown>
+          </div>
+        </CollapsibleContent>
+
+        {/* Preview when collapsed */}
+        {!isExpanded && isLong && (
+          <div className="mt-2 text-sm text-muted-foreground line-clamp-3">
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                code: ({ children }) => (
+                  <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
+                    {children}
+                  </code>
+                ),
+              }}
+            >
+              {text}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        {/* Show full content when not long */}
+        {!isLong && (
+          <div className="mt-2 text-sm text-muted-foreground">
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                code: ({ children }) => (
+                  <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
+                    {children}
+                  </code>
+                ),
+              }}
+            >
+              {text}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
-    </div>
+    </Collapsible>
   )
 }
 

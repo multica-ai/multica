@@ -1,10 +1,22 @@
 /**
  * Agent setup / Settings component
- * Minimalist design with bordered cards
+ * Using shadcn/ui components
  */
 import { useState, useEffect } from 'react'
 import type { AgentCheckResult } from '../../../shared/electron-api'
 import { useTheme } from '../contexts/ThemeContext'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Sun, Moon, Monitor, Check, Loader2, RefreshCw } from 'lucide-react'
 
 interface SettingsProps {
   isOpen: boolean
@@ -32,13 +44,11 @@ export function Settings({ isOpen, onClose, currentAgentId, onSwitchAgent }: Set
 
   useEffect(() => {
     if (isOpen) {
-      // Reset selection when opening
       setSelectedAgent(currentAgentId)
       loadAgents()
     }
   }, [isOpen, currentAgentId])
 
-  // Auto-select first installed agent if none selected
   useEffect(() => {
     if (agents.length > 0 && !selectedAgent) {
       const firstInstalled = agents.find(a => a.installed)
@@ -63,7 +73,6 @@ export function Settings({ isOpen, onClose, currentAgentId, onSwitchAgent }: Set
   async function handleContinue() {
     if (!selectedAgent || switching) return
 
-    // If already using this agent, just close
     if (selectedAgent === currentAgentId) {
       onClose()
       return
@@ -80,35 +89,49 @@ export function Settings({ isOpen, onClose, currentAgentId, onSwitchAgent }: Set
     }
   }
 
-  if (!isOpen) return null
-
   const installedCount = agents.filter(a => a.installed).length
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-md rounded-xl bg-[var(--color-background)] p-8 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-[var(--color-text)]">Settings</h1>
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-2xl">Settings</DialogTitle>
+        </DialogHeader>
 
         {/* Appearance Section */}
-        <div className="mb-8">
-          <h2 className="mb-3 text-sm font-medium text-[var(--color-text-muted)]">Appearance</h2>
-          <ThemeSelector value={mode} onChange={setMode} />
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Appearance</h2>
+          <ToggleGroup
+            type="single"
+            value={mode}
+            onValueChange={(value) => value && setMode(value as ThemeMode)}
+            className="w-full"
+          >
+            <ToggleGroupItem value="light" className="flex-1 gap-2">
+              <Sun className="h-4 w-4" />
+              Light
+            </ToggleGroupItem>
+            <ToggleGroupItem value="dark" className="flex-1 gap-2">
+              <Moon className="h-4 w-4" />
+              Dark
+            </ToggleGroupItem>
+            <ToggleGroupItem value="system" className="flex-1 gap-2">
+              <Monitor className="h-4 w-4" />
+              System
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         {/* Agent Section */}
-        <div className="mb-6">
-          <h2 className="mb-3 text-sm font-medium text-[var(--color-text-muted)]">Coding Agent</h2>
-          <p className="mb-4 text-xs text-[var(--color-text-muted)]">
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Coding Agent</h2>
+          <p className="text-xs text-muted-foreground">
             Select a coding agent. Agents use local authentication.
           </p>
 
-          {/* Agent Cards */}
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-accent)] border-t-transparent" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
             <div className="space-y-3">
@@ -125,96 +148,38 @@ export function Settings({ isOpen, onClose, currentAgentId, onSwitchAgent }: Set
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-6">
-          <button
+        <DialogFooter className="flex-row items-center justify-between border-t pt-4 sm:justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={loadAgents}
             disabled={loading}
-            className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-50"
           >
-            Refresh agents
-          </button>
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
 
           <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="rounded-lg px-4 py-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface)]"
-            >
+            <Button variant="ghost" onClick={onClose}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleContinue}
               disabled={!selectedAgent || !!switching || installedCount === 0}
-              className="flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-5 py-2 font-medium text-[var(--color-primary-text)] transition-colors hover:bg-[var(--color-primary-dark)] disabled:opacity-50"
             >
               {switching ? (
                 <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Switching...
                 </>
               ) : (
                 'Done'
               )}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface ThemeSelectorProps {
-  value: ThemeMode
-  onChange: (mode: ThemeMode) => void
-}
-
-function ThemeSelector({ value, onChange }: ThemeSelectorProps) {
-  const options: { mode: ThemeMode; label: string; icon: React.ReactNode }[] = [
-    {
-      mode: 'light',
-      label: 'Light',
-      icon: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-        </svg>
-      ),
-    },
-    {
-      mode: 'dark',
-      label: 'Dark',
-      icon: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-        </svg>
-      ),
-    },
-    {
-      mode: 'system',
-      label: 'System',
-      icon: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-      ),
-    },
-  ]
-
-  return (
-    <div className="flex gap-2">
-      {options.map(({ mode, label, icon }) => (
-        <button
-          key={mode}
-          onClick={() => onChange(mode)}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-all ${
-            value === mode
-              ? 'border-[var(--color-accent)] bg-[var(--color-accent-muted)] text-[var(--color-text)]'
-              : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)]'
-          }`}
-        >
-          {icon}
-          {label}
-        </button>
-      ))}
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -228,39 +193,37 @@ function AgentCard({ agent, isSelected, onSelect }: AgentCardProps) {
   const icon = AGENT_ICONS[agent.id] || '◇'
 
   return (
-    <div
+    <Card
       onClick={onSelect}
-      className={`flex items-start gap-4 rounded-lg border p-4 transition-all ${
+      className={`flex-row items-start gap-4 p-4 cursor-pointer transition-all ${
         !agent.installed
-          ? 'border-[var(--color-border)] opacity-50 cursor-not-allowed'
+          ? 'opacity-50 cursor-not-allowed'
           : isSelected
-            ? 'border-[var(--color-accent)] bg-[var(--color-accent-muted)] cursor-pointer'
-            : 'border-[var(--color-border)] hover:border-[var(--color-text-muted)] cursor-pointer'
+            ? 'border-primary bg-primary/5'
+            : 'hover:border-muted-foreground'
       }`}
     >
       {/* Icon */}
-      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface)] text-lg">
+      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
         {icon}
       </div>
 
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-[var(--color-text)]">{agent.name}</span>
+          <span className="font-medium">{agent.name}</span>
           {agent.installed && (
-            <span className="flex items-center gap-1 rounded-full bg-[var(--color-accent-muted)] px-2 py-0.5 text-xs text-[var(--color-accent)]">
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+            <Badge variant="secondary" className="gap-1">
+              <Check className="h-3 w-3" />
               installed
-            </span>
+            </Badge>
           )}
         </div>
-        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-0.5 text-sm text-muted-foreground">
           {getAgentDescription(agent.id)}
         </p>
         {!agent.installed && agent.installHint && (
-          <p className="mt-2 font-mono text-xs text-[var(--color-text-muted)]">
+          <p className="mt-2 font-mono text-xs text-muted-foreground">
             {agent.installHint}
           </p>
         )}
@@ -269,16 +232,12 @@ function AgentCard({ agent, isSelected, onSelect }: AgentCardProps) {
       {/* Selection indicator */}
       <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
         isSelected
-          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
-          : 'border-[var(--color-border)]'
+          ? 'border-primary bg-primary'
+          : 'border-muted-foreground/30'
       }`}>
-        {isSelected && (
-          <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        )}
+        {isSelected && <Check className="h-3 w-3 text-primary-foreground" />}
       </div>
-    </div>
+    </Card>
   )
 }
 
