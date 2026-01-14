@@ -1,23 +1,20 @@
 /**
- * Status bar component - shows agent status and current session info
+ * Status bar component - shows session info and running status
  */
-import type { AgentStatus, MulticaSession } from '../../../shared/types'
-import { Button } from '@/components/ui/button'
+import type { MulticaSession } from '../../../shared/types'
 import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 
 interface StatusBarProps {
-  agentStatus: AgentStatus
+  runningSessionsCount: number
   currentSession: MulticaSession | null
-  onStartAgent: () => void
-  onStopAgent: () => void
+  isCurrentSessionRunning: boolean
 }
 
 export function StatusBar({
-  agentStatus,
+  runningSessionsCount,
   currentSession,
-  onStartAgent,
-  onStopAgent,
+  isCurrentSessionRunning,
 }: StatusBarProps) {
   const { state, isMobile } = useSidebar()
 
@@ -46,50 +43,29 @@ export function StatusBar({
         )}
       </div>
 
-      {/* Right: Agent status */}
+      {/* Right: Status */}
       <div className="titlebar-no-drag flex items-center gap-3">
-        <AgentStatusBadge status={agentStatus} />
-
-        {agentStatus.state === 'stopped' ? (
-          <Button size="sm" onClick={onStartAgent}>
-            Start Agent
-          </Button>
-        ) : agentStatus.state === 'running' ? (
-          <Button size="sm" variant="secondary" onClick={onStopAgent}>
-            Stop
-          </Button>
-        ) : null}
+        <SessionStatusBadge
+          isRunning={isCurrentSessionRunning}
+          runningCount={runningSessionsCount}
+        />
       </div>
     </div>
   )
 }
 
-interface AgentStatusBadgeProps {
-  status: AgentStatus
+interface SessionStatusBadgeProps {
+  isRunning: boolean
+  runningCount: number
 }
 
-function AgentStatusBadge({ status }: AgentStatusBadgeProps) {
-  let dotColor = 'bg-gray-500'
-  let text = 'Stopped'
-
-  switch (status.state) {
-    case 'starting':
-      dotColor = 'bg-yellow-500 animate-pulse'
-      text = `Starting ${status.agentId}...`
-      break
-    case 'running':
-      dotColor = 'bg-green-500'
-      text = status.agentId
-      break
-    case 'error':
-      dotColor = 'bg-red-500'
-      text = 'Error'
-      break
-    case 'stopped':
-      dotColor = 'bg-gray-500'
-      text = 'Stopped'
-      break
-  }
+function SessionStatusBadge({ isRunning, runningCount }: SessionStatusBadgeProps) {
+  const dotColor = isRunning ? 'bg-green-500' : 'bg-gray-500'
+  const text = isRunning
+    ? `Running (${runningCount} session${runningCount !== 1 ? 's' : ''})`
+    : runningCount > 0
+      ? `${runningCount} running`
+      : 'No sessions'
 
   return (
     <div className="flex items-center gap-2">

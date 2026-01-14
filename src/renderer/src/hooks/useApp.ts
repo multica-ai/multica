@@ -4,9 +4,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type {
   MulticaSession,
-  AgentStatus,
   StoredSessionUpdate,
 } from '../../../shared/types'
+import type { RunningSessionsStatus } from '../../../shared/electron-api'
 
 export interface AppState {
   // Sessions
@@ -14,8 +14,8 @@ export interface AppState {
   currentSession: MulticaSession | null
   sessionUpdates: StoredSessionUpdate[]
 
-  // Agent
-  agentStatus: AgentStatus
+  // Agent (per-session)
+  runningSessionsStatus: RunningSessionsStatus
   isProcessing: boolean
 
   // UI
@@ -25,14 +25,11 @@ export interface AppState {
 export interface AppActions {
   // Session actions
   loadSessions: () => Promise<void>
-  createSession: (cwd: string) => Promise<void>
+  createSession: (cwd: string, agentId: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
 
-  // Agent actions
-  startAgent: (agentId: string) => Promise<void>
-  stopAgent: () => Promise<void>
-  switchAgent: (agentId: string) => Promise<void>
+  // Agent actions (per-session)
   sendPrompt: (content: string) => Promise<void>
   cancelRequest: () => Promise<void>
 
@@ -45,9 +42,17 @@ export function useApp(): AppState & AppActions {
   const [sessions, setSessions] = useState<MulticaSession[]>([])
   const [currentSession, setCurrentSession] = useState<MulticaSession | null>(null)
   const [sessionUpdates, setSessionUpdates] = useState<StoredSessionUpdate[]>([])
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>({ state: 'stopped' })
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [runningSessionsStatus, setRunningSessionsStatus] = useState<RunningSessionsStatus>({
+    runningSessions: 0,
+    sessionIds: [],
+    processingSessionIds: [],
+  })
   const [error, setError] = useState<string | null>(null)
+
+  // Derive isProcessing from processingSessionIds (per-session isolation)
+  const isProcessing = currentSession
+    ? runningSessionsStatus.processingSessionIds.includes(currentSession.id)
+    : false
 
   // Track streaming text for current message
   const streamingTextRef = useRef<string>('')
@@ -55,12 +60,18 @@ export function useApp(): AppState & AppActions {
   // Load sessions on mount
   useEffect(() => {
     loadSessions()
-    loadAgentStatus()
+    loadRunningStatus()
   }, [])
 
   // Subscribe to agent events
   useEffect(() => {
     const unsubMessage = window.electronAPI.onAgentMessage((message) => {
+      // Only process messages for the current session
+      // message.sessionId is ACP Agent Session ID, compare with currentSession.agentSessionId
+      if (!currentSession || message.sessionId !== currentSession.agentSessionId) {
+        return
+      }
+
       const update = message.update
       const updateType = update?.sessionUpdate
 
@@ -114,17 +125,15 @@ export function useApp(): AppState & AppActions {
 
       if (message.done) {
         streamingTextRef.current = ''
-        setIsProcessing(false)
       }
     })
 
     const unsubStatus = window.electronAPI.onAgentStatus((status) => {
-      setAgentStatus(status)
+      setRunningSessionsStatus(status)
     })
 
     const unsubError = window.electronAPI.onAgentError((err) => {
       setError(err.message)
-      setIsProcessing(false)
     })
 
     return () => {
@@ -132,7 +141,7 @@ export function useApp(): AppState & AppActions {
       unsubStatus()
       unsubError()
     }
-  }, [])
+  }, [currentSession])
 
   // Actions
   const loadSessions = useCallback(async () => {
@@ -144,32 +153,33 @@ export function useApp(): AppState & AppActions {
     }
   }, [])
 
-  const loadAgentStatus = useCallback(async () => {
+  const loadRunningStatus = useCallback(async () => {
     try {
       const status = await window.electronAPI.getAgentStatus()
-      setAgentStatus(status)
+      setRunningSessionsStatus(status)
     } catch (err) {
-      console.error('Failed to get agent status:', err)
+      console.error('Failed to get running status:', err)
     }
   }, [])
 
-  const createSession = useCallback(async (cwd: string) => {
+  const createSession = useCallback(async (cwd: string, agentId: string) => {
     try {
       setError(null)
-      const session = await window.electronAPI.createSession(cwd)
+      const session = await window.electronAPI.createSession(cwd, agentId)
       setCurrentSession(session)
       setSessionUpdates([])
       await loadSessions()
+      await loadRunningStatus()
     } catch (err) {
       setError(`Failed to create session: ${err}`)
     }
-  }, [loadSessions])
+  }, [loadSessions, loadRunningStatus])
 
   const selectSession = useCallback(async (sessionId: string) => {
     try {
       setError(null)
-      // Resume session (creates new ACP session, loads history)
-      const session = await window.electronAPI.resumeSession(sessionId)
+      // Load session without starting agent (lazy loading)
+      const session = await window.electronAPI.loadSession(sessionId)
       setCurrentSession(session)
 
       // Load session data for history
@@ -191,46 +201,11 @@ export function useApp(): AppState & AppActions {
         setSessionUpdates([])
       }
       await loadSessions()
+      await loadRunningStatus()
     } catch (err) {
       setError(`Failed to delete session: ${err}`)
     }
-  }, [currentSession, loadSessions])
-
-  const startAgent = useCallback(async (agentId: string) => {
-    try {
-      setError(null)
-      await window.electronAPI.startAgent(agentId)
-      await loadAgentStatus()
-    } catch (err) {
-      setError(`Failed to start agent: ${err}`)
-    }
-  }, [loadAgentStatus])
-
-  const stopAgent = useCallback(async () => {
-    try {
-      setError(null)
-      await window.electronAPI.stopAgent()
-      await loadAgentStatus()
-    } catch (err) {
-      setError(`Failed to stop agent: ${err}`)
-    }
-  }, [loadAgentStatus])
-
-  const switchAgent = useCallback(async (agentId: string) => {
-    try {
-      setError(null)
-      // Stop current agent first
-      await window.electronAPI.stopAgent()
-      // Clear current session (it's bound to the old agent)
-      setCurrentSession(null)
-      setSessionUpdates([])
-      // Start new agent
-      await window.electronAPI.startAgent(agentId)
-      await loadAgentStatus()
-    } catch (err) {
-      setError(`Failed to switch agent: ${err}`)
-    }
-  }, [loadAgentStatus])
+  }, [currentSession, loadSessions, loadRunningStatus])
 
   const sendPrompt = useCallback(async (content: string) => {
     if (!currentSession) {
@@ -240,7 +215,6 @@ export function useApp(): AppState & AppActions {
 
     try {
       setError(null)
-      setIsProcessing(true)
       streamingTextRef.current = ''
 
       // Add user message to updates (use a custom marker for UI display)
@@ -258,10 +232,8 @@ export function useApp(): AppState & AppActions {
       setSessionUpdates((prev) => [...prev, userUpdate])
 
       await window.electronAPI.sendPrompt(currentSession.id, content)
-      setIsProcessing(false)
     } catch (err) {
       setError(`Failed to send prompt: ${err}`)
-      setIsProcessing(false)
     }
   }, [currentSession])
 
@@ -270,7 +242,6 @@ export function useApp(): AppState & AppActions {
 
     try {
       await window.electronAPI.cancelRequest(currentSession.id)
-      setIsProcessing(false)
     } catch (err) {
       setError(`Failed to cancel: ${err}`)
     }
@@ -285,7 +256,7 @@ export function useApp(): AppState & AppActions {
     sessions,
     currentSession,
     sessionUpdates,
-    agentStatus,
+    runningSessionsStatus,
     isProcessing,
     error,
 
@@ -294,9 +265,6 @@ export function useApp(): AppState & AppActions {
     createSession,
     selectSession,
     deleteSession,
-    startAgent,
-    stopAgent,
-    switchAgent,
     sendPrompt,
     cancelRequest,
     clearError,

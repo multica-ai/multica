@@ -2,20 +2,18 @@
  * IPC Channel definitions for communication between main and renderer processes
  */
 export const IPC_CHANNELS = {
-  // Agent communication
+  // Agent communication (per-session)
   AGENT_PROMPT: 'agent:prompt',
   AGENT_CANCEL: 'agent:cancel',
-  AGENT_SWITCH: 'agent:switch',
-  AGENT_START: 'agent:start',
-  AGENT_STOP: 'agent:stop',
   AGENT_MESSAGE: 'agent:message',
   AGENT_ERROR: 'agent:error',
-  AGENT_STATUS: 'agent:status',
+  AGENT_STATUS: 'agent:status', // Returns status of all running sessions
 
   // Session management
   SESSION_CREATE: 'session:create',
   SESSION_LIST: 'session:list',
   SESSION_GET: 'session:get',
+  SESSION_LOAD: 'session:load', // Load session without starting agent (lazy)
   SESSION_RESUME: 'session:resume',
   SESSION_DELETE: 'session:delete',
   SESSION_UPDATE: 'session:update',

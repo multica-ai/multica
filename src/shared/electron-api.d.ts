@@ -35,21 +35,25 @@ export interface AgentCheckResult {
   installHint?: string
 }
 
+export interface RunningSessionsStatus {
+  runningSessions: number
+  sessionIds: string[]
+  processingSessionIds: string[] // Sessions currently handling a request
+}
+
 export interface ElectronAPI {
-  // Agent lifecycle
-  startAgent(agentId: string): Promise<{ success: boolean; agentId: string }>
-  stopAgent(): Promise<{ success: boolean }>
-  switchAgent(agentId: string): Promise<{ success: boolean; agentId: string }>
-  getAgentStatus(): Promise<AgentStatus>
+  // Agent status (per-session agents)
+  getAgentStatus(): Promise<RunningSessionsStatus>
 
   // Agent communication
   sendPrompt(sessionId: string, content: string): Promise<{ stopReason: string }>
   cancelRequest(sessionId: string): Promise<{ success: boolean }>
 
-  // Session management
-  createSession(workingDirectory: string): Promise<MulticaSession>
+  // Session management (agent starts when session is created)
+  createSession(workingDirectory: string, agentId: string): Promise<MulticaSession>
   listSessions(options?: ListSessionsOptions): Promise<MulticaSession[]>
   getSession(sessionId: string): Promise<SessionData | null>
+  loadSession(sessionId: string): Promise<MulticaSession> // Load without starting agent
   resumeSession(sessionId: string): Promise<MulticaSession>
   deleteSession(sessionId: string): Promise<{ success: boolean }>
   updateSession(sessionId: string, updates: Partial<MulticaSession>): Promise<MulticaSession>
@@ -66,7 +70,7 @@ export interface ElectronAPI {
 
   // Event listeners (return unsubscribe function)
   onAgentMessage(callback: (message: AgentMessage) => void): () => void
-  onAgentStatus(callback: (status: AgentStatus) => void): () => void
+  onAgentStatus(callback: (status: RunningSessionsStatus) => void): () => void
   onAgentError(callback: (error: Error) => void): () => void
 }
 

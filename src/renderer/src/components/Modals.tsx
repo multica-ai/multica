@@ -19,8 +19,8 @@ import { Input } from '@/components/ui/input'
 
 interface ModalsProps {
   // Settings props
-  currentAgentId: string | null
-  onSwitchAgent: (agentId: string) => Promise<void>
+  defaultAgentId: string
+  onSetDefaultAgent: (agentId: string) => void
   // NewSession props
   onCreateSession: (cwd: string) => Promise<void>
   // DeleteSession props
@@ -28,8 +28,8 @@ interface ModalsProps {
 }
 
 export function Modals({
-  currentAgentId,
-  onSwitchAgent,
+  defaultAgentId,
+  onSetDefaultAgent,
   onCreateSession,
   onDeleteSession,
 }: ModalsProps) {
@@ -38,8 +38,8 @@ export function Modals({
   return (
     <>
       <SettingsModal
-        currentAgentId={currentAgentId}
-        onSwitchAgent={onSwitchAgent}
+        defaultAgentId={defaultAgentId}
+        onSetDefaultAgent={onSetDefaultAgent}
         onClose={() => closeModal('settings')}
       />
       <NewSessionModal
@@ -56,20 +56,20 @@ export function Modals({
 
 // Settings Modal
 interface SettingsModalProps {
-  currentAgentId: string | null
-  onSwitchAgent: (agentId: string) => Promise<void>
+  defaultAgentId: string
+  onSetDefaultAgent: (agentId: string) => void
   onClose: () => void
 }
 
-function SettingsModal({ currentAgentId, onSwitchAgent, onClose }: SettingsModalProps) {
+function SettingsModal({ defaultAgentId, onSetDefaultAgent, onClose }: SettingsModalProps) {
   const { isOpen } = useModal('settings')
 
   return (
     <Settings
       isOpen={isOpen}
       onClose={onClose}
-      currentAgentId={currentAgentId}
-      onSwitchAgent={onSwitchAgent}
+      defaultAgentId={defaultAgentId}
+      onSetDefaultAgent={onSetDefaultAgent}
     />
   )
 }

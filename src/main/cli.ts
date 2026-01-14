@@ -46,7 +46,7 @@ const c = {
 interface CLIState {
   conductor: Conductor
   currentSession: MulticaSession | null
-  currentAgent: AgentConfig | null
+  defaultAgentId: string // Agent to use for new sessions
   isProcessing: boolean
   isCancelling: boolean
   logFile: string | null
@@ -96,7 +96,7 @@ ${c.bold}Commands:${c.reset}
   ${c.cyan}/resume <id>${c.reset}       Resume an existing session
   ${c.cyan}/delete <id>${c.reset}       Delete a session
   ${c.cyan}/history${c.reset}           Show current session message history
-  ${c.cyan}/agent <name>${c.reset}      Switch to a different agent
+  ${c.cyan}/default <name>${c.reset}    Set default agent for new sessions
   ${c.cyan}/agents${c.reset}            List available agents
   ${c.cyan}/doctor${c.reset}            Check agent installations
   ${c.cyan}/status${c.reset}            Show current status
@@ -105,6 +105,7 @@ ${c.bold}Commands:${c.reset}
 
 ${c.bold}Usage:${c.reset}
   Type any text to send as a prompt to the current session.
+  Each session runs its own agent process.
   Press Ctrl+C to cancel a running request.
   Press Ctrl+C twice to force quit.
 `)
@@ -152,24 +153,18 @@ async function cmdNewSession(state: CLIState, cwd?: string) {
     return
   }
 
-  // Ensure agent is running
-  if (!state.conductor.isAgentRunning()) {
-    const agentId = state.currentAgent?.id || 'opencode'
-    const config = DEFAULT_AGENTS[agentId]
-    if (!config) {
-      printError(`Unknown agent: ${agentId}`)
-      return
-    }
-    printInfo(`Starting ${config.name}...`)
-    await state.conductor.startAgent(config)
-    state.currentAgent = config
+  const config = DEFAULT_AGENTS[state.defaultAgentId]
+  if (!config) {
+    printError(`Unknown agent: ${state.defaultAgentId}`)
+    return
   }
 
-  printInfo(`Creating session in ${targetCwd}...`)
-  const session = await state.conductor.createSession(targetCwd)
+  printInfo(`Creating session with ${config.name} in ${targetCwd}...`)
+  const session = await state.conductor.createSession(targetCwd, config)
   state.currentSession = session
 
   printSuccess(`Session created: ${session.id.slice(0, 8)}`)
+  printInfo(`Agent: ${config.name}`)
   printInfo(`Working directory: ${session.workingDirectory}`)
 }
 
@@ -188,24 +183,18 @@ async function cmdResumeSession(state: CLIState, sessionId: string) {
     return
   }
 
-  // Ensure agent is running
   const agentConfig = DEFAULT_AGENTS[match.agentId]
   if (!agentConfig) {
     printError(`Unknown agent: ${match.agentId}`)
     return
   }
 
-  if (!state.conductor.isAgentRunning() || state.currentAgent?.id !== agentConfig.id) {
-    printInfo(`Starting ${agentConfig.name}...`)
-    await state.conductor.startAgent(agentConfig)
-    state.currentAgent = agentConfig
-  }
-
-  printInfo(`Resuming session ${match.id.slice(0, 8)}...`)
+  printInfo(`Resuming session ${match.id.slice(0, 8)} with ${agentConfig.name}...`)
   const session = await state.conductor.resumeSession(match.id)
   state.currentSession = session
 
   printSuccess(`Session resumed: ${session.id.slice(0, 8)}`)
+  printInfo(`Agent: ${agentConfig.name}`)
   printInfo(`Working directory: ${session.workingDirectory}`)
   printDim('Note: Agent state is not restored. Previous messages are stored for display.')
 }
@@ -392,9 +381,10 @@ async function cmdDoctor(): Promise<AgentCheckResult[]> {
   return results
 }
 
-async function cmdSwitchAgent(state: CLIState, agentId: string) {
+async function cmdSetDefaultAgent(state: CLIState, agentId: string) {
   if (!agentId) {
-    printError('Usage: /agent <name>')
+    printError('Usage: /default <name>')
+    print(`Current default: ${state.defaultAgentId}`)
     return
   }
 
@@ -405,36 +395,32 @@ async function cmdSwitchAgent(state: CLIState, agentId: string) {
     return
   }
 
-  printInfo(`Stopping current agent...`)
-  await state.conductor.stopAgent()
-
-  printInfo(`Starting ${config.name}...`)
-  await state.conductor.startAgent(config)
-  state.currentAgent = config
-  state.currentSession = null
-
-  printSuccess(`Switched to ${config.name}`)
-  printInfo('Use /new to create a session with this agent.')
+  state.defaultAgentId = agentId
+  printSuccess(`Default agent set to ${config.name}`)
+  printInfo('New sessions will use this agent. Use /new to create a session.')
 }
 
 async function cmdStatus(state: CLIState) {
   print(`\n${c.bold}Status:${c.reset}`)
 
-  // Agent
-  if (state.currentAgent) {
-    print(`  Agent: ${c.green}${state.currentAgent.name}${c.reset}`)
-    print(`    Running: ${state.conductor.isAgentRunning() ? `${c.green}Yes${c.reset}` : `${c.red}No${c.reset}`}`)
-  } else {
-    print(`  Agent: ${c.dim}None${c.reset}`)
-  }
+  // Default agent
+  const defaultConfig = DEFAULT_AGENTS[state.defaultAgentId]
+  print(`  Default Agent: ${c.cyan}${defaultConfig?.name || state.defaultAgentId}${c.reset}`)
 
-  // Session
+  // Running sessions
+  const runningIds = state.conductor.getRunningSessionIds()
+  print(`  Running Sessions: ${c.green}${runningIds.length}${c.reset}`)
+
+  // Current session
   if (state.currentSession) {
-    print(`  Session: ${c.green}${state.currentSession.id.slice(0, 8)}${c.reset}`)
+    const isRunning = state.conductor.isSessionRunning(state.currentSession.id)
+    const agentConfig = state.conductor.getSessionAgent(state.currentSession.id)
+    print(`  Current Session: ${c.green}${state.currentSession.id.slice(0, 8)}${c.reset}`)
+    print(`    Agent: ${agentConfig?.name || 'unknown'} (${isRunning ? `${c.green}running${c.reset}` : `${c.red}stopped${c.reset}`})`)
     print(`    Directory: ${state.currentSession.workingDirectory}`)
     print(`    Status: ${state.currentSession.status}`)
   } else {
-    print(`  Session: ${c.dim}None${c.reset}`)
+    print(`  Current Session: ${c.dim}None${c.reset}`)
   }
 
   // Processing
@@ -529,7 +515,7 @@ async function runInteractiveMode(state: CLIState) {
     const sessionMarker = state.currentSession
       ? `${c.green}[${state.currentSession.id.slice(0, 8)}]${c.reset}`
       : `${c.dim}[no session]${c.reset}`
-    const agentMarker = state.currentAgent ? state.currentAgent.id : 'none'
+    const agentMarker = state.defaultAgentId
 
     rl.question(`${sessionMarker} ${c.dim}${agentMarker}${c.reset} > `, async (input) => {
       const trimmed = input.trim()
@@ -570,9 +556,9 @@ async function runInteractiveMode(state: CLIState) {
             case 'hist':
               await cmdHistory(state)
               break
-            case 'agent':
-            case 'a':
-              await cmdSwitchAgent(state, arg)
+            case 'default':
+            case 'd':
+              await cmdSetDefaultAgent(state, arg)
               break
             case 'agents':
               await cmdAgents()
@@ -616,21 +602,15 @@ async function runInteractiveMode(state: CLIState) {
 async function runOneShotPrompt(state: CLIState, prompt: string, options: { cwd?: string }) {
   const cwd = options.cwd || process.cwd()
 
-  // Start default agent
-  const agentId = 'opencode'
-  const config = DEFAULT_AGENTS[agentId]
+  const config = DEFAULT_AGENTS[state.defaultAgentId]
   if (!config) {
-    printError(`Unknown agent: ${agentId}`)
+    printError(`Unknown agent: ${state.defaultAgentId}`)
     process.exit(1)
   }
 
-  printInfo(`Starting ${config.name}...`)
-  await state.conductor.startAgent(config)
-  state.currentAgent = config
-
-  // Create session
-  printInfo(`Creating session in ${cwd}...`)
-  const session = await state.conductor.createSession(cwd)
+  // Create session (agent starts automatically)
+  printInfo(`Creating session with ${config.name} in ${cwd}...`)
+  const session = await state.conductor.createSession(cwd, config)
   state.currentSession = session
 
   // Send prompt
@@ -648,7 +628,7 @@ async function cleanup(state: CLIState) {
     writeFileSync(state.logFile, JSON.stringify(state.sessionLog, null, 2))
     printInfo(`Session log saved to: ${state.logFile}`)
   }
-  await state.conductor.stopAgent()
+  await state.conductor.stopAllSessions()
 }
 
 async function main() {
@@ -742,7 +722,7 @@ async function main() {
   const state: CLIState = {
     conductor,
     currentSession: null,
-    currentAgent: null,
+    defaultAgentId: 'opencode',
     isProcessing: false,
     isCancelling: false,
     logFile,

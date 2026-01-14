@@ -5,13 +5,7 @@ import type { ListSessionsOptions, MulticaSession } from '../shared/types'
 
 // Electron API exposed to renderer process
 const electronAPI: ElectronAPI = {
-  // Agent lifecycle
-  startAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_START, agentId),
-
-  stopAgent: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_STOP),
-
-  switchAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_SWITCH, agentId),
-
+  // Agent status (per-session agents)
   getAgentStatus: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_STATUS),
 
   // Agent communication
@@ -20,14 +14,16 @@ const electronAPI: ElectronAPI = {
 
   cancelRequest: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_CANCEL, sessionId),
 
-  // Session management
-  createSession: (workingDirectory: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE, workingDirectory),
+  // Session management (agent starts when session is created)
+  createSession: (workingDirectory: string, agentId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE, workingDirectory, agentId),
 
   listSessions: (options?: ListSessionsOptions) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST, options),
 
   getSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET, sessionId),
+
+  loadSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.SESSION_LOAD, sessionId),
 
   resumeSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.SESSION_RESUME, sessionId),
 

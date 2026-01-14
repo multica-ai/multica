@@ -10,30 +10,7 @@ import type { Conductor } from '../conductor/Conductor'
 import type { ListSessionsOptions, MulticaSession } from '../../shared/types'
 
 export function registerIPCHandlers(conductor: Conductor): void {
-  // --- Agent handlers ---
-
-  ipcMain.handle(IPC_CHANNELS.AGENT_START, async (_event, agentId: string) => {
-    const config = DEFAULT_AGENTS[agentId]
-    if (!config) {
-      throw new Error(`Unknown agent: ${agentId}`)
-    }
-    await conductor.startAgent(config)
-    return { success: true, agentId }
-  })
-
-  ipcMain.handle(IPC_CHANNELS.AGENT_STOP, async () => {
-    await conductor.stopAgent()
-    return { success: true }
-  })
-
-  ipcMain.handle(IPC_CHANNELS.AGENT_SWITCH, async (_event, agentId: string) => {
-    const config = DEFAULT_AGENTS[agentId]
-    if (!config) {
-      throw new Error(`Unknown agent: ${agentId}`)
-    }
-    await conductor.startAgent(config)
-    return { success: true, agentId }
-  })
+  // --- Agent handlers (per-session) ---
 
   ipcMain.handle(IPC_CHANNELS.AGENT_PROMPT, async (_event, sessionId: string, content: string) => {
     const stopReason = await conductor.sendPrompt(sessionId, content)
@@ -46,23 +23,28 @@ export function registerIPCHandlers(conductor: Conductor): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.AGENT_STATUS, async () => {
-    const agent = conductor.getCurrentAgent()
-    const isRunning = conductor.isAgentRunning()
-    if (!isRunning || !agent) {
-      return { state: 'stopped' as const }
-    }
+    // Return status of all running sessions
+    const runningSessionIds = conductor.getRunningSessionIds()
+    const processingSessionIds = conductor.getProcessingSessionIds()
     return {
-      state: 'running' as const,
-      agentId: agent.id,
-      sessionCount: 0, // TODO: track session count
+      runningSessions: runningSessionIds.length,
+      sessionIds: runningSessionIds,
+      processingSessionIds,
     }
   })
 
   // --- Session handlers ---
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_CREATE, async (_event, workingDirectory: string) => {
-    return conductor.createSession(workingDirectory)
-  })
+  ipcMain.handle(
+    IPC_CHANNELS.SESSION_CREATE,
+    async (_event, workingDirectory: string, agentId: string) => {
+      const config = DEFAULT_AGENTS[agentId]
+      if (!config) {
+        throw new Error(`Unknown agent: ${agentId}`)
+      }
+      return conductor.createSession(workingDirectory, config)
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, async (_event, options?: ListSessionsOptions) => {
     return conductor.listSessions(options)
@@ -70,6 +52,10 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
   ipcMain.handle(IPC_CHANNELS.SESSION_GET, async (_event, sessionId: string) => {
     return conductor.getSessionData(sessionId)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_LOAD, async (_event, sessionId: string) => {
+    return conductor.loadSession(sessionId)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_RESUME, async (_event, sessionId: string) => {
@@ -93,7 +79,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
   ipcMain.handle(IPC_CHANNELS.CONFIG_GET, async () => {
     return {
       version: '0.1.0',
-      activeAgentId: conductor.getCurrentAgent()?.id ?? 'opencode',
+      defaultAgentId: 'opencode', // Default agent for new sessions
       agents: DEFAULT_AGENTS,
       ui: {
         theme: 'system',

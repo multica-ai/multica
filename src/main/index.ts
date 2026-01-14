@@ -77,6 +77,17 @@ app.whenReady().then(async () => {
           })
         }
       },
+      onStatusChange: () => {
+        // Broadcast status change to renderer (for isProcessing state)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          const status = {
+            runningSessions: conductor.getRunningSessionIds().length,
+            sessionIds: conductor.getRunningSessionIds(),
+            processingSessionIds: conductor.getProcessingSessionIds(),
+          }
+          mainWindow.webContents.send(IPC_CHANNELS.AGENT_STATUS, status)
+        }
+      },
     },
   })
   await conductor.initialize()

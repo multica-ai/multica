@@ -1,7 +1,7 @@
 /**
  * Main App component
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from './hooks/useApp'
 import { ChatView, MessageInput, StatusBar } from './components'
 import { AppSidebar } from './components/AppSidebar'
@@ -16,7 +16,7 @@ function AppContent(): React.JSX.Element {
     sessions,
     currentSession,
     sessionUpdates,
-    agentStatus,
+    runningSessionsStatus,
     isProcessing,
     error,
 
@@ -24,9 +24,6 @@ function AppContent(): React.JSX.Element {
     createSession,
     selectSession,
     deleteSession,
-    startAgent,
-    stopAgent,
-    switchAgent,
     sendPrompt,
     cancelRequest,
     clearError,
@@ -34,35 +31,34 @@ function AppContent(): React.JSX.Element {
 
   const openModal = useModalStore((s) => s.openModal)
 
-  // Auto-show new session dialog when agent is running but no session
+  // Default agent for new sessions
+  const [defaultAgentId, setDefaultAgentId] = useState('opencode')
+
+  // Auto-show new session dialog when no sessions exist
   useEffect(() => {
-    if (agentStatus.state === 'running' && !currentSession && sessions.length === 0) {
+    if (!currentSession && sessions.length === 0) {
       openModal('newSession')
     }
-  }, [agentStatus.state, currentSession, sessions.length, openModal])
+  }, [currentSession, sessions.length, openModal])
 
   const handleNewSession = () => {
     openModal('newSession')
   }
 
   const handleCreateSession = async (cwd: string) => {
-    // Ensure agent is running
-    if (agentStatus.state !== 'running') {
-      await startAgent('opencode')
-    }
-    await createSession(cwd)
+    // Create session with default agent (agent starts automatically)
+    await createSession(cwd, defaultAgentId)
   }
 
   const handleSelectSession = async (sessionId: string) => {
-    // Ensure agent is running
-    if (agentStatus.state !== 'running') {
-      const session = sessions.find((s) => s.id === sessionId)
-      if (session) {
-        await startAgent(session.agentId)
-      }
-    }
+    // Select session (agent starts automatically via resumeSession)
     await selectSession(sessionId)
   }
+
+  // Check if current session has a running agent
+  const isCurrentSessionRunning = currentSession
+    ? runningSessionsStatus.sessionIds.includes(currentSession.id)
+    : false
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
@@ -90,10 +86,9 @@ function AppContent(): React.JSX.Element {
         <main className="flex flex-1 flex-col">
           {/* Status bar */}
           <StatusBar
-            agentStatus={agentStatus}
+            runningSessionsCount={runningSessionsStatus.runningSessions}
             currentSession={currentSession}
-            onStartAgent={() => startAgent('opencode')}
-            onStopAgent={stopAgent}
+            isCurrentSessionRunning={isCurrentSessionRunning}
           />
 
           {/* Chat view */}
@@ -109,15 +104,15 @@ function AppContent(): React.JSX.Element {
             onSend={sendPrompt}
             onCancel={cancelRequest}
             isProcessing={isProcessing}
-            disabled={!currentSession || agentStatus.state !== 'running'}
+            disabled={!currentSession}
           />
         </main>
       </SidebarProvider>
 
       {/* Global modals */}
       <Modals
-        currentAgentId={agentStatus.state === 'running' ? agentStatus.agentId : null}
-        onSwitchAgent={switchAgent}
+        defaultAgentId={defaultAgentId}
+        onSetDefaultAgent={setDefaultAgentId}
         onCreateSession={handleCreateSession}
         onDeleteSession={deleteSession}
       />

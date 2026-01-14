@@ -29,6 +29,7 @@ export interface ConductorEvents {
   onPermissionRequest?: (
     params: RequestPermissionRequest
   ) => Promise<RequestPermissionResponse>
+  onStatusChange?: () => void
 }
 
 export interface ConductorOptions {
@@ -39,16 +40,23 @@ export interface ConductorOptions {
   storagePath?: string
 }
 
+/** Per-session agent state */
+interface SessionAgent {
+  agentProcess: AgentProcess
+  connection: ClientSideConnection
+  agentConfig: AgentConfig
+  agentSessionId: string
+}
+
 export class Conductor {
-  private agentProcess: AgentProcess | null = null
-  private connection: ClientSideConnection | null = null
-  private currentAgentConfig: AgentConfig | null = null
   private events: ConductorEvents
   private sessionStore: SessionStore | null = null
   private skipPersistence: boolean
 
-  // Current active Multica session ID
-  private activeSessionId: string | null = null
+  // Map of Multica sessionId -> agent state (each session has its own process)
+  private sessions: Map<string, SessionAgent> = new Map()
+  // Set of session IDs currently processing a request
+  private processingSessions: Set<string> = new Set()
   // In-memory session for CLI mode (when persistence is skipped)
   private inMemorySession: MulticaSession | null = null
 
@@ -70,91 +78,106 @@ export class Conductor {
   }
 
   /**
-   * Start an ACP agent
+   * Start an agent process for a session (internal helper)
    */
-  async startAgent(config: AgentConfig): Promise<void> {
-    console.log(`[Conductor] Starting agent: ${config.name} (${config.command} ${config.args.join(' ')})`)
-
-    // Stop existing agent if running
-    await this.stopAgent()
+  private async startAgentForSession(
+    sessionId: string,
+    config: AgentConfig,
+    cwd: string
+  ): Promise<{ connection: ClientSideConnection; agentSessionId: string }> {
+    console.log(`[Conductor] Starting agent for session ${sessionId}: ${config.name}`)
 
     // Start the agent subprocess
-    this.agentProcess = new AgentProcess(config)
-    await this.agentProcess.start()
+    const agentProcess = new AgentProcess(config)
+    await agentProcess.start()
 
     // Create ACP connection using the SDK
     const stream = ndJsonStream(
-      this.agentProcess.getStdinWeb(),
-      this.agentProcess.getStdoutWeb()
+      agentProcess.getStdinWeb(),
+      agentProcess.getStdoutWeb()
     )
 
     // Create client-side connection with our Client implementation
-    this.connection = new ClientSideConnection((_agent) => this.createClient(), stream)
+    const connection = new ClientSideConnection(
+      (_agent) => this.createClient(sessionId),
+      stream
+    )
 
     console.log(`[Conductor] Sending ACP initialize request (protocol v${PROTOCOL_VERSION})`)
 
     // Initialize the ACP connection
-    const initResult = await this.connection.initialize({
+    const initResult = await connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {
-        // Declare what capabilities we support
         fs: {
-          readTextFile: false, // V2: implement file system access
+          readTextFile: false,
           writeTextFile: false,
         },
-        terminal: false, // V2: implement terminal support
+        terminal: false,
       },
     })
 
     console.log(`[Conductor] ACP connected to ${config.name}`)
     console.log(`[Conductor]   Protocol version: ${initResult.protocolVersion}`)
     console.log(`[Conductor]   Agent info:`, initResult.agentInfo)
-    this.currentAgentConfig = config
-
-    // Handle agent process exit
-    this.agentProcess.onExit((code, signal) => {
-      console.log(`[Conductor] Agent exited (code: ${code}, signal: ${signal})`)
-      this.connection = null
-      this.agentProcess = null
-    })
-  }
-
-  /**
-   * Stop the current agent
-   */
-  async stopAgent(): Promise<void> {
-    if (this.agentProcess) {
-      console.log(`[Conductor] Stopping agent: ${this.currentAgentConfig?.name}`)
-      await this.agentProcess.stop()
-      this.agentProcess = null
-      this.connection = null
-      this.currentAgentConfig = null
-      this.activeSessionId = null
-      console.log(`[Conductor] Agent stopped`)
-    }
-  }
-
-  /**
-   * Create a new session with the agent
-   */
-  async createSession(cwd: string): Promise<MulticaSession> {
-    if (!this.connection || !this.currentAgentConfig) {
-      throw new Error('No agent is running')
-    }
 
     // Create ACP session
-    const result = await this.connection.newSession({
+    const acpResult = await connection.newSession({
       cwd,
-      mcpServers: [], // V2: support MCP servers
+      mcpServers: [],
     })
 
+    // Handle agent process exit
+    agentProcess.onExit((code, signal) => {
+      console.log(`[Conductor] Agent for session ${sessionId} exited (code: ${code}, signal: ${signal})`)
+      this.sessions.delete(sessionId)
+    })
+
+    // Store in sessions map
+    this.sessions.set(sessionId, {
+      agentProcess,
+      connection,
+      agentConfig: config,
+      agentSessionId: acpResult.sessionId,
+    })
+
+    return { connection, agentSessionId: acpResult.sessionId }
+  }
+
+  /**
+   * Stop a session's agent process
+   */
+  async stopSession(sessionId: string): Promise<void> {
+    const sessionAgent = this.sessions.get(sessionId)
+    if (sessionAgent) {
+      console.log(`[Conductor] Stopping session ${sessionId} agent: ${sessionAgent.agentConfig.name}`)
+      await sessionAgent.agentProcess.stop()
+      this.sessions.delete(sessionId)
+      console.log(`[Conductor] Session ${sessionId} agent stopped`)
+    }
+  }
+
+  /**
+   * Stop all session agents
+   */
+  async stopAllSessions(): Promise<void> {
+    const sessionIds = Array.from(this.sessions.keys())
+    for (const sessionId of sessionIds) {
+      await this.stopSession(sessionId)
+    }
+  }
+
+  /**
+   * Create a new session with a new agent process
+   */
+  async createSession(cwd: string, agentConfig: AgentConfig): Promise<MulticaSession> {
     let session: MulticaSession
 
     if (this.sessionStore) {
-      // Persist session
+      // Create session record first to get the ID
       session = await this.sessionStore.create({
-        agentSessionId: result.sessionId,
-        agentId: this.currentAgentConfig.id,
+        agentSessionId: '', // Will be updated after agent starts
+        agentId: agentConfig.id,
         workingDirectory: cwd,
       })
     } else {
@@ -163,8 +186,8 @@ export class Conductor {
       const now = new Date().toISOString()
       session = {
         id: randomUUID(),
-        agentSessionId: result.sessionId,
-        agentId: this.currentAgentConfig.id,
+        agentSessionId: '',
+        agentId: agentConfig.id,
         workingDirectory: cwd,
         createdAt: now,
         updatedAt: now,
@@ -174,14 +197,24 @@ export class Conductor {
       this.inMemorySession = session
     }
 
-    this.activeSessionId = session.id
-    console.log(`[Conductor] Created session: ${session.id} (agent: ${result.sessionId})`)
+    // Start agent process for this session
+    const { agentSessionId } = await this.startAgentForSession(session.id, agentConfig, cwd)
+
+    // Update session with agentSessionId
+    if (this.sessionStore) {
+      session = await this.sessionStore.updateMeta(session.id, { agentSessionId })
+    } else {
+      session.agentSessionId = agentSessionId
+      this.inMemorySession = session
+    }
+
+    console.log(`[Conductor] Created session: ${session.id} (agent: ${agentSessionId})`)
 
     return session
   }
 
   /**
-   * Resume an existing session (for UI display only, agent state is not restored)
+   * Resume an existing session (starts a new agent process for it)
    */
   async resumeSession(sessionId: string): Promise<MulticaSession> {
     if (!this.sessionStore) {
@@ -193,30 +226,32 @@ export class Conductor {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    // Ensure agent is started
+    // If session already has a running agent, return as-is
+    if (this.sessions.has(sessionId)) {
+      console.log(`[Conductor] Session ${sessionId} already has a running agent`)
+      return data.session
+    }
+
+    // Get agent config
     const agentConfig = DEFAULT_AGENTS[data.session.agentId]
     if (!agentConfig) {
       throw new Error(`Unknown agent: ${data.session.agentId}`)
     }
 
-    if (!this.isAgentRunning() || this.currentAgentConfig?.id !== agentConfig.id) {
-      await this.startAgent(agentConfig)
-    }
-
-    // Create new ACP session (agent doesn't know about previous conversation)
-    const result = await this.connection!.newSession({
-      cwd: data.session.workingDirectory,
-      mcpServers: [],
-    })
+    // Start a new agent process for this session
+    const { agentSessionId } = await this.startAgentForSession(
+      sessionId,
+      agentConfig,
+      data.session.workingDirectory
+    )
 
     // Update agentSessionId (new ACP session)
     const updatedSession = await this.sessionStore.updateMeta(sessionId, {
-      agentSessionId: result.sessionId,
+      agentSessionId,
       status: 'active',
     })
 
-    this.activeSessionId = sessionId
-    console.log(`[Conductor] Resumed session: ${sessionId} (new agent session: ${result.sessionId})`)
+    console.log(`[Conductor] Resumed session: ${sessionId} (new agent session: ${agentSessionId})`)
 
     return updatedSession
   }
@@ -225,30 +260,15 @@ export class Conductor {
    * Send a prompt to the agent
    */
   async sendPrompt(sessionId: string, content: string): Promise<string> {
-    if (!this.connection) {
-      throw new Error('No agent is running')
-    }
-
-    // Get agentSessionId
-    let agentSessionId: string
-
-    if (this.sessionStore) {
-      const data = await this.sessionStore.get(sessionId)
-      if (!data) {
-        throw new Error(`Session not found: ${sessionId}`)
-      }
-      agentSessionId = data.session.agentSessionId
-    } else if (this.inMemorySession && this.inMemorySession.id === sessionId) {
-      agentSessionId = this.inMemorySession.agentSessionId
-    } else {
-      throw new Error(`Session not found: ${sessionId}`)
-    }
+    // Ensure agent is running (lazy start if needed)
+    const sessionAgent = await this.ensureAgentForSession(sessionId)
+    const { connection, agentSessionId } = sessionAgent
 
     console.log(`[Conductor] Sending prompt to session ${agentSessionId}`)
     console.log(`[Conductor]   Content: ${content.slice(0, 100)}${content.length > 100 ? '...' : ''}`)
 
     // Store user message before sending (so it appears in history)
-    if (this.sessionStore && this.activeSessionId) {
+    if (this.sessionStore) {
       const userUpdate = {
         sessionId: agentSessionId,
         update: {
@@ -256,44 +276,42 @@ export class Conductor {
           content: { type: 'text', text: content },
         },
       }
-      await this.sessionStore.appendUpdate(this.activeSessionId, userUpdate as any)
+      await this.sessionStore.appendUpdate(sessionId, userUpdate as any)
     }
 
-    const result = await this.connection.prompt({
-      sessionId: agentSessionId,
-      prompt: [{ type: 'text', text: content }],
-    })
+    // Mark session as processing and broadcast status change
+    this.processingSessions.add(sessionId)
+    this.events.onStatusChange?.()
 
-    console.log(`[Conductor] Prompt completed with stopReason: ${result.stopReason}`)
+    try {
+      const result = await connection.prompt({
+        sessionId: agentSessionId,
+        prompt: [{ type: 'text', text: content }],
+      })
 
-    return result.stopReason
+      console.log(`[Conductor] Prompt completed with stopReason: ${result.stopReason}`)
+
+      return result.stopReason
+    } finally {
+      // Always remove from processing when done (success or error)
+      this.processingSessions.delete(sessionId)
+      this.events.onStatusChange?.()
+    }
   }
 
   /**
    * Cancel an ongoing request
    */
   async cancelRequest(sessionId: string): Promise<void> {
-    if (!this.connection) {
+    const sessionAgent = this.sessions.get(sessionId)
+    if (!sessionAgent) {
       return
     }
 
-    // Get agentSessionId
-    let agentSessionId: string | null = null
-
-    if (this.sessionStore) {
-      const data = await this.sessionStore.get(sessionId)
-      if (data) {
-        agentSessionId = data.session.agentSessionId
-      }
-    } else if (this.inMemorySession && this.inMemorySession.id === sessionId) {
-      agentSessionId = this.inMemorySession.agentSessionId
-    }
-
-    if (agentSessionId) {
-      console.log(`[Conductor] Cancelling request for session ${agentSessionId}`)
-      await this.connection.cancel({ sessionId: agentSessionId })
-      console.log(`[Conductor] Cancel request sent`)
-    }
+    const { connection, agentSessionId } = sessionAgent
+    console.log(`[Conductor] Cancelling request for session ${agentSessionId}`)
+    await connection.cancel({ sessionId: agentSessionId })
+    console.log(`[Conductor] Cancel request sent`)
   }
 
   /**
@@ -317,14 +335,75 @@ export class Conductor {
   }
 
   /**
+   * Load a session without starting its agent (lazy loading)
+   */
+  async loadSession(sessionId: string): Promise<MulticaSession> {
+    if (!this.sessionStore) {
+      throw new Error('Session loading not available in CLI mode')
+    }
+
+    const data = await this.sessionStore.get(sessionId)
+    if (!data) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    return data.session
+  }
+
+  /**
+   * Ensure an agent is running for a session (start if needed)
+   */
+  private async ensureAgentForSession(sessionId: string): Promise<SessionAgent> {
+    // If already running, return existing
+    const existing = this.sessions.get(sessionId)
+    if (existing) {
+      return existing
+    }
+
+    // Load session data
+    if (!this.sessionStore) {
+      throw new Error('Cannot auto-start agent in CLI mode')
+    }
+
+    const data = await this.sessionStore.get(sessionId)
+    if (!data) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    // Get agent config
+    const agentConfig = DEFAULT_AGENTS[data.session.agentId]
+    if (!agentConfig) {
+      throw new Error(`Unknown agent: ${data.session.agentId}`)
+    }
+
+    console.log(`[Conductor] Lazy-starting agent for session ${sessionId}`)
+
+    // Start agent
+    const { agentSessionId } = await this.startAgentForSession(
+      sessionId,
+      agentConfig,
+      data.session.workingDirectory
+    )
+
+    // Update session with new agentSessionId
+    await this.sessionStore.updateMeta(sessionId, {
+      agentSessionId,
+      status: 'active',
+    })
+
+    return this.sessions.get(sessionId)!
+  }
+
+  /**
    * Delete a session
    */
   async deleteSession(sessionId: string): Promise<void> {
+    // Stop the session's agent process first
+    await this.stopSession(sessionId)
+
+    // Delete from store
     if (this.sessionStore) {
       await this.sessionStore.delete(sessionId)
-    }
-    if (this.activeSessionId === sessionId) {
-      this.activeSessionId = null
     }
     if (this.inMemorySession?.id === sessionId) {
       this.inMemorySession = null
@@ -345,30 +424,38 @@ export class Conductor {
   }
 
   /**
-   * Get current agent info
+   * Get agent config for a session
    */
-  getCurrentAgent(): AgentConfig | null {
-    return this.currentAgentConfig
+  getSessionAgent(sessionId: string): AgentConfig | null {
+    return this.sessions.get(sessionId)?.agentConfig ?? null
   }
 
   /**
-   * Check if an agent is running
+   * Check if a session has a running agent
    */
-  isAgentRunning(): boolean {
-    return this.agentProcess?.isRunning() ?? false
+  isSessionRunning(sessionId: string): boolean {
+    const sessionAgent = this.sessions.get(sessionId)
+    return sessionAgent?.agentProcess.isRunning() ?? false
   }
 
   /**
-   * Get active session ID
+   * Get all running session IDs (sessions with agent process running)
    */
-  getActiveSessionId(): string | null {
-    return this.activeSessionId
+  getRunningSessionIds(): string[] {
+    return Array.from(this.sessions.keys())
+  }
+
+  /**
+   * Get all processing session IDs (sessions currently handling a request)
+   */
+  getProcessingSessionIds(): string[] {
+    return Array.from(this.processingSessions)
   }
 
   /**
    * Create the Client implementation for ACP SDK
    */
-  private createClient(): Client {
+  private createClient(sessionId: string): Client {
     return {
       // Handle session updates from agent
       sessionUpdate: async (params: SessionNotification) => {
@@ -377,24 +464,23 @@ export class Conductor {
         if ('sessionUpdate' in update) {
           const updateType = update.sessionUpdate
           if (updateType === 'agent_message_chunk') {
-            // Don't log full text chunks, just note they're arriving
             const contentType = update.content?.type || 'unknown'
-            console.log(`[ACP] Session update: ${updateType} (${contentType})`)
+            console.log(`[ACP] Session ${sessionId} update: ${updateType} (${contentType})`)
           } else if (updateType === 'tool_call') {
-            console.log(`[ACP] Session update: ${updateType} - ${update.title} [${update.status}]`)
+            console.log(`[ACP] Session ${sessionId} update: ${updateType} - ${update.title} [${update.status}]`)
           } else if (updateType === 'tool_call_update') {
-            console.log(`[ACP] Session update: ${updateType} [${update.status}]`)
+            console.log(`[ACP] Session ${sessionId} update: ${updateType} [${update.status}]`)
           } else {
-            console.log(`[ACP] Session update: ${updateType}`, update)
+            console.log(`[ACP] Session ${sessionId} update: ${updateType}`, update)
           }
         } else {
-          console.log(`[ACP] Session update (raw):`, params)
+          console.log(`[ACP] Session ${sessionId} update (raw):`, params)
         }
 
         // Store raw update to SessionStore (if available)
-        if (this.activeSessionId && this.sessionStore) {
+        if (this.sessionStore) {
           try {
-            await this.sessionStore.appendUpdate(this.activeSessionId, params)
+            await this.sessionStore.appendUpdate(sessionId, params)
           } catch (err) {
             console.error('[Conductor] Failed to store session update:', err)
           }
@@ -414,7 +500,6 @@ export class Conductor {
           return this.events.onPermissionRequest(params)
         }
         // Default: auto-approve (V1 simplification)
-        // In production, this should prompt the user
         console.log(`[Conductor] Auto-approving: ${params.toolCall.title}`)
         return {
           outcome: {
