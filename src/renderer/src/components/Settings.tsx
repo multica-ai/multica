@@ -139,8 +139,10 @@ function AgentItem({ agent, isSelected, onSelect }: AgentItemProps) {
   return (
     <div
       className={cn(
-        'rounded-md transition-colors duration-150 text-secondary-foreground hover:bg-muted/50 hover:text-foreground',
-        status === 'selected' && 'bg-muted text-foreground',
+        'rounded-md transition-colors duration-150 text-secondary-foreground',
+        status === 'selected'
+          ? 'bg-muted text-foreground'
+          : 'hover:bg-muted/50 hover:text-foreground',
         status === 'setup' && 'opacity-60 hover:opacity-100'
       )}
     >

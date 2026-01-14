@@ -2,6 +2,7 @@
  * Message input component
  */
 import { useState, useRef, useEffect } from 'react'
+import { ArrowUp, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface MessageInputProps {
@@ -20,6 +21,7 @@ export function MessageInput({
   placeholder = 'Type a message...',
 }: MessageInputProps) {
   const [value, setValue] = useState('')
+  const [isComposing, setIsComposing] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Auto-resize textarea
@@ -45,40 +47,49 @@ export function MessageInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Don't submit while IME is composing
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault()
       handleSubmit()
     }
   }
 
+  const canSubmit = !disabled && value.trim().length > 0
+
   return (
-    <div className="border-t border-border p-4">
-      <div className="mx-auto flex max-w-3xl gap-2">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={disabled ? 'Select or create a session first' : placeholder}
-          disabled={disabled}
-          rows={1}
-          className="flex-1 resize-none rounded-lg border border-border bg-muted px-4 py-2 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary disabled:cursor-not-allowed disabled:opacity-50"
-        />
-
-        {isProcessing ? (
-          <Button variant="destructive" onClick={onCancel}>
-            Cancel
-          </Button>
-        ) : (
-          <Button onClick={handleSubmit} disabled={disabled || !value.trim()}>
-            Send
-          </Button>
-        )}
-      </div>
-
-      {/* Hint */}
-      <div className="mx-auto mt-1 max-w-3xl text-center text-xs text-muted-foreground">
-        Press Enter to send, Shift+Enter for new line
+    <div className="p-4">
+      <div className="mx-auto max-w-3xl">
+        <div className="bg-secondary/50 hover:bg-secondary focus-within:bg-secondary transition-colors duration-200 rounded-md p-2 border border-border">
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+            placeholder={disabled ? 'Select or create a session first' : placeholder}
+            disabled={disabled}
+            rows={1}
+            className="w-full resize-none bg-transparent px-2 py-1 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <div className="flex justify-end pt-1">
+            <Button
+              size="icon"
+              onClick={isProcessing ? onCancel : handleSubmit}
+              disabled={!canSubmit && !isProcessing}
+              className="h-8 w-8 rounded-full"
+            >
+              {isProcessing ? (
+                <Square className="h-3.5 w-3.5" fill="currentColor" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-1 text-center text-xs text-muted-foreground">
+          Enter to send, Shift+Enter for new line
+        </div>
       </div>
     </div>
   )
