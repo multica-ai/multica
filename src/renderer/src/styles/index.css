@@ -122,6 +122,12 @@ body {
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
+
+  /* Tool call status colors */
+  --tool-pending: oklch(0.55 0.05 250);
+  --tool-running: oklch(0.6 0.18 250);
+  --tool-success: oklch(0.72 0.12 145);
+  --tool-error: oklch(0.65 0.2 25);
 }
 
 .dark {
@@ -156,6 +162,12 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.552 0.016 285.938);
+
+  /* Tool call status colors */
+  --tool-pending: oklch(0.5 0.08 250);
+  --tool-running: oklch(0.65 0.2 250);
+  --tool-success: oklch(0.65 0.15 145);
+  --tool-error: oklch(0.7 0.2 22);
 }
 
 @layer base {
@@ -164,5 +176,15 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Tool call status glow animation */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--tool-running);
+  }
+  50% {
+    box-shadow: 0 0 0 3px oklch(0.6 0.2 250 / 0);
   }
 }

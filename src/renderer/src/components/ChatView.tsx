@@ -7,6 +7,7 @@ import type { StoredSessionUpdate } from '../../../shared/types'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ChevronDown } from 'lucide-react'
+import { ToolCallItem, type ToolCall } from './ToolCallItem'
 
 interface ChatViewProps {
   updates: StoredSessionUpdate[]
@@ -71,15 +72,6 @@ interface Message {
   content: string
   thought: string
   toolCalls: ToolCall[]
-}
-
-interface ToolCall {
-  id: string
-  title: string
-  status: string
-  kind?: string
-  input?: string
-  output?: string
 }
 
 function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
@@ -237,7 +229,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
 
       {/* Tool calls */}
       {message.toolCalls.map((tc) => (
-        <ToolCallLine key={tc.id} toolCall={tc} />
+        <ToolCallItem key={tc.id} toolCall={tc} />
       ))}
 
       {/* Text content with markdown */}
@@ -367,157 +359,6 @@ function ThoughtBlock({ text }: { text: string }) {
       </div>
     </Collapsible>
   )
-}
-
-// Tool call line - inline display
-function ToolCallLine({ toolCall }: { toolCall: ToolCall }) {
-  const { icon, action, detail } = parseToolCall(toolCall)
-
-  const isRunning = toolCall.status === 'running' || toolCall.status === 'in_progress' || toolCall.status === 'pending'
-  const isFailed = toolCall.status === 'failed'
-
-  return (
-    <div className={`flex items-center gap-2 text-sm ${isFailed ? 'text-red-400' : 'text-muted-foreground'}`}>
-      {/* Icon */}
-      <span className="w-4 text-center font-mono opacity-60">{icon}</span>
-
-      {/* Action */}
-      <span>{action}</span>
-
-      {/* Detail in code pill */}
-      {detail && (
-        <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs truncate max-w-[300px]">
-          {detail}
-        </span>
-      )}
-
-      {/* Running indicator */}
-      {isRunning && <LoadingDots />}
-    </div>
-  )
-}
-
-interface ParsedToolCall {
-  icon: string
-  action: string
-  detail?: string
-}
-
-function parseToolCall(toolCall: ToolCall): ParsedToolCall {
-  const title = toolCall.title?.toLowerCase() || ''
-  const kind = toolCall.kind?.toLowerCase() || ''
-
-  // Try to extract file path from input
-  let filePath: string | undefined
-  if (toolCall.input) {
-    try {
-      const parsed = JSON.parse(toolCall.input)
-      filePath = parsed.file_path || parsed.path || parsed.filePath || parsed.pattern
-    } catch {
-      // Not JSON, might be a direct path
-      if (toolCall.input.startsWith('/') || toolCall.input.includes('.')) {
-        filePath = toolCall.input.split('\n')[0].trim()
-      }
-    }
-  }
-
-  // Determine icon and action based on kind/title
-  if (kind === 'search' || title.includes('glob') || title.includes('search') || title.includes('grep')) {
-    return {
-      icon: '◎',
-      action: title.includes('glob') ? 'Search files' : 'Search',
-      detail: filePath || extractPathFromTitle(toolCall.title),
-    }
-  }
-
-  if (title.includes('list') || title.startsWith('ls')) {
-    return {
-      icon: '▤',
-      action: 'List',
-      detail: extractPathFromTitle(toolCall.title),
-    }
-  }
-
-  if (title.includes('read')) {
-    return {
-      icon: '◔',
-      action: 'Read',
-      detail: filePath || extractPathFromTitle(toolCall.title),
-    }
-  }
-
-  if (title.includes('write') || title.includes('create')) {
-    // Try to get line count from output
-    let lineCount = ''
-    if (toolCall.output) {
-      const lines = toolCall.output.split('\n').length
-      if (lines > 1) lineCount = `${lines} lines`
-    }
-    return {
-      icon: '▤',
-      action: lineCount ? `Write ${lineCount}` : 'Write',
-      detail: filePath || extractPathFromTitle(toolCall.title),
-    }
-  }
-
-  if (title.includes('edit') || title.includes('replace')) {
-    return {
-      icon: '✎',
-      action: 'Edit',
-      detail: filePath || extractPathFromTitle(toolCall.title),
-    }
-  }
-
-  if (title.startsWith('run') || kind === 'bash' || kind === 'shell') {
-    const cmd = extractCommandFromTitle(toolCall.title)
-    return {
-      icon: '>_',
-      action: getCommandDescription(toolCall.title),
-      detail: cmd,
-    }
-  }
-
-  // Default
-  return {
-    icon: '◇',
-    action: toolCall.title || toolCall.kind || 'Tool',
-    detail: filePath,
-  }
-}
-
-function extractPathFromTitle(title?: string): string | undefined {
-  if (!title) return undefined
-  // Look for path-like strings
-  const match = title.match(/\/[\w\-./]+/)
-  return match ? match[0] : undefined
-}
-
-function extractCommandFromTitle(title?: string): string | undefined {
-  if (!title) return undefined
-  // Remove "Run " prefix and get the command
-  if (title.toLowerCase().startsWith('run ')) {
-    const cmd = title.slice(4).trim()
-    // Truncate if too long
-    return cmd.length > 50 ? cmd.slice(0, 47) + '...' : cmd
-  }
-  return undefined
-}
-
-function getCommandDescription(title?: string): string {
-  if (!title) return 'Run command'
-  const lower = title.toLowerCase()
-
-  if (lower.includes('mkdir')) return 'Create directory'
-  if (lower.includes('rm ')) return 'Remove'
-  if (lower.includes('mv ')) return 'Move'
-  if (lower.includes('cp ')) return 'Copy'
-  if (lower.includes('npm') || lower.includes('pnpm') || lower.includes('yarn')) return 'Package manager'
-  if (lower.includes('git')) return 'Git'
-  if (lower.includes('python')) return 'Run Python'
-  if (lower.includes('node')) return 'Run Node'
-  if (lower.includes('perl')) return 'Run Perl'
-
-  return 'Run command'
 }
 
 function LoadingDots() {
