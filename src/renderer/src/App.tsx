@@ -1,7 +1,7 @@
 /**
  * Main App component
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useApp } from './hooks/useApp'
 import { ChatView, MessageInput, StatusBar } from './components'
 import { AppSidebar } from './components/AppSidebar'
@@ -43,13 +43,6 @@ function AppContent(): React.JSX.Element {
 
   // Default agent for new sessions
   const [defaultAgentId, setDefaultAgentId] = useState('opencode')
-
-  // Auto-show new session dialog when no sessions exist
-  useEffect(() => {
-    if (!currentSession && sessions.length === 0) {
-      openModal('newSession')
-    }
-  }, [currentSession, sessions.length, openModal])
 
   const handleNewSession = () => {
     openModal('newSession')
