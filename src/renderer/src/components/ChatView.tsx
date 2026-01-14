@@ -46,7 +46,7 @@ export function ChatView({ updates, isProcessing, hasSession }: ChatViewProps) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-4">
+      <div className="mx-auto max-w-3xl space-y-4 px-6 py-4">
         {messages.map((msg, idx) => (
           <MessageBubble key={idx} message={msg} />
         ))}
@@ -269,7 +269,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
     const textBlock = message.blocks.find((b): b is TextBlock => b.type === 'text')
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-muted px-4 py-3 text-sm">
+        <div className="max-w-[85%] rounded-lg bg-muted px-4 py-3 text-[15px]">
           {textBlock?.content || ''}
         </div>
       </div>
@@ -300,7 +300,7 @@ function TextContentBlock({ content }: { content: string }) {
   if (!content) return null
 
   return (
-    <div className="prose prose-invert prose-sm max-w-none">
+    <div className="prose prose-invert max-w-none text-[15px]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
