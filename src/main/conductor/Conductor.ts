@@ -19,6 +19,7 @@ import type {
   SessionData,
   ListSessionsOptions,
 } from '../../shared/types'
+import { formatHistoryForReplay, hasReplayableHistory } from './historyReplay'
 
 export interface SessionUpdateCallback {
   (update: SessionNotification): void
@@ -30,6 +31,8 @@ export interface ConductorEvents {
     params: RequestPermissionRequest
   ) => Promise<RequestPermissionResponse>
   onStatusChange?: () => void
+  /** Called when session metadata changes (e.g., agentSessionId after lazy start) */
+  onSessionMetaUpdated?: (session: MulticaSession) => void
 }
 
 export interface ConductorOptions {
@@ -46,6 +49,8 @@ interface SessionAgent {
   connection: ClientSideConnection
   agentConfig: AgentConfig
   agentSessionId: string
+  /** Whether the first prompt needs history prepended (for resumed sessions) */
+  needsHistoryReplay: boolean
 }
 
 export class Conductor {
@@ -79,11 +84,13 @@ export class Conductor {
 
   /**
    * Start an agent process for a session (internal helper)
+   * @param isResumed - Whether this is resuming an existing session (needs history replay)
    */
   private async startAgentForSession(
     sessionId: string,
     config: AgentConfig,
-    cwd: string
+    cwd: string,
+    isResumed: boolean = false
   ): Promise<{ connection: ClientSideConnection; agentSessionId: string }> {
     console.log(`[Conductor] Starting agent for session ${sessionId}: ${config.name}`)
 
@@ -139,6 +146,7 @@ export class Conductor {
       connection,
       agentConfig: config,
       agentSessionId: acpResult.sessionId,
+      needsHistoryReplay: isResumed, // True when resuming, agent needs conversation context
     })
 
     return { connection, agentSessionId: acpResult.sessionId }
@@ -238,11 +246,12 @@ export class Conductor {
       throw new Error(`Unknown agent: ${data.session.agentId}`)
     }
 
-    // Start a new agent process for this session
+    // Start a new agent process for this session (isResumed = true)
     const { agentSessionId } = await this.startAgentForSession(
       sessionId,
       agentConfig,
-      data.session.workingDirectory
+      data.session.workingDirectory,
+      true // Resumed session needs history replay
     )
 
     // Update agentSessionId (new ACP session)
@@ -264,10 +273,34 @@ export class Conductor {
     const sessionAgent = await this.ensureAgentForSession(sessionId)
     const { connection, agentSessionId } = sessionAgent
 
+    // Prepare the final prompt content
+    let finalContent = content
+
+    // If this is a resumed session, prepend conversation history to first prompt
+    if (sessionAgent.needsHistoryReplay && this.sessionStore) {
+      try {
+        const data = await this.sessionStore.get(sessionId)
+        if (data && hasReplayableHistory(data.updates)) {
+          const history = formatHistoryForReplay(data.updates)
+          if (history) {
+            console.log(`[Conductor] Prepending conversation history (${data.updates.length} updates)`)
+            finalContent = history + content
+          }
+        }
+      } catch (error) {
+        console.error(`[Conductor] Failed to load history for replay:`, error)
+        // Continue without history - better than blocking the prompt
+      } finally {
+        // Always mark as replayed to prevent repeated attempts
+        sessionAgent.needsHistoryReplay = false
+      }
+    }
+
     console.log(`[Conductor] Sending prompt to session ${agentSessionId}`)
-    console.log(`[Conductor]   Content: ${content.slice(0, 100)}${content.length > 100 ? '...' : ''}`)
+    console.log(`[Conductor]   Content: ${finalContent.slice(0, 100)}${finalContent.length > 100 ? '...' : ''}`)
 
     // Store user message before sending (so it appears in history)
+    // Note: We store the original content, not the history-prepended version
     if (this.sessionStore) {
       const userUpdate = {
         sessionId: agentSessionId,
@@ -286,7 +319,7 @@ export class Conductor {
     try {
       const result = await connection.prompt({
         sessionId: agentSessionId,
-        prompt: [{ type: 'text', text: content }],
+        prompt: [{ type: 'text', text: finalContent }],
       })
 
       console.log(`[Conductor] Prompt completed with stopReason: ${result.stopReason}`)
@@ -378,18 +411,25 @@ export class Conductor {
 
     console.log(`[Conductor] Lazy-starting agent for session ${sessionId}`)
 
-    // Start agent
+    // Start agent (isResumed = true for lazy start of existing session)
     const { agentSessionId } = await this.startAgentForSession(
       sessionId,
       agentConfig,
-      data.session.workingDirectory
+      data.session.workingDirectory,
+      true // Existing session needs history replay
     )
 
     // Update session with new agentSessionId
-    await this.sessionStore.updateMeta(sessionId, {
+    const updatedSession = await this.sessionStore.updateMeta(sessionId, {
       agentSessionId,
       status: 'active',
     })
+
+    // Notify frontend of session metadata change (important for agentSessionId update)
+    // This must happen BEFORE sending the prompt so frontend can receive messages
+    if (this.events.onSessionMetaUpdated) {
+      this.events.onSessionMetaUpdated(updatedSession)
+    }
 
     return this.sessions.get(sessionId)!
   }

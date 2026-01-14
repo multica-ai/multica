@@ -41,8 +41,18 @@ function AppContent(): React.JSX.Element {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen)
 
-  // Default agent for new sessions
-  const [defaultAgentId, setDefaultAgentId] = useState('opencode')
+  // Default agent for new sessions (persisted in localStorage)
+  const [defaultAgentId, setDefaultAgentId] = useState(() => {
+    // Load from localStorage on initial render
+    const saved = localStorage.getItem('multica:defaultAgentId')
+    return saved || 'claude-code' // Default to claude-code if not set
+  })
+
+  // Wrapper to also persist to localStorage
+  const handleSetDefaultAgent = (agentId: string) => {
+    localStorage.setItem('multica:defaultAgentId', agentId)
+    setDefaultAgentId(agentId)
+  }
 
   const handleNewSession = () => {
     clearCurrentSession()
@@ -143,7 +153,7 @@ function AppContent(): React.JSX.Element {
       {/* Global modals */}
       <Modals
         defaultAgentId={defaultAgentId}
-        onSetDefaultAgent={setDefaultAgentId}
+        onSetDefaultAgent={handleSetDefaultAgent}
         onCreateSession={handleCreateSession}
         onDeleteSession={deleteSession}
       />

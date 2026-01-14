@@ -65,6 +65,25 @@ export function useApp(): AppState & AppActions {
     loadRunningStatus()
   }, [])
 
+  // Get current session ID for stable reference in effect
+  const currentSessionId = currentSession?.id
+
+  // Subscribe to session metadata updates (e.g., when agentSessionId changes after lazy start)
+  // This is critical for receiving messages after app restart
+  useEffect(() => {
+    const unsubSessionMeta = window.electronAPI.onSessionMetaUpdated((updatedSession) => {
+      // Only update if this is the current session
+      if (currentSessionId && updatedSession.id === currentSessionId) {
+        console.log('[useApp] Session meta updated:', updatedSession.id, 'agentSessionId:', updatedSession.agentSessionId)
+        setCurrentSession(updatedSession)
+      }
+    })
+
+    return () => {
+      unsubSessionMeta()
+    }
+  }, [currentSessionId])
+
   // Get current agentSessionId for stable reference in effect
   const currentAgentSessionId = currentSession?.agentSessionId
 

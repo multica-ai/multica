@@ -79,6 +79,13 @@ const electronAPI: ElectronAPI = {
   respondToPermission: (response) => {
     ipcRenderer.send(IPC_CHANNELS.PERMISSION_RESPONSE, response)
   },
+
+  onSessionMetaUpdated: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, session: unknown) =>
+      callback(session as Parameters<typeof callback>[0])
+    ipcRenderer.on(IPC_CHANNELS.SESSION_META_UPDATED, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SESSION_META_UPDATED, listener)
+  },
 }
 
 // Expose API to renderer via contextBridge
