@@ -16,6 +16,7 @@ import {
   RightPanelContent,
 } from './components/layout'
 import { FileTree } from './components/FileTree'
+import { Toaster } from '@/components/ui/sonner'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -147,6 +148,9 @@ function AppContent(): React.JSX.Element {
         onCreateSession={handleCreateSession}
         onDeleteSession={deleteSession}
       />
+
+      {/* Toast notifications */}
+      <Toaster position="bottom-right" />
     </div>
   )
 }

@@ -12,6 +12,7 @@ import {
   LockIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -123,6 +124,9 @@ function TreeItem({
     async (appId: string) => {
       try {
         await window.electronAPI.openWith({ path: node.path, appId })
+        if (appId === 'copy-path') {
+          toast.success('Path copied to clipboard')
+        }
       } catch (error) {
         console.error('Failed to open with app:', error)
       }
