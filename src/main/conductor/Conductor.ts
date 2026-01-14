@@ -79,11 +79,13 @@ export class Conductor {
 
   /**
    * Start an agent process for a session (internal helper)
+   * @param existingAgentSessionId - If provided, will try to load this existing ACP session instead of creating a new one
    */
   private async startAgentForSession(
     sessionId: string,
     config: AgentConfig,
-    cwd: string
+    cwd: string,
+    existingAgentSessionId?: string
   ): Promise<{ connection: ClientSideConnection; agentSessionId: string }> {
     console.log(`[Conductor] Starting agent for session ${sessionId}: ${config.name}`)
 
@@ -120,12 +122,39 @@ export class Conductor {
     console.log(`[Conductor] ACP connected to ${config.name}`)
     console.log(`[Conductor]   Protocol version: ${initResult.protocolVersion}`)
     console.log(`[Conductor]   Agent info:`, initResult.agentInfo)
+    console.log(`[Conductor]   Agent capabilities:`, initResult.agentCapabilities)
 
-    // Create ACP session
-    const acpResult = await connection.newSession({
-      cwd,
-      mcpServers: [],
-    })
+    // Create or load ACP session
+    let acpResult: { sessionId: string }
+
+    if (existingAgentSessionId && initResult.agentCapabilities?.loadSession) {
+      // Try to load existing session
+      console.log(`[Conductor] Loading existing ACP session: ${existingAgentSessionId}`)
+      try {
+        acpResult = await connection.loadSession({
+          cwd,
+          mcpServers: [],
+          sessionId: existingAgentSessionId,
+        })
+        console.log(`[Conductor] Successfully loaded existing session`)
+      } catch (err) {
+        // Fallback to new session if load fails
+        console.log(`[Conductor] Failed to load session, creating new one:`, err)
+        acpResult = await connection.newSession({
+          cwd,
+          mcpServers: [],
+        })
+      }
+    } else {
+      // Create new session
+      if (existingAgentSessionId) {
+        console.log(`[Conductor] Agent does not support loadSession, creating new session`)
+      }
+      acpResult = await connection.newSession({
+        cwd,
+        mcpServers: [],
+      })
+    }
 
     // Handle agent process exit
     agentProcess.onExit((code, signal) => {
@@ -215,6 +244,7 @@ export class Conductor {
 
   /**
    * Resume an existing session (starts a new agent process for it)
+   * Will attempt to load the existing ACP session if the agent supports it
    */
   async resumeSession(sessionId: string): Promise<MulticaSession> {
     if (!this.sessionStore) {
@@ -238,22 +268,29 @@ export class Conductor {
       throw new Error(`Unknown agent: ${data.session.agentId}`)
     }
 
-    // Start a new agent process for this session
+    // Start a new agent process and try to load existing ACP session
     const { agentSessionId } = await this.startAgentForSession(
       sessionId,
       agentConfig,
-      data.session.workingDirectory
+      data.session.workingDirectory,
+      data.session.agentSessionId // Pass existing agent session ID for loading
     )
 
-    // Update agentSessionId (new ACP session)
-    const updatedSession = await this.sessionStore.updateMeta(sessionId, {
-      agentSessionId,
-      status: 'active',
-    })
-
-    console.log(`[Conductor] Resumed session: ${sessionId} (new agent session: ${agentSessionId})`)
-
-    return updatedSession
+    // Only update agentSessionId if it changed (e.g., loadSession failed and created new)
+    if (agentSessionId !== data.session.agentSessionId) {
+      const updatedSession = await this.sessionStore.updateMeta(sessionId, {
+        agentSessionId,
+        status: 'active',
+      })
+      console.log(`[Conductor] Resumed session: ${sessionId} (new agent session: ${agentSessionId})`)
+      return updatedSession
+    } else {
+      const updatedSession = await this.sessionStore.updateMeta(sessionId, {
+        status: 'active',
+      })
+      console.log(`[Conductor] Resumed session: ${sessionId} (loaded existing agent session: ${agentSessionId})`)
+      return updatedSession
+    }
   }
 
   /**
@@ -352,6 +389,7 @@ export class Conductor {
 
   /**
    * Ensure an agent is running for a session (start if needed)
+   * Will attempt to load the existing ACP session if the agent supports it
    */
   private async ensureAgentForSession(sessionId: string): Promise<SessionAgent> {
     // If already running, return existing
@@ -378,18 +416,25 @@ export class Conductor {
 
     console.log(`[Conductor] Lazy-starting agent for session ${sessionId}`)
 
-    // Start agent
+    // Start agent and try to load existing ACP session
     const { agentSessionId } = await this.startAgentForSession(
       sessionId,
       agentConfig,
-      data.session.workingDirectory
+      data.session.workingDirectory,
+      data.session.agentSessionId // Pass existing agent session ID for loading
     )
 
-    // Update session with new agentSessionId
-    await this.sessionStore.updateMeta(sessionId, {
-      agentSessionId,
-      status: 'active',
-    })
+    // Only update agentSessionId if it changed
+    if (agentSessionId !== data.session.agentSessionId) {
+      await this.sessionStore.updateMeta(sessionId, {
+        agentSessionId,
+        status: 'active',
+      })
+    } else {
+      await this.sessionStore.updateMeta(sessionId, {
+        status: 'active',
+      })
+    }
 
     return this.sessions.get(sessionId)!
   }
