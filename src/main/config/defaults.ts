@@ -15,7 +15,7 @@ export const DEFAULT_AGENTS: Record<string, AgentConfig> = {
   },
   opencode: {
     id: 'opencode',
-    name: 'OpenCode',
+    name: 'opencode',
     command: 'opencode',
     args: ['acp'],
     enabled: true,
