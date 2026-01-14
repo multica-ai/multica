@@ -163,7 +163,7 @@ function AgentItem({ agent, isSelected, onSelect }: AgentItemProps) {
 
         {/* Right side: status or button */}
         {status === 'selected' ? (
-          <span className="text-xs text-green-600">Default</span>
+          <span className="text-xs text-green-600">Selected</span>
         ) : status === 'ready' ? (
           <button
             onClick={handleSelectClick}
