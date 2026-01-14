@@ -47,8 +47,12 @@ function formatDate(iso: string): string {
 function getSessionTitle(session: MulticaSession): string {
   if (session.title) return session.title
   const parts = session.workingDirectory.split('/')
-  return parts[parts.length - 1] || session.workingDirectory
+  const folderName = parts[parts.length - 1] || session.workingDirectory
+  // Add short ID suffix to distinguish sessions in the same folder
+  const shortId = session.id.slice(0, 4)
+  return `${folderName} · ${shortId}`
 }
+
 
 // Session list item component
 interface SessionItemProps {
@@ -77,15 +81,16 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
               isActive && "bg-sidebar-accent"
             )}
           >
-            {/* Error indicator - only show on error */}
-            {session.status === 'error' && (
-              <span className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500" />
-            )}
-
-            {/* Content */}
-            <div className="min-w-0 flex-1">
-              <span className="truncate text-sm">
+            {/* Two-line layout container */}
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              {/* Line 1: Title */}
+              <span className="truncate text-sm font-medium">
                 {getSessionTitle(session)}
+              </span>
+
+              {/* Line 2: Agent + Timestamp */}
+              <span className="text-xs text-muted-foreground/60">
+                {session.agentId} · {formatDate(session.updatedAt)}
               </span>
             </div>
 
@@ -96,7 +101,7 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
                 onDelete()
               }}
               className={cn(
-                "flex-shrink-0 rounded p-1 transition-opacity duration-150",
+                "flex-shrink-0 self-start rounded p-1 transition-opacity duration-150",
                 "hover:bg-muted active:bg-muted",
                 isHovered ? "opacity-50 hover:opacity-100" : "opacity-0"
               )}
@@ -106,7 +111,7 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
           </SidebarMenuButton>
         </TooltipTrigger>
         <TooltipContent side="right">
-          <p>{session.agentId} · {formatDate(session.updatedAt)}</p>
+          <p>{session.workingDirectory}</p>
         </TooltipContent>
       </Tooltip>
     </SidebarMenuItem>
@@ -183,13 +188,13 @@ export function AppSidebar({
 
       <SidebarFooter className="px-2 pb-2">
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
           onClick={() => openModal('settings')}
-          className="w-full justify-center gap-2"
+          className="w-full justify-center gap-2 hover:bg-sidebar-accent"
         >
           <Settings className="h-4 w-4" />
-          Setting
+          Settings
         </Button>
       </SidebarFooter>
     </Sidebar>
