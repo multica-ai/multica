@@ -28,7 +28,7 @@ import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { Conductor } from './conductor'
 import { DEFAULT_AGENTS } from './config'
-import type { MulticaSession, AgentConfig } from '../shared/types'
+import type { MulticaSession } from '../shared/types'
 
 // ANSI colors
 const c = {

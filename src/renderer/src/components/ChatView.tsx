@@ -3,6 +3,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { StoredSessionUpdate } from '../../../shared/types'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -244,6 +245,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
       {message.content && (
         <div className="prose prose-invert prose-sm max-w-none">
           <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
             components={{
               // Custom styling for markdown elements
               p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
@@ -286,6 +288,29 @@ function MessageBubble({ message }: MessageBubbleProps) {
               hr: () => <hr className="border-border my-4" />,
               strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
               em: ({ children }) => <em className="italic">{children}</em>,
+              // Table components for GFM table support
+              table: ({ children }) => (
+                <div className="overflow-x-auto mb-3">
+                  <table className="min-w-full border-collapse border border-border text-sm">
+                    {children}
+                  </table>
+                </div>
+              ),
+              thead: ({ children }) => (
+                <thead className="bg-muted/50">{children}</thead>
+              ),
+              tbody: ({ children }) => <tbody>{children}</tbody>,
+              tr: ({ children }) => (
+                <tr className="border-b border-border">{children}</tr>
+              ),
+              th: ({ children }) => (
+                <th className="border border-border px-3 py-2 text-left font-semibold">
+                  {children}
+                </th>
+              ),
+              td: ({ children }) => (
+                <td className="border border-border px-3 py-2">{children}</td>
+              ),
             }}
           >
             {message.content}
