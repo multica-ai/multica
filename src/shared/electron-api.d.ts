@@ -69,6 +69,25 @@ export interface PermissionResponse {
   optionId: string
 }
 
+// File tree types
+export interface FileTreeNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  extension?: string
+}
+
+export interface DetectedApp {
+  id: string
+  name: string
+  icon?: string // App icon identifier
+}
+
+export interface OpenWithOptions {
+  path: string
+  appId: string
+}
+
 export interface ElectronAPI {
   // Agent status (per-session agents)
   getAgentStatus(): Promise<RunningSessionsStatus>
@@ -95,6 +114,11 @@ export interface ElectronAPI {
 
   // System
   checkAgents(): Promise<AgentCheckResult[]>
+
+  // File tree
+  listDirectory(path: string): Promise<FileTreeNode[]>
+  detectApps(): Promise<DetectedApp[]>
+  openWith(options: OpenWithOptions): Promise<void>
 
   // Event listeners (return unsubscribe function)
   onAgentMessage(callback: (message: AgentMessage) => void): () => void

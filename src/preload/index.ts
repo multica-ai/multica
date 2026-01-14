@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
-import type { ElectronAPI } from '../shared/electron-api'
+import type { ElectronAPI, OpenWithOptions } from '../shared/electron-api'
 import type { ListSessionsOptions, MulticaSession } from '../shared/types'
 
 // Electron API exposed to renderer process
@@ -42,6 +42,11 @@ const electronAPI: ElectronAPI = {
 
   // System
   checkAgents: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_AGENTS),
+
+  // File tree
+  listDirectory: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.FS_LIST_DIRECTORY, path),
+  detectApps: () => ipcRenderer.invoke(IPC_CHANNELS.FS_DETECT_APPS),
+  openWith: (options: OpenWithOptions) => ipcRenderer.invoke(IPC_CHANNELS.FS_OPEN_WITH, options),
 
   // Event listeners
   onAgentMessage: (callback) => {

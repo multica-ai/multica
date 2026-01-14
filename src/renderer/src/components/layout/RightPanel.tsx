@@ -94,13 +94,27 @@ export function SidebarTrigger({
 // Sub-components for consistent structure
 export function RightPanelHeader({
   className,
+  children,
   ...props
 }: React.ComponentProps<'div'>) {
+  const toggle = useUIStore((s) => s.toggleRightPanel)
+
   return (
     <div
-      className={cn('flex h-11 items-center border-b px-4', className)}
+      className={cn('group flex h-11 items-center border-b px-4', className)}
       {...props}
-    />
+    >
+      {children}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="ml-auto size-7 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={toggle}
+      >
+        <PanelRightIcon className="h-4 w-4" />
+        <span className="sr-only">Close Right Panel</span>
+      </Button>
+    </div>
   )
 }
 

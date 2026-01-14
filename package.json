@@ -28,6 +28,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource/geist-sans": "^5.2.5",
     "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
@@ -39,6 +40,7 @@
     "lucide-react": "^0.562.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "zustand": "^5.0.10"
   },

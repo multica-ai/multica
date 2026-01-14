@@ -35,6 +35,11 @@ export const IPC_CHANNELS = {
   // Permission request (ACP)
   PERMISSION_REQUEST: 'permission:request',
   PERMISSION_RESPONSE: 'permission:response',
+
+  // File tree
+  FS_LIST_DIRECTORY: 'fs:list-directory',
+  FS_DETECT_APPS: 'fs:detect-apps',
+  FS_OPEN_WITH: 'fs:open-with',
 } as const
 
 export type IPCChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]

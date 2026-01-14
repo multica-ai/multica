@@ -143,7 +143,7 @@ app.whenReady().then(async () => {
               console.log(`[Permission] Timeout ${requestId}, auto-denying`)
               pendingPermissionRequests.delete(requestId)
               // Find a deny option or use first option
-              const denyOption = params.options.find(o => o.kind === 'deny') || params.options[0]
+              const denyOption = params.options.find(o => (o.kind as string) === 'deny') || params.options[0]
               resolve({
                 outcome: {
                   outcome: 'selected',
