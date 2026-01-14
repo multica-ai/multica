@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { ArrowUp, Square, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 
 interface MessageInputProps {
   onSend: (content: string) => void
@@ -113,34 +114,46 @@ export function MessageInput({
             onCompositionEnd={() => setIsComposing(false)}
             placeholder={placeholder}
             disabled={disabled}
-            rows={1}
-            className="w-full resize-none bg-transparent px-1 py-1 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            rows={2}
+            className="w-full resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
           />
 
           {/* Bottom toolbar */}
-          <div className="flex items-center justify-between pt-2 mt-2 border-t border-border/50">
+          <div className="flex items-center justify-between pt-2">
             {/* Folder indicator */}
-            <button
-              onClick={onSelectFolder}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50"
-            >
-              <Folder className="h-3.5 w-3.5" />
-              <span className="max-w-[150px] truncate">{folderName}</span>
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={onSelectFolder}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50"
+                >
+                  <Folder className="h-3.5 w-3.5" />
+                  <span className="max-w-[150px] truncate">{folderName}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Change folder</TooltipContent>
+            </Tooltip>
 
             {/* Send button */}
-            <Button
-              size="icon"
-              onClick={isProcessing ? onCancel : handleSubmit}
-              disabled={!canSubmit && !isProcessing}
-              className="h-8 w-8 rounded-full"
-            >
-              {isProcessing ? (
-                <Square className="h-3.5 w-3.5" fill="currentColor" />
-              ) : (
-                <ArrowUp className="h-4 w-4" />
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  onClick={isProcessing ? onCancel : handleSubmit}
+                  disabled={!canSubmit && !isProcessing}
+                  className="h-8 w-8 rounded-full"
+                >
+                  {isProcessing ? (
+                    <Square className="h-3.5 w-3.5" fill="currentColor" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isProcessing ? 'Stop' : 'Send message'}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>
