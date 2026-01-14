@@ -6,6 +6,7 @@ import type { MulticaSession } from '../../../shared/types'
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -13,26 +14,18 @@ import {
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Settings, Trash2 } from 'lucide-react'
+import { useModalStore } from '../stores/modalStore'
 
 interface AppSidebarProps {
   sessions: MulticaSession[]
   currentSessionId: string | null
   onSelect: (sessionId: string) => void
-  onDelete: (sessionId: string) => void
   onNewSession: () => void
 }
 
@@ -73,27 +66,21 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <Tooltip open={isHovered}>
+      <Tooltip delayDuration={600}>
         <TooltipTrigger asChild>
           <SidebarMenuButton
             isActive={isActive}
             onClick={onSelect}
             className={cn(
               "h-auto py-2 transition-colors duration-150",
-              // Hover weaker than active
-              "hover:bg-accent/50",
-              isActive && "bg-accent"
+              "hover:bg-sidebar-accent/50",
+              isActive && "bg-sidebar-accent"
             )}
           >
-            {/* Status indicator */}
-            <span
-              className={cn(
-                "h-2 w-2 flex-shrink-0 rounded-full transition-colors",
-                session.status === 'active' && "bg-green-500",
-                session.status === 'error' && "bg-red-500",
-                session.status !== 'active' && session.status !== 'error' && "bg-muted-foreground/40"
-              )}
-            />
+            {/* Error indicator - only show on error */}
+            {session.status === 'error' && (
+              <span className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500" />
+            )}
 
             {/* Content */}
             <div className="min-w-0 flex-1">
@@ -110,7 +97,7 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
               }}
               className={cn(
                 "flex-shrink-0 rounded p-1 transition-opacity duration-150",
-                "hover:bg-accent/12 active:bg-accent/16",
+                "hover:bg-muted active:bg-muted",
                 isHovered ? "opacity-50 hover:opacity-100" : "opacity-0"
               )}
             >
@@ -162,67 +149,49 @@ export function AppSidebar({
   sessions,
   currentSessionId,
   onSelect,
-  onDelete,
   onNewSession,
 }: AppSidebarProps) {
-  const [deleteSession, setDeleteSession] = useState<MulticaSession | null>(null)
-
-  const handleConfirmDelete = () => {
-    if (deleteSession) {
-      onDelete(deleteSession.id)
-      setDeleteSession(null)
-    }
-  }
+  const openModal = useModalStore((s) => s.openModal)
 
   return (
-    <>
-      <Sidebar>
-        {/* Header - just for traffic lights spacing */}
-        <SidebarHeader className="titlebar-drag-region h-11 pl-20" />
+    <Sidebar>
+      {/* Header - just for traffic lights spacing */}
+      <SidebarHeader className="titlebar-drag-region h-11 pl-20" />
 
-        <SidebarContent className="px-2">
-          {/* New task button */}
-          <Button
-            variant="ghost"
-            className="w-full justify-start gap-2"
-            onClick={onNewSession}
-          >
-            <Plus className="h-4 w-4 text-primary" />
-            New task
-          </Button>
+      <SidebarContent className="px-2">
+        {/* New task button */}
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2"
+          onClick={onNewSession}
+        >
+          <Plus className="h-4 w-4 text-primary" />
+          New task
+        </Button>
 
-          {/* Recent label */}
-          <p className="px-2 py-2 text-xs text-muted-foreground/60">Recent</p>
+        {/* Recent label */}
+        <p className="px-2 py-2 text-xs text-muted-foreground/60">Recent</p>
 
-          {/* Session list */}
-          <SessionList
-            sessions={sessions}
-            currentSessionId={currentSessionId}
-            onSelect={onSelect}
-            onDeleteRequest={setDeleteSession}
-          />
-        </SidebarContent>
-      </Sidebar>
+        {/* Session list */}
+        <SessionList
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          onSelect={onSelect}
+          onDeleteRequest={(session) => openModal('deleteSession', session)}
+        />
+      </SidebarContent>
 
-      {/* Delete confirmation dialog */}
-      <Dialog open={!!deleteSession} onOpenChange={(open) => !open && setDeleteSession(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete Task</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{deleteSession && getSessionTitle(deleteSession)}"? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteSession(null)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+      <SidebarFooter className="px-2 pb-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => openModal('settings')}
+          className="w-full justify-center gap-2"
+        >
+          <Settings className="h-4 w-4" />
+          Setting
+        </Button>
+      </SidebarFooter>
+    </Sidebar>
   )
 }

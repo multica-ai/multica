@@ -3,45 +3,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Dark theme (default) */
-:root,
-.dark {
-  --color-primary: #292929;
-  --color-primary-dark: #363636;
-  --color-primary-text: #ffffff;
-  --color-accent: #22c55e;
-  --color-accent-muted: rgba(34, 197, 94, 0.15);
-  --color-background: #0f0f0f;
-  --color-surface: #1a1a1a;
-  --color-surface-hover: #252525;
-  --color-border: #2e2e2e;
-  --color-text: #ffffff;
-  --color-text-muted: #a1a1aa;
-}
-
-/* Light theme */
-.light {
-  --color-primary: #f5f5f5;
-  --color-primary-dark: #e5e5e5;
-  --color-primary-text: #171717;
-  --color-accent: #16a34a;
-  --color-accent-muted: rgba(22, 163, 74, 0.1);
-  --color-background: #ffffff;
-  --color-surface: #f5f5f5;
-  --color-surface-hover: #e5e5e5;
-  --color-border: #e5e5e5;
-  --color-text: #171717;
-  --color-text-muted: #525252;
-}
-
 /* Base styles */
 * {
   box-sizing: border-box;
 }
 
 body {
-  background-color: var(--color-background);
-  color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   font-family:
     -apple-system,
@@ -73,12 +40,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: var(--color-border);
+  background-color: var(--border);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-text-muted);
+  background-color: var(--muted-foreground);
 }
 
 @theme inline {
@@ -155,6 +122,12 @@ body {
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
+
+  /* Tool call status colors */
+  --tool-pending: oklch(0.55 0.05 250);
+  --tool-running: oklch(0.6 0.18 250);
+  --tool-success: oklch(0.72 0.12 145);
+  --tool-error: oklch(0.65 0.2 25);
 }
 
 .dark {
@@ -189,6 +162,12 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.552 0.016 285.938);
+
+  /* Tool call status colors */
+  --tool-pending: oklch(0.5 0.08 250);
+  --tool-running: oklch(0.65 0.2 250);
+  --tool-success: oklch(0.65 0.15 145);
+  --tool-error: oklch(0.7 0.2 22);
 }
 
 @layer base {
@@ -197,5 +176,15 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Tool call status glow animation */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--tool-running);
+  }
+  50% {
+    box-shadow: 0 0 0 3px oklch(0.6 0.2 250 / 0);
   }
 }

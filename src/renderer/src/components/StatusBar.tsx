@@ -2,23 +2,19 @@
  * Status bar component - shows session info and running status
  */
 import type { MulticaSession } from '../../../shared/types'
-import { Button } from '@/components/ui/button'
 import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
-import { Settings } from 'lucide-react'
 
 interface StatusBarProps {
   runningSessionsCount: number
   currentSession: MulticaSession | null
   isCurrentSessionRunning: boolean
-  onOpenSettings: () => void
 }
 
 export function StatusBar({
   runningSessionsCount,
   currentSession,
   isCurrentSessionRunning,
-  onOpenSettings,
 }: StatusBarProps) {
   const { state, isMobile } = useSidebar()
 
@@ -38,25 +34,21 @@ export function StatusBar({
             <span className="text-sm font-medium">
               {currentSession.title || currentSession.workingDirectory.split('/').pop()}
             </span>
-            <span className="text-xs text-[var(--color-text-muted)]">
+            <span className="text-xs text-muted-foreground">
               {currentSession.workingDirectory}
             </span>
           </>
         ) : (
-          <span className="text-sm text-[var(--color-text-muted)]">No session selected</span>
+          <span className="text-sm text-muted-foreground">No session selected</span>
         )}
       </div>
 
-      {/* Right: Status + Settings */}
+      {/* Right: Status */}
       <div className="titlebar-no-drag flex items-center gap-3">
         <SessionStatusBadge
           isRunning={isCurrentSessionRunning}
           runningCount={runningSessionsCount}
         />
-
-        <Button variant="ghost" size="icon-sm" onClick={onOpenSettings} title="Settings">
-          <Settings className="h-4 w-4" />
-        </Button>
       </div>
     </div>
   )
@@ -78,7 +70,7 @@ function SessionStatusBadge({ isRunning, runningCount }: SessionStatusBadgeProps
   return (
     <div className="flex items-center gap-2">
       <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-      <span className="text-xs text-[var(--color-text-muted)]">{text}</span>
+      <span className="text-xs text-muted-foreground">{text}</span>
     </div>
   )
 }

@@ -1,21 +1,14 @@
 /**
  * Main App component
  */
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from './hooks/useApp'
-import { ChatView, MessageInput, StatusBar, Settings } from './components'
+import { ChatView, MessageInput, StatusBar } from './components'
 import { AppSidebar } from './components/AppSidebar'
+import { Modals } from './components/Modals'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { SidebarProvider } from '@/components/ui/sidebar'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { useModalStore } from './stores/modalStore'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -36,34 +29,25 @@ function AppContent(): React.JSX.Element {
     clearError,
   } = useApp()
 
-  // New session dialog state
-  const [showNewSession, setShowNewSession] = useState(false)
-  const [newSessionCwd, setNewSessionCwd] = useState('')
-  const [selectedAgentId, setSelectedAgentId] = useState('opencode')
+  const openModal = useModalStore((s) => s.openModal)
 
-  // Settings dialog state
-  const [showSettings, setShowSettings] = useState(false)
+  // Default agent for new sessions
+  const [defaultAgentId, setDefaultAgentId] = useState('opencode')
 
   // Auto-show new session dialog when no sessions exist
   useEffect(() => {
     if (!currentSession && sessions.length === 0) {
-      setNewSessionCwd('')
-      setShowNewSession(true)
+      openModal('newSession')
     }
-  }, [currentSession, sessions.length])
+  }, [currentSession, sessions.length, openModal])
 
   const handleNewSession = () => {
-    setNewSessionCwd('')
-    setShowNewSession(true)
+    openModal('newSession')
   }
 
-  const handleCreateSession = async () => {
-    if (!newSessionCwd.trim()) return
-
-    // Create session with selected agent (agent starts automatically)
-    await createSession(newSessionCwd.trim(), selectedAgentId)
-    setShowNewSession(false)
-    setNewSessionCwd('')
+  const handleCreateSession = async (cwd: string) => {
+    // Create session with default agent (agent starts automatically)
+    await createSession(cwd, defaultAgentId)
   }
 
   const handleSelectSession = async (sessionId: string) => {
@@ -77,7 +61,7 @@ function AppContent(): React.JSX.Element {
     : false
 
   return (
-    <div className="flex h-screen flex-col bg-[var(--color-background)] text-[var(--color-text)]">
+    <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Error banner */}
       {error && (
         <div className="flex items-center justify-between bg-red-600 px-4 py-2 text-sm text-white">
@@ -95,7 +79,6 @@ function AppContent(): React.JSX.Element {
           sessions={sessions}
           currentSessionId={currentSession?.id ?? null}
           onSelect={handleSelectSession}
-          onDelete={deleteSession}
           onNewSession={handleNewSession}
         />
 
@@ -106,7 +89,6 @@ function AppContent(): React.JSX.Element {
             runningSessionsCount={runningSessionsStatus.runningSessions}
             currentSession={currentSession}
             isCurrentSessionRunning={isCurrentSessionRunning}
-            onOpenSettings={() => setShowSettings(true)}
           />
 
           {/* Chat view */}
@@ -127,57 +109,12 @@ function AppContent(): React.JSX.Element {
         </main>
       </SidebarProvider>
 
-      {/* New session dialog */}
-      <Dialog open={showNewSession} onOpenChange={setShowNewSession}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>New Session</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">
-                Working Directory
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  value={newSessionCwd}
-                  onChange={(e) => setNewSessionCwd(e.target.value)}
-                  placeholder="Select a directory..."
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCreateSession()
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    const dir = await window.electronAPI.selectDirectory()
-                    if (dir) setNewSessionCwd(dir)
-                  }}
-                >
-                  Browse...
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowNewSession(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateSession} disabled={!newSessionCwd.trim()}>
-              Create
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Settings dialog */}
-      <Settings
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        defaultAgentId={selectedAgentId}
-        onSetDefaultAgent={setSelectedAgentId}
+      {/* Global modals */}
+      <Modals
+        defaultAgentId={defaultAgentId}
+        onSetDefaultAgent={setDefaultAgentId}
+        onCreateSession={handleCreateSession}
+        onDeleteSession={deleteSession}
       />
     </div>
   )

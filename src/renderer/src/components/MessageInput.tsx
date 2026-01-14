@@ -52,7 +52,7 @@ export function MessageInput({
   }
 
   return (
-    <div className="border-t border-[var(--color-border)] p-4">
+    <div className="border-t border-border p-4">
       <div className="mx-auto flex max-w-3xl gap-2">
         <textarea
           ref={textareaRef}
@@ -62,7 +62,7 @@ export function MessageInput({
           placeholder={disabled ? 'Select or create a session first' : placeholder}
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex-1 resize-none rounded-lg border border-border bg-muted px-4 py-2 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary disabled:cursor-not-allowed disabled:opacity-50"
         />
 
         {isProcessing ? (
@@ -77,7 +77,7 @@ export function MessageInput({
       </div>
 
       {/* Hint */}
-      <div className="mx-auto mt-1 max-w-3xl text-center text-xs text-[var(--color-text-muted)]">
+      <div className="mx-auto mt-1 max-w-3xl text-center text-xs text-muted-foreground">
         Press Enter to send, Shift+Enter for new line
       </div>
     </div>
