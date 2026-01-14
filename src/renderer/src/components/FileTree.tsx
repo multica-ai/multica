@@ -316,10 +316,14 @@ export function FileTree({ rootPath }: FileTreeProps) {
   }, [])
 
   const loadChildren = useCallback(async (path: string) => {
-    if (childrenCache.has(path)) return
+    // Fetch children first, then check cache in the setter to avoid stale closure
     const children = await window.electronAPI.listDirectory(path)
-    setChildrenCache((prev) => new Map(prev).set(path, children))
-  }, [childrenCache])
+    setChildrenCache((prev) => {
+      // Skip if already cached (handles race conditions)
+      if (prev.has(path)) return prev
+      return new Map(prev).set(path, children)
+    })
+  }, [])
 
   if (isLoading) {
     return (

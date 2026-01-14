@@ -11,10 +11,39 @@ import type { ListSessionsOptions, MulticaSession } from '../../shared/types'
 import type { FileTreeNode, DetectedApp } from '../../shared/electron-api'
 import * as fs from 'fs'
 import * as path from 'path'
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import { spawn } from 'child_process'
 
-const execAsync = promisify(exec)
+/**
+ * Promisified spawn that waits for the process to complete
+ */
+function spawnAsync(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, { stdio: 'ignore' })
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`Command failed with code ${code}`))
+      }
+    })
+    proc.on('error', reject)
+  })
+}
+
+/**
+ * Validates a file path for safety:
+ * - Must be absolute
+ * - Must be normalized (no .. traversal tricks)
+ */
+function isValidPath(inputPath: string): boolean {
+  // Must be absolute
+  if (!path.isAbsolute(inputPath)) {
+    return false
+  }
+  // Resolved path must equal input (catches .. in the middle)
+  const resolved = path.resolve(inputPath)
+  return resolved === inputPath
+}
 
 export function registerIPCHandlers(conductor: Conductor): void {
   // --- Agent handlers (per-session) ---
@@ -125,6 +154,12 @@ export function registerIPCHandlers(conductor: Conductor): void {
   // --- File tree handlers ---
 
   ipcMain.handle(IPC_CHANNELS.FS_LIST_DIRECTORY, async (_event, dirPath: string) => {
+    // Validate path to prevent traversal attacks
+    if (!isValidPath(dirPath)) {
+      console.warn(`[IPC] Invalid path rejected: ${dirPath}`)
+      return []
+    }
+
     try {
       const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
       const nodes: FileTreeNode[] = entries.map((entry) => {
@@ -191,33 +226,39 @@ export function registerIPCHandlers(conductor: Conductor): void {
     async (_event, options: { path: string; appId: string }) => {
       const { path: filePath, appId } = options
 
+      // Validate path to prevent traversal attacks
+      if (!isValidPath(filePath)) {
+        console.warn(`[IPC] Invalid path rejected: ${filePath}`)
+        throw new Error('Invalid path')
+      }
+
       try {
+        // Helper to get directory for terminal apps
+        const getDir = (p: string) => fs.statSync(p).isDirectory() ? p : path.dirname(p)
+
         switch (appId) {
           case 'finder':
-            // Reveal in Finder
+            // Reveal in Finder (uses Electron's safe API)
             shell.showItemInFolder(filePath)
             break
           case 'cursor':
-            await execAsync(`open -a "Cursor" "${filePath}"`)
+            await spawnAsync('open', ['-a', 'Cursor', filePath])
             break
           case 'vscode':
-            await execAsync(`open -a "Visual Studio Code" "${filePath}"`)
+            await spawnAsync('open', ['-a', 'Visual Studio Code', filePath])
             break
           case 'xcode':
-            await execAsync(`open -a "Xcode" "${filePath}"`)
+            await spawnAsync('open', ['-a', 'Xcode', filePath])
             break
           case 'ghostty':
             // For terminals, open the directory (not file)
-            const ghosttyDir = fs.statSync(filePath).isDirectory() ? filePath : path.dirname(filePath)
-            await execAsync(`open -a "Ghostty" "${ghosttyDir}"`)
+            await spawnAsync('open', ['-a', 'Ghostty', getDir(filePath)])
             break
           case 'iterm':
-            const itermDir = fs.statSync(filePath).isDirectory() ? filePath : path.dirname(filePath)
-            await execAsync(`open -a "iTerm" "${itermDir}"`)
+            await spawnAsync('open', ['-a', 'iTerm', getDir(filePath)])
             break
           case 'terminal':
-            const termDir = fs.statSync(filePath).isDirectory() ? filePath : path.dirname(filePath)
-            await execAsync(`open -a "Terminal" "${termDir}"`)
+            await spawnAsync('open', ['-a', 'Terminal', getDir(filePath)])
             break
           case 'copy-path':
             clipboard.writeText(filePath)
