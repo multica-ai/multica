@@ -8,8 +8,13 @@ import type { MulticaSession } from '../../../shared/types'
 export type ModalType = 'settings' | 'newSession' | 'deleteSession'
 
 // Modal data types
+export interface SettingsModalData {
+  highlightAgent?: string  // Agent ID to highlight (for missing dependency prompt)
+  pendingFolder?: string   // Folder path waiting to create session after agent install
+}
+
 interface ModalDataMap {
-  settings: undefined
+  settings: SettingsModalData | undefined
   newSession: undefined
   deleteSession: MulticaSession
 }

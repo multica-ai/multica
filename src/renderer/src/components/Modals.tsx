@@ -40,6 +40,7 @@ export function Modals({
       <SettingsModal
         defaultAgentId={defaultAgentId}
         onSetDefaultAgent={onSetDefaultAgent}
+        onCreateSession={onCreateSession}
         onClose={() => closeModal('settings')}
       />
       <NewSessionModal
@@ -58,18 +59,33 @@ export function Modals({
 interface SettingsModalProps {
   defaultAgentId: string
   onSetDefaultAgent: (agentId: string) => void
+  onCreateSession: (cwd: string) => Promise<void>
   onClose: () => void
 }
 
-function SettingsModal({ defaultAgentId, onSetDefaultAgent, onClose }: SettingsModalProps) {
-  const { isOpen } = useModal('settings')
+function SettingsModal({ defaultAgentId, onSetDefaultAgent, onCreateSession, onClose }: SettingsModalProps) {
+  const { isOpen, data } = useModal('settings')
+
+  const handleClose = async () => {
+    const pendingFolder = data?.pendingFolder
+    onClose()
+
+    // If there's a pending folder, check if agent is now installed and create session
+    if (pendingFolder) {
+      const agentCheck = await window.electronAPI.checkAgent(defaultAgentId)
+      if (agentCheck?.installed) {
+        await onCreateSession(pendingFolder)
+      }
+    }
+  }
 
   return (
     <Settings
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       defaultAgentId={defaultAgentId}
       onSetDefaultAgent={onSetDefaultAgent}
+      highlightAgent={data?.highlightAgent}
     />
   )
 }

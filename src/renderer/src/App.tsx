@@ -10,6 +10,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { useUIStore } from './stores/uiStore'
 import { usePermissionStore } from './stores/permissionStore'
+import { useModalStore } from './stores/modalStore'
 import {
   RightPanel,
   RightPanelHeader,
@@ -49,6 +50,9 @@ function AppContent(): React.JSX.Element {
   const pendingPermission = usePermissionStore((s) => s.pendingRequest)
   const permissionPendingSessionId = pendingPermission?.multicaSessionId ?? null
 
+  // Modal actions
+  const openModal = useModalStore((s) => s.openModal)
+
   // Default agent for new sessions (persisted in localStorage)
   const [defaultAgentId, setDefaultAgentId] = useState(() => {
     // Load from localStorage on initial render
@@ -74,6 +78,13 @@ function AppContent(): React.JSX.Element {
   const handleSelectFolder = async () => {
     const dir = await window.electronAPI.selectDirectory()
     if (dir) {
+      // Check if the default agent is installed before creating session
+      const agentCheck = await window.electronAPI.checkAgent(defaultAgentId)
+      if (!agentCheck?.installed) {
+        // Agent not installed - open Settings with highlight and pending folder
+        openModal('settings', { highlightAgent: defaultAgentId, pendingFolder: dir })
+        return
+      }
       await createSession(dir, defaultAgentId)
     }
   }

@@ -19,6 +19,7 @@ interface SettingsProps {
   onClose: () => void
   defaultAgentId: string
   onSetDefaultAgent: (agentId: string) => void
+  highlightAgent?: string  // Agent to highlight (when opened due to missing dependency)
 }
 
 type ThemeMode = 'light' | 'dark' | 'system'
@@ -41,7 +42,8 @@ export function Settings({
   isOpen,
   onClose,
   defaultAgentId,
-  onSetDefaultAgent
+  onSetDefaultAgent,
+  highlightAgent
 }: SettingsProps): React.ReactElement {
   const [agentResults, setAgentResults] = useState<Map<string, AgentCheckResult>>(new Map())
   const [checkingAgents, setCheckingAgents] = useState<Set<string>>(new Set())
@@ -189,6 +191,13 @@ export function Settings({
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-muted-foreground">AI Agent</h2>
 
+          {/* Missing dependency prompt */}
+          {highlightAgent && (
+            <div className="rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+              To start a conversation, please install at least one AI agent below.
+            </div>
+          )}
+
           <div className="space-y-1">
             {AGENT_LIST.map(({ id, name }) => {
               const agent = agentResults.get(id)
@@ -204,6 +213,7 @@ export function Settings({
                   onSelect={handleSelectAgent}
                   installStatus={installStatus}
                   onInstall={handleInstall}
+                  isHighlighted={id === highlightAgent}
                 />
               )
             })}
@@ -223,6 +233,7 @@ interface AgentItemProps {
   onSelect: (agentId: string) => void
   installStatus: InstallStatus
   onInstall: (agentId: string) => void
+  isHighlighted?: boolean  // When true, auto-expand and highlight this agent
 }
 
 function AgentItem({
@@ -233,9 +244,17 @@ function AgentItem({
   isSelected,
   onSelect,
   installStatus,
-  onInstall
+  onInstall,
+  isHighlighted
 }: AgentItemProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
+
+  // Auto-expand when highlighted
+  useEffect(() => {
+    if (isHighlighted) {
+      setExpanded(true)
+    }
+  }, [isHighlighted])
 
   const isInstalling = installStatus.agentId === agentId && installStatus.state === 'installing'
   const hasInstallError = installStatus.agentId === agentId && installStatus.state === 'error'
