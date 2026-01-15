@@ -125,6 +125,7 @@ export interface ElectronAPI {
   onAgentStatus(callback: (status: RunningSessionsStatus) => void): () => void
   onAgentError(callback: (error: Error) => void): () => void
   onPermissionRequest(callback: (request: PermissionRequest) => void): () => void
+  onSessionMetaUpdated(callback: (session: MulticaSession) => void): () => void
 
   // Permission response
   respondToPermission(response: PermissionResponse): void

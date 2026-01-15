@@ -96,6 +96,14 @@ app.whenReady().then(async () => {
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_STATUS, status)
         }
       },
+      onSessionMetaUpdated: (session) => {
+        // Notify renderer when session metadata changes (e.g., agentSessionId after lazy start)
+        // This is critical for the renderer to receive messages after app restart
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log(`[Main->Renderer] Session meta updated: ${session.id}, agentSessionId: ${session.agentSessionId}`)
+          mainWindow.webContents.send(IPC_CHANNELS.SESSION_META_UPDATED, session)
+        }
+      },
       onPermissionRequest: async (params) => {
         // Generate unique request ID
         const { randomUUID } = await import('crypto')
