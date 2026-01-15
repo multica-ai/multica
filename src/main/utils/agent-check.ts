@@ -3,25 +3,11 @@
  */
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
-import { platform, homedir } from 'node:os'
+import { platform } from 'node:os'
 import { DEFAULT_AGENTS } from '../config/defaults'
+import { getEnhancedPath } from './path'
 
 const execAsync = promisify(exec)
-
-/**
- * Get enhanced PATH that includes common custom installation directories
- */
-function getEnhancedPath(): string {
-  const home = homedir()
-  const customPaths = [
-    `${home}/.opencode/bin`,
-    `${home}/.claude/local/bin`,
-    `${home}/.local/bin`,
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-  ]
-  return `${customPaths.join(':')}:${process.env.PATH || ''}`
-}
 
 export interface CommandInfo {
   command: string

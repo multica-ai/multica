@@ -4,6 +4,7 @@
 import { spawn, ChildProcess } from 'node:child_process'
 import { Writable, Readable } from 'node:stream'
 import type { AgentConfig } from '../../shared/types'
+import { getEnhancedPath } from '../utils/path'
 
 export class AgentProcess {
   private process: ChildProcess | null = null
@@ -29,7 +30,7 @@ export class AgentProcess {
     const t1 = Date.now()
     this.process = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'inherit'], // stdin, stdout piped; stderr inherited
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, PATH: getEnhancedPath() },
     })
     console.log(`[AgentProcess] [TIMING] spawn() took ${Date.now() - t1}ms`)
 
