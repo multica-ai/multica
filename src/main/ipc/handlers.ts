@@ -113,7 +113,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
         if (!config) {
           throw new Error(`Unknown agent: ${agentId}`)
         }
-        return conductor.createSession(workingDirectory, config)
+        return await conductor.createSession(workingDirectory, config)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
       }
@@ -152,7 +152,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
     IPC_CHANNELS.SESSION_SWITCH_AGENT,
     async (_event, sessionId: string, newAgentId: string) => {
       try {
-        return conductor.switchSessionAgent(sessionId, newAgentId)
+        return await conductor.switchSessionAgent(sessionId, newAgentId)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
       }
@@ -212,7 +212,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
       if (!window) {
         throw new Error('No focused window')
       }
-      return installAgent({ window, agentId })
+      return await installAgent({ window, agentId })
     } catch (err) {
       throw new Error(extractErrorMessage(err))
     }
