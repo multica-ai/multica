@@ -47,20 +47,49 @@ function isValidPath(inputPath: string): boolean {
   return resolved === inputPath
 }
 
+/**
+ * Extract error message from various error types
+ * Handles ACP SDK errors which are plain objects with message property
+ */
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message
+  }
+  if (err && typeof err === 'object') {
+    if ('message' in err && typeof (err as Record<string, unknown>).message === 'string') {
+      return (err as Record<string, unknown>).message as string
+    }
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return 'Unknown error'
+    }
+  }
+  return String(err)
+}
+
 export function registerIPCHandlers(conductor: Conductor): void {
   // --- Agent handlers (per-session) ---
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_PROMPT,
     async (_event, sessionId: string, content: MessageContent) => {
-      const stopReason = await conductor.sendPrompt(sessionId, content)
-      return { stopReason }
+      try {
+        const stopReason = await conductor.sendPrompt(sessionId, content)
+        return { stopReason }
+      } catch (err) {
+        throw new Error(extractErrorMessage(err))
+      }
     }
   )
 
   ipcMain.handle(IPC_CHANNELS.AGENT_CANCEL, async (_event, sessionId: string) => {
-    await conductor.cancelRequest(sessionId)
-    return { success: true }
+    try {
+      await conductor.cancelRequest(sessionId)
+      return { success: true }
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
   })
 
   ipcMain.handle(IPC_CHANNELS.AGENT_STATUS, async () => {
@@ -79,11 +108,15 @@ export function registerIPCHandlers(conductor: Conductor): void {
   ipcMain.handle(
     IPC_CHANNELS.SESSION_CREATE,
     async (_event, workingDirectory: string, agentId: string) => {
-      const config = DEFAULT_AGENTS[agentId]
-      if (!config) {
-        throw new Error(`Unknown agent: ${agentId}`)
+      try {
+        const config = DEFAULT_AGENTS[agentId]
+        if (!config) {
+          throw new Error(`Unknown agent: ${agentId}`)
+        }
+        return conductor.createSession(workingDirectory, config)
+      } catch (err) {
+        throw new Error(extractErrorMessage(err))
       }
-      return conductor.createSession(workingDirectory, config)
     }
   )
 
@@ -118,7 +151,11 @@ export function registerIPCHandlers(conductor: Conductor): void {
   ipcMain.handle(
     IPC_CHANNELS.SESSION_SWITCH_AGENT,
     async (_event, sessionId: string, newAgentId: string) => {
-      return conductor.switchSessionAgent(sessionId, newAgentId)
+      try {
+        return conductor.switchSessionAgent(sessionId, newAgentId)
+      } catch (err) {
+        throw new Error(extractErrorMessage(err))
+      }
     }
   )
 
@@ -170,12 +207,15 @@ export function registerIPCHandlers(conductor: Conductor): void {
   // --- Agent installation handler ---
 
   ipcMain.handle(IPC_CHANNELS.AGENT_INSTALL, async (_event, agentId: string) => {
-    const window = BrowserWindow.getFocusedWindow()
-    if (!window) {
-      throw new Error('No focused window')
+    try {
+      const window = BrowserWindow.getFocusedWindow()
+      if (!window) {
+        throw new Error('No focused window')
+      }
+      return installAgent({ window, agentId })
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
     }
-
-    return installAgent({ window, agentId })
   })
 
   // --- File tree handlers ---
