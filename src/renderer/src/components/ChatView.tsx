@@ -153,6 +153,17 @@ interface Message {
 }
 
 function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
+  // Sort updates by sequence number to ensure correct ordering despite async delivery
+  // Updates without sequence numbers (e.g., user messages, legacy data) keep their relative position
+  const sortedUpdates = [...updates].sort((a, b) => {
+    // If both have sequence numbers, sort by sequence
+    if (a.sequenceNumber !== undefined && b.sequenceNumber !== undefined) {
+      return a.sequenceNumber - b.sequenceNumber
+    }
+    // If only one has sequence number, keep relative order (stable sort)
+    return 0
+  })
+
   const messages: Message[] = []
   let currentBlocks: ContentBlock[] = []
   // Track tool calls by ID to update them in place
@@ -191,7 +202,7 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
     }
   }
 
-  for (const stored of updates) {
+  for (const stored of sortedUpdates) {
     const notification = stored.update
     const update = notification?.update
     if (!update || !('sessionUpdate' in update)) {

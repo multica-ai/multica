@@ -12,7 +12,7 @@ import type {
 import type { SessionStore } from '../session/SessionStore'
 
 export interface AcpClientCallbacks {
-  onSessionUpdate?: (update: SessionNotification) => void
+  onSessionUpdate?: (update: SessionNotification, sequenceNumber?: number) => void
   onPermissionRequest?: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>
 }
 
@@ -60,18 +60,20 @@ export function createAcpClient(sessionId: string, options: AcpClientFactoryOpti
         console.log(`[ACP] raw update:`, params)
       }
 
-      // Store raw update to SessionStore (if available)
+      // Store raw update to SessionStore (if available) and get sequence number
+      let sequenceNumber: number | undefined
       if (sessionStore) {
         try {
-          await sessionStore.appendUpdate(sessionId, params)
+          const storedUpdate = await sessionStore.appendUpdate(sessionId, params)
+          sequenceNumber = storedUpdate.sequenceNumber
         } catch (err) {
           console.error('[Conductor] Failed to store session update:', err)
         }
       }
 
-      // Trigger UI callback
+      // Trigger UI callback with sequence number for ordering
       if (callbacks.onSessionUpdate) {
-        callbacks.onSessionUpdate(params)
+        callbacks.onSessionUpdate(params, sequenceNumber)
       }
     },
 

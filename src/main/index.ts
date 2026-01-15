@@ -64,11 +64,12 @@ app.whenReady().then(async () => {
   // Initialize conductor with event handlers
   conductor = new Conductor({
     events: {
-      onSessionUpdate: (params) => {
-        // Forward ALL session updates to renderer
+      onSessionUpdate: (params, sequenceNumber) => {
+        // Forward ALL session updates to renderer with sequence number for ordering
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE, {
             sessionId: params.sessionId,
+            sequenceNumber,
             update: params.update,
             done: false
           })

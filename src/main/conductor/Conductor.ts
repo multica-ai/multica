@@ -29,7 +29,7 @@ import type { MessageContent, MessageContentItem } from '../../shared/types/mess
 import { formatHistoryForReplay, hasReplayableHistory } from './historyReplay'
 
 export interface SessionUpdateCallback {
-  (update: SessionNotification): void
+  (update: SessionNotification, sequenceNumber?: number): void
 }
 
 export interface ConductorEvents {

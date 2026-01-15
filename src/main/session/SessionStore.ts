@@ -48,8 +48,11 @@ export class SessionStore {
   private sessionsIndex: Map<string, MulticaSession> = new Map()
   private loadedSessions: Map<string, SessionData> = new Map()
 
-  // Write locks to prevent concurrent writes
-  private writeLocks: Map<string, Promise<void>> = new Map()
+  // Write queues to serialize concurrent writes (proper async mutex pattern)
+  private writeQueues: Map<string, Promise<void>> = new Map()
+
+  // Sequence counters per session for ordering updates (handles concurrent async updates)
+  private sequenceCounters: Map<string, number> = new Map()
 
   constructor(basePath?: string) {
     this.basePath = basePath ?? getDefaultStoragePath()
@@ -157,6 +160,8 @@ export class SessionStore {
       const content = await readFile(dataPath, 'utf-8')
       const sessionData = JSON.parse(content) as SessionData
       this.loadedSessions.set(sessionId, sessionData)
+      // Initialize sequence counter from loaded data
+      this.initSequenceCounter(sessionId, sessionData.updates)
       return sessionData
     } catch {
       console.error(`[SessionStore] Failed to load session: ${sessionId}`)
@@ -167,16 +172,22 @@ export class SessionStore {
   /**
    * Append a session update
    */
-  async appendUpdate(sessionId: string, update: SessionNotification): Promise<void> {
+  async appendUpdate(sessionId: string, update: SessionNotification): Promise<StoredSessionUpdate> {
     // Ensure session is loaded
     const sessionData = await this.get(sessionId)
     if (!sessionData) {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    // Append update
+    // Get next sequence number for this session (monotonically increasing)
+    const currentSeq = this.sequenceCounters.get(sessionId) ?? 0
+    const nextSeq = currentSeq + 1
+    this.sequenceCounters.set(sessionId, nextSeq)
+
+    // Append update with sequence number
     const storedUpdate: StoredSessionUpdate = {
       timestamp: new Date().toISOString(),
+      sequenceNumber: nextSeq,
       update
     }
     sessionData.updates.push(storedUpdate)
@@ -191,6 +202,22 @@ export class SessionStore {
     // Persist (debounce in production, immediate for now)
     await this.saveSessionData(sessionId)
     await this.saveIndex()
+
+    return storedUpdate
+  }
+
+  /**
+   * Initialize sequence counter when loading session from disk
+   */
+  private initSequenceCounter(sessionId: string, updates: StoredSessionUpdate[]): void {
+    // Find the highest sequence number in existing updates
+    let maxSeq = 0
+    for (const update of updates) {
+      if (update.sequenceNumber && update.sequenceNumber > maxSeq) {
+        maxSeq = update.sequenceNumber
+      }
+    }
+    this.sequenceCounters.set(sessionId, maxSeq)
   }
 
   /**
@@ -301,22 +328,21 @@ export class SessionStore {
   }
 
   /**
-   * Atomic write with lock to prevent concurrent writes and corruption
+   * Atomic write with proper serialization to prevent concurrent writes and corruption.
+   *
+   * Uses a chained promise pattern to ensure writes to the same file are serialized.
+   * Each write waits for the previous write to complete before starting.
    */
   private async atomicWrite(
     lockKey: string,
     filePath: string,
     getData: () => Promise<string>
   ): Promise<void> {
-    // Wait for any pending write to complete
-    const pendingWrite = this.writeLocks.get(lockKey)
-    if (pendingWrite) {
-      await pendingWrite
-    }
-
-    // Create new write promise
-    const writePromise = (async () => {
-      const tempPath = `${filePath}.tmp.${Date.now()}`
+    // Create the actual write operation
+    const doWrite = async (): Promise<void> => {
+      // Use unique temp file name: timestamp + random suffix to avoid collisions
+      // even when multiple writes happen within the same millisecond
+      const tempPath = `${filePath}.tmp.${Date.now()}.${randomUUID().slice(0, 8)}`
       try {
         const data = await getData()
         await writeFile(tempPath, data)
@@ -332,18 +358,25 @@ export class SessionStore {
         }
         throw err
       }
-    })()
-
-    this.writeLocks.set(lockKey, writePromise)
-
-    try {
-      await writePromise
-    } finally {
-      // Only delete if this is still our promise
-      if (this.writeLocks.get(lockKey) === writePromise) {
-        this.writeLocks.delete(lockKey)
-      }
     }
+
+    // Get the current write queue for this key (or resolved promise if none)
+    const previousWrite = this.writeQueues.get(lockKey) ?? Promise.resolve()
+
+    // Chain this write after the previous one.
+    // Catch previous errors so they don't block the chain - each write should
+    // be independent and a failure in one shouldn't prevent subsequent writes.
+    const thisWrite = previousWrite.catch(() => {}).then(doWrite)
+
+    // Immediately update the queue (synchronous) before any await.
+    // Store a non-rejecting version for chaining purposes.
+    this.writeQueues.set(
+      lockKey,
+      thisWrite.catch(() => {})
+    )
+
+    // Return the actual promise which can reject if this write fails
+    return thisWrite
   }
 
   private countMessages(updates: StoredSessionUpdate[]): number {

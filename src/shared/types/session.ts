@@ -55,6 +55,7 @@ export interface AskUserQuestionResponseUpdate {
  */
 export interface StoredSessionUpdate {
   timestamp: string // Receive time
+  sequenceNumber?: number // Monotonically increasing sequence number for ordering (added for concurrent update handling)
   update: SessionNotification | { update: AskUserQuestionResponseUpdate } // Raw ACP data or custom update
 }
 
