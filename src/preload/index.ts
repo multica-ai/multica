@@ -46,6 +46,7 @@ const electronAPI: ElectronAPI = {
 
   // System
   checkAgents: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_AGENTS),
+  checkAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_AGENT, agentId),
 
   // Agent installation
   installAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_INSTALL, agentId),

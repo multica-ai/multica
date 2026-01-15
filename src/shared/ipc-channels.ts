@@ -29,6 +29,7 @@ export const IPC_CHANNELS = {
 
   // System
   SYSTEM_CHECK_AGENTS: 'system:check-agents',
+  SYSTEM_CHECK_AGENT: 'system:check-agent',
 
   // Agent installation
   AGENT_INSTALL: 'agent:install',

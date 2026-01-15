@@ -29,7 +29,6 @@ export interface AgentMessage {
 export interface CommandInfo {
   command: string
   path?: string
-  version?: string
 }
 
 export interface AgentCheckResult {
@@ -38,7 +37,6 @@ export interface AgentCheckResult {
   command: string
   installed: boolean
   path?: string
-  version?: string
   installHint?: string
   commands?: CommandInfo[]
 }
@@ -139,6 +137,7 @@ export interface ElectronAPI {
 
   // System
   checkAgents(): Promise<AgentCheckResult[]>
+  checkAgent(agentId: string): Promise<AgentCheckResult | null>
 
   // Agent installation
   installAgent(agentId: string): Promise<InstallResult>
