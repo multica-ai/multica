@@ -12,12 +12,12 @@ import { StandardPermissionUI } from './StandardPermissionUI'
 import type { PermissionRequestItemProps, AskUserQuestionInput } from './types'
 
 export function PermissionRequestItem({ request }: PermissionRequestItemProps) {
-  const pendingRequest = usePermissionStore((s) => s.pendingRequest)
+  const currentRequest = usePermissionStore((s) => s.pendingRequests[0] ?? null)
   const currentQuestionIndex = usePermissionStore((s) => s.currentQuestionIndex)
   const getRespondedRequest = usePermissionStore((s) => s.getRespondedRequest)
 
   const { toolCall } = request
-  const isPending = pendingRequest?.requestId === request.requestId
+  const isPending = currentRequest?.requestId === request.requestId
 
   // Get responded data for completed requests
   const respondedData = getRespondedRequest(request.requestId)

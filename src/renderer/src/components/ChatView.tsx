@@ -23,7 +23,7 @@ interface ChatViewProps {
 
 export function ChatView({ updates, isProcessing, hasSession, isInitializing, currentSessionId, onSelectFolder }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
-  const pendingPermission = usePermissionStore((s) => s.pendingRequest)
+  const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
 
   // Only show permission request if it belongs to the current session
   const currentPermission = pendingPermission?.multicaSessionId === currentSessionId

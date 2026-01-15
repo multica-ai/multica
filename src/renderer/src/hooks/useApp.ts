@@ -158,10 +158,10 @@ export function useApp(): AppState & AppActions {
     })
 
     // Subscribe to permission requests
-    const setPendingRequest = usePermissionStore.getState().setPendingRequest
+    const addPendingRequest = usePermissionStore.getState().addPendingRequest
     const unsubPermission = window.electronAPI.onPermissionRequest((request) => {
       console.log('[useApp] Permission request received:', request)
-      setPendingRequest(request)
+      addPendingRequest(request)
     })
 
     return () => {

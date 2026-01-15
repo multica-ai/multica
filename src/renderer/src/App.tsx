@@ -45,7 +45,7 @@ function AppContent(): React.JSX.Element {
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen)
 
   // Permission state - get the session ID that has a pending permission request
-  const pendingPermission = usePermissionStore((s) => s.pendingRequest)
+  const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
   const permissionPendingSessionId = pendingPermission?.multicaSessionId ?? null
 
   // Modal actions

@@ -44,8 +44,8 @@ export interface RespondedRequest {
 }
 
 interface PermissionStore {
-  // Current pending permission request
-  pendingRequest: PermissionRequest | null
+  // Pending permission requests queue (supports concurrent requests)
+  pendingRequests: PermissionRequest[]
 
   // Responded requests (requestId -> responded info)
   respondedRequests: Map<string, RespondedRequest>
@@ -60,8 +60,11 @@ interface PermissionStore {
   // Collected answers for multi-question AskUserQuestion
   collectedAnswers: QuestionAnswer[]
 
-  // Set pending request
-  setPendingRequest: (request: PermissionRequest | null) => void
+  // Get current request (first in queue)
+  getCurrentRequest: () => PermissionRequest | null
+
+  // Add pending request to queue
+  addPendingRequest: (request: PermissionRequest) => void
 
   // Respond to permission request (with optional data for AskUserQuestion)
   respondToRequest: (optionId: string, data?: PermissionResponseData) => void
@@ -80,25 +83,36 @@ interface PermissionStore {
 }
 
 export const usePermissionStore = create<PermissionStore>((set, get) => ({
-  pendingRequest: null,
+  pendingRequests: [],
   respondedRequests: new Map(),
   lastRespondedRequest: null,
   currentQuestionIndex: 0,
   collectedAnswers: [],
 
-  setPendingRequest: (request) => {
-    // Clear last responded and reset multi-question state when a new request comes in
-    set({
-      pendingRequest: request,
-      lastRespondedRequest: null,
-      currentQuestionIndex: 0,
-      collectedAnswers: [],
+  getCurrentRequest: () => {
+    return get().pendingRequests[0] || null
+  },
+
+  addPendingRequest: (request) => {
+    set((state) => {
+      const isQueueEmpty = state.pendingRequests.length === 0
+      return {
+        pendingRequests: [...state.pendingRequests, request],
+        // Only reset multi-question state when queue was empty
+        ...(isQueueEmpty ? {
+          lastRespondedRequest: null,
+          currentQuestionIndex: 0,
+          collectedAnswers: [],
+        } : {}),
+      }
     })
   },
 
   respondToRequest: (optionId, data) => {
-    const { pendingRequest, respondedRequests } = get()
-    if (!pendingRequest) {
+    const { pendingRequests, respondedRequests } = get()
+    const currentRequest = pendingRequests[0]
+
+    if (!currentRequest) {
       console.warn('[PermissionStore] No pending request to respond to')
       return
     }
@@ -110,11 +124,12 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
       selectedOptionsLength: data?.selectedOptions?.length,
       hasAnswers: !!data?.answers,
       answersLength: data?.answers?.length,
+      queueLength: pendingRequests.length,
     })
 
     // Create responded request object
     const respondedRequest: RespondedRequest = {
-      request: pendingRequest,
+      request: currentRequest,
       response: {
         optionId,
         selectedOption: data?.selectedOption,
@@ -127,10 +142,10 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
 
     // Store the responded request for later reference
     const newResponded = new Map(respondedRequests)
-    newResponded.set(pendingRequest.requestId, respondedRequest)
+    newResponded.set(currentRequest.requestId, respondedRequest)
 
     const response: PermissionResponse = {
-      requestId: pendingRequest.requestId,
+      requestId: currentRequest.requestId,
       optionId,
       data,
     }
@@ -138,10 +153,10 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
     // Send response to main process
     window.electronAPI.respondToPermission(response)
 
-    // Clear pending request, store responded, and set as last responded
-    // Also reset multi-question state
+    // Remove current request from queue (shift), store responded
+    // Reset multi-question state for the next request
     set({
-      pendingRequest: null,
+      pendingRequests: pendingRequests.slice(1),
       respondedRequests: newResponded,
       lastRespondedRequest: respondedRequest,
       currentQuestionIndex: 0,
@@ -150,14 +165,16 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
   },
 
   answerCurrentQuestion: (answer, isCustom = false) => {
-    const { pendingRequest, currentQuestionIndex, collectedAnswers } = get()
-    if (!pendingRequest) {
+    const { pendingRequests, currentQuestionIndex, collectedAnswers } = get()
+    const currentRequest = pendingRequests[0]
+
+    if (!currentRequest) {
       console.warn('[PermissionStore] No pending request for answerCurrentQuestion')
       return
     }
 
     // Get questions from rawInput
-    const rawInput = pendingRequest.toolCall.rawInput as AskUserQuestionInput | undefined
+    const rawInput = currentRequest.toolCall.rawInput as AskUserQuestionInput | undefined
     const questions = rawInput?.questions || []
     const currentQuestion = questions[currentQuestionIndex]
 
@@ -190,9 +207,9 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
       console.log(`[PermissionStore] All ${questions.length} questions answered, sending response`)
 
       // Find allow option
-      const allowOption = pendingRequest.options.find((o) => o.kind === 'allow_once') ||
-                          pendingRequest.options.find((o) => o.kind === 'allow') ||
-                          pendingRequest.options[0]
+      const allowOption = currentRequest.options.find((o) => o.kind === 'allow_once') ||
+                          currentRequest.options.find((o) => o.kind === 'allow') ||
+                          currentRequest.options[0]
 
       // Build response data with all answers
       const responseData: PermissionResponseData = {
