@@ -2,7 +2,7 @@
  * Message input component with image upload support
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowUp, Square, Paperclip, X, Folder } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { AgentSelector } from './AgentSelector'
@@ -15,7 +15,6 @@ interface MessageInputProps {
   disabled: boolean
   placeholder?: string
   workingDirectory?: string | null
-  onSelectFolder: () => Promise<void>
   currentAgentId?: string
   onAgentChange?: (agentId: string) => void
   isSwitchingAgent?: boolean
@@ -31,7 +30,6 @@ export function MessageInput({
   disabled,
   placeholder = 'Type a message...',
   workingDirectory,
-  onSelectFolder,
   currentAgentId,
   onAgentChange,
   isSwitchingAgent = false,
@@ -41,11 +39,6 @@ export function MessageInput({
   const [images, setImages] = useState<ImageContentItem[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Get folder name from path
-  const folderName = workingDirectory
-    ? workingDirectory.split('/').filter(Boolean).pop() || workingDirectory
-    : null
 
   // Auto-resize textarea
   useEffect(() => {
@@ -246,20 +239,6 @@ export function MessageInput({
                   isSwitching={isSwitchingAgent}
                 />
               )}
-
-              {/* Folder indicator */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={onSelectFolder}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50"
-                  >
-                    <Folder className="h-3.5 w-3.5" />
-                    <span className="max-w-[150px] truncate">{folderName}</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">Change folder</TooltipContent>
-              </Tooltip>
 
               {/* Image upload button */}
               <Tooltip>

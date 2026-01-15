@@ -141,7 +141,6 @@ function AppContent(): React.JSX.Element {
             isProcessing={isProcessing}
             disabled={!currentSession}
             workingDirectory={currentSession?.workingDirectory}
-            onSelectFolder={handleSelectFolder}
             currentAgentId={currentSession?.agentId}
             onAgentChange={switchSessionAgent}
             isSwitchingAgent={isSwitchingAgent}
