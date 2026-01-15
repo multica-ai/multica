@@ -323,7 +323,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
 
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] px-4 py-3 text-[15px]">
+        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] dark:bg-muted px-4 py-3 text-[15px]">
           {/* Render images first */}
           {imageBlocks.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
