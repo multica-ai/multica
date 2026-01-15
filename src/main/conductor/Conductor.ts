@@ -509,6 +509,59 @@ export class Conductor {
   }
 
   /**
+   * Switch a session's agent (stops current, updates, starts new)
+   */
+  async switchSessionAgent(sessionId: string, newAgentId: string): Promise<MulticaSession> {
+    if (!this.sessionStore) {
+      throw new Error('Session agent switch not available in CLI mode')
+    }
+
+    const data = await this.sessionStore.get(sessionId)
+    if (!data) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    // Get new agent config
+    const newAgentConfig = DEFAULT_AGENTS[newAgentId]
+    if (!newAgentConfig) {
+      throw new Error(`Unknown agent: ${newAgentId}`)
+    }
+
+    console.log(`[Conductor] Switching session ${sessionId} from ${data.session.agentId} to ${newAgentId}`)
+
+    // Stop current agent if running
+    await this.stopSession(sessionId)
+
+    // Update session's agentId
+    let updatedSession = await this.sessionStore.updateMeta(sessionId, {
+      agentId: newAgentId,
+    })
+
+    // Start new agent (isResumed = true to replay history)
+    const { agentSessionId } = await this.startAgentForSession(
+      sessionId,
+      newAgentConfig,
+      data.session.workingDirectory,
+      true
+    )
+
+    // Update agentSessionId
+    updatedSession = await this.sessionStore.updateMeta(sessionId, {
+      agentSessionId,
+      status: 'active',
+    })
+
+    // Notify frontend
+    if (this.events.onSessionMetaUpdated) {
+      this.events.onSessionMetaUpdated(updatedSession)
+    }
+
+    console.log(`[Conductor] Session ${sessionId} switched to ${newAgentId} (agent session: ${agentSessionId})`)
+
+    return updatedSession
+  }
+
+  /**
    * Get agent config for a session
    */
   getSessionAgent(sessionId: string): AgentConfig | null {

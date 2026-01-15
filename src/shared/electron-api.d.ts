@@ -105,6 +105,7 @@ export interface ElectronAPI {
   resumeSession(sessionId: string): Promise<MulticaSession>
   deleteSession(sessionId: string): Promise<{ success: boolean }>
   updateSession(sessionId: string, updates: Partial<MulticaSession>): Promise<MulticaSession>
+  switchSessionAgent(sessionId: string, newAgentId: string): Promise<MulticaSession>
 
   // Configuration
   getConfig(): Promise<AppConfig>

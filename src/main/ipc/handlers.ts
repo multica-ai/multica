@@ -111,6 +111,13 @@ export function registerIPCHandlers(conductor: Conductor): void {
     }
   )
 
+  ipcMain.handle(
+    IPC_CHANNELS.SESSION_SWITCH_AGENT,
+    async (_event, sessionId: string, newAgentId: string) => {
+      return conductor.switchSessionAgent(sessionId, newAgentId)
+    }
+  )
+
   // --- Configuration handlers ---
 
   ipcMain.handle(IPC_CHANNELS.CONFIG_GET, async () => {

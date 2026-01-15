@@ -33,6 +33,9 @@ const electronAPI: ElectronAPI = {
   updateSession: (sessionId: string, updates: Partial<MulticaSession>) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_UPDATE, sessionId, updates),
 
+  switchSessionAgent: (sessionId: string, newAgentId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_SWITCH_AGENT, sessionId, newAgentId),
+
   // Configuration
   getConfig: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET),
 
