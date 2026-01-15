@@ -15,14 +15,14 @@ export const DEFAULT_AGENTS: Record<string, AgentConfig> = {
   },
   opencode: {
     id: 'opencode',
-    name: 'opencode',
+    name: 'OpenCode',
     command: 'opencode',
     args: ['acp'],
     enabled: true
   },
   codex: {
     id: 'codex',
-    name: 'Codex CLI (ACP)',
+    name: 'Codex',
     command: 'codex-acp',
     args: [],
     enabled: true
