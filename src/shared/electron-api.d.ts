@@ -139,6 +139,7 @@ export interface ElectronAPI {
 
   // System
   checkAgents(): Promise<AgentCheckResult[]>
+  checkAgent(agentId: string): Promise<AgentCheckResult | null>
 
   // Agent installation
   installAgent(agentId: string): Promise<InstallResult>

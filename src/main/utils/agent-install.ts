@@ -163,7 +163,7 @@ async function installClaudeCode(options: InstallOptions): Promise<InstallResult
   try {
     // Step 1: Check npm
     sendProgress('check-npm', 'started')
-    const npmCheck = commandExists('npm')
+    const npmCheck = await commandExists('npm')
     if (!npmCheck.exists) {
       const errorMsg = 'Node.js is required. Please install from https://nodejs.org'
       sendProgress('check-npm', 'error', undefined, errorMsg)
@@ -172,7 +172,7 @@ async function installClaudeCode(options: InstallOptions): Promise<InstallResult
     sendProgress('check-npm', 'completed')
 
     // Step 2: Install Claude Code CLI (if not already installed)
-    const claudeCheck = commandExists('claude')
+    const claudeCheck = await commandExists('claude')
     if (!claudeCheck.exists) {
       sendProgress('install-cli', 'started')
       const cliResult = await installClaudeCLI((msg) =>
@@ -248,7 +248,7 @@ async function installCodex(options: InstallOptions): Promise<InstallResult> {
   try {
     // Step 1: Check npm
     sendProgress('check-npm', 'started')
-    const npmCheck = commandExists('npm')
+    const npmCheck = await commandExists('npm')
     if (!npmCheck.exists) {
       const errorMsg = 'Node.js is required. Please install from https://nodejs.org'
       sendProgress('check-npm', 'error', undefined, errorMsg)
@@ -257,7 +257,7 @@ async function installCodex(options: InstallOptions): Promise<InstallResult> {
     sendProgress('check-npm', 'completed')
 
     // Step 2: Install Codex CLI (if not already installed)
-    const codexCheck = commandExists('codex')
+    const codexCheck = await commandExists('codex')
     if (!codexCheck.exists) {
       sendProgress('install-cli', 'started')
       const cliResult = await installCodexCLI((msg) =>

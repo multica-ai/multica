@@ -1,9 +1,12 @@
 /**
  * Utility to check agent installations
  */
-import { execSync } from 'node:child_process'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
 import { platform, homedir } from 'node:os'
 import { DEFAULT_AGENTS } from '../config/defaults'
+
+const execAsync = promisify(exec)
 
 /**
  * Get enhanced PATH that includes common custom installation directories
@@ -54,75 +57,87 @@ const AGENT_COMMANDS: Record<string, string[]> = {
 }
 
 /**
- * Check if a command exists in the system PATH
+ * Check if a command exists in the system PATH (async for true concurrency)
  */
-export function commandExists(cmd: string): { exists: boolean; path?: string; version?: string } {
+export async function commandExists(cmd: string): Promise<{ exists: boolean; path?: string; version?: string }> {
   const isWindows = platform() === 'win32'
   const whichCmd = isWindows ? 'where' : 'which'
 
   const enhancedEnv = { ...process.env, PATH: getEnhancedPath() }
 
   try {
-    const path = execSync(`${whichCmd} ${cmd}`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
+    const { stdout } = await execAsync(`${whichCmd} ${cmd}`, {
       env: enhancedEnv,
     })
-      .trim()
-      .split('\n')[0]
+    const cmdPath = stdout.trim().split('\n')[0]
 
     // Try to get version
     let version: string | undefined
     try {
-      const versionOutput = execSync(`${cmd} --version`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 5000,
+      const { stdout: versionOutput } = await execAsync(`${cmd} --version`, {
         env: enhancedEnv,
-      }).trim()
+        timeout: 5000,
+      })
       // Extract first line or first meaningful part
-      version = versionOutput.split('\n')[0].slice(0, 50)
+      version = versionOutput.trim().split('\n')[0].slice(0, 50)
     } catch {
       // Some commands don't support --version
     }
 
-    return { exists: true, path, version }
+    return { exists: true, path: cmdPath, version }
   } catch {
     return { exists: false }
   }
 }
 
 /**
- * Check all configured agents and return their installation status
+ * Check a single agent's installation status (async for true concurrency)
  */
-export function checkAgents(): AgentCheckResult[] {
-  const results: AgentCheckResult[] = []
+export async function checkAgent(agentId: string): Promise<AgentCheckResult | null> {
+  const config = DEFAULT_AGENTS[agentId]
+  if (!config) {
+    return null
+  }
 
-  for (const [id, config] of Object.entries(DEFAULT_AGENTS)) {
-    const check = commandExists(config.command)
-
-    // Check all related commands for this agent
-    const commandsToCheck = AGENT_COMMANDS[id] || [config.command]
-    const commands: CommandInfo[] = commandsToCheck.map((cmd) => {
-      const cmdCheck = commandExists(cmd)
+  // Check all related commands for this agent concurrently
+  const commandsToCheck = AGENT_COMMANDS[agentId] || [config.command]
+  const commandChecks = await Promise.all(
+    commandsToCheck.map(async (cmd) => {
+      const cmdCheck = await commandExists(cmd)
       return {
         command: cmd,
         path: cmdCheck.path,
         version: cmdCheck.version,
       }
     })
+  )
 
-    results.push({
-      id,
-      name: config.name,
-      command: config.command,
-      installed: check.exists,
-      path: check.path,
-      version: check.version,
-      installHint: INSTALL_HINTS[id],
-      commands,
-    })
+  // Primary command check (first in list)
+  const primaryCheck = await commandExists(config.command)
+
+  return {
+    id: agentId,
+    name: config.name,
+    command: config.command,
+    installed: primaryCheck.exists,
+    path: primaryCheck.path,
+    version: primaryCheck.version,
+    installHint: INSTALL_HINTS[agentId],
+    commands: commandChecks,
   }
+}
 
-  return results
+/**
+ * Check all configured agents and return their installation status (async for true concurrency)
+ */
+export async function checkAgents(): Promise<AgentCheckResult[]> {
+  const agentIds = Object.keys(DEFAULT_AGENTS)
+
+  // Check all agents concurrently
+  const results = await Promise.all(
+    agentIds.map((id) => checkAgent(id))
+  )
+
+  // Filter out null results
+  return results.filter((r): r is AgentCheckResult => r !== null)
 }

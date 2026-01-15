@@ -30,14 +30,21 @@ interface InstallStatus {
   error?: string
 }
 
+// Static agent list - always visible
+const AGENT_LIST = [
+  { id: 'claude-code', name: 'Claude Code' },
+  { id: 'opencode', name: 'opencode' },
+  { id: 'codex', name: 'Codex CLI (ACP)' }
+]
+
 export function Settings({
   isOpen,
   onClose,
   defaultAgentId,
   onSetDefaultAgent
 }: SettingsProps): React.ReactElement {
-  const [agents, setAgents] = useState<AgentCheckResult[]>([])
-  const [loading, setLoading] = useState(true)
+  const [agentResults, setAgentResults] = useState<Map<string, AgentCheckResult>>(new Map())
+  const [checkingAgents, setCheckingAgents] = useState<Set<string>>(new Set())
   const [installStatus, setInstallStatus] = useState<InstallStatus>({
     agentId: null,
     state: 'idle'
@@ -62,8 +69,8 @@ export function Settings({
         })
       } else if (event.status === 'completed' && isLastInstallStep(event.agentId, event.step)) {
         setInstallStatus({ agentId: event.agentId, state: 'success' })
-        // Refresh agent list after installation
-        loadAgents()
+        // Refresh this agent after installation
+        refreshAgent(event.agentId)
       } else {
         setInstallStatus({
           agentId: event.agentId,
@@ -76,16 +83,49 @@ export function Settings({
     return unsubscribe
   }, [])
 
-  async function loadAgents(): Promise<void> {
-    setLoading(true)
+  // Refresh a single agent
+  async function refreshAgent(agentId: string): Promise<void> {
+    setCheckingAgents((prev) => new Set(prev).add(agentId))
     try {
-      const results = await window.electronAPI.checkAgents()
-      setAgents(results)
+      const result = await window.electronAPI.checkAgent(agentId)
+      if (result) {
+        setAgentResults((prev) => new Map(prev).set(agentId, result))
+      }
     } catch (err) {
-      console.error('Failed to check agents:', err)
+      console.error(`Failed to check agent ${agentId}:`, err)
     } finally {
-      setLoading(false)
+      setCheckingAgents((prev) => {
+        const next = new Set(prev)
+        next.delete(agentId)
+        return next
+      })
     }
+  }
+
+  // Load all agents concurrently
+  async function loadAgents(): Promise<void> {
+    const allIds = AGENT_LIST.map((a) => a.id)
+    setCheckingAgents(new Set(allIds))
+
+    // Check all agents concurrently
+    await Promise.all(
+      allIds.map(async (id) => {
+        try {
+          const result = await window.electronAPI.checkAgent(id)
+          if (result) {
+            setAgentResults((prev) => new Map(prev).set(id, result))
+          }
+        } catch (err) {
+          console.error(`Failed to check agent ${id}:`, err)
+        } finally {
+          setCheckingAgents((prev) => {
+            const next = new Set(prev)
+            next.delete(id)
+            return next
+          })
+        }
+      })
+    )
   }
 
   // Direct selection - Linear style, no confirm button needed
@@ -149,24 +189,25 @@ export function Settings({
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-muted-foreground">AI Agent</h2>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {agents.map((agent) => (
+          <div className="space-y-1">
+            {AGENT_LIST.map(({ id, name }) => {
+              const agent = agentResults.get(id)
+              const isChecking = checkingAgents.has(id)
+              return (
                 <AgentItem
-                  key={agent.id}
+                  key={id}
+                  agentId={id}
+                  agentName={name}
                   agent={agent}
-                  isSelected={agent.id === defaultAgentId}
+                  isChecking={isChecking}
+                  isSelected={id === defaultAgentId}
                   onSelect={handleSelectAgent}
                   installStatus={installStatus}
                   onInstall={handleInstall}
                 />
-              ))}
-            </div>
-          )}
+              )
+            })}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -174,7 +215,10 @@ export function Settings({
 }
 
 interface AgentItemProps {
-  agent: AgentCheckResult
+  agentId: string
+  agentName: string
+  agent?: AgentCheckResult
+  isChecking: boolean
   isSelected: boolean
   onSelect: (agentId: string) => void
   installStatus: InstallStatus
@@ -182,7 +226,10 @@ interface AgentItemProps {
 }
 
 function AgentItem({
+  agentId,
+  agentName,
   agent,
+  isChecking,
   isSelected,
   onSelect,
   installStatus,
@@ -190,11 +237,18 @@ function AgentItem({
 }: AgentItemProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
 
-  const isInstalling = installStatus.agentId === agent.id && installStatus.state === 'installing'
-  const hasInstallError = installStatus.agentId === agent.id && installStatus.state === 'error'
-  const canInstall = ['claude-code', 'opencode', 'codex'].includes(agent.id)
+  const isInstalling = installStatus.agentId === agentId && installStatus.state === 'installing'
+  const hasInstallError = installStatus.agentId === agentId && installStatus.state === 'error'
+  const canInstall = ['claude-code', 'opencode', 'codex'].includes(agentId)
 
-  const status = !agent.installed ? 'setup' : isSelected ? 'selected' : 'ready'
+  // Determine status: checking -> setup/selected/ready
+  const status = isChecking
+    ? 'checking'
+    : !agent?.installed
+      ? 'setup'
+      : isSelected
+        ? 'selected'
+        : 'ready'
 
   // Auto-expand when installing
   useEffect(() => {
@@ -210,7 +264,7 @@ function AgentItem({
 
   const handleSelectClick = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    onSelect(agent.id)
+    onSelect(agentId)
   }
 
   return (
@@ -229,10 +283,12 @@ function AgentItem({
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </span>
 
-        <span className="flex-1 font-medium text-sm">{agent.name}</span>
+        <span className="flex-1 font-medium text-sm">{agentName}</span>
 
         {/* Right side: status or button */}
-        {status === 'selected' ? (
+        {status === 'checking' ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : status === 'selected' ? (
           <span className="text-xs text-green-600">Selected</span>
         ) : status === 'ready' ? (
           <button
@@ -245,7 +301,7 @@ function AgentItem({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onInstall(agent.id)
+              onInstall(agentId)
             }}
             disabled={isInstalling}
             className={cn(
@@ -266,14 +322,16 @@ function AgentItem({
       {/* Expanded content */}
       {expanded && (
         <div className="pl-9 pr-3 pb-2 text-sm text-muted-foreground">
-          {status === 'setup' ? (
+          {status === 'checking' ? (
+            <p className="text-xs">Checking installation status...</p>
+          ) : status === 'setup' ? (
             hasInstallError ? (
               <p className="text-xs text-destructive">Installation failed: {installStatus.error}</p>
             ) : isInstalling ? (
-              <p className="text-xs">{getStepDescription(installStatus.currentStep, agent.id)}</p>
+              <p className="text-xs">{getStepDescription(installStatus.currentStep, agentId)}</p>
             ) : canInstall ? (
-              <p className="text-xs">Click Install to set up {agent.name} automatically.</p>
-            ) : agent.installHint ? (
+              <p className="text-xs">Click Install to set up {agentName} automatically.</p>
+            ) : agent?.installHint ? (
               <p className="text-xs">
                 To install, run in Terminal:{' '}
                 <code className="font-mono bg-muted px-1 py-0.5 rounded">{agent.installHint}</code>
@@ -281,8 +339,8 @@ function AgentItem({
             ) : null
           ) : (
             <div className="space-y-1">
-              <p className="text-xs">{getAgentDescription(agent.id)}</p>
-              {agent.commands && agent.commands.length > 0 && (
+              <p className="text-xs">{getAgentDescription(agentId)}</p>
+              {agent?.commands && agent.commands.length > 0 && (
                 <div className="mt-2 space-y-0.5">
                   {agent.commands.map((cmd) => (
                     <div key={cmd.command} className="text-xs font-mono text-muted-foreground/70">

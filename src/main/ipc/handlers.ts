@@ -5,7 +5,7 @@
 import { ipcMain, dialog, clipboard, shell, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
-import { checkAgents } from '../utils/agent-check'
+import { checkAgents, checkAgent } from '../utils/agent-check'
 import { installAgent } from '../utils/agent-install'
 import type { Conductor } from '../conductor/Conductor'
 import type { ListSessionsOptions, MulticaSession } from '../../shared/types'
@@ -161,6 +161,10 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
   ipcMain.handle(IPC_CHANNELS.SYSTEM_CHECK_AGENTS, async () => {
     return checkAgents()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SYSTEM_CHECK_AGENT, async (_event, agentId: string) => {
+    return checkAgent(agentId)
   })
 
   // --- Agent installation handler ---
