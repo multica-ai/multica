@@ -108,22 +108,23 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
         command: cmd,
         path: cmdCheck.path,
         version: cmdCheck.version,
+        exists: cmdCheck.exists,
       }
     })
   )
 
-  // Primary command check (first in list)
-  const primaryCheck = await commandExists(config.command)
+  // Find primary command result from already-checked commands (avoid duplicate check)
+  const primaryResult = commandChecks.find((c) => c.command === config.command)
 
   return {
     id: agentId,
     name: config.name,
     command: config.command,
-    installed: primaryCheck.exists,
-    path: primaryCheck.path,
-    version: primaryCheck.version,
+    installed: primaryResult?.exists ?? false,
+    path: primaryResult?.path,
+    version: primaryResult?.version,
     installHint: INSTALL_HINTS[agentId],
-    commands: commandChecks,
+    commands: commandChecks.map(({ command, path, version }) => ({ command, path, version })),
   }
 }
 
