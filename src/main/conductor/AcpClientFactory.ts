@@ -44,16 +44,25 @@ export function createAcpClient(
         const updateType = update.sessionUpdate
         if (updateType === 'agent_message_chunk') {
           const contentType = update.content?.type || 'unknown'
-          console.log(`[ACP] Session ${sessionId} update: ${updateType} (${contentType})`)
+          const textPreview = update.content?.type === 'text'
+            ? update.content.text?.slice(0, 50)
+            : ''
+          console.log(`[ACP] ${updateType} (${contentType}): "${textPreview}"`)
+        } else if (updateType === 'agent_thought_chunk') {
+          const textPreview = update.content?.type === 'text'
+            ? update.content.text?.slice(0, 50)
+            : ''
+          console.log(`[ACP] ${updateType}: "${textPreview}"`)
         } else if (updateType === 'tool_call') {
-          console.log(`[ACP] Session ${sessionId} update: ${updateType} - ${update.title} [${update.status}]`)
+          console.log(`[ACP] ${updateType}: ${update.title} [${update.status}]`)
         } else if (updateType === 'tool_call_update') {
-          console.log(`[ACP] Session ${sessionId} update: ${updateType} [${update.status}]`)
+          console.log(`[ACP] ${updateType}: ${update.title || update.toolCallId} [${update.status}]`)
         } else {
-          console.log(`[ACP] Session ${sessionId} update: ${updateType}`, update)
+          // Log other types briefly
+          console.log(`[ACP] ${updateType}`)
         }
       } else {
-        console.log(`[ACP] Session ${sessionId} update (raw):`, params)
+        console.log(`[ACP] raw update:`, params)
       }
 
       // Store raw update to SessionStore (if available)

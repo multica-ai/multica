@@ -16,16 +16,22 @@ interface ChatViewProps {
   isProcessing: boolean
   hasSession: boolean
   isInitializing: boolean
+  currentSessionId: string | null
 }
 
-export function ChatView({ updates, isProcessing, hasSession, isInitializing }: ChatViewProps) {
+export function ChatView({ updates, isProcessing, hasSession, isInitializing, currentSessionId }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const pendingPermission = usePermissionStore((s) => s.pendingRequest)
+
+  // Only show permission request if it belongs to the current session
+  const currentPermission = pendingPermission?.multicaSessionId === currentSessionId
+    ? pendingPermission
+    : null
 
   // Auto-scroll to bottom when new messages arrive or permission request changes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [updates, pendingPermission])
+  }, [updates, currentPermission])
 
   // Group updates into messages
   const messages = groupUpdatesIntoMessages(updates)
@@ -57,12 +63,12 @@ export function ChatView({ updates, isProcessing, hasSession, isInitializing }: 
           <MessageBubble key={idx} message={msg} />
         ))}
 
-        {/* Permission request - show in feed */}
-        {pendingPermission && (
-          <PermissionRequestItem request={pendingPermission} />
+        {/* Permission request - show in feed (only for current session) */}
+        {currentPermission && (
+          <PermissionRequestItem request={currentPermission} />
         )}
 
-        {isProcessing && !pendingPermission && (
+        {isProcessing && !currentPermission && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <LoadingDots />
             <span className="text-sm">Agent is thinking...</span>
@@ -148,6 +154,12 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
     const update = notification?.update
     if (!update || !('sessionUpdate' in update)) {
       continue
+    }
+
+    // Debug: log unhandled update types
+    const handledTypes = ['user_message', 'agent_thought_chunk', 'agent_message_chunk', 'tool_call', 'tool_call_update']
+    if (!handledTypes.includes(update.sessionUpdate as string)) {
+      console.log('[ChatView] Unhandled sessionUpdate type:', update.sessionUpdate, update)
     }
 
     switch (update.sessionUpdate) {

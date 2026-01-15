@@ -536,4 +536,16 @@ export class Conductor {
   getProcessingSessionIds(): string[] {
     return Array.from(this.processingSessions)
   }
+
+  /**
+   * Find Multica session ID by ACP agent session ID
+   */
+  getSessionIdByAgentSessionId(agentSessionId: string): string | null {
+    for (const [sessionId, sessionAgent] of this.sessions) {
+      if (sessionAgent.agentSessionId === agentSessionId) {
+        return sessionId
+      }
+    }
+    return null
+  }
 }

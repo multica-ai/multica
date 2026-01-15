@@ -19,12 +19,14 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { Plus, Settings, Trash2 } from 'lucide-react'
+import { CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
 import { useModalStore } from '../stores/modalStore'
 
 interface AppSidebarProps {
   sessions: MulticaSession[]
   currentSessionId: string | null
+  processingSessionIds: string[]
+  permissionPendingSessionId: string | null
   onSelect: (sessionId: string) => void
   onNewSession: () => void
 }
@@ -58,11 +60,13 @@ function getSessionTitle(session: MulticaSession): string {
 interface SessionItemProps {
   session: MulticaSession
   isActive: boolean
+  isProcessing: boolean
+  needsPermission: boolean
   onSelect: () => void
   onDelete: () => void
 }
 
-function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps) {
+function SessionItem({ session, isActive, isProcessing, needsPermission, onSelect, onDelete }: SessionItemProps) {
   const [isHovered, setIsHovered] = useState(false)
 
   return (
@@ -83,10 +87,17 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
           >
             {/* Two-line layout container */}
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              {/* Line 1: Title */}
-              <span className="truncate text-sm font-medium">
-                {getSessionTitle(session)}
-              </span>
+              {/* Line 1: Title + Status indicator */}
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-medium">
+                  {getSessionTitle(session)}
+                </span>
+                {needsPermission ? (
+                  <CirclePause className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
+                ) : isProcessing ? (
+                  <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-primary" />
+                ) : null}
+              </div>
 
               {/* Line 2: Agent + Timestamp */}
               <span className="text-xs text-muted-foreground/60">
@@ -122,11 +133,13 @@ function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps
 interface SessionListProps {
   sessions: MulticaSession[]
   currentSessionId: string | null
+  processingSessionIds: string[]
+  permissionPendingSessionId: string | null
   onSelect: (sessionId: string) => void
   onDeleteRequest: (session: MulticaSession) => void
 }
 
-function SessionList({ sessions, currentSessionId, onSelect, onDeleteRequest }: SessionListProps) {
+function SessionList({ sessions, currentSessionId, processingSessionIds, permissionPendingSessionId, onSelect, onDeleteRequest }: SessionListProps) {
   if (sessions.length === 0) {
     return (
       <p className="px-2 py-4 text-center text-sm text-muted-foreground">
@@ -142,6 +155,8 @@ function SessionList({ sessions, currentSessionId, onSelect, onDeleteRequest }: 
           key={session.id}
           session={session}
           isActive={session.id === currentSessionId}
+          isProcessing={processingSessionIds.includes(session.id)}
+          needsPermission={session.id === permissionPendingSessionId}
           onSelect={() => onSelect(session.id)}
           onDelete={() => onDeleteRequest(session)}
         />
@@ -153,6 +168,8 @@ function SessionList({ sessions, currentSessionId, onSelect, onDeleteRequest }: 
 export function AppSidebar({
   sessions,
   currentSessionId,
+  processingSessionIds,
+  permissionPendingSessionId,
   onSelect,
   onNewSession,
 }: AppSidebarProps) {
@@ -181,6 +198,8 @@ export function AppSidebar({
         <SessionList
           sessions={sessions}
           currentSessionId={currentSessionId}
+          processingSessionIds={processingSessionIds}
+          permissionPendingSessionId={permissionPendingSessionId}
           onSelect={onSelect}
           onDeleteRequest={(session) => openModal('deleteSession', session)}
         />

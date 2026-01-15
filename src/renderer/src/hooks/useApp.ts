@@ -60,24 +60,8 @@ export function useApp(): AppState & AppActions {
     ? runningSessionsStatus.processingSessionIds.includes(currentSession.id)
     : false
 
-  // Periodic file tree refresh while agent is processing
-  useEffect(() => {
-    if (!isProcessing) return
-
-    const triggerRefresh = useFileChangeStore.getState().triggerRefresh
-    const REFRESH_INTERVAL = 2000 // Refresh every 2 seconds while processing
-
-    console.log('[FileChange] Starting periodic refresh (agent processing)')
-    const intervalId = setInterval(() => {
-      console.log('[FileChange] Periodic refresh triggered')
-      triggerRefresh()
-    }, REFRESH_INTERVAL)
-
-    return () => {
-      console.log('[FileChange] Stopping periodic refresh')
-      clearInterval(intervalId)
-    }
-  }, [isProcessing])
+  // Note: File tree refresh is triggered by tool completion (see onAgentMessage handler below)
+  // No need for periodic refresh - it causes performance issues
 
   // Load sessions on mount
   useEffect(() => {

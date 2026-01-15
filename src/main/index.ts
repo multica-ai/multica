@@ -109,7 +109,11 @@ app.whenReady().then(async () => {
         const { randomUUID } = await import('crypto')
         const requestId = randomUUID()
 
+        // Find Multica session ID from ACP session ID
+        const multicaSessionId = conductor.getSessionIdByAgentSessionId(params.sessionId)
+
         console.log(`[Permission] Request ${requestId}: ${params.toolCall.title}`)
+        console.log(`[Permission]   ACP sessionId: ${params.sessionId}, Multica sessionId: ${multicaSessionId}`)
         console.log(`[Permission]   Options:`, params.options.map(o => `${o.name} (${o.optionId})`).join(', '))
 
         // Send permission request to renderer
@@ -117,7 +121,7 @@ app.whenReady().then(async () => {
           mainWindow.webContents.send(IPC_CHANNELS.PERMISSION_REQUEST, {
             requestId,
             sessionId: params.sessionId,
-            multicaSessionId: params.sessionId, // ACP session ID
+            multicaSessionId: multicaSessionId || params.sessionId, // Use Multica session ID for matching
             toolCall: {
               toolCallId: params.toolCall.toolCallId,
               title: params.toolCall.title,

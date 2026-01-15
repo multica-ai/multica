@@ -9,6 +9,7 @@ import { Modals } from './components/Modals'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { useUIStore } from './stores/uiStore'
+import { usePermissionStore } from './stores/permissionStore'
 import {
   RightPanel,
   RightPanelHeader,
@@ -41,6 +42,10 @@ function AppContent(): React.JSX.Element {
   // UI state
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen)
+
+  // Permission state - get the session ID that has a pending permission request
+  const pendingPermission = usePermissionStore((s) => s.pendingRequest)
+  const permissionPendingSessionId = pendingPermission?.multicaSessionId ?? null
 
   // Default agent for new sessions (persisted in localStorage)
   const [defaultAgentId, setDefaultAgentId] = useState(() => {
@@ -103,6 +108,8 @@ function AppContent(): React.JSX.Element {
         <AppSidebar
           sessions={sessions}
           currentSessionId={currentSession?.id ?? null}
+          processingSessionIds={runningSessionsStatus.processingSessionIds}
+          permissionPendingSessionId={permissionPendingSessionId}
           onSelect={handleSelectSession}
           onNewSession={handleNewSession}
         />
@@ -122,6 +129,7 @@ function AppContent(): React.JSX.Element {
             isProcessing={isProcessing}
             hasSession={!!currentSession}
             isInitializing={isInitializing}
+            currentSessionId={currentSession?.id ?? null}
           />
 
           {/* Input */}
