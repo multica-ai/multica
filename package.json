@@ -1,10 +1,10 @@
 {
   "name": "multica",
   "version": "0.1.0",
-  "description": "A GUI client for ACP-compatible coding agents",
+  "description": "Multiplexed Information and Computing Agent - A GUI client that brings coding agent capabilities to everyone",
   "main": "./out/main/index.js",
   "author": "Multica",
-  "homepage": "https://github.com/multica/multica",
+  "homepage": "https://github.com/multica-ai/multica",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",

@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: multica-temp
+appId: com.multica.app
+productName: Multica
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: multica-temp
+  executableName: multica
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

@@ -1,8 +1,44 @@
 # Multica
 
-A GUI client for ACP-compatible coding agents.
+**Multiplexed Information and Computing Agent**
 
-Multica uses the [Agent Client Protocol (ACP)](https://github.com/anthropics/agent-client-protocol) to communicate with various coding agents like OpenCode, Codex, and Gemini CLI.
+A native desktop client that brings coding agent capabilities to everyone through a visual interface.
+
+English | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+
+## Why "Multica"?
+
+The name is inspired by [Multics](https://en.wikipedia.org/wiki/Multics) (Multiplexed Information and Computing Service), a pioneering operating system created in 1964. Although Multics never achieved widespread adoption, it laid the foundation for modern operating systems, including concepts like the hierarchical file system. Unix itself was derived from Multics (Uniplexed Information and Computing Service -> Unics -> Unix).
+
+**The metaphor:** Just as Multics was created to solve the problem of multi-user time-sharing on computing resources, Multica is designed to solve the problem of multi-model/multi-agent collaboration for knowledge workers.
+
+## The Problem
+
+Coding agents (like Claude Code, Codex, Gemini CLI) have become incredibly powerful in 2025, capable of solving complex tasks far beyond just writing code. However, 95% of knowledge workers are locked out of these capabilities due to three core barriers:
+
+**1. Interaction Mismatch**
+- CLI-based tools require understanding of terminal concepts, file paths, and environment variables
+- Current tools focus on code output (diffs, commits, linting) rather than business outcomes
+- Knowledge workers care about results (charts, reports, analysis), not the scripts that generate them
+
+**2. Local Environment Challenges**
+- Web-based agents can't access local files, folders, or native applications
+- Setting up Python, Node.js, or other dependencies is a significant barrier
+- Missing the "just works" sandbox environment that handles all dependencies
+
+**3. Privacy & Trust**
+- Sensitive business data (financial analysis, legal documents, medical records) can't be uploaded to third-party servers
+- Need a model where data stays local while intelligence comes from the cloud
+
+Multica bridges this gap by providing a visual, native desktop interface that leverages coding agents' capabilities while keeping your data local.
+
+## Features
+
+- Native macOS application with a clean, intuitive interface
+- Support for multiple AI agents through the [Agent Client Protocol (ACP)](https://github.com/anthropics/agent-client-protocol)
+- Local-first: your data never leaves your machine
+- Session management with history and resume capabilities
+- Built-in CLI for power users and testing
 
 ## Supported Agents
 
@@ -21,8 +57,8 @@ pnpm install
 # Check which agents are installed
 pnpm cli doctor
 
-# Start interactive mode
-pnpm cli
+# Start the desktop app
+pnpm dev
 ```
 
 ## CLI
@@ -72,16 +108,6 @@ pnpm cli prompt "What is 2+2?"
 pnpm cli prompt "List files" --cwd=/tmp
 ```
 
-### Doctor
-
-Check if agents are installed on your system:
-
-```bash
-pnpm cli doctor
-```
-
-Shows installation status, binary path, version, and install hints for missing agents.
-
 ### Options
 
 | Option | Description |
@@ -89,11 +115,6 @@ Shows installation status, binary path, version, and install hints for missing a
 | `--cwd=PATH` | Working directory for the agent |
 | `--log` | Save session log to `logs/` directory |
 | `--log=PATH` | Save session log to specified file |
-
-### Cancellation
-
-- Press `Ctrl+C` once to send a cancel request to the agent
-- Press `Ctrl+C` twice to force quit
 
 ## Development
 
@@ -103,6 +124,9 @@ pnpm dev
 
 # Type check
 pnpm typecheck
+
+# Run tests
+pnpm test
 ```
 
 ## Build
@@ -117,20 +141,20 @@ pnpm build:linux    # Linux
 
 ```
 Multica (Electron)
-├── Renderer Process (React)
-│   └── UI Components (Chat, Settings, etc.)
-│
-├── Main Process
-│   ├── Conductor (orchestrates agent communication)
-│   │   ├── SessionStore (session persistence)
-│   │   └── ClientSideConnection (ACP SDK)
-│   │         └── AgentProcess (subprocess management)
-│   │               └── opencode/codex-acp/gemini (stdio)
-│   │
-│   └── IPC Handlers (session, agent, config)
-│
-└── Preload (contextBridge)
-    └── electronAPI (exposed to renderer)
++-- Renderer Process (React)
+|   +-- UI Components (Chat, Settings, etc.)
+|
++-- Main Process
+|   +-- Conductor (orchestrates agent communication)
+|   |   +-- SessionStore (session persistence)
+|   |   +-- ClientSideConnection (ACP SDK)
+|   |         +-- AgentProcess (subprocess management)
+|   |               +-- opencode/codex-acp/gemini (stdio)
+|   |
+|   +-- IPC Handlers (session, agent, config)
+|
++-- Preload (contextBridge)
+    +-- electronAPI (exposed to renderer)
 ```
 
 ### Session Management
@@ -139,32 +163,15 @@ Multica maintains its own session layer on top of ACP:
 
 ```
 ~/.multica/sessions/
-├── index.json              # Session list (fast load)
-└── data/
-    └── {session-id}.json   # Full session data + updates
++-- index.json              # Session list (fast load)
++-- data/
+    +-- {session-id}.json   # Full session data + updates
 ```
 
 **Key design decisions:**
 - **Client-side storage**: Multica stores raw `session/update` data for UI display
 - **Agent-agnostic**: Each agent manages its own internal state separately
 - **Resume behavior**: Creates new ACP session, displays stored history in UI
-
-### IPC API
-
-```typescript
-// Session management
-electronAPI.createSession(cwd)
-electronAPI.listSessions(options?)
-electronAPI.getSession(id)
-electronAPI.resumeSession(id)
-electronAPI.deleteSession(id)
-
-// Agent control
-electronAPI.startAgent(agentId)
-electronAPI.stopAgent()
-electronAPI.sendPrompt(sessionId, content)
-electronAPI.cancelRequest(sessionId)
-```
 
 ## License
 
