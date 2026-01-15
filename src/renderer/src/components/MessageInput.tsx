@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowUp, Square, Folder, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { AgentSelector } from './AgentSelector'
 import type { MessageContent, ImageContentItem } from '../../../shared/types/message'
 
 interface MessageInputProps {
@@ -15,6 +16,8 @@ interface MessageInputProps {
   placeholder?: string
   workingDirectory?: string | null
   onSelectFolder: () => Promise<void>
+  currentAgentId?: string
+  onAgentChange?: (agentId: string) => void
 }
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -28,6 +31,8 @@ export function MessageInput({
   placeholder = 'Type a message...',
   workingDirectory,
   onSelectFolder,
+  currentAgentId,
+  onAgentChange,
 }: MessageInputProps) {
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -255,8 +260,17 @@ export function MessageInput({
 
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between pt-2">
-            {/* Left side: folder and image button */}
+            {/* Left side: agent selector, folder, and image button */}
             <div className="flex items-center gap-1">
+              {/* Agent selector */}
+              {currentAgentId && onAgentChange && (
+                <AgentSelector
+                  currentAgentId={currentAgentId}
+                  onAgentChange={onAgentChange}
+                  disabled={isProcessing}
+                />
+              )}
+
               {/* Folder indicator */}
               <Tooltip>
                 <TooltipTrigger asChild>
