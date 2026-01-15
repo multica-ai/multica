@@ -2,10 +2,11 @@
  * IPC handlers for main process
  * Registers all IPC handlers for communication with renderer process
  */
-import { ipcMain, dialog, clipboard, shell } from 'electron'
+import { ipcMain, dialog, clipboard, shell, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
 import { checkAgents } from '../utils/agent-check'
+import { installAgent } from '../utils/agent-install'
 import type { Conductor } from '../conductor/Conductor'
 import type { ListSessionsOptions, MulticaSession } from '../../shared/types'
 import type { FileTreeNode, DetectedApp } from '../../shared/electron-api'
@@ -49,10 +50,13 @@ function isValidPath(inputPath: string): boolean {
 export function registerIPCHandlers(conductor: Conductor): void {
   // --- Agent handlers (per-session) ---
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_PROMPT, async (_event, sessionId: string, content: MessageContent) => {
-    const stopReason = await conductor.sendPrompt(sessionId, content)
-    return { stopReason }
-  })
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_PROMPT,
+    async (_event, sessionId: string, content: MessageContent) => {
+      const stopReason = await conductor.sendPrompt(sessionId, content)
+      return { stopReason }
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.AGENT_CANCEL, async (_event, sessionId: string) => {
     await conductor.cancelRequest(sessionId)
@@ -66,7 +70,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
     return {
       runningSessions: runningSessionIds.length,
       sessionIds: runningSessionIds,
-      processingSessionIds,
+      processingSessionIds
     }
   })
 
@@ -127,8 +131,8 @@ export function registerIPCHandlers(conductor: Conductor): void {
       agents: DEFAULT_AGENTS,
       ui: {
         theme: 'system',
-        fontSize: 14,
-      },
+        fontSize: 14
+      }
     }
   })
 
@@ -143,7 +147,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
   ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY, async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
-      title: 'Select Working Directory',
+      title: 'Select Working Directory'
     })
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -157,6 +161,17 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
   ipcMain.handle(IPC_CHANNELS.SYSTEM_CHECK_AGENTS, async () => {
     return checkAgents()
+  })
+
+  // --- Agent installation handler ---
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_INSTALL, async (_event, agentId: string) => {
+    const window = BrowserWindow.getFocusedWindow()
+    if (!window) {
+      throw new Error('No focused window')
+    }
+
+    return installAgent({ window, agentId })
   })
 
   // --- File tree handlers ---
@@ -178,7 +193,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
           name: entry.name,
           path: fullPath,
           type: isDirectory ? 'directory' : 'file',
-          extension: ext || undefined,
+          extension: ext || undefined
         }
       })
 
@@ -198,9 +213,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.FS_DETECT_APPS, async () => {
-    const apps: DetectedApp[] = [
-      { id: 'finder', name: 'Finder' },
-    ]
+    const apps: DetectedApp[] = [{ id: 'finder', name: 'Finder' }]
 
     // App definitions to check
     const appChecks = [
@@ -208,7 +221,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
       { id: 'vscode', name: 'VS Code', appName: 'Visual Studio Code.app' },
       { id: 'xcode', name: 'Xcode', appName: 'Xcode.app' },
       { id: 'ghostty', name: 'Ghostty', appName: 'Ghostty.app' },
-      { id: 'iterm', name: 'iTerm', appName: 'iTerm.app' },
+      { id: 'iterm', name: 'iTerm', appName: 'iTerm.app' }
     ]
 
     const homeDir = process.env.HOME || ''
@@ -242,7 +255,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
       try {
         // Helper to get directory for terminal apps
-        const getDir = (p: string) => fs.statSync(p).isDirectory() ? p : path.dirname(p)
+        const getDir = (p: string) => (fs.statSync(p).isDirectory() ? p : path.dirname(p))
 
         switch (appId) {
           case 'finder':

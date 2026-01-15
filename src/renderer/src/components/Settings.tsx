@@ -2,15 +2,14 @@
  * Settings component - simplified agent selector
  * Using Linear-style design: minimal UI, direct interactions
  */
-import { useState, useEffect } from 'react'
-import type { AgentCheckResult } from '../../../shared/electron-api'
+import React, { useState, useEffect } from 'react'
+import type {
+  AgentCheckResult,
+  InstallProgressEvent,
+  InstallStep
+} from '../../../shared/electron-api'
 import { useTheme } from '../contexts/ThemeContext'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Sun, Moon, Monitor, ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -24,9 +23,25 @@ interface SettingsProps {
 
 type ThemeMode = 'light' | 'dark' | 'system'
 
-export function Settings({ isOpen, onClose, defaultAgentId, onSetDefaultAgent }: SettingsProps) {
+interface InstallStatus {
+  agentId: string | null
+  state: 'idle' | 'installing' | 'success' | 'error'
+  currentStep?: InstallStep
+  error?: string
+}
+
+export function Settings({
+  isOpen,
+  onClose,
+  defaultAgentId,
+  onSetDefaultAgent
+}: SettingsProps): React.ReactElement {
   const [agents, setAgents] = useState<AgentCheckResult[]>([])
   const [loading, setLoading] = useState(true)
+  const [installStatus, setInstallStatus] = useState<InstallStatus>({
+    agentId: null,
+    state: 'idle'
+  })
   const { mode, setMode } = useTheme()
 
   useEffect(() => {
@@ -35,7 +50,33 @@ export function Settings({ isOpen, onClose, defaultAgentId, onSetDefaultAgent }:
     }
   }, [isOpen])
 
-  async function loadAgents() {
+  // Listen to install progress events
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onInstallProgress((event: InstallProgressEvent) => {
+      if (event.status === 'error') {
+        setInstallStatus({
+          agentId: event.agentId,
+          state: 'error',
+          currentStep: event.step,
+          error: event.error
+        })
+      } else if (event.status === 'completed' && isLastInstallStep(event.agentId, event.step)) {
+        setInstallStatus({ agentId: event.agentId, state: 'success' })
+        // Refresh agent list after installation
+        loadAgents()
+      } else {
+        setInstallStatus({
+          agentId: event.agentId,
+          state: 'installing',
+          currentStep: event.step
+        })
+      }
+    })
+
+    return unsubscribe
+  }, [])
+
+  async function loadAgents(): Promise<void> {
     setLoading(true)
     try {
       const results = await window.electronAPI.checkAgents()
@@ -48,9 +89,26 @@ export function Settings({ isOpen, onClose, defaultAgentId, onSetDefaultAgent }:
   }
 
   // Direct selection - Linear style, no confirm button needed
-  function handleSelectAgent(agentId: string) {
+  function handleSelectAgent(agentId: string): void {
     if (agentId !== defaultAgentId) {
       onSetDefaultAgent(agentId)
+    }
+  }
+
+  // Handle agent installation
+  async function handleInstall(agentId: string): Promise<void> {
+    setInstallStatus({ agentId, state: 'installing' })
+    try {
+      const result = await window.electronAPI.installAgent(agentId)
+      if (!result.success) {
+        setInstallStatus({ agentId, state: 'error', error: result.error })
+      }
+    } catch (err) {
+      setInstallStatus({
+        agentId,
+        state: 'error',
+        error: err instanceof Error ? err.message : 'Unknown error'
+      })
     }
   }
 
@@ -103,6 +161,8 @@ export function Settings({ isOpen, onClose, defaultAgentId, onSetDefaultAgent }:
                   agent={agent}
                   isSelected={agent.id === defaultAgentId}
                   onSelect={handleSelectAgent}
+                  installStatus={installStatus}
+                  onInstall={handleInstall}
                 />
               ))}
             </div>
@@ -117,21 +177,38 @@ interface AgentItemProps {
   agent: AgentCheckResult
   isSelected: boolean
   onSelect: (agentId: string) => void
+  installStatus: InstallStatus
+  onInstall: (agentId: string) => void
 }
 
-function AgentItem({ agent, isSelected, onSelect }: AgentItemProps) {
+function AgentItem({
+  agent,
+  isSelected,
+  onSelect,
+  installStatus,
+  onInstall
+}: AgentItemProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
 
-  const status = !agent.installed ? 'setup'
-    : isSelected ? 'selected'
-      : 'ready'
+  const isInstalling = installStatus.agentId === agent.id && installStatus.state === 'installing'
+  const hasInstallError = installStatus.agentId === agent.id && installStatus.state === 'error'
+  const canInstall = ['claude-code', 'opencode', 'codex'].includes(agent.id)
+
+  const status = !agent.installed ? 'setup' : isSelected ? 'selected' : 'ready'
+
+  // Auto-expand when installing
+  useEffect(() => {
+    if (isInstalling) {
+      setExpanded(true)
+    }
+  }, [isInstalling])
 
   // Click row to expand/collapse only
-  const handleRowClick = () => {
+  const handleRowClick = (): void => {
     setExpanded(!expanded)
   }
 
-  const handleSelectClick = (e: React.MouseEvent) => {
+  const handleSelectClick = (e: React.MouseEvent): void => {
     e.stopPropagation()
     onSelect(agent.id)
   }
@@ -147,16 +224,9 @@ function AgentItem({ agent, isSelected, onSelect }: AgentItemProps) {
       )}
     >
       {/* Main row - click to expand */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer"
-        onClick={handleRowClick}
-      >
+      <div className="flex items-center gap-2 px-3 py-2 cursor-pointer" onClick={handleRowClick}>
         <span className="p-0.5 text-muted-foreground">
-          {expanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </span>
 
         <span className="flex-1 font-medium text-sm">{agent.name}</span>
@@ -171,6 +241,23 @@ function AgentItem({ agent, isSelected, onSelect }: AgentItemProps) {
           >
             Use
           </button>
+        ) : canInstall ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onInstall(agent.id)
+            }}
+            disabled={isInstalling}
+            className={cn(
+              'text-xs px-2 py-0.5 rounded transition-colors flex items-center gap-1',
+              isInstalling
+                ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                : 'bg-primary/10 text-primary hover:bg-primary/20'
+            )}
+          >
+            {isInstalling && <Loader2 className="h-3 w-3 animate-spin" />}
+            {isInstalling ? 'Installing...' : 'Install'}
+          </button>
         ) : (
           <span className="text-xs text-muted-foreground">Setup required</span>
         )}
@@ -179,10 +266,19 @@ function AgentItem({ agent, isSelected, onSelect }: AgentItemProps) {
       {/* Expanded content */}
       {expanded && (
         <div className="pl-9 pr-3 pb-2 text-sm text-muted-foreground">
-          {status === 'setup' && agent.installHint ? (
-            <p className="text-xs">
-              To install, run in Terminal: <code className="font-mono bg-muted px-1 py-0.5 rounded">{agent.installHint}</code>
-            </p>
+          {status === 'setup' ? (
+            hasInstallError ? (
+              <p className="text-xs text-destructive">Installation failed: {installStatus.error}</p>
+            ) : isInstalling ? (
+              <p className="text-xs">{getStepDescription(installStatus.currentStep, agent.id)}</p>
+            ) : canInstall ? (
+              <p className="text-xs">Click Install to set up {agent.name} automatically.</p>
+            ) : agent.installHint ? (
+              <p className="text-xs">
+                To install, run in Terminal:{' '}
+                <code className="font-mono bg-muted px-1 py-0.5 rounded">{agent.installHint}</code>
+              </p>
+            ) : null
           ) : (
             <p className="text-xs">{getAgentDescription(agent.id)}</p>
           )}
@@ -196,8 +292,38 @@ function getAgentDescription(agentId: string): string {
   const descriptions: Record<string, string> = {
     'claude-code': 'Best for complex reasoning tasks. By Anthropic.',
     opencode: 'Fast and lightweight. Open source.',
-    codex: 'OpenAI\'s code assistant. By OpenAI.',
-    gemini: 'Google\'s AI assistant. By Google.',
+    codex: "OpenAI's code assistant with ACP support.",
+    gemini: "Google's AI assistant. By Google."
   }
   return descriptions[agentId] || 'AI coding assistant'
+}
+
+function isLastInstallStep(agentId: string, step: InstallStep): boolean {
+  if (agentId === 'claude-code' || agentId === 'codex') {
+    return step === 'install-acp'
+  }
+  // opencode and others: install-cli is the last step
+  return step === 'install-cli'
+}
+
+function getStepDescription(step?: InstallStep, agentId?: string): string {
+  switch (step) {
+    case 'check-npm':
+      return 'Checking npm installation...'
+    case 'install-cli':
+      if (agentId === 'opencode') {
+        return 'Installing opencode...'
+      }
+      if (agentId === 'codex') {
+        return 'Installing Codex CLI...'
+      }
+      return 'Installing Claude Code CLI...'
+    case 'install-acp':
+      if (agentId === 'codex') {
+        return 'Installing codex-acp...'
+      }
+      return 'Installing claude-code-acp...'
+    default:
+      return 'Preparing installation...'
+  }
 }

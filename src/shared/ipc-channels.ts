@@ -30,6 +30,10 @@ export const IPC_CHANNELS = {
   // System
   SYSTEM_CHECK_AGENTS: 'system:check-agents',
 
+  // Agent installation
+  AGENT_INSTALL: 'agent:install',
+  AGENT_INSTALL_PROGRESS: 'agent:install-progress',
+
   // File system (V2)
   FILE_APPROVAL_REQUEST: 'file:approval-request',
   FILE_APPROVAL_RESPONSE: 'file:approval-response',
