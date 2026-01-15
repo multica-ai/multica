@@ -68,7 +68,7 @@ export function ChatView({ updates, isProcessing, hasSession, isInitializing, cu
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 px-6 py-4">
+      <div className="mx-auto max-w-3xl space-y-5 px-8 py-6">
         {messages.map((msg, idx) => (
           <MessageBubble key={idx} message={msg} />
         ))}
@@ -323,7 +323,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
 
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-muted px-4 py-3 text-[15px]">
+        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] px-4 py-3 text-[15px]">
           {/* Render images first */}
           {imageBlocks.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -379,53 +379,69 @@ function TextContentBlock({ content }: { content: string }) {
   if (!content) return null
 
   return (
-    <div className="prose prose-invert max-w-none text-[15px]">
+    <div className="prose prose-invert max-w-none text-[15px] leading-[1.7]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-          h1: ({ children }) => <h1 className="text-xl font-bold mb-3 mt-4">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-3">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-base font-semibold mb-2 mt-3">{children}</h3>,
-          ul: ({ children }) => <ul className="list-disc pl-4 mb-3 space-y-1">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal pl-4 mb-3 space-y-1">{children}</ol>,
-          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          // Paragraphs: consistent spacing, tighter line height for readability
+          p: ({ children }) => (
+            <p className="mb-4 last:mb-0">{children}</p>
+          ),
+          // Headings: more space above (1.5x) than below (0.5x) for visual grouping
+          h1: ({ children }) => (
+            <h1 className="text-xl font-bold mt-6 mb-3 first:mt-0">{children}</h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="text-lg font-bold mt-5 mb-2.5 first:mt-0">{children}</h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="text-base font-semibold mt-4 mb-2 first:mt-0">{children}</h3>
+          ),
+          // Lists: consistent spacing with content
+          ul: ({ children }) => (
+            <ul className="list-disc pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ol>
+          ),
+          li: ({ children }) => <li>{children}</li>,
+          // Code: pre handles container, code is transparent for blocks
           code: ({ className, children }) => {
             const isBlock = className?.includes('language-')
             if (isBlock) {
-              return (
-                <code className="block bg-muted rounded-lg p-3 text-xs font-mono overflow-x-auto">
-                  {children}
-                </code>
-              )
+              // Block code inside pre - no extra styling, pre handles it
+              return <code>{children}</code>
             }
+            // Inline code
             return (
-              <code className="bg-muted rounded px-1.5 py-0.5 text-xs font-mono">
+              <code className="bg-muted/70 rounded px-1.5 py-0.5 text-[13px] font-mono">
                 {children}
               </code>
             )
           },
           pre: ({ children }) => (
-            <pre className="bg-muted rounded-lg p-3 mb-3 overflow-x-auto text-xs">
+            <pre className="bg-muted rounded-lg px-4 py-3 mb-4 last:mb-0 overflow-x-auto text-[13px] font-mono leading-relaxed">
               {children}
             </pre>
           ),
+          // Links
           a: ({ href, children }) => (
             <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">
               {children}
             </a>
           ),
+          // Blockquote: subtle styling
           blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-border pl-3 italic text-muted-foreground">
+            <blockquote className="border-l-2 border-border pl-4 my-4 text-muted-foreground">
               {children}
             </blockquote>
           ),
-          hr: () => <hr className="border-border my-4" />,
+          hr: () => <hr className="border-border my-6" />,
           strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
           // Table components for GFM table support
           table: ({ children }) => (
-            <div className="overflow-x-auto mb-3">
+            <div className="overflow-x-auto mb-4 last:mb-0">
               <table className="min-w-full border-collapse border border-border text-sm">
                 {children}
               </table>
