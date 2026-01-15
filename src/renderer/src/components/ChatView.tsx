@@ -156,12 +156,6 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
       continue
     }
 
-    // Debug: log unhandled update types
-    const handledTypes = ['user_message', 'agent_thought_chunk', 'agent_message_chunk', 'tool_call', 'tool_call_update']
-    if (!handledTypes.includes(update.sessionUpdate as string)) {
-      console.log('[ChatView] Unhandled sessionUpdate type:', update.sessionUpdate, update)
-    }
-
     switch (update.sessionUpdate) {
       case 'user_message' as string:
         // Flush any pending assistant message
