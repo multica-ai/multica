@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { StoredSessionUpdate } from '../../../shared/types'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Folder } from 'lucide-react'
 import { ToolCallItem, type ToolCall } from './ToolCallItem'
 import { PermissionRequestItem } from './PermissionRequestItem'
 import { usePermissionStore } from '../stores/permissionStore'
@@ -17,9 +17,10 @@ interface ChatViewProps {
   hasSession: boolean
   isInitializing: boolean
   currentSessionId: string | null
+  onSelectFolder?: () => void
 }
 
-export function ChatView({ updates, isProcessing, hasSession, isInitializing, currentSessionId }: ChatViewProps) {
+export function ChatView({ updates, isProcessing, hasSession, isInitializing, currentSessionId, onSelectFolder }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const pendingPermission = usePermissionStore((s) => s.pendingRequest)
 
@@ -46,11 +47,20 @@ export function ChatView({ updates, isProcessing, hasSession, isInitializing, cu
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold">Multica</h1>
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground mb-6">
             {hasSession
               ? 'Start a conversation with your coding agent'
-              : 'Select a folder below to start'}
+              : 'Select a folder to start'}
           </p>
+          {!hasSession && onSelectFolder && (
+            <button
+              onClick={onSelectFolder}
+              className="inline-flex items-center gap-2 bg-card hover:bg-accent transition-colors duration-200 rounded-xl px-4 py-2.5 border border-border cursor-pointer text-sm text-muted-foreground hover:text-foreground"
+            >
+              <Folder className="h-4 w-4" />
+              <span>Browse folder</span>
+            </button>
+          )}
         </div>
       </div>
     )

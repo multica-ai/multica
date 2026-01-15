@@ -132,6 +132,7 @@ function AppContent(): React.JSX.Element {
             hasSession={!!currentSession}
             isInitializing={isInitializing}
             currentSessionId={currentSession?.id ?? null}
+            onSelectFolder={handleSelectFolder}
           />
 
           {/* Input */}

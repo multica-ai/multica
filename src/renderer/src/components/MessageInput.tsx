@@ -2,7 +2,7 @@
  * Message input component with image upload support
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowUp, Square, Folder, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, X, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { AgentSelector } from './AgentSelector'
@@ -174,43 +174,16 @@ export function MessageInput({
   const canSubmit = !disabled && (value.trim().length > 0 || images.length > 0)
   const hasFolder = !!workingDirectory
 
-  // Render folder selection mode when no folder is selected
+  // Don't render when no folder is selected
   if (!hasFolder) {
-    return (
-      <div className="p-4">
-        <div className="mx-auto max-w-3xl">
-          <div className="bg-[#fdfdfc] hover:bg-[#fdfdfc] transition-colors duration-200 rounded-xl p-3 border border-border">
-            {/* Folder selection prompt */}
-            <div className="flex items-center gap-3">
-              <Folder className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-              <span className="text-sm text-muted-foreground flex-1">Select a folder to start...</span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onSelectFolder}
-                className="flex-shrink-0"
-              >
-                Browse
-              </Button>
-            </div>
-
-            {/* Bottom toolbar */}
-            <div className="flex items-center justify-end pt-3 mt-3 border-t border-border/50">
-              <Button size="icon" disabled className="h-8 w-8 rounded-full">
-                <ArrowUp className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
+    return null
   }
 
   // Normal chat input mode
   return (
     <div className="p-4">
       <div className="mx-auto max-w-3xl">
-        <div className="bg-[#fdfdfc] hover:bg-[#fdfdfc] focus-within:bg-[#fdfdfc] transition-colors duration-200 rounded-xl p-3 border border-border">
+        <div className="bg-card transition-colors duration-200 rounded-xl p-3 border border-border">
           {/* Image previews */}
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3 pb-3 border-b border-border/50">
