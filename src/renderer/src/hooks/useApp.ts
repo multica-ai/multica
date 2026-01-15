@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/types'
 import type { RunningSessionsStatus } from '../../../shared/electron-api'
 import { usePermissionStore } from '../stores/permissionStore'
+import { useFileChangeStore } from '../stores/fileChangeStore'
 
 export interface AppState {
   // Sessions
@@ -56,6 +57,25 @@ export function useApp(): AppState & AppActions {
     ? runningSessionsStatus.processingSessionIds.includes(currentSession.id)
     : false
 
+  // Periodic file tree refresh while agent is processing
+  useEffect(() => {
+    if (!isProcessing) return
+
+    const triggerRefresh = useFileChangeStore.getState().triggerRefresh
+    const REFRESH_INTERVAL = 2000 // Refresh every 2 seconds while processing
+
+    console.log('[FileChange] Starting periodic refresh (agent processing)')
+    const intervalId = setInterval(() => {
+      console.log('[FileChange] Periodic refresh triggered')
+      triggerRefresh()
+    }, REFRESH_INTERVAL)
+
+    return () => {
+      console.log('[FileChange] Stopping periodic refresh')
+      clearInterval(intervalId)
+    }
+  }, [isProcessing])
+
   // Load sessions on mount
   useEffect(() => {
     loadSessions()
@@ -86,11 +106,45 @@ export function useApp(): AppState & AppActions {
 
   // Subscribe to agent events
   useEffect(() => {
+    // Get triggerRefresh from store for file change detection
+    const triggerRefresh = useFileChangeStore.getState().triggerRefresh
+
+    // Tool kinds that modify files (case-insensitive)
+    const FILE_MODIFYING_TOOLS = new Set(['write', 'edit', 'notebookedit', 'bash'])
+
     const unsubMessage = window.electronAPI.onAgentMessage((message) => {
       // Only process messages for the current session
       // message.sessionId is ACP Agent Session ID, compare with currentAgentSessionId
       if (!currentAgentSessionId || message.sessionId !== currentAgentSessionId) {
         return
+      }
+
+      // Check for file-modifying tool completion to trigger FileTree refresh
+      const update = message.update
+      const kind = update?.kind?.toLowerCase() || ''
+      const status = update?.status?.toLowerCase() || ''
+
+      // Debug logging for tool updates
+      if (update?.sessionUpdate === 'tool_call_update' || update?.sessionUpdate === 'tool_call') {
+        console.log('[FileChange] Tool event:', {
+          sessionUpdate: update.sessionUpdate,
+          kind,
+          status,
+          title: update?.title,
+          rawUpdate: update
+        })
+      }
+
+      // Trigger refresh when a file-modifying tool completes
+      // More lenient: trigger on any status that isn't "running" or "pending" or "in_progress"
+      const isCompleted = status && !['running', 'pending', 'in_progress', ''].includes(status)
+      if (
+        update?.sessionUpdate === 'tool_call_update' &&
+        FILE_MODIFYING_TOOLS.has(kind) &&
+        isCompleted
+      ) {
+        console.log('[FileChange] Triggering refresh for:', { kind, status })
+        triggerRefresh()
       }
 
       // Pass through original update without any accumulation

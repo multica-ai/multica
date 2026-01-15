@@ -2,7 +2,7 @@
  * FileTree component for displaying directory structure
  * With lazy loading and context menu support
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronRightIcon,
   FolderIcon,
@@ -28,6 +28,7 @@ import {
   GitIcon,
 } from './FileIcons'
 import type { FileTreeNode, DetectedApp } from '../../../shared/electron-api'
+import { useFileChangeStore } from '../stores/fileChangeStore'
 
 interface FileTreeProps {
   rootPath: string
@@ -277,12 +278,19 @@ function TreeItem({
   )
 }
 
+// Filter out hidden files (starting with .)
+const filterHidden = (nodes: FileTreeNode[]) => nodes.filter((n) => !n.name.startsWith('.'))
+
 export function FileTree({ rootPath }: FileTreeProps) {
   const [rootChildren, setRootChildren] = useState<FileTreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Map<string, FileTreeNode[]>>(new Map())
   const [availableApps, setAvailableApps] = useState<DetectedApp[]>([])
   const [isLoading, setIsLoading] = useState(true)
+
+  // Subscribe to file change events for auto-refresh
+  const refreshCounter = useFileChangeStore((s) => s.refreshCounter)
+  const isInitialMount = useRef(true)
 
   // Load root directory and detect apps on mount
   useEffect(() => {
@@ -293,7 +301,7 @@ export function FileTree({ rootPath }: FileTreeProps) {
           window.electronAPI.listDirectory(rootPath),
           window.electronAPI.detectApps(),
         ])
-        setRootChildren(children)
+        setRootChildren(filterHidden(children))
         setAvailableApps(apps)
       } catch (error) {
         console.error('Failed to load file tree:', error)
@@ -302,6 +310,59 @@ export function FileTree({ rootPath }: FileTreeProps) {
     }
     init()
   }, [rootPath])
+
+  // Keep a ref to expandedPaths for use in refresh effect without triggering it
+  const expandedPathsRef = useRef(expandedPaths)
+  expandedPathsRef.current = expandedPaths
+
+  // Refresh file tree when files change (from agent tool calls)
+  useEffect(() => {
+    // Skip on initial mount (already loaded above)
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
+
+    console.log('[FileTree] Refresh triggered, counter:', refreshCounter)
+
+    // Refresh: clear cache and re-fetch root + expanded directories
+    async function refresh() {
+      try {
+        // Re-fetch root directory
+        console.log('[FileTree] Fetching root directory:', rootPath)
+        const children = await window.electronAPI.listDirectory(rootPath)
+        const filtered = filterHidden(children)
+        console.log('[FileTree] Root directory result:', filtered.length, 'items', filtered.map(c => c.name))
+        setRootChildren(filtered)
+
+        // Re-fetch all expanded directories to update them
+        const currentExpanded = Array.from(expandedPathsRef.current)
+        if (currentExpanded.length > 0) {
+          console.log('[FileTree] Refreshing expanded dirs:', currentExpanded)
+          const newCache = new Map<string, FileTreeNode[]>()
+          const results = await Promise.all(
+            currentExpanded.map(async (path) => {
+              try {
+                const dirChildren = await window.electronAPI.listDirectory(path)
+                return { path, children: filterHidden(dirChildren) }
+              } catch {
+                // Directory may no longer exist
+                return { path, children: [] }
+              }
+            })
+          )
+          for (const { path, children: dirChildren } of results) {
+            newCache.set(path, dirChildren)
+          }
+          setChildrenCache(newCache)
+        }
+      } catch (error) {
+        console.error('[FileTree] Failed to refresh file tree:', error)
+      }
+    }
+
+    refresh()
+  }, [refreshCounter, rootPath])
 
   const handleToggle = useCallback((path: string) => {
     setExpandedPaths((prev) => {
@@ -318,10 +379,11 @@ export function FileTree({ rootPath }: FileTreeProps) {
   const loadChildren = useCallback(async (path: string) => {
     // Fetch children first, then check cache in the setter to avoid stale closure
     const children = await window.electronAPI.listDirectory(path)
+    const filtered = filterHidden(children)
     setChildrenCache((prev) => {
       // Skip if already cached (handles race conditions)
       if (prev.has(path)) return prev
-      return new Map(prev).set(path, children)
+      return new Map(prev).set(path, filtered)
     })
   }, [])
 
