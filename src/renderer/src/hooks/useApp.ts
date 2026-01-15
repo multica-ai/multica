@@ -138,9 +138,11 @@ export function useApp(): AppState & AppActions {
 
       // Pass through original update without any accumulation
       // ChatView is responsible for accumulating chunks into complete messages
+      // Include sequence number for proper ordering of concurrent updates
       setSessionUpdates((prev) => {
         const newUpdate = {
           timestamp: new Date().toISOString(),
+          sequenceNumber: message.sequenceNumber,
           update: {
             sessionId: message.sessionId,
             update: message.update

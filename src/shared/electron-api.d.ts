@@ -12,6 +12,7 @@ import type { MessageContent } from './types/message'
 
 export interface AgentMessage {
   sessionId: string
+  sequenceNumber?: number // Monotonically increasing for ordering concurrent updates
   update: {
     sessionUpdate: string
     content?: { type: string; text: string }
