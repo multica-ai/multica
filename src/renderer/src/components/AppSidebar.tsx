@@ -184,7 +184,7 @@ export function AppSidebar({
         {/* New task button */}
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2"
+          className="w-full justify-start gap-2 hover:bg-sidebar-accent"
           onClick={onNewSession}
         >
           <Plus className="h-4 w-4 text-primary" />
