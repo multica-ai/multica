@@ -9,7 +9,7 @@ export function CompletedAnswer({
   selectedOption,
   selectedOptions,
   customText,
-  firstQuestionHeader,
+  firstQuestionHeader
 }: CompletedAnswerProps) {
   // Multi-question: simply show "Answered"
   if (answers && answers.length > 1) {

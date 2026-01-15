@@ -30,7 +30,7 @@ export class AgentProcess {
     const t1 = Date.now()
     this.process = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'inherit'], // stdin, stdout piped; stderr inherited
-      env: { ...process.env, ...env, PATH: getEnhancedPath() },
+      env: { ...process.env, ...env, PATH: getEnhancedPath() }
     })
     console.log(`[AgentProcess] [TIMING] spawn() took ${Date.now() - t1}ms`)
 

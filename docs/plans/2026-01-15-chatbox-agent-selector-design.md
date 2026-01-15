@@ -64,12 +64,12 @@ Add to MessageInput.tsx in the bottom toolbar, positioned left of folder indicat
 
 ## Edge Cases
 
-| Scenario | Behavior |
-|----------|----------|
-| No session active | Changes default agent for next session |
-| Agent switch fails | Error toast, revert to previous agent |
-| All agents unavailable | Disabled selector with tooltip |
-| Loading agents | Show spinner instead of chevron |
+| Scenario               | Behavior                               |
+| ---------------------- | -------------------------------------- |
+| No session active      | Changes default agent for next session |
+| Agent switch fails     | Error toast, revert to previous agent  |
+| All agents unavailable | Disabled selector with tooltip         |
+| Loading agents         | Show spinner instead of chevron        |
 
 ## Files to Modify
 

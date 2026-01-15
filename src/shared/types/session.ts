@@ -32,7 +32,7 @@ export interface MulticaSession {
  * Compatible with PermissionResponseData from electron-api
  */
 export interface AskUserQuestionResponseData {
-  optionId?: string  // Optional: permission optionId (not always needed for display)
+  optionId?: string // Optional: permission optionId (not always needed for display)
   selectedOption?: string
   selectedOptions?: string[]
   customText?: string

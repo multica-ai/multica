@@ -16,7 +16,11 @@ const OTHER_PATTERNS = ['other', '其他', '另外']
 const isOtherOption = (label: string): boolean =>
   OTHER_PATTERNS.some((pattern) => label.toLowerCase().includes(pattern))
 
-export function AskUserQuestionUI({ request, questions, currentQuestionIndex }: AskUserQuestionUIProps) {
+export function AskUserQuestionUI({
+  request,
+  questions,
+  currentQuestionIndex
+}: AskUserQuestionUIProps) {
   const respondToRequest = usePermissionStore((s) => s.respondToRequest)
   const answerCurrentQuestion = usePermissionStore((s) => s.answerCurrentQuestion)
   const [customInput, setCustomInput] = useState('')
@@ -68,9 +72,7 @@ export function AskUserQuestionUI({ request, questions, currentQuestionIndex }: 
 
     // If "Other" is selected and has custom input, replace "Other" with custom text
     if (hasOtherSelected && customInput.trim()) {
-      finalOptions = finalOptions.map((opt) =>
-        isOtherOption(opt) ? customInput.trim() : opt
-      )
+      finalOptions = finalOptions.map((opt) => (isOtherOption(opt) ? customInput.trim() : opt))
     }
     // If custom input is filled but "Other" is not selected, add custom input as an option
     else if (customInput.trim() && !hasOtherSelected) {
@@ -140,24 +142,25 @@ export function AskUserQuestionUI({ request, questions, currentQuestionIndex }: 
       />
 
       {/* Submit button for multi-select (after custom input) */}
-      {isMultiSelect && (() => {
-        const hasCustom = customInput.trim().length > 0
-        const totalCount = selectedOptions.length + (hasCustom && !hasOtherSelected ? 1 : 0)
-        const canSubmit = totalCount > 0 && !(hasOtherSelected && !hasCustom)
+      {isMultiSelect &&
+        (() => {
+          const hasCustom = customInput.trim().length > 0
+          const totalCount = selectedOptions.length + (hasCustom && !hasOtherSelected ? 1 : 0)
+          const canSubmit = totalCount > 0 && !(hasOtherSelected && !hasCustom)
 
-        return (
-          <Button
-            size="sm"
-            onClick={handleMultiSelectSubmit}
-            disabled={!canSubmit}
-            className="w-full"
-          >
-            {hasOtherSelected && !hasCustom
-              ? 'Please enter custom text above'
-              : `Submit (${totalCount} selected)`}
-          </Button>
-        )
-      })()}
+          return (
+            <Button
+              size="sm"
+              onClick={handleMultiSelectSubmit}
+              disabled={!canSubmit}
+              className="w-full"
+            >
+              {hasOtherSelected && !hasCustom
+                ? 'Please enter custom text above'
+                : `Submit (${totalCount} selected)`}
+            </Button>
+          )
+        })()}
     </div>
   )
 }

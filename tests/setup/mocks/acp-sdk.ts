@@ -2,11 +2,11 @@ import { vi } from 'vitest'
 
 export const createMockAcpClient = () => ({
   createSession: vi.fn().mockResolvedValue({
-    sessionId: 'mock-session-id',
+    sessionId: 'mock-session-id'
   }),
   sendMessage: vi.fn().mockResolvedValue(undefined),
   cancelSession: vi.fn().mockResolvedValue(undefined),
-  close: vi.fn().mockResolvedValue(undefined),
+  close: vi.fn().mockResolvedValue(undefined)
 })
 
 export const createMockSessionNotification = (
@@ -16,6 +16,6 @@ export const createMockSessionNotification = (
   sessionId: 'mock-session-id',
   update: {
     sessionUpdate: type,
-    ...data,
-  },
+    ...data
+  }
 })

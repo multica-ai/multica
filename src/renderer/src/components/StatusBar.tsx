@@ -15,7 +15,7 @@ interface StatusBarProps {
 export function StatusBar({
   runningSessionsCount,
   currentSession,
-  isCurrentSessionRunning,
+  isCurrentSessionRunning
 }: StatusBarProps) {
   const { state, isMobile } = useSidebar()
 
@@ -23,10 +23,12 @@ export function StatusBar({
   const needsTrafficLightPadding = state === 'collapsed' || isMobile
 
   return (
-    <div className={cn(
-      "titlebar-drag-region flex h-11 items-center justify-between px-4",
-      needsTrafficLightPadding && "pl-24"
-    )}>
+    <div
+      className={cn(
+        'titlebar-drag-region flex h-11 items-center justify-between px-4',
+        needsTrafficLightPadding && 'pl-24'
+      )}
+    >
       {/* Left: Sidebar trigger + Session info */}
       <div className="titlebar-no-drag flex items-center gap-3">
         <SidebarTrigger className="-ml-1" />
@@ -35,9 +37,7 @@ export function StatusBar({
             <span className="text-sm font-medium">
               {currentSession.title || currentSession.workingDirectory.split('/').pop()}
             </span>
-            <span className="text-xs text-muted-foreground">
-              {currentSession.workingDirectory}
-            </span>
+            <span className="text-xs text-muted-foreground">{currentSession.workingDirectory}</span>
           </>
         ) : (
           <span className="text-sm text-muted-foreground">No session selected</span>

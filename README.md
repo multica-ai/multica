@@ -17,16 +17,19 @@ The name is inspired by [Multics](https://en.wikipedia.org/wiki/Multics) (Multip
 Coding agents (like Claude Code, Codex, Gemini CLI) have become incredibly powerful in 2025, capable of solving complex tasks far beyond just writing code. However, 95% of knowledge workers are locked out of these capabilities due to three core barriers:
 
 **1. Interaction Mismatch**
+
 - CLI-based tools require understanding of terminal concepts, file paths, and environment variables
 - Current tools focus on code output (diffs, commits, linting) rather than business outcomes
 - Knowledge workers care about results (charts, reports, analysis), not the scripts that generate them
 
 **2. Local Environment Challenges**
+
 - Web-based agents can't access local files, folders, or native applications
 - Setting up Python, Node.js, or other dependencies is a significant barrier
 - Missing the "just works" sandbox environment that handles all dependencies
 
 **3. Privacy & Trust**
+
 - Sensitive business data (financial analysis, legal documents, medical records) can't be uploaded to third-party servers
 - Need a model where data stays local while intelligence comes from the cloud
 
@@ -42,11 +45,11 @@ Multica bridges this gap by providing a visual, native desktop interface that le
 
 ## Supported Agents
 
-| Agent | Command | Install |
-|-------|---------|---------|
-| [OpenCode](https://github.com/opencode-ai/opencode) | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp` | `npm install -g codex-acp` |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` | `npm install -g @google/gemini-cli` |
+| Agent                                                          | Command        | Install                                             |
+| -------------------------------------------------------------- | -------------- | --------------------------------------------------- |
+| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`    | `npm install -g codex-acp`                          |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli)      | `gemini acp`   | `npm install -g @google/gemini-cli`                 |
 
 ## Quick Start
 
@@ -84,20 +87,20 @@ pnpm cli
 
 Available commands:
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show help |
-| `/new [cwd]` | Create new session (default: current directory) |
-| `/sessions` | List all sessions |
-| `/resume <id>` | Resume session by ID prefix |
-| `/delete <id>` | Delete a session |
-| `/history` | Show current session message history |
-| `/agent <name>` | Switch to a different agent |
-| `/agents` | List available agents |
-| `/doctor` | Check agent installations |
-| `/status` | Show current status |
-| `/cancel` | Cancel current request |
-| `/quit` | Exit CLI |
+| Command         | Description                                     |
+| --------------- | ----------------------------------------------- |
+| `/help`         | Show help                                       |
+| `/new [cwd]`    | Create new session (default: current directory) |
+| `/sessions`     | List all sessions                               |
+| `/resume <id>`  | Resume session by ID prefix                     |
+| `/delete <id>`  | Delete a session                                |
+| `/history`      | Show current session message history            |
+| `/agent <name>` | Switch to a different agent                     |
+| `/agents`       | List available agents                           |
+| `/doctor`       | Check agent installations                       |
+| `/status`       | Show current status                             |
+| `/cancel`       | Cancel current request                          |
+| `/quit`         | Exit CLI                                        |
 
 ### One-Shot Prompt
 
@@ -110,11 +113,11 @@ pnpm cli prompt "List files" --cwd=/tmp
 
 ### Options
 
-| Option | Description |
-|--------|-------------|
-| `--cwd=PATH` | Working directory for the agent |
-| `--log` | Save session log to `logs/` directory |
-| `--log=PATH` | Save session log to specified file |
+| Option       | Description                           |
+| ------------ | ------------------------------------- |
+| `--cwd=PATH` | Working directory for the agent       |
+| `--log`      | Save session log to `logs/` directory |
+| `--log=PATH` | Save session log to specified file    |
 
 ## Development
 
@@ -169,6 +172,7 @@ Multica maintains its own session layer on top of ACP:
 ```
 
 **Key design decisions:**
+
 - **Client-side storage**: Multica stores raw `session/update` data for UI display
 - **Agent-agnostic**: Each agent manages its own internal state separately
 - **Resume behavior**: Creates new ACP session, displays stored history in UI

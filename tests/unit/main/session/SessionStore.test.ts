@@ -39,7 +39,7 @@ describe('SessionStore', () => {
       const session = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test/project',
+        workingDirectory: '/test/project'
       })
 
       expect(session).toMatchObject({
@@ -48,7 +48,7 @@ describe('SessionStore', () => {
         agentId: 'opencode',
         workingDirectory: '/test/project',
         status: 'active',
-        messageCount: 0,
+        messageCount: 0
       })
       expect(session.createdAt).toBeDefined()
       expect(session.updatedAt).toBeDefined()
@@ -58,7 +58,7 @@ describe('SessionStore', () => {
       const session = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test/project',
+        workingDirectory: '/test/project'
       })
 
       // Check index file exists
@@ -74,12 +74,12 @@ describe('SessionStore', () => {
       const session1 = await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
       const session2 = await store.create({
         agentSessionId: 'agent-2',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       expect(session1.id).not.toBe(session2.id)
@@ -92,7 +92,7 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       // Small delay to ensure different timestamps
@@ -102,7 +102,7 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-2',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       const sessions = await store.list()
@@ -116,12 +116,12 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
       await store.create({
         agentSessionId: 'agent-2',
         agentId: 'gemini',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       const sessions = await store.list({ agentId: 'opencode' })
@@ -133,12 +133,12 @@ describe('SessionStore', () => {
       const session1 = await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
       await store.create({
         agentSessionId: 'agent-2',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       await store.updateMeta(session1.id, { status: 'completed' })
@@ -155,7 +155,7 @@ describe('SessionStore', () => {
         await store.create({
           agentSessionId: `agent-${i}`,
           agentId: 'opencode',
-          workingDirectory: '/test',
+          workingDirectory: '/test'
         })
       }
 
@@ -175,7 +175,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       const sessionData = await store.get(created.id)
@@ -193,7 +193,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       // First get loads from disk
@@ -210,12 +210,12 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       const updated = await store.updateMeta(created.id, {
         title: 'My Session',
-        status: 'completed',
+        status: 'completed'
       })
 
       expect(updated.title).toBe('My Session')
@@ -226,9 +226,9 @@ describe('SessionStore', () => {
     })
 
     it('should throw for non-existent session', async () => {
-      await expect(
-        store.updateMeta('non-existent', { title: 'Test' })
-      ).rejects.toThrow('Session not found')
+      await expect(store.updateMeta('non-existent', { title: 'Test' })).rejects.toThrow(
+        'Session not found'
+      )
     })
   })
 
@@ -237,7 +237,7 @@ describe('SessionStore', () => {
       const session = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       const dataPath = join(tempDir, 'data', `${session.id}.json`)
@@ -259,7 +259,7 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
 
       const found = store.getByAgentSessionId('agent-123')
@@ -279,7 +279,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test',
+        workingDirectory: '/test'
       })
       await store.updateMeta(created.id, { title: 'Persistent Session' })
 

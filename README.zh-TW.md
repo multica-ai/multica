@@ -17,16 +17,19 @@
 程式智能體（如 Claude Code、Codex、Gemini CLI）在 2025 年變得極其強大，其能力已經遠遠超出了單純的程式碼編寫。然而，95% 的知識工作者因為三個核心障礙而無法使用這些能力：
 
 **1. 互動形態的錯配**
+
 - 基於命令列的工具需要理解終端機概念、檔案路徑和環境變數
 - 現有工具聚焦於程式碼輸出（差異比對、提交、程式碼檢查），而非業務成果
 - 知識工作者關心的是結果（圖表、報告、分析），而不是產生這些結果的腳本
 
 **2. 本機環境的挑戰**
+
 - 基於網頁的智能體無法存取本機檔案、資料夾或原生應用程式
 - 設定 Python、Node.js 或其他相依套件是一個巨大的障礙
 - 缺少一個「開箱即用」、處理好所有相依套件的沙盒環境
 
 **3. 隱私與信任**
+
 - 敏感的業務資料（財務分析、法律文件、醫療紀錄）不能上傳到第三方伺服器
 - 需要一種資料留在本機、智能來自雲端的模式
 
@@ -42,11 +45,11 @@ Multica 透過提供視覺化的原生桌面介面來彌合這一鴻溝，在保
 
 ## 支援的智能體
 
-| 智能體 | 命令 | 安裝方式 |
-|-------|---------|---------|
-| [OpenCode](https://github.com/opencode-ai/opencode) | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp` | `npm install -g codex-acp` |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` | `npm install -g @google/gemini-cli` |
+| 智能體                                                         | 命令           | 安裝方式                                            |
+| -------------------------------------------------------------- | -------------- | --------------------------------------------------- |
+| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`    | `npm install -g codex-acp`                          |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli)      | `gemini acp`   | `npm install -g @google/gemini-cli`                 |
 
 ## 快速開始
 
@@ -84,20 +87,20 @@ pnpm cli
 
 可用命令：
 
-| 命令 | 描述 |
-|---------|-------------|
-| `/help` | 顯示說明 |
-| `/new [cwd]` | 建立新工作階段（預設：目前目錄） |
-| `/sessions` | 列出所有工作階段 |
-| `/resume <id>` | 透過 ID 前綴恢復工作階段 |
-| `/delete <id>` | 刪除工作階段 |
-| `/history` | 顯示目前工作階段的訊息歷史 |
-| `/agent <name>` | 切換到其他智能體 |
-| `/agents` | 列出可用智能體 |
-| `/doctor` | 檢查智能體安裝狀態 |
-| `/status` | 顯示目前狀態 |
-| `/cancel` | 取消目前請求 |
-| `/quit` | 退出 CLI |
+| 命令            | 描述                             |
+| --------------- | -------------------------------- |
+| `/help`         | 顯示說明                         |
+| `/new [cwd]`    | 建立新工作階段（預設：目前目錄） |
+| `/sessions`     | 列出所有工作階段                 |
+| `/resume <id>`  | 透過 ID 前綴恢復工作階段         |
+| `/delete <id>`  | 刪除工作階段                     |
+| `/history`      | 顯示目前工作階段的訊息歷史       |
+| `/agent <name>` | 切換到其他智能體                 |
+| `/agents`       | 列出可用智能體                   |
+| `/doctor`       | 檢查智能體安裝狀態               |
+| `/status`       | 顯示目前狀態                     |
+| `/cancel`       | 取消目前請求                     |
+| `/quit`         | 退出 CLI                         |
 
 ### 單次提問
 
@@ -110,11 +113,11 @@ pnpm cli prompt "列出檔案" --cwd=/tmp
 
 ### 選項
 
-| 選項 | 描述 |
-|--------|-------------|
-| `--cwd=PATH` | 智能體的工作目錄 |
-| `--log` | 將工作階段日誌儲存到 `logs/` 目錄 |
-| `--log=PATH` | 將工作階段日誌儲存到指定檔案 |
+| 選項         | 描述                              |
+| ------------ | --------------------------------- |
+| `--cwd=PATH` | 智能體的工作目錄                  |
+| `--log`      | 將工作階段日誌儲存到 `logs/` 目錄 |
+| `--log=PATH` | 將工作階段日誌儲存到指定檔案      |
 
 ## 開發
 
@@ -169,6 +172,7 @@ Multica 在 ACP 之上維護自己的工作階段層：
 ```
 
 **關鍵設計決策：**
+
 - **客戶端儲存**：Multica 儲存原始的 `session/update` 資料用於 UI 展示
 - **智能體無關**：每個智能體獨立管理自己的內部狀態
 - **恢復行為**：建立新的 ACP 工作階段，在 UI 中顯示儲存的歷史紀錄

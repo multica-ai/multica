@@ -11,12 +11,19 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/main/**', 'src/shared/**'],
       exclude: ['src/renderer/**', 'src/preload/**'],
-    },
+      // Coverage thresholds - starting at 50%, plan to increase over time
+      thresholds: {
+        lines: 50,
+        functions: 50,
+        branches: 50,
+        statements: 50
+      }
+    }
   },
   resolve: {
     alias: {
       '@main': resolve(__dirname, 'src/main'),
-      '@shared': resolve(__dirname, 'src/shared'),
-    },
-  },
+      '@shared': resolve(__dirname, 'src/shared')
+    }
+  }
 })

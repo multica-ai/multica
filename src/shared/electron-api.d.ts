@@ -6,7 +6,7 @@ import type {
   AppConfig,
   MulticaSession,
   SessionData,
-  ListSessionsOptions,
+  ListSessionsOptions
 } from './types'
 import type { MessageContent } from './types/message'
 
@@ -72,15 +72,15 @@ export interface PermissionRequest {
 
 // Answer for a single question (used in multi-question AskUserQuestion)
 export interface QuestionAnswer {
-  question: string     // The question text
-  answer: string       // User's answer
-  isCustom?: boolean   // Whether this was a custom text input
+  question: string // The question text
+  answer: string // User's answer
+  isCustom?: boolean // Whether this was a custom text input
 }
 
 export interface PermissionResponseData {
-  selectedOption?: string    // User's selected option label (single select)
+  selectedOption?: string // User's selected option label (single select)
   selectedOptions?: string[] // User's selected option labels (multi-select)
-  customText?: string        // User's custom free-form input
+  customText?: string // User's custom free-form input
   // Multi-question support: array of all question-answer pairs
   answers?: QuestionAnswer[]
 }
@@ -88,7 +88,7 @@ export interface PermissionResponseData {
 export interface PermissionResponse {
   requestId: string
   optionId: string
-  data?: PermissionResponseData  // Additional data for AskUserQuestion
+  data?: PermissionResponseData // Additional data for AskUserQuestion
 }
 
 // File tree types

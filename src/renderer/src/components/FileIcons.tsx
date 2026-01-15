@@ -12,14 +12,8 @@ export function TypeScriptIcon({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
-      <path
-        d="M4.5 8.5H7V9.5H5.5V12.5H4.5V8.5Z"
-        fill="currentColor"
-      />
-      <path
-        d="M7.5 9.5V8.5H11V9.5H9.75V12.5H8.75V9.5H7.5Z"
-        fill="currentColor"
-      />
+      <path d="M4.5 8.5H7V9.5H5.5V12.5H4.5V8.5Z" fill="currentColor" />
+      <path d="M7.5 9.5V8.5H11V9.5H9.75V12.5H8.75V9.5H7.5Z" fill="currentColor" />
     </svg>
   )
 }
@@ -75,14 +69,8 @@ export function MarkdownIcon({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
-      <path
-        d="M3 5V11H4.5V8L6 10L7.5 8V11H9V5H7.5L6 7.5L4.5 5H3Z"
-        fill="currentColor"
-      />
-      <path
-        d="M11 8V5H12.5V8L14 6.5V8.5L12.5 10L11 8.5V10H9.5L11 8Z"
-        fill="currentColor"
-      />
+      <path d="M3 5V11H4.5V8L6 10L7.5 8V11H9V5H7.5L6 7.5L4.5 5H3Z" fill="currentColor" />
+      <path d="M11 8V5H12.5V8L14 6.5V8.5L12.5 10L11 8.5V10H9.5L11 8Z" fill="currentColor" />
     </svg>
   )
 }
@@ -126,7 +114,12 @@ export function GitIcon({ className }: IconProps) {
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
       <circle cx="8" cy="8" r="2" fill="currentColor" />
-      <path d="M8 4V6M8 10V12M4 8H6M10 8H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M8 4V6M8 10V12M4 8H6M10 8H12"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
     </svg>
   )
 }
@@ -187,12 +180,10 @@ export function isConfigFile(name: string): boolean {
     'jest.config',
     'vitest.config',
     'tailwind.config',
-    'postcss.config',
+    'postcss.config'
   ]
   const lowerName = name.toLowerCase()
-  return configPatterns.some(
-    (pattern) => lowerName === pattern || lowerName.startsWith(pattern)
-  )
+  return configPatterns.some((pattern) => lowerName === pattern || lowerName.startsWith(pattern))
 }
 
 // Check if file is git-related

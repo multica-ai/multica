@@ -1,113 +1,100 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { commandExists, checkAgents } from '../../../../src/main/utils/agent-check'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock child_process
+// Mock child_process with exec
 vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
+  exec: vi.fn()
 }))
 
 // Mock os module
 vi.mock('node:os', () => ({
-  platform: vi.fn().mockReturnValue('darwin'),
+  platform: vi.fn().mockReturnValue('darwin')
 }))
 
-import { execSync } from 'node:child_process'
-import { platform } from 'node:os'
+// Mock path module
+vi.mock('../../../../src/main/utils/path', () => ({
+  getEnhancedPath: vi.fn().mockReturnValue('/usr/local/bin:/usr/bin:/bin')
+}))
 
-const mockExecSync = vi.mocked(execSync)
+import { exec } from 'node:child_process'
+import { platform } from 'node:os'
+import { commandExists, checkAgents } from '../../../../src/main/utils/agent-check'
+
+const mockExec = vi.mocked(exec)
 const mockPlatform = vi.mocked(platform)
+
+// Helper to create a mock exec implementation
+function mockExecSuccess(stdout: string): void {
+  mockExec.mockImplementation((_cmd, _opts, callback) => {
+    if (typeof _opts === 'function') {
+      callback = _opts
+    }
+    if (callback) {
+      callback(null, { stdout, stderr: '' } as never)
+    }
+    return {} as ReturnType<typeof exec>
+  })
+}
+
+function mockExecFailure(error: Error): void {
+  mockExec.mockImplementation((_cmd, _opts, callback) => {
+    if (typeof _opts === 'function') {
+      callback = _opts
+    }
+    if (callback) {
+      callback(error, { stdout: '', stderr: '' } as never)
+    }
+    return {} as ReturnType<typeof exec>
+  })
+}
 
 describe('agent-check', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPlatform.mockReturnValue('darwin')
   })
 
   describe('commandExists', () => {
-    it('should return exists: true when command is found', () => {
-      mockExecSync
-        .mockReturnValueOnce('/usr/local/bin/node\n') // which command
-        .mockReturnValueOnce('v18.0.0\n') // --version command
+    it('should return exists: true when command is found', async () => {
+      mockExecSuccess('/usr/local/bin/node\n')
 
-      const result = commandExists('node')
+      const result = await commandExists('node')
 
       expect(result).toEqual({
         exists: true,
-        path: '/usr/local/bin/node',
-        version: 'v18.0.0',
+        path: '/usr/local/bin/node'
       })
     })
 
-    it('should return exists: false when command is not found', () => {
-      mockExecSync.mockImplementation(() => {
-        throw new Error('Command not found')
-      })
+    it('should return exists: false when command is not found', async () => {
+      mockExecFailure(new Error('Command not found'))
 
-      const result = commandExists('nonexistent')
+      const result = await commandExists('nonexistent')
 
       expect(result).toEqual({ exists: false })
     })
 
-    it('should handle missing version gracefully', () => {
-      mockExecSync
-        .mockReturnValueOnce('/usr/local/bin/myapp\n') // which command
-        .mockImplementationOnce(() => {
-          throw new Error('--version not supported')
-        })
-
-      const result = commandExists('myapp')
-
-      expect(result).toEqual({
-        exists: true,
-        path: '/usr/local/bin/myapp',
-        version: undefined,
-      })
-    })
-
-    it('should use "where" command on Windows', () => {
+    it('should use "where" command on Windows', async () => {
       mockPlatform.mockReturnValue('win32')
-      mockExecSync
-        .mockReturnValueOnce('C:\\Program Files\\node\\node.exe\n')
-        .mockReturnValueOnce('v18.0.0\n')
+      mockExecSuccess('C:\\Program Files\\node\\node.exe\n')
 
-      commandExists('node')
+      await commandExists('node')
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'where node',
-        expect.any(Object)
-      )
+      expect(mockExec).toHaveBeenCalledWith('where node', expect.any(Object), expect.any(Function))
     })
 
-    it('should use "which" command on Unix-like systems', () => {
+    it('should use "which" command on Unix-like systems', async () => {
       mockPlatform.mockReturnValue('darwin')
-      mockExecSync
-        .mockReturnValueOnce('/usr/local/bin/node\n')
-        .mockReturnValueOnce('v18.0.0\n')
+      mockExecSuccess('/usr/local/bin/node\n')
 
-      commandExists('node')
+      await commandExists('node')
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'which node',
-        expect.any(Object)
-      )
+      expect(mockExec).toHaveBeenCalledWith('which node', expect.any(Object), expect.any(Function))
     })
 
-    it('should truncate long version strings', () => {
-      const longVersion = 'v'.padEnd(100, '1')
-      mockExecSync
-        .mockReturnValueOnce('/usr/local/bin/node\n')
-        .mockReturnValueOnce(longVersion + '\n')
+    it('should handle multiline which output', async () => {
+      mockExecSuccess('/usr/local/bin/node\n/usr/bin/node\n')
 
-      const result = commandExists('node')
-
-      expect(result.version?.length).toBeLessThanOrEqual(50)
-    })
-
-    it('should handle multiline which output', () => {
-      mockExecSync
-        .mockReturnValueOnce('/usr/local/bin/node\n/usr/bin/node\n')
-        .mockReturnValueOnce('v18.0.0\n')
-
-      const result = commandExists('node')
+      const result = await commandExists('node')
 
       // Should return first path
       expect(result.path).toBe('/usr/local/bin/node')
@@ -115,50 +102,48 @@ describe('agent-check', () => {
   })
 
   describe('checkAgents', () => {
-    it('should check all default agents', () => {
+    it('should check all default agents', async () => {
       // Mock all commands as not found for simplicity
-      mockExecSync.mockImplementation(() => {
-        throw new Error('Command not found')
-      })
+      mockExecFailure(new Error('Command not found'))
 
-      const results = checkAgents()
+      const results = await checkAgents()
 
       // Should have entries for each configured agent
       expect(results.length).toBeGreaterThan(0)
       expect(results.every((r) => r.id && r.name && r.command)).toBe(true)
     })
 
-    it('should mark installed agents correctly', () => {
-      mockExecSync
-        // First agent check (claude-code)
-        .mockReturnValueOnce('/usr/local/bin/claude-code\n')
-        .mockReturnValueOnce('1.0.0\n')
-        // Second agent check - not found
-        .mockImplementationOnce(() => {
-          throw new Error('not found')
-        })
-        // Third agent check - not found
-        .mockImplementationOnce(() => {
-          throw new Error('not found')
-        })
-        // Fourth agent check - not found
-        .mockImplementationOnce(() => {
-          throw new Error('not found')
-        })
-
-      const results = checkAgents()
-
-      // At least one should be installed
-      const installedAgents = results.filter((r) => r.installed)
-      expect(installedAgents.length).toBeGreaterThanOrEqual(1)
-    })
-
-    it('should include install hints', () => {
-      mockExecSync.mockImplementation(() => {
-        throw new Error('Command not found')
+    it('should mark installed agents correctly', async () => {
+      // Mock 'opencode' command as found, rest as not found
+      mockExec.mockImplementation((cmd, _opts, callback) => {
+        if (typeof _opts === 'function') {
+          callback = _opts
+        }
+        // Check if this is looking for 'opencode'
+        const cmdStr = String(cmd)
+        if (cmdStr.includes('opencode')) {
+          if (callback) {
+            callback(null, { stdout: '/usr/local/bin/opencode\n', stderr: '' } as never)
+          }
+        } else {
+          if (callback) {
+            callback(new Error('not found'), { stdout: '', stderr: '' } as never)
+          }
+        }
+        return {} as ReturnType<typeof exec>
       })
 
-      const results = checkAgents()
+      const results = await checkAgents()
+
+      // The opencode agent should be marked as installed
+      const opencodeAgent = results.find((r) => r.id === 'opencode')
+      expect(opencodeAgent?.installed).toBe(true)
+    })
+
+    it('should include install hints', async () => {
+      mockExecFailure(new Error('Command not found'))
+
+      const results = await checkAgents()
 
       // Check that at least some have install hints
       const withHints = results.filter((r) => r.installHint)

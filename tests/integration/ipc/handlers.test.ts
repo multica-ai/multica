@@ -8,17 +8,17 @@ import { join } from 'path'
 // Mock electron modules
 vi.mock('electron', () => ({
   ipcMain: {
-    handle: vi.fn(),
+    handle: vi.fn()
   },
   dialog: {
-    showOpenDialog: vi.fn(),
+    showOpenDialog: vi.fn()
   },
   clipboard: {
-    writeText: vi.fn(),
+    writeText: vi.fn()
   },
   shell: {
-    showItemInFolder: vi.fn(),
-  },
+    showItemInFolder: vi.fn()
+  }
 }))
 
 // Mock child_process spawn
@@ -28,15 +28,13 @@ vi.mock('child_process', () => ({
       if (event === 'close') {
         callback(0)
       }
-    }),
-  }),
+    })
+  })
 }))
 
 // Mock agent-check
 vi.mock('../../../src/main/utils/agent-check', () => ({
-  checkAgents: vi.fn().mockReturnValue([
-    { id: 'opencode', name: 'OpenCode', installed: true },
-  ]),
+  checkAgents: vi.fn().mockReturnValue([{ id: 'opencode', name: 'OpenCode', installed: true }])
 }))
 
 import { ipcMain, dialog, clipboard, shell } from 'electron'
@@ -55,7 +53,7 @@ const createMockConductor = () => ({
   loadSession: vi.fn().mockResolvedValue({ id: 'loaded-session' }),
   resumeSession: vi.fn().mockResolvedValue({ id: 'resumed-session' }),
   deleteSession: vi.fn().mockResolvedValue(undefined),
-  updateSessionMeta: vi.fn().mockResolvedValue({ id: 'updated-session' }),
+  updateSessionMeta: vi.fn().mockResolvedValue({ id: 'updated-session' })
 })
 
 describe('IPC Handlers', () => {
@@ -105,7 +103,7 @@ describe('IPC Handlers', () => {
         'system:check-agents',
         'fs:list-directory',
         'fs:detect-apps',
-        'fs:open-with',
+        'fs:open-with'
       ]
 
       for (const channel of expectedChannels) {
@@ -136,7 +134,7 @@ describe('IPC Handlers', () => {
       expect(result).toMatchObject({
         runningSessions: 1,
         sessionIds: ['session-1'],
-        processingSessionIds: [],
+        processingSessionIds: []
       })
     })
   })
@@ -178,7 +176,7 @@ describe('IPC Handlers', () => {
 
       expect(result).toMatchObject({
         version: '0.1.0',
-        defaultAgentId: 'opencode',
+        defaultAgentId: 'opencode'
       })
       expect(result.agents).toBeDefined()
     })
@@ -267,7 +265,7 @@ describe('IPC Handlers', () => {
     it('dialog:select-directory should return selected path', async () => {
       vi.mocked(dialog.showOpenDialog).mockResolvedValue({
         canceled: false,
-        filePaths: ['/selected/path'],
+        filePaths: ['/selected/path']
       })
 
       const handler = handlers.get('dialog:select-directory')!
@@ -279,7 +277,7 @@ describe('IPC Handlers', () => {
     it('dialog:select-directory should return null if canceled', async () => {
       vi.mocked(dialog.showOpenDialog).mockResolvedValue({
         canceled: true,
-        filePaths: [],
+        filePaths: []
       })
 
       const handler = handlers.get('dialog:select-directory')!
@@ -294,9 +292,7 @@ describe('IPC Handlers', () => {
       const handler = handlers.get('system:check-agents')!
       const result = await handler({})
 
-      expect(result).toEqual([
-        { id: 'opencode', name: 'OpenCode', installed: true },
-      ])
+      expect(result).toEqual([{ id: 'opencode', name: 'OpenCode', installed: true }])
     })
   })
 })

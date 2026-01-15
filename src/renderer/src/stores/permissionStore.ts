@@ -11,7 +11,12 @@
  * The IPC response is only sent after ALL questions are answered.
  */
 import { create } from 'zustand'
-import type { PermissionRequest, PermissionResponse, PermissionResponseData, QuestionAnswer } from '../../../shared/electron-api'
+import type {
+  PermissionRequest,
+  PermissionResponse,
+  PermissionResponseData,
+  QuestionAnswer
+} from '../../../shared/electron-api'
 
 // AskUserQuestion rawInput structure (for type safety)
 interface QuestionOption {
@@ -35,7 +40,7 @@ export interface RespondedRequest {
   request: PermissionRequest
   response: {
     optionId: string
-    selectedOption?: string    // Single selection
+    selectedOption?: string // Single selection
     selectedOptions?: string[] // Multi-selection
     customText?: string
     answers?: QuestionAnswer[] // Multi-question answers
@@ -99,11 +104,13 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
       return {
         pendingRequests: [...state.pendingRequests, request],
         // Only reset multi-question state when queue was empty
-        ...(isQueueEmpty ? {
-          lastRespondedRequest: null,
-          currentQuestionIndex: 0,
-          collectedAnswers: [],
-        } : {}),
+        ...(isQueueEmpty
+          ? {
+              lastRespondedRequest: null,
+              currentQuestionIndex: 0,
+              collectedAnswers: []
+            }
+          : {})
       }
     })
   },
@@ -124,7 +131,7 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
       selectedOptionsLength: data?.selectedOptions?.length,
       hasAnswers: !!data?.answers,
       answersLength: data?.answers?.length,
-      queueLength: pendingRequests.length,
+      queueLength: pendingRequests.length
     })
 
     // Create responded request object
@@ -136,8 +143,8 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
         selectedOptions: data?.selectedOptions,
         customText: data?.customText,
         answers: data?.answers,
-        timestamp: Date.now(),
-      },
+        timestamp: Date.now()
+      }
     }
 
     // Store the responded request for later reference
@@ -147,7 +154,7 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
     const response: PermissionResponse = {
       requestId: currentRequest.requestId,
       optionId,
-      data,
+      data
     }
 
     // Send response to main process
@@ -160,7 +167,7 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
       respondedRequests: newResponded,
       lastRespondedRequest: respondedRequest,
       currentQuestionIndex: 0,
-      collectedAnswers: [],
+      collectedAnswers: []
     })
   },
 
@@ -187,12 +194,14 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
     const newAnswer: QuestionAnswer = {
       question: currentQuestion.question,
       answer,
-      isCustom,
+      isCustom
     }
     const newAnswers = [...collectedAnswers, newAnswer]
     const nextIndex = currentQuestionIndex + 1
 
-    console.log(`[PermissionStore] answerCurrentQuestion: index=${currentQuestionIndex}, total=${questions.length}, nextIndex=${nextIndex}`)
+    console.log(
+      `[PermissionStore] answerCurrentQuestion: index=${currentQuestionIndex}, total=${questions.length}, nextIndex=${nextIndex}`
+    )
 
     // Check if there are more questions
     if (nextIndex < questions.length) {
@@ -200,27 +209,26 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
       console.log(`[PermissionStore] Advancing to question ${nextIndex + 1} of ${questions.length}`)
       set({
         currentQuestionIndex: nextIndex,
-        collectedAnswers: newAnswers,
+        collectedAnswers: newAnswers
       })
     } else {
       // All questions answered, send the response
       console.log(`[PermissionStore] All ${questions.length} questions answered, sending response`)
 
       // Find allow option
-      const allowOption = currentRequest.options.find((o) => o.kind === 'allow_once') ||
-                          currentRequest.options.find((o) => o.kind === 'allow') ||
-                          currentRequest.options[0]
+      const allowOption =
+        currentRequest.options.find((o) => o.kind === 'allow_once') ||
+        currentRequest.options.find((o) => o.kind === 'allow') ||
+        currentRequest.options[0]
 
       // Build response data with all answers
       const responseData: PermissionResponseData = {
         answers: newAnswers,
         // For backward compatibility with single question
-        selectedOption: newAnswers.length === 1 && !newAnswers[0].isCustom
-          ? newAnswers[0].answer
-          : undefined,
-        customText: newAnswers.length === 1 && newAnswers[0].isCustom
-          ? newAnswers[0].answer
-          : undefined,
+        selectedOption:
+          newAnswers.length === 1 && !newAnswers[0].isCustom ? newAnswers[0].answer : undefined,
+        customText:
+          newAnswers.length === 1 && newAnswers[0].isCustom ? newAnswers[0].answer : undefined
       }
 
       // Use respondToRequest to send the final response
@@ -245,5 +253,5 @@ export const usePermissionStore = create<PermissionStore>((set, get) => ({
 
   clearLastResponded: () => {
     set({ lastRespondedRequest: null })
-  },
+  }
 }))

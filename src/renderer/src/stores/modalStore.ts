@@ -9,8 +9,8 @@ export type ModalType = 'settings' | 'newSession' | 'deleteSession'
 
 // Modal data types
 export interface SettingsModalData {
-  highlightAgent?: string  // Agent ID to highlight (for missing dependency prompt)
-  pendingFolder?: string   // Folder path waiting to create session after agent install
+  highlightAgent?: string // Agent ID to highlight (for missing dependency prompt)
+  pendingFolder?: string // Folder path waiting to create session after agent install
 }
 
 interface ModalDataMap {
@@ -36,22 +36,22 @@ export const useModalStore = create<ModalStore>((set) => ({
   modals: {
     settings: { isOpen: false },
     newSession: { isOpen: false },
-    deleteSession: { isOpen: false },
+    deleteSession: { isOpen: false }
   },
   openModal: (type, data) =>
     set((state) => ({
       modals: {
         ...state.modals,
-        [type]: { isOpen: true, data },
-      },
+        [type]: { isOpen: true, data }
+      }
     })),
   closeModal: (type) =>
     set((state) => ({
       modals: {
         ...state.modals,
-        [type]: { isOpen: false, data: undefined },
-      },
-    })),
+        [type]: { isOpen: false, data: undefined }
+      }
+    }))
 }))
 
 // Convenience selectors

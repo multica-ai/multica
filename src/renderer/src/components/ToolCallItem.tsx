@@ -12,7 +12,7 @@ import {
   Bot,
   ListTodo,
   Circle,
-  MessageSquare,
+  MessageSquare
 } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
@@ -23,7 +23,7 @@ import { isQuestionTool } from '../../../shared/tool-names'
  * Persisted response from AskUserQuestion (restored from session updates)
  */
 export interface AnsweredResponse {
-  optionId?: string  // Optional: permission optionId (not needed for display)
+  optionId?: string // Optional: permission optionId (not needed for display)
   selectedOption?: string
   selectedOptions?: string[]
   customText?: string
@@ -35,8 +35,8 @@ export interface ToolCall {
   title: string
   status: string
   kind?: string
-  toolName?: string  // From _meta.claudeCode.toolName, most reliable tool name
-  rawInput?: Record<string, unknown>  // Raw input for subtitle display
+  toolName?: string // From _meta.claudeCode.toolName, most reliable tool name
+  rawInput?: Record<string, unknown> // Raw input for subtitle display
   input?: string
   output?: string
   /** Persisted response for AskUserQuestion (restored from disk on restart) */
@@ -56,7 +56,7 @@ function countLines(output: string | undefined): number {
 function extractMatchCount(output: string | undefined): number | undefined {
   if (!output) return undefined
   // Count non-empty lines as match count
-  const lines = output.split('\n').filter(line => line.trim())
+  const lines = output.split('\n').filter((line) => line.trim())
   return lines.length > 0 ? lines.length : undefined
 }
 
@@ -72,7 +72,7 @@ function getDisplayInfo(toolCall: ToolCall): {
   icon: ReactNode
   name: string
   subtitle?: string
-  stats?: string  // Right-side stats, e.g. "1027 lines" or "51 matches"
+  stats?: string // Right-side stats, e.g. "1027 lines" or "51 matches"
 } {
   const { toolName, kind, title, rawInput, output, status } = toolCall
   const input = rawInput || {}
@@ -84,12 +84,13 @@ function getDisplayInfo(toolCall: ToolCall): {
   switch (name.toLowerCase() || kind) {
     case 'read': {
       const lines = isCompleted ? countLines(output) : 0
-      const stats = isCompleted && lines > 0 ? `${lines} lines` : isPending ? 'reading...' : undefined
+      const stats =
+        isCompleted && lines > 0 ? `${lines} lines` : isPending ? 'reading...' : undefined
       return {
         icon: <FileText className={iconClass} />,
         name: 'Read',
         subtitle: formatPath(input.file_path as string),
-        stats,
+        stats
       }
     }
     case 'write': {
@@ -100,14 +101,14 @@ function getDisplayInfo(toolCall: ToolCall): {
         icon: <FilePen className={iconClass} />,
         name: 'Write',
         subtitle: formatPath(input.file_path as string),
-        stats,
+        stats
       }
     }
     case 'edit': {
       return {
         icon: <FilePen className={iconClass} />,
         name: 'Edit',
-        subtitle: formatPath(input.file_path as string),
+        subtitle: formatPath(input.file_path as string)
       }
     }
     case 'bash':
@@ -115,38 +116,41 @@ function getDisplayInfo(toolCall: ToolCall): {
       return {
         icon: <Terminal className={iconClass} />,
         name: 'Terminal',
-        subtitle: input.description as string || (input.command as string)?.slice(0, 50),
-        stats: isPending ? 'running...' : undefined,
+        subtitle: (input.description as string) || (input.command as string)?.slice(0, 50),
+        stats: isPending ? 'running...' : undefined
       }
     }
     case 'grep': {
       const matches = isCompleted ? extractMatchCount(output) : undefined
-      const stats = matches !== undefined ? `${matches} matches` : isPending ? 'searching...' : undefined
+      const stats =
+        matches !== undefined ? `${matches} matches` : isPending ? 'searching...' : undefined
       return {
         icon: <Search className={iconClass} />,
         name: `grep '${(input.pattern as string)?.slice(0, 20) || '...'}'`,
         subtitle: formatPath(input.path as string),
-        stats,
+        stats
       }
     }
     case 'glob': {
       const matches = isCompleted ? extractMatchCount(output) : undefined
-      const stats = matches !== undefined ? `${matches} files` : isPending ? 'searching...' : undefined
+      const stats =
+        matches !== undefined ? `${matches} files` : isPending ? 'searching...' : undefined
       return {
         icon: <Search className={iconClass} />,
         name: 'Glob',
         subtitle: input.pattern as string,
-        stats,
+        stats
       }
     }
     case 'search': {
       const matches = isCompleted ? extractMatchCount(output) : undefined
-      const stats = matches !== undefined ? `${matches} matches` : isPending ? 'searching...' : undefined
+      const stats =
+        matches !== undefined ? `${matches} matches` : isPending ? 'searching...' : undefined
       return {
         icon: <Search className={iconClass} />,
         name: 'Search',
         subtitle: input.pattern as string,
-        stats,
+        stats
       }
     }
     case 'websearch': {
@@ -154,7 +158,7 @@ function getDisplayInfo(toolCall: ToolCall): {
         icon: <Globe className={iconClass} />,
         name: 'Web Search',
         subtitle: input.query as string,
-        stats: isPending ? 'searching...' : undefined,
+        stats: isPending ? 'searching...' : undefined
       }
     }
     case 'webfetch': {
@@ -162,15 +166,15 @@ function getDisplayInfo(toolCall: ToolCall): {
         icon: <Globe className={iconClass} />,
         name: 'Web Fetch',
         subtitle: input.url as string,
-        stats: isPending ? 'fetching...' : undefined,
+        stats: isPending ? 'fetching...' : undefined
       }
     }
     case 'fetch': {
       return {
         icon: <Globe className={iconClass} />,
         name: 'Web Search',
-        subtitle: input.query as string || input.url as string,
-        stats: isPending ? 'searching...' : undefined,
+        subtitle: (input.query as string) || (input.url as string),
+        stats: isPending ? 'searching...' : undefined
       }
     }
     case 'task': {
@@ -178,7 +182,7 @@ function getDisplayInfo(toolCall: ToolCall): {
         icon: <Bot className={iconClass} />,
         name: `${input.subagent_type || 'Task'} Agent`,
         subtitle: input.description as string,
-        stats: isPending ? 'working...' : undefined,
+        stats: isPending ? 'working...' : undefined
       }
     }
     case 'todowrite': {
@@ -195,7 +199,7 @@ function getDisplayInfo(toolCall: ToolCall): {
       return {
         icon: <MessageSquare className={iconClass} />,
         name: header,
-        stats: isPending ? 'waiting...' : undefined,
+        stats: isPending ? 'waiting...' : undefined
       }
     }
     default: {
@@ -212,7 +216,7 @@ function StatusDot({ status }: { status: string }) {
     running: 'bg-[var(--tool-running)] animate-[glow-pulse_2s_ease-in-out_infinite]',
     in_progress: 'bg-[var(--tool-running)] animate-[glow-pulse_2s_ease-in-out_infinite]',
     completed: 'bg-[var(--tool-success)]',
-    failed: 'bg-[var(--tool-error)]',
+    failed: 'bg-[var(--tool-error)]'
   }
 
   return (
@@ -239,9 +243,7 @@ function ToolCallDetails({ toolCall }: { toolCall: ToolCall }) {
       )}
 
       {/* Separator */}
-      {toolCall.input && toolCall.output && (
-        <div className="my-1.5 border-t border-border/40" />
-      )}
+      {toolCall.input && toolCall.output && <div className="my-1.5 border-t border-border/40" />}
 
       {/* Output */}
       {toolCall.output && (
@@ -288,11 +290,12 @@ export function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
     // Prefer memory response, fallback to persisted response
     const response = respondedData?.response || persistedResponse
     // Handle both single and multi-select answers
-    const selectedAnswer = response?.selectedOptions?.join(', ') ||
-                           response?.selectedOption ||
-                           response?.customText ||
-                           response?.answers?.[0]?.answer ||
-                           'Answered'
+    const selectedAnswer =
+      response?.selectedOptions?.join(', ') ||
+      response?.selectedOption ||
+      response?.customText ||
+      response?.answers?.[0]?.answer ||
+      'Answered'
     const questions = (toolCall.rawInput?.questions as Array<{ header?: string }>) || []
     const header = questions[0]?.header || 'Question'
 
@@ -311,7 +314,10 @@ export function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
 
   // Use getDisplayInfo to get icon, name, subtitle, and stats
   const { icon, name, subtitle, stats } = getDisplayInfo(toolCall)
-  const isPending = toolCall.status === 'pending' || toolCall.status === 'running' || toolCall.status === 'in_progress'
+  const isPending =
+    toolCall.status === 'pending' ||
+    toolCall.status === 'running' ||
+    toolCall.status === 'in_progress'
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -343,9 +349,7 @@ export function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
 
         {/* Subtitle (path, query, etc.) */}
         {subtitle && (
-          <span className="text-muted-foreground truncate max-w-[300px]">
-            {subtitle}
-          </span>
+          <span className="text-muted-foreground truncate max-w-[300px]">{subtitle}</span>
         )}
 
         {/* Stats (line count, match count, etc.) - shown on the right */}

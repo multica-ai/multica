@@ -32,7 +32,7 @@ export function MessageInput({
   workingDirectory,
   currentAgentId,
   onAgentChange,
-  isSwitchingAgent = false,
+  isSwitchingAgent = false
 }: MessageInputProps) {
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -70,63 +70,72 @@ export function MessageInput({
   }, [])
 
   // Process and add image
-  const addImage = useCallback(async (file: File) => {
-    // Validate file type
-    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
-      console.warn('Unsupported image type:', file.type)
-      return
-    }
-
-    // Validate file size
-    if (file.size > MAX_IMAGE_SIZE) {
-      console.warn('Image too large:', file.size)
-      return
-    }
-
-    try {
-      const base64 = await fileToBase64(file)
-      const imageItem: ImageContentItem = {
-        type: 'image',
-        data: base64,
-        mimeType: file.type,
+  const addImage = useCallback(
+    async (file: File) => {
+      // Validate file type
+      if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+        console.warn('Unsupported image type:', file.type)
+        return
       }
-      setImages((prev) => [...prev, imageItem])
-    } catch (err) {
-      console.error('Failed to process image:', err)
-    }
-  }, [fileToBase64])
+
+      // Validate file size
+      if (file.size > MAX_IMAGE_SIZE) {
+        console.warn('Image too large:', file.size)
+        return
+      }
+
+      try {
+        const base64 = await fileToBase64(file)
+        const imageItem: ImageContentItem = {
+          type: 'image',
+          data: base64,
+          mimeType: file.type
+        }
+        setImages((prev) => [...prev, imageItem])
+      } catch (err) {
+        console.error('Failed to process image:', err)
+      }
+    },
+    [fileToBase64]
+  )
 
   // Handle paste event
-  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items
-    if (!items) return
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
 
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault()
-        const file = item.getAsFile()
-        if (file) {
-          await addImage(file)
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const file = item.getAsFile()
+          if (file) {
+            await addImage(file)
+          }
+          break
         }
-        break
       }
-    }
-  }, [addImage])
+    },
+    [addImage]
+  )
 
   // Handle file selection
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
+  const handleFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files
+      if (!files) return
 
-    for (const file of files) {
-      await addImage(file)
-    }
+      for (const file of files) {
+        await addImage(file)
+      }
 
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-  }, [addImage])
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    },
+    [addImage]
+  )
 
   // Remove image
   const removeImage = useCallback((index: number) => {
@@ -271,9 +280,7 @@ export function MessageInput({
                   )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">
-                {isProcessing ? 'Stop' : 'Send message'}
-              </TooltipContent>
+              <TooltipContent side="top">{isProcessing ? 'Stop' : 'Send message'}</TooltipContent>
             </Tooltip>
           </div>
         </div>

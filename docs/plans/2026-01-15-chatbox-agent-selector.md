@@ -13,6 +13,7 @@
 ### Task 1: Create DropdownMenu UI Component
 
 **Files:**
+
 - Create: `src/renderer/src/components/ui/dropdown-menu.tsx`
 
 **Step 1: Install Radix UI dropdown-menu package**
@@ -23,24 +24,20 @@ Expected: Package added to package.json
 **Step 2: Create the DropdownMenu component**
 
 ```tsx
-import * as React from "react"
-import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
-import { CheckIcon } from "lucide-react"
+import * as React from 'react'
+import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
+import { CheckIcon } from 'lucide-react'
 
-import { cn } from "@/lib/utils"
+import { cn } from '@/lib/utils'
 
-function DropdownMenu({
-  ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
 }
 
 function DropdownMenuTrigger({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
-  return (
-    <DropdownMenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
-  )
+  return <DropdownMenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
 }
 
 function DropdownMenuContent({
@@ -54,7 +51,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-md border p-1 shadow-md",
+          'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-md border p-1 shadow-md',
           className
         )}
         {...props}
@@ -71,7 +68,7 @@ function DropdownMenuItem({
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
       className={cn(
-        "focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        'focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className
       )}
       {...props}
@@ -89,7 +86,7 @@ function DropdownMenuCheckboxItem({
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        "focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        'focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className
       )}
       checked={checked}
@@ -112,7 +109,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("bg-border -mx-1 my-1 h-px", className)}
+      className={cn('bg-border -mx-1 my-1 h-px', className)}
       {...props}
     />
   )
@@ -124,7 +121,7 @@ export {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
-  DropdownMenuSeparator,
+  DropdownMenuSeparator
 }
 ```
 
@@ -145,6 +142,7 @@ git commit -m "feat: add DropdownMenu UI component"
 ### Task 2: Add switchSessionAgent to Backend
 
 **Files:**
+
 - Modify: `src/main/conductor/Conductor.ts:468-476` (add new method after updateSessionMeta)
 - Modify: `src/main/ipc/handlers.ts:106-111` (add IPC handler after SESSION_UPDATE)
 - Modify: `src/shared/ipc-channels.ts` (add new channel)
@@ -265,6 +263,7 @@ git commit -m "feat: add switchSessionAgent backend support"
 ### Task 3: Add switchSessionAgent to useApp Hook
 
 **Files:**
+
 - Modify: `src/renderer/src/hooks/useApp.ts:27-41` (add to AppActions interface)
 - Modify: `src/renderer/src/hooks/useApp.ts:293-297` (add implementation before clearError)
 - Modify: `src/renderer/src/hooks/useApp.ts:299-317` (add to return object)
@@ -282,21 +281,27 @@ switchSessionAgent: (newAgentId: string) => Promise<void>
 In `src/renderer/src/hooks/useApp.ts`, add before `clearError` (around line 295):
 
 ```typescript
-const switchSessionAgent = useCallback(async (newAgentId: string) => {
-  if (!currentSession) {
-    setError('No active session')
-    return
-  }
+const switchSessionAgent = useCallback(
+  async (newAgentId: string) => {
+    if (!currentSession) {
+      setError('No active session')
+      return
+    }
 
-  try {
-    setError(null)
-    const updatedSession = await window.electronAPI.switchSessionAgent(currentSession.id, newAgentId)
-    setCurrentSession(updatedSession)
-    await loadRunningStatus()
-  } catch (err) {
-    setError(`Failed to switch agent: ${err}`)
-  }
-}, [currentSession, loadRunningStatus])
+    try {
+      setError(null)
+      const updatedSession = await window.electronAPI.switchSessionAgent(
+        currentSession.id,
+        newAgentId
+      )
+      setCurrentSession(updatedSession)
+      await loadRunningStatus()
+    } catch (err) {
+      setError(`Failed to switch agent: ${err}`)
+    }
+  },
+  [currentSession, loadRunningStatus]
+)
 ```
 
 **Step 3: Add to return object**
@@ -320,6 +325,7 @@ git commit -m "feat: add switchSessionAgent to useApp hook"
 ### Task 4: Create AgentSelector Component
 
 **Files:**
+
 - Create: `src/renderer/src/components/AgentSelector.tsx`
 
 **Step 1: Create the component**
@@ -335,7 +341,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuItem
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -349,7 +355,7 @@ interface AgentSelectorProps {
 export function AgentSelector({
   currentAgentId,
   onAgentChange,
-  disabled = false,
+  disabled = false
 }: AgentSelectorProps) {
   const [agents, setAgents] = useState<AgentCheckResult[]>([])
   const [loading, setLoading] = useState(true)
@@ -386,8 +392,8 @@ export function AgentSelector({
       <DropdownMenuTrigger asChild disabled={disabled || loading}>
         <button
           className={cn(
-            "flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50",
-            disabled && "opacity-50 cursor-not-allowed"
+            'flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50',
+            disabled && 'opacity-50 cursor-not-allowed'
           )}
         >
           <Sparkles className="h-3.5 w-3.5" />
@@ -409,18 +415,13 @@ export function AgentSelector({
               <Tooltip key={agent.id}>
                 <TooltipTrigger asChild>
                   <div>
-                    <DropdownMenuItem
-                      disabled
-                      className="flex items-center justify-between"
-                    >
+                    <DropdownMenuItem disabled className="flex items-center justify-between">
                       <span>{agent.name}</span>
                       <span className="h-2 w-2 rounded-full bg-muted" />
                     </DropdownMenuItem>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent side="right">
-                  Setup required in Settings
-                </TooltipContent>
+                <TooltipContent side="right">Setup required in Settings</TooltipContent>
               </Tooltip>
             )
           }
@@ -434,8 +435,8 @@ export function AgentSelector({
               <span>{agent.name}</span>
               <span
                 className={cn(
-                  "h-2 w-2 rounded-full",
-                  isSelected ? "bg-green-500" : "bg-green-500/50"
+                  'h-2 w-2 rounded-full',
+                  isSelected ? 'bg-green-500' : 'bg-green-500/50'
                 )}
               />
             </DropdownMenuItem>
@@ -464,6 +465,7 @@ git commit -m "feat: create AgentSelector component"
 ### Task 5: Integrate AgentSelector into MessageInput
 
 **Files:**
+
 - Modify: `src/renderer/src/components/MessageInput.tsx:5-6` (add import)
 - Modify: `src/renderer/src/components/MessageInput.tsx:9-17` (update props interface)
 - Modify: `src/renderer/src/components/MessageInput.tsx:122-135` (add AgentSelector to toolbar)
@@ -499,8 +501,10 @@ onAgentChange,
 In the normal chat input mode, modify the bottom toolbar (around line 122) to include AgentSelector before the folder indicator:
 
 ```tsx
-{/* Bottom toolbar */}
-<div className="flex items-center justify-between pt-2">
+{
+  /* Bottom toolbar */
+}
+;<div className="flex items-center justify-between pt-2">
   <div className="flex items-center gap-1">
     {/* Agent selector */}
     {currentAgentId && onAgentChange && (
@@ -527,9 +531,7 @@ In the normal chat input mode, modify the bottom toolbar (around line 122) to in
   </div>
 
   {/* Send button */}
-  <Tooltip>
-    {/* ... existing send button code ... */}
-  </Tooltip>
+  <Tooltip>{/* ... existing send button code ... */}</Tooltip>
 </div>
 ```
 
@@ -550,6 +552,7 @@ git commit -m "feat: integrate AgentSelector into MessageInput"
 ### Task 6: Wire Up AgentSelector in App.tsx
 
 **Files:**
+
 - Modify: `src/renderer/src/App.tsx:31-38` (add switchSessionAgent to useApp destructuring)
 - Modify: `src/renderer/src/App.tsx:126-133` (add props to MessageInput)
 
@@ -591,6 +594,7 @@ git commit -m "feat: wire up AgentSelector in App.tsx"
 ### Task 7: Add Toast Notification on Agent Switch
 
 **Files:**
+
 - Modify: `src/renderer/src/hooks/useApp.ts` (add toast import and notification)
 
 **Step 1: Add toast import**
@@ -635,6 +639,7 @@ git commit -m "feat: add toast notification on agent switch"
 ### Task 8: Export AgentSelector from Components Index
 
 **Files:**
+
 - Modify: `src/renderer/src/components/index.ts` (add export)
 
 **Step 1: Add export**
@@ -662,6 +667,7 @@ git commit -m "feat: export AgentSelector from components index"
 ## Summary
 
 After completing all tasks, the chatbox will have an inline agent selector that:
+
 - Shows current agent name with sparkle icon and dropdown chevron
 - Displays available agents with green status dots (installed) or grey dots (needs setup)
 - Disables uninstalled agents with tooltip

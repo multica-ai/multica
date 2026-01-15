@@ -11,11 +11,7 @@ import { SidebarProvider } from '@/components/ui/sidebar'
 import { useUIStore } from './stores/uiStore'
 import { usePermissionStore } from './stores/permissionStore'
 import { useModalStore } from './stores/modalStore'
-import {
-  RightPanel,
-  RightPanelHeader,
-  RightPanelContent,
-} from './components/layout'
+import { RightPanel, RightPanelHeader, RightPanelContent } from './components/layout'
 import { FileTree } from './components/FileTree'
 import { Toaster } from '@/components/ui/sonner'
 
@@ -37,7 +33,7 @@ function AppContent(): React.JSX.Element {
     clearCurrentSession,
     sendPrompt,
     cancelRequest,
-    switchSessionAgent,
+    switchSessionAgent
   } = useApp()
 
   // UI state

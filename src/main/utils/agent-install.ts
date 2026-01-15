@@ -114,7 +114,12 @@ async function installClaudeCLI(
 async function installClaudeCodeACP(
   onProgress: (message: string) => void
 ): Promise<{ success: boolean; error?: string }> {
-  return spawnWithProgress('npm', ['install', '-g', '@zed-industries/claude-code-acp'], onProgress, true)
+  return spawnWithProgress(
+    'npm',
+    ['install', '-g', '@zed-industries/claude-code-acp'],
+    onProgress,
+    true
+  )
 }
 
 /**
@@ -260,9 +265,7 @@ async function installCodex(options: InstallOptions): Promise<InstallResult> {
     const codexCheck = await commandExists('codex')
     if (!codexCheck.exists) {
       sendProgress('install-cli', 'started')
-      const cliResult = await installCodexCLI((msg) =>
-        sendProgress('install-cli', 'progress', msg)
-      )
+      const cliResult = await installCodexCLI((msg) => sendProgress('install-cli', 'progress', msg))
 
       if (!cliResult.success) {
         // CLI installation failure is not fatal - ACP might still work
@@ -278,9 +281,7 @@ async function installCodex(options: InstallOptions): Promise<InstallResult> {
 
     // Step 3: Install codex-acp
     sendProgress('install-acp', 'started')
-    const acpResult = await installCodexACP((msg) =>
-      sendProgress('install-acp', 'progress', msg)
-    )
+    const acpResult = await installCodexACP((msg) => sendProgress('install-acp', 'progress', msg))
 
     if (!acpResult.success) {
       const errorMsg = formatInstallError(acpResult.error || 'Unknown error')

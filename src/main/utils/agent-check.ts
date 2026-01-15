@@ -29,7 +29,7 @@ const INSTALL_HINTS: Record<string, string> = {
   'claude-code': 'npm install -g @zed-industries/claude-code-acp',
   opencode: 'go install github.com/anomalyco/opencode@latest',
   codex: 'npm install -g @openai/codex',
-  gemini: 'npm install -g @google/gemini-cli',
+  gemini: 'npm install -g @google/gemini-cli'
 }
 
 // Commands to check for each agent
@@ -37,7 +37,7 @@ const AGENT_COMMANDS: Record<string, string[]> = {
   'claude-code': ['claude', 'claude-code-acp'],
   opencode: ['opencode'],
   codex: ['codex', 'codex-acp'],
-  gemini: ['gemini'],
+  gemini: ['gemini']
 }
 
 /**
@@ -72,7 +72,7 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
       return {
         command: cmd,
         path: cmdCheck.path,
-        exists: cmdCheck.exists,
+        exists: cmdCheck.exists
       }
     })
   )
@@ -87,7 +87,7 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
     installed: primaryResult?.exists ?? false,
     path: primaryResult?.path,
     installHint: INSTALL_HINTS[agentId],
-    commands: commandChecks.map(({ command, path }) => ({ command, path })),
+    commands: commandChecks.map(({ command, path }) => ({ command, path }))
   }
 }
 
@@ -98,9 +98,7 @@ export async function checkAgents(): Promise<AgentCheckResult[]> {
   const agentIds = Object.keys(DEFAULT_AGENTS)
 
   // Check all agents concurrently
-  const results = await Promise.all(
-    agentIds.map((id) => checkAgent(id))
-  )
+  const results = await Promise.all(agentIds.map((id) => checkAgent(id)))
 
   // Filter out null results
   return results.filter((r): r is AgentCheckResult => r !== null)

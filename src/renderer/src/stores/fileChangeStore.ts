@@ -17,5 +17,5 @@ export const useFileChangeStore = create<FileChangeStore>((set) => ({
 
   triggerRefresh: () => {
     set((state) => ({ refreshCounter: state.refreshCounter + 1 }))
-  },
+  }
 }))

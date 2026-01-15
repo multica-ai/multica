@@ -10,14 +10,10 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
-  SidebarMenuItem,
+  SidebarMenuItem
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
 import { useModalStore } from '../stores/modalStore'
@@ -55,7 +51,6 @@ function getSessionTitle(session: MulticaSession): string {
   return `${folderName} · ${shortId}`
 }
 
-
 // Session list item component
 interface SessionItemProps {
   session: MulticaSession
@@ -66,7 +61,14 @@ interface SessionItemProps {
   onDelete: () => void
 }
 
-function SessionItem({ session, isActive, isProcessing, needsPermission, onSelect, onDelete }: SessionItemProps) {
+function SessionItem({
+  session,
+  isActive,
+  isProcessing,
+  needsPermission,
+  onSelect,
+  onDelete
+}: SessionItemProps) {
   const [isHovered, setIsHovered] = useState(false)
 
   return (
@@ -80,18 +82,16 @@ function SessionItem({ session, isActive, isProcessing, needsPermission, onSelec
             isActive={isActive}
             onClick={onSelect}
             className={cn(
-              "h-auto py-2 transition-colors duration-150",
-              "hover:bg-sidebar-accent/50",
-              isActive && "bg-sidebar-accent"
+              'h-auto py-2 transition-colors duration-150',
+              'hover:bg-sidebar-accent/50',
+              isActive && 'bg-sidebar-accent'
             )}
           >
             {/* Two-line layout container */}
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               {/* Line 1: Title + Status indicator */}
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-medium">
-                  {getSessionTitle(session)}
-                </span>
+                <span className="truncate text-sm font-medium">{getSessionTitle(session)}</span>
                 {needsPermission ? (
                   <CirclePause className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
                 ) : isProcessing ? (
@@ -112,9 +112,9 @@ function SessionItem({ session, isActive, isProcessing, needsPermission, onSelec
                 onDelete()
               }}
               className={cn(
-                "flex-shrink-0 self-start rounded p-1 transition-opacity duration-150",
-                "hover:bg-muted active:bg-muted",
-                isHovered ? "opacity-50 hover:opacity-100" : "opacity-0"
+                'flex-shrink-0 self-start rounded p-1 transition-opacity duration-150',
+                'hover:bg-muted active:bg-muted',
+                isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
               )}
             >
               <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -139,13 +139,16 @@ interface SessionListProps {
   onDeleteRequest: (session: MulticaSession) => void
 }
 
-function SessionList({ sessions, currentSessionId, processingSessionIds, permissionPendingSessionId, onSelect, onDeleteRequest }: SessionListProps) {
+function SessionList({
+  sessions,
+  currentSessionId,
+  processingSessionIds,
+  permissionPendingSessionId,
+  onSelect,
+  onDeleteRequest
+}: SessionListProps) {
   if (sessions.length === 0) {
-    return (
-      <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-        No tasks yet
-      </p>
-    )
+    return <p className="px-2 py-4 text-center text-sm text-muted-foreground">No tasks yet</p>
   }
 
   return (
@@ -171,7 +174,7 @@ export function AppSidebar({
   processingSessionIds,
   permissionPendingSessionId,
   onSelect,
-  onNewSession,
+  onNewSession
 }: AppSidebarProps) {
   const openModal = useModalStore((s) => s.openModal)
 

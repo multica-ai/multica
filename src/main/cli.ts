@@ -40,7 +40,7 @@ const c = {
   yellow: '\x1b[33m',
   blue: '\x1b[34m',
   magenta: '\x1b[35m',
-  cyan: '\x1b[36m',
+  cyan: '\x1b[36m'
 }
 
 interface CLIState {
@@ -53,23 +53,23 @@ interface CLIState {
   sessionLog: Array<{ timestamp: string; type: string; data: unknown }>
 }
 
-function print(msg: string) {
+function print(msg: string): void {
   console.log(msg)
 }
 
-function printError(msg: string) {
+function printError(msg: string): void {
   console.log(`${c.red}Error: ${msg}${c.reset}`)
 }
 
-function printSuccess(msg: string) {
+function printSuccess(msg: string): void {
   console.log(`${c.green}${msg}${c.reset}`)
 }
 
-function printInfo(msg: string) {
+function printInfo(msg: string): void {
   console.log(`${c.cyan}${msg}${c.reset}`)
 }
 
-function printDim(msg: string) {
+function printDim(msg: string): void {
   console.log(`${c.dim}${msg}${c.reset}`)
 }
 
@@ -85,7 +85,7 @@ function truncate(str: string, len: number): string {
 
 // ============ Commands ============
 
-async function cmdHelp() {
+async function cmdHelp(): Promise<void> {
   print(`
 ${c.bold}Multica CLI${c.reset} - Test Conductor functionality
 
@@ -111,7 +111,7 @@ ${c.bold}Usage:${c.reset}
 `)
 }
 
-async function cmdSessions(state: CLIState) {
+async function cmdSessions(state: CLIState): Promise<void> {
   const sessions = await state.conductor.listSessions()
 
   if (sessions.length === 0) {
@@ -145,7 +145,7 @@ async function cmdSessions(state: CLIState) {
   print(`${'─'.repeat(80)}`)
 }
 
-async function cmdNewSession(state: CLIState, cwd?: string) {
+async function cmdNewSession(state: CLIState, cwd?: string): Promise<void> {
   const targetCwd = cwd ? resolve(cwd) : process.cwd()
 
   if (!existsSync(targetCwd)) {
@@ -168,7 +168,7 @@ async function cmdNewSession(state: CLIState, cwd?: string) {
   printInfo(`Working directory: ${session.workingDirectory}`)
 }
 
-async function cmdResumeSession(state: CLIState, sessionId: string) {
+async function cmdResumeSession(state: CLIState, sessionId: string): Promise<void> {
   if (!sessionId) {
     printError('Usage: /resume <session-id>')
     return
@@ -199,7 +199,7 @@ async function cmdResumeSession(state: CLIState, sessionId: string) {
   printDim('Note: Agent state is not restored. Previous messages are stored for display.')
 }
 
-async function cmdDeleteSession(state: CLIState, sessionId: string) {
+async function cmdDeleteSession(state: CLIState, sessionId: string): Promise<void> {
   if (!sessionId) {
     printError('Usage: /delete <session-id>')
     return
@@ -222,7 +222,7 @@ async function cmdDeleteSession(state: CLIState, sessionId: string) {
   printSuccess(`Session deleted: ${match.id.slice(0, 8)}`)
 }
 
-async function cmdHistory(state: CLIState) {
+async function cmdHistory(state: CLIState): Promise<void> {
   if (!state.currentSession) {
     printError('No active session. Use /new or /resume first.')
     return
@@ -260,7 +260,7 @@ async function cmdHistory(state: CLIState) {
   print(`\n${'─'.repeat(80)}`)
 }
 
-async function cmdAgents() {
+async function cmdAgents(): Promise<void> {
   print(`\n${c.bold}Available Agents:${c.reset}`)
   for (const [id, config] of Object.entries(DEFAULT_AGENTS)) {
     const status = config.enabled ? `${c.green}enabled${c.reset}` : `${c.dim}disabled${c.reset}`
@@ -279,8 +279,10 @@ function commandExists(cmd: string): { exists: boolean; path?: string; version?:
   try {
     const path = execSync(`${whichCmd} ${cmd}`, {
       encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim().split('\n')[0]
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+      .trim()
+      .split('\n')[0]
 
     // Try to get version
     let version: string | undefined
@@ -288,7 +290,7 @@ function commandExists(cmd: string): { exists: boolean; path?: string; version?:
       const versionOutput = execSync(`${cmd} --version`, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 5000,
+        timeout: 5000
       }).trim()
       // Extract first line or first meaningful part
       version = versionOutput.split('\n')[0].slice(0, 50)
@@ -325,7 +327,7 @@ async function cmdDoctor(): Promise<AgentCheckResult[]> {
   const installHints: Record<string, string> = {
     opencode: 'go install github.com/anomalyco/opencode@latest',
     codex: 'npm install -g codex-acp',
-    gemini: 'npm install -g @anthropic-ai/gemini-cli',
+    gemini: 'npm install -g @anthropic-ai/gemini-cli'
   }
 
   for (const [id, config] of Object.entries(DEFAULT_AGENTS)) {
@@ -338,7 +340,7 @@ async function cmdDoctor(): Promise<AgentCheckResult[]> {
       installed: check.exists,
       path: check.path,
       version: check.version,
-      installHint: installHints[id],
+      installHint: installHints[id]
     }
     results.push(result)
 
@@ -381,7 +383,7 @@ async function cmdDoctor(): Promise<AgentCheckResult[]> {
   return results
 }
 
-async function cmdSetDefaultAgent(state: CLIState, agentId: string) {
+async function cmdSetDefaultAgent(state: CLIState, agentId: string): Promise<void> {
   if (!agentId) {
     printError('Usage: /default <name>')
     print(`Current default: ${state.defaultAgentId}`)
@@ -400,7 +402,7 @@ async function cmdSetDefaultAgent(state: CLIState, agentId: string) {
   printInfo('New sessions will use this agent. Use /new to create a session.')
 }
 
-async function cmdStatus(state: CLIState) {
+async function cmdStatus(state: CLIState): Promise<void> {
   print(`\n${c.bold}Status:${c.reset}`)
 
   // Default agent
@@ -416,7 +418,9 @@ async function cmdStatus(state: CLIState) {
     const isRunning = state.conductor.isSessionRunning(state.currentSession.id)
     const agentConfig = state.conductor.getSessionAgent(state.currentSession.id)
     print(`  Current Session: ${c.green}${state.currentSession.id.slice(0, 8)}${c.reset}`)
-    print(`    Agent: ${agentConfig?.name || 'unknown'} (${isRunning ? `${c.green}running${c.reset}` : `${c.red}stopped${c.reset}`})`)
+    print(
+      `    Agent: ${agentConfig?.name || 'unknown'} (${isRunning ? `${c.green}running${c.reset}` : `${c.red}stopped${c.reset}`})`
+    )
     print(`    Directory: ${state.currentSession.workingDirectory}`)
     print(`    Status: ${state.currentSession.status}`)
   } else {
@@ -429,7 +433,7 @@ async function cmdStatus(state: CLIState) {
   }
 }
 
-async function cmdCancel(state: CLIState) {
+async function cmdCancel(state: CLIState): Promise<void> {
   if (!state.isProcessing) {
     printInfo('No request in progress.')
     return
@@ -477,10 +481,10 @@ async function sendPrompt(state: CLIState, content: string): Promise<void> {
 
 // ============ Main ============
 
-async function runInteractiveMode(state: CLIState) {
+async function runInteractiveMode(state: CLIState): Promise<void> {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: process.stdout
   })
 
   // Handle Ctrl+C
@@ -513,7 +517,7 @@ async function runInteractiveMode(state: CLIState) {
   await cmdStatus(state)
   print('')
 
-  const prompt = () => {
+  const prompt = (): void => {
     const sessionMarker = state.currentSession
       ? `${c.green}[${state.currentSession.id.slice(0, 8)}]${c.reset}`
       : `${c.dim}[no session]${c.reset}`
@@ -583,6 +587,7 @@ async function runInteractiveMode(state: CLIState) {
               print('Goodbye!')
               await cleanup(state)
               process.exit(0)
+              break
             default:
               printError(`Unknown command: /${cmd}`)
               print('Type /help for available commands.')
@@ -601,7 +606,11 @@ async function runInteractiveMode(state: CLIState) {
   prompt()
 }
 
-async function runOneShotPrompt(state: CLIState, prompt: string, options: { cwd?: string }) {
+async function runOneShotPrompt(
+  state: CLIState,
+  prompt: string,
+  options: { cwd?: string }
+): Promise<void> {
   const cwd = options.cwd || process.cwd()
 
   const config = DEFAULT_AGENTS[state.defaultAgentId]
@@ -625,7 +634,7 @@ async function runOneShotPrompt(state: CLIState, prompt: string, options: { cwd?
   process.exit(0)
 }
 
-async function cleanup(state: CLIState) {
+async function cleanup(state: CLIState): Promise<void> {
   if (state.logFile && state.sessionLog.length > 0) {
     writeFileSync(state.logFile, JSON.stringify(state.sessionLog, null, 2))
     printInfo(`Session log saved to: ${state.logFile}`)
@@ -633,7 +642,7 @@ async function cleanup(state: CLIState) {
   await state.conductor.stopAllSessions()
 }
 
-async function main() {
+async function main(): Promise<void> {
   const args = process.argv.slice(2)
 
   // Parse global options
@@ -678,7 +687,9 @@ async function main() {
 
           case 'tool_call': {
             toolCalls.set(update.toolCallId, update.title)
-            print(`\n${c.yellow}┌─ 🔧 ${update.title}${c.reset} ${c.dim}[${update.status}]${c.reset}`)
+            print(
+              `\n${c.yellow}┌─ 🔧 ${update.title}${c.reset} ${c.dim}[${update.status}]${c.reset}`
+            )
             if (update.kind) {
               print(`${c.dim}│  Kind: ${update.kind}${c.reset}`)
             }
@@ -689,7 +700,8 @@ async function main() {
                   : JSON.stringify(update.rawInput, null, 2)
               const lines = input.split('\n')
               lines.slice(0, 10).forEach((line) => print(`${c.dim}│  ${line}${c.reset}`))
-              if (lines.length > 10) print(`${c.dim}│  ... (${lines.length - 10} more lines)${c.reset}`)
+              if (lines.length > 10)
+                print(`${c.dim}│  ... (${lines.length - 10} more lines)${c.reset}`)
             }
             break
           }
@@ -711,11 +723,13 @@ async function main() {
             break
 
           case 'plan':
-            print(`\n${c.cyan}📋 Plan: ${'title' in update ? update.title : 'Thinking...'}${c.reset}`)
+            print(
+              `\n${c.cyan}📋 Plan: ${'title' in update ? update.title : 'Thinking...'}${c.reset}`
+            )
             break
         }
-      },
-    },
+      }
+    }
   })
 
   // Initialize conductor (loads session index)
@@ -728,7 +742,7 @@ async function main() {
     isProcessing: false,
     isCancelling: false,
     logFile,
-    sessionLog: [],
+    sessionLog: []
   }
 
   // Handle subcommands
@@ -750,6 +764,7 @@ async function main() {
     case 'ls': {
       await cmdSessions(state)
       process.exit(0)
+      break
     }
 
     case 'resume':
@@ -767,12 +782,14 @@ async function main() {
     case 'agents': {
       await cmdAgents()
       process.exit(0)
+      break
     }
 
     case 'doctor':
     case 'check': {
       await cmdDoctor()
       process.exit(0)
+      break
     }
 
     case 'help':
@@ -802,6 +819,7 @@ ${c.bold}Examples:${c.reset}
   pnpm cli resume abc123                    # Resume session by ID prefix
 `)
       process.exit(0)
+      break
     }
 
     default: {

@@ -20,7 +20,7 @@ import type {
   SessionData,
   StoredSessionUpdate,
   CreateSessionParams,
-  ListSessionsOptions,
+  ListSessionsOptions
 } from '../../shared/types'
 
 /**
@@ -86,7 +86,7 @@ export class SessionStore {
       createdAt: now,
       updatedAt: now,
       status: 'active',
-      messageCount: 0,
+      messageCount: 0
     }
 
     // Add to index
@@ -95,7 +95,7 @@ export class SessionStore {
     // Create session data
     const sessionData: SessionData = {
       session,
-      updates: [],
+      updates: []
     }
     this.loadedSessions.set(session.id, sessionData)
 
@@ -169,7 +169,7 @@ export class SessionStore {
    */
   async appendUpdate(sessionId: string, update: SessionNotification): Promise<void> {
     // Ensure session is loaded
-    let sessionData = await this.get(sessionId)
+    const sessionData = await this.get(sessionId)
     if (!sessionData) {
       throw new Error(`Session not found: ${sessionId}`)
     }
@@ -177,7 +177,7 @@ export class SessionStore {
     // Append update
     const storedUpdate: StoredSessionUpdate = {
       timestamp: new Date().toISOString(),
-      update,
+      update
     }
     sessionData.updates.push(storedUpdate)
 

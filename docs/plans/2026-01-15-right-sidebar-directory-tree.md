@@ -15,19 +15,19 @@ Add a directory tree to the right sidebar that displays the current session's mo
 
 ### Frontend Components
 
-| Component | Purpose |
-|-----------|---------|
-| `FileTree` | Main component in RightPanel, manages tree state |
-| `FileTreeItem` | Individual row: icon, name, expand/collapse chevron |
-| `FileContextMenu` | Right-click menu with app options |
+| Component         | Purpose                                             |
+| ----------------- | --------------------------------------------------- |
+| `FileTree`        | Main component in RightPanel, manages tree state    |
+| `FileTreeItem`    | Individual row: icon, name, expand/collapse chevron |
+| `FileContextMenu` | Right-click menu with app options                   |
 
 ### Backend (Main Process)
 
-| IPC Handler | Purpose |
-|-------------|---------|
+| IPC Handler         | Purpose                                   |
+| ------------------- | ----------------------------------------- |
 | `fs:list-directory` | Returns immediate children of a directory |
-| `fs:detect-apps` | Detects installed apps on system |
-| `fs:open-with` | Opens file/folder with specified app |
+| `fs:detect-apps`    | Detects installed apps on system          |
+| `fs:open-with`      | Opens file/folder with specified app      |
 
 ### State
 
@@ -51,17 +51,17 @@ Add a directory tree to the right sidebar that displays the current session's mo
 
 ### File Icons
 
-| Type | Icon |
-|------|------|
-| Folder (closed) | `FolderIcon` |
-| Folder (open) | `FolderOpenIcon` |
-| TypeScript (.ts, .tsx) | Custom TS icon (blue) |
-| JavaScript (.js, .jsx) | Custom JS icon (yellow) |
-| JSON (.json) | `{ }` icon |
-| YAML (.yaml, .yml) | Custom YAML icon |
-| Markdown (.md) | Custom MD icon |
-| Images (.png, .jpg, .svg) | `ImageIcon` |
-| Default | Generic `FileIcon` |
+| Type                      | Icon                    |
+| ------------------------- | ----------------------- |
+| Folder (closed)           | `FolderIcon`            |
+| Folder (open)             | `FolderOpenIcon`        |
+| TypeScript (.ts, .tsx)    | Custom TS icon (blue)   |
+| JavaScript (.js, .jsx)    | Custom JS icon (yellow) |
+| JSON (.json)              | `{ }` icon              |
+| YAML (.yaml, .yml)        | Custom YAML icon        |
+| Markdown (.md)            | Custom MD icon          |
+| Images (.png, .jpg, .svg) | `ImageIcon`             |
+| Default                   | Generic `FileIcon`      |
 
 ### Interactions
 
@@ -74,15 +74,15 @@ Add a directory tree to the right sidebar that displays the current session's mo
 
 Check for existence in `/Applications/` and `~/Applications/`:
 
-| App | Detection |
-|-----|-----------|
-| Finder | Always available |
-| Cursor | `Cursor.app` |
-| VS Code | `Visual Studio Code.app` |
-| Xcode | `Xcode.app` |
-| Ghostty | `Ghostty.app` |
-| iTerm | `iTerm.app` |
-| Terminal | Always available |
+| App      | Detection                |
+| -------- | ------------------------ |
+| Finder   | Always available         |
+| Cursor   | `Cursor.app`             |
+| VS Code  | `Visual Studio Code.app` |
+| Xcode    | `Xcode.app`              |
+| Ghostty  | `Ghostty.app`            |
+| iTerm    | `iTerm.app`              |
+| Terminal | Always available         |
 
 ### Menu Structure
 
@@ -102,11 +102,11 @@ Copy path             ← Always last
 
 ### Opening Behavior
 
-| App | Command |
-|-----|---------|
-| Finder | `open -R <path>` (reveal) |
-| Editors | `open -a "App Name" <path>` |
-| Terminals | `open -a "Terminal" <path>` |
+| App       | Command                         |
+| --------- | ------------------------------- |
+| Finder    | `open -R <path>` (reveal)       |
+| Editors   | `open -a "App Name" <path>`     |
+| Terminals | `open -a "Terminal" <path>`     |
 | Copy path | Copy absolute path to clipboard |
 
 ## Data Flow
@@ -137,11 +137,11 @@ interface FileTreeNode {
 
 ### Edge Cases
 
-| Case | Handling |
-|------|----------|
-| Permission denied | Grayed out with lock icon |
-| Empty directory | Show "(empty)" text |
-| Symlinks | Follow, show as target type |
+| Case              | Handling                    |
+| ----------------- | --------------------------- |
+| Permission denied | Grayed out with lock icon   |
+| Empty directory   | Show "(empty)" text         |
+| Symlinks          | Follow, show as target type |
 
 ## Implementation Steps
 

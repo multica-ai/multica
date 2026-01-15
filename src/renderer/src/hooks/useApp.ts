@@ -2,10 +2,7 @@
  * Main application state hook
  */
 import { useState, useEffect, useCallback } from 'react'
-import type {
-  MulticaSession,
-  StoredSessionUpdate,
-} from '../../../shared/types'
+import type { MulticaSession, StoredSessionUpdate } from '../../../shared/types'
 import type { RunningSessionsStatus } from '../../../shared/electron-api'
 import type { MessageContent } from '../../../shared/types/message'
 import { usePermissionStore } from '../stores/permissionStore'
@@ -40,7 +37,6 @@ export interface AppActions {
   sendPrompt: (content: MessageContent) => Promise<void>
   cancelRequest: () => Promise<void>
   switchSessionAgent: (newAgentId: string) => Promise<void>
-
 }
 
 export function useApp(): AppState & AppActions {
@@ -51,7 +47,7 @@ export function useApp(): AppState & AppActions {
   const [runningSessionsStatus, setRunningSessionsStatus] = useState<RunningSessionsStatus>({
     runningSessions: 0,
     sessionIds: [],
-    processingSessionIds: [],
+    processingSessionIds: []
   })
   const [isInitializing, setIsInitializing] = useState(false)
   const [isSwitchingAgent, setIsSwitchingAgent] = useState(false)
@@ -79,7 +75,12 @@ export function useApp(): AppState & AppActions {
     const unsubSessionMeta = window.electronAPI.onSessionMetaUpdated((updatedSession) => {
       // Only update if this is the current session
       if (currentSessionId && updatedSession.id === currentSessionId) {
-        console.log('[useApp] Session meta updated:', updatedSession.id, 'agentSessionId:', updatedSession.agentSessionId)
+        console.log(
+          '[useApp] Session meta updated:',
+          updatedSession.id,
+          'agentSessionId:',
+          updatedSession.agentSessionId
+        )
         setCurrentSession(updatedSession)
       }
     })
@@ -142,8 +143,8 @@ export function useApp(): AppState & AppActions {
           timestamp: new Date().toISOString(),
           update: {
             sessionId: message.sessionId,
-            update: message.update,
-          },
+            update: message.update
+          }
         } as StoredSessionUpdate
         return [...prev, newUpdate]
       })
@@ -191,20 +192,23 @@ export function useApp(): AppState & AppActions {
     }
   }, [])
 
-  const createSession = useCallback(async (cwd: string, agentId: string) => {
-    try {
-      setIsInitializing(true)
-      const session = await window.electronAPI.createSession(cwd, agentId)
-      setCurrentSession(session)
-      setSessionUpdates([])
-      await loadSessions()
-      await loadRunningStatus()
-    } catch (err) {
-      toast.error(`Failed to create session: ${getErrorMessage(err)}`)
-    } finally {
-      setIsInitializing(false)
-    }
-  }, [loadSessions, loadRunningStatus])
+  const createSession = useCallback(
+    async (cwd: string, agentId: string) => {
+      try {
+        setIsInitializing(true)
+        const session = await window.electronAPI.createSession(cwd, agentId)
+        setCurrentSession(session)
+        setSessionUpdates([])
+        await loadSessions()
+        await loadRunningStatus()
+      } catch (err) {
+        toast.error(`Failed to create session: ${getErrorMessage(err)}`)
+      } finally {
+        setIsInitializing(false)
+      }
+    },
+    [loadSessions, loadRunningStatus]
+  )
 
   const selectSession = useCallback(async (sessionId: string) => {
     try {
@@ -222,51 +226,57 @@ export function useApp(): AppState & AppActions {
     }
   }, [])
 
-  const deleteSession = useCallback(async (sessionId: string) => {
-    try {
-      await window.electronAPI.deleteSession(sessionId)
-      if (currentSession?.id === sessionId) {
-        setCurrentSession(null)
-        setSessionUpdates([])
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await window.electronAPI.deleteSession(sessionId)
+        if (currentSession?.id === sessionId) {
+          setCurrentSession(null)
+          setSessionUpdates([])
+        }
+        await loadSessions()
+        await loadRunningStatus()
+      } catch (err) {
+        toast.error(`Failed to delete session: ${getErrorMessage(err)}`)
       }
-      await loadSessions()
-      await loadRunningStatus()
-    } catch (err) {
-      toast.error(`Failed to delete session: ${getErrorMessage(err)}`)
-    }
-  }, [currentSession, loadSessions, loadRunningStatus])
+    },
+    [currentSession, loadSessions, loadRunningStatus]
+  )
 
   const clearCurrentSession = useCallback(() => {
     setCurrentSession(null)
     setSessionUpdates([])
   }, [])
 
-  const sendPrompt = useCallback(async (content: MessageContent) => {
-    if (!currentSession) {
-      toast.error('No active session')
-      return
-    }
+  const sendPrompt = useCallback(
+    async (content: MessageContent) => {
+      if (!currentSession) {
+        toast.error('No active session')
+        return
+      }
 
-    try {
-      // Add user message to updates (use a custom marker for UI display)
-      // 'user_message' is a custom type not in ACP SDK, used for UI purposes only
-      const userUpdate = {
-        timestamp: new Date().toISOString(),
-        update: {
-          sessionId: currentSession.agentSessionId,
+      try {
+        // Add user message to updates (use a custom marker for UI display)
+        // 'user_message' is a custom type not in ACP SDK, used for UI purposes only
+        const userUpdate = {
+          timestamp: new Date().toISOString(),
           update: {
-            sessionUpdate: 'user_message',
-            content: content, // Now stores full MessageContent array
-          },
-        },
-      } as unknown as StoredSessionUpdate
-      setSessionUpdates((prev) => [...prev, userUpdate])
+            sessionId: currentSession.agentSessionId,
+            update: {
+              sessionUpdate: 'user_message',
+              content: content // Now stores full MessageContent array
+            }
+          }
+        } as unknown as StoredSessionUpdate
+        setSessionUpdates((prev) => [...prev, userUpdate])
 
-      await window.electronAPI.sendPrompt(currentSession.id, content)
-    } catch (err) {
-      toast.error(`Failed to send prompt: ${getErrorMessage(err)}`)
-    }
-  }, [currentSession])
+        await window.electronAPI.sendPrompt(currentSession.id, content)
+      } catch (err) {
+        toast.error(`Failed to send prompt: ${getErrorMessage(err)}`)
+      }
+    },
+    [currentSession]
+  )
 
   const cancelRequest = useCallback(async () => {
     if (!currentSession) return
@@ -278,24 +288,30 @@ export function useApp(): AppState & AppActions {
     }
   }, [currentSession])
 
-  const switchSessionAgent = useCallback(async (newAgentId: string) => {
-    if (!currentSession) {
-      toast.error('No active session')
-      return
-    }
+  const switchSessionAgent = useCallback(
+    async (newAgentId: string) => {
+      if (!currentSession) {
+        toast.error('No active session')
+        return
+      }
 
-    try {
-      setIsSwitchingAgent(true)
-      const updatedSession = await window.electronAPI.switchSessionAgent(currentSession.id, newAgentId)
-      setCurrentSession(updatedSession)
-      await loadRunningStatus()
-      toast.success(`Switched to ${newAgentId}`)
-    } catch (err) {
-      toast.error(`Failed to switch agent: ${getErrorMessage(err)}`)
-    } finally {
-      setIsSwitchingAgent(false)
-    }
-  }, [currentSession, loadRunningStatus])
+      try {
+        setIsSwitchingAgent(true)
+        const updatedSession = await window.electronAPI.switchSessionAgent(
+          currentSession.id,
+          newAgentId
+        )
+        setCurrentSession(updatedSession)
+        await loadRunningStatus()
+        toast.success(`Switched to ${newAgentId}`)
+      } catch (err) {
+        toast.error(`Failed to switch agent: ${getErrorMessage(err)}`)
+      } finally {
+        setIsSwitchingAgent(false)
+      }
+    },
+    [currentSession, loadRunningStatus]
+  )
 
   return {
     // State
@@ -315,6 +331,6 @@ export function useApp(): AppState & AppActions {
     clearCurrentSession,
     sendPrompt,
     cancelRequest,
-    switchSessionAgent,
+    switchSessionAgent
   }
 }

@@ -12,7 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,7 +31,7 @@ export function Modals({
   defaultAgentId,
   onSetDefaultAgent,
   onCreateSession,
-  onDeleteSession,
+  onDeleteSession
 }: ModalsProps) {
   const closeModal = useModalStore((s) => s.closeModal)
 
@@ -43,10 +43,7 @@ export function Modals({
         onCreateSession={onCreateSession}
         onClose={() => closeModal('settings')}
       />
-      <NewSessionModal
-        onCreateSession={onCreateSession}
-        onClose={() => closeModal('newSession')}
-      />
+      <NewSessionModal onCreateSession={onCreateSession} onClose={() => closeModal('newSession')} />
       <DeleteSessionModal
         onDeleteSession={onDeleteSession}
         onClose={() => closeModal('deleteSession')}
@@ -63,7 +60,12 @@ interface SettingsModalProps {
   onClose: () => void
 }
 
-function SettingsModal({ defaultAgentId, onSetDefaultAgent, onCreateSession, onClose }: SettingsModalProps) {
+function SettingsModal({
+  defaultAgentId,
+  onSetDefaultAgent,
+  onCreateSession,
+  onClose
+}: SettingsModalProps) {
   const { isOpen, data } = useModal('settings')
 
   const handleClose = async () => {

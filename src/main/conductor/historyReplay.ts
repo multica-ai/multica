@@ -74,9 +74,7 @@ function extractMessages(updates: StoredSessionUpdate[]): ExtractedMessage[] {
           role: 'assistant',
           content: currentAssistantContent,
           toolSummary:
-            currentToolCalls.length > 0
-              ? `[Used: ${currentToolCalls.join(', ')}]`
-              : undefined,
+            currentToolCalls.length > 0 ? `[Used: ${currentToolCalls.join(', ')}]` : undefined
         })
         currentAssistantContent = ''
         currentToolCalls = []
@@ -110,9 +108,7 @@ function extractMessages(updates: StoredSessionUpdate[]): ExtractedMessage[] {
       role: 'assistant',
       content: currentAssistantContent,
       toolSummary:
-        currentToolCalls.length > 0
-          ? `[Used: ${currentToolCalls.join(', ')}]`
-          : undefined,
+        currentToolCalls.length > 0 ? `[Used: ${currentToolCalls.join(', ')}]` : undefined
     })
   }
 
@@ -196,11 +192,7 @@ export function formatHistoryForReplay(
 /**
  * Wrap history with header/footer markers
  */
-function wrapHistory(
-  content: string,
-  totalMessages: number,
-  truncatedCount: number = 0
-): string {
+function wrapHistory(content: string, totalMessages: number, truncatedCount: number = 0): string {
   const header =
     truncatedCount > 0
       ? `[Session History - ${totalMessages} messages, ${truncatedCount} truncated]`

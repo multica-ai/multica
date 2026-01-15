@@ -7,15 +7,13 @@ import type {
   Client,
   SessionNotification,
   RequestPermissionRequest,
-  RequestPermissionResponse,
+  RequestPermissionResponse
 } from '@agentclientprotocol/sdk'
 import type { SessionStore } from '../session/SessionStore'
 
 export interface AcpClientCallbacks {
   onSessionUpdate?: (update: SessionNotification) => void
-  onPermissionRequest?: (
-    params: RequestPermissionRequest
-  ) => Promise<RequestPermissionResponse>
+  onPermissionRequest?: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>
 }
 
 export interface AcpClientFactoryOptions {
@@ -29,10 +27,7 @@ export interface AcpClientFactoryOptions {
  * @param sessionId - The Multica session ID (used for persistence)
  * @param options - Factory options including store and callbacks
  */
-export function createAcpClient(
-  sessionId: string,
-  options: AcpClientFactoryOptions
-): Client {
+export function createAcpClient(sessionId: string, options: AcpClientFactoryOptions): Client {
   const { sessionStore, callbacks } = options
 
   return {
@@ -44,19 +39,19 @@ export function createAcpClient(
         const updateType = update.sessionUpdate
         if (updateType === 'agent_message_chunk') {
           const contentType = update.content?.type || 'unknown'
-          const textPreview = update.content?.type === 'text'
-            ? update.content.text?.slice(0, 50)
-            : ''
+          const textPreview =
+            update.content?.type === 'text' ? update.content.text?.slice(0, 50) : ''
           console.log(`[ACP] ${updateType} (${contentType}): "${textPreview}"`)
         } else if (updateType === 'agent_thought_chunk') {
-          const textPreview = update.content?.type === 'text'
-            ? update.content.text?.slice(0, 50)
-            : ''
+          const textPreview =
+            update.content?.type === 'text' ? update.content.text?.slice(0, 50) : ''
           console.log(`[ACP] ${updateType}: "${textPreview}"`)
         } else if (updateType === 'tool_call') {
           console.log(`[ACP] ${updateType}: ${update.title} [${update.status}]`)
         } else if (updateType === 'tool_call_update') {
-          console.log(`[ACP] ${updateType}: ${update.title || update.toolCallId} [${update.status}]`)
+          console.log(
+            `[ACP] ${updateType}: ${update.title || update.toolCallId} [${update.status}]`
+          )
         } else {
           // Log other types briefly
           console.log(`[ACP] ${updateType}`)
@@ -92,9 +87,9 @@ export function createAcpClient(
       return {
         outcome: {
           outcome: 'selected',
-          optionId: params.options[0]?.optionId ?? '',
-        },
+          optionId: params.options[0]?.optionId ?? ''
+        }
       }
-    },
+    }
   }
 }

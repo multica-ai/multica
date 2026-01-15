@@ -28,7 +28,7 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: true
     }
   })
 
@@ -70,14 +70,16 @@ app.whenReady().then(async () => {
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE, {
             sessionId: params.sessionId,
             update: params.update,
-            done: false,
+            done: false
           })
         }
 
         // Delegate question tool workaround to PermissionManager
         permissionManager.handleSessionUpdate({
           sessionId: params.sessionId,
-          update: params.update as Parameters<typeof permissionManager.handleSessionUpdate>[0]['update'],
+          update: params.update as Parameters<
+            typeof permissionManager.handleSessionUpdate
+          >[0]['update']
         })
       },
       onStatusChange: () => {
@@ -86,7 +88,7 @@ app.whenReady().then(async () => {
           const status = {
             runningSessions: conductor.getRunningSessionIds().length,
             sessionIds: conductor.getRunningSessionIds(),
-            processingSessionIds: conductor.getProcessingSessionIds(),
+            processingSessionIds: conductor.getProcessingSessionIds()
           }
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_STATUS, status)
         }
@@ -99,8 +101,8 @@ app.whenReady().then(async () => {
       },
       onPermissionRequest: async (params) => {
         return permissionManager.handlePermissionRequest(params)
-      },
-    },
+      }
+    }
   })
 
   // Initialize PermissionManager after Conductor is created

@@ -47,10 +47,12 @@ export const useUIStore = create<UIStore>()(
       toggleRightPanel: () => set((state) => ({ rightPanelOpen: !state.rightPanelOpen })),
       setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
       setRightPanelWidth: (width) =>
-        set({ rightPanelWidth: Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, width)) }),
+        set({
+          rightPanelWidth: Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, width))
+        })
     }),
     {
-      name: 'ui-state', // localStorage key
+      name: 'ui-state' // localStorage key
     }
   )
 )

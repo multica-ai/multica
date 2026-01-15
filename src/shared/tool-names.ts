@@ -32,7 +32,7 @@ export const TOOL_NAMES = {
 
   // Agent tools
   TASK: 'Task',
-  TODO_WRITE: 'TodoWrite',
+  TODO_WRITE: 'TodoWrite'
 } as const
 
 // Type for tool names

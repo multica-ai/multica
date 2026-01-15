@@ -4,5 +4,5 @@ export {
   RightPanelHeader,
   RightPanelContent,
   RightPanelFooter,
-  SidebarTrigger,
+  SidebarTrigger
 } from './RightPanel'

@@ -1,0 +1,5 @@
+# Run the test checker script (advisory only)
+npx tsx scripts/check-tests.ts
+
+# Run lint-staged for formatting and linting
+npx lint-staged

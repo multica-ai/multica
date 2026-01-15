@@ -70,7 +70,9 @@ export class AskUserQuestionHandler {
       if (!answer) return
 
       this.conductor.addPendingAnswer(multicaSessionId, question, answer)
-      console.log(`[G-3] Stored answer for session ${multicaSessionId}: "${question}" -> "${answer}"`)
+      console.log(
+        `[G-3] Stored answer for session ${multicaSessionId}: "${question}" -> "${answer}"`
+      )
       userAnswerText = answer
     }
 

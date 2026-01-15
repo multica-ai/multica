@@ -12,7 +12,7 @@ import {
   PROTOCOL_VERSION,
   type SessionNotification,
   type RequestPermissionRequest,
-  type RequestPermissionResponse,
+  type RequestPermissionResponse
 } from '@agentclientprotocol/sdk'
 import { AgentProcess } from './AgentProcess'
 import { SessionStore } from '../session/SessionStore'
@@ -23,7 +23,7 @@ import type {
   MulticaSession,
   SessionData,
   ListSessionsOptions,
-  AskUserQuestionResponseData,
+  AskUserQuestionResponseData
 } from '../../shared/types'
 import type { MessageContent, MessageContentItem } from '../../shared/types/message'
 import { formatHistoryForReplay, hasReplayableHistory } from './historyReplay'
@@ -34,9 +34,7 @@ export interface SessionUpdateCallback {
 
 export interface ConductorEvents {
   onSessionUpdate?: SessionUpdateCallback
-  onPermissionRequest?: (
-    params: RequestPermissionRequest
-  ) => Promise<RequestPermissionResponse>
+  onPermissionRequest?: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>
   onStatusChange?: () => void
   /** Called when session metadata changes (e.g., agentSessionId after lazy start) */
   onSessionMetaUpdated?: (session: MulticaSession) => void
@@ -123,10 +121,7 @@ export class Conductor {
     await agentProcess.start()
 
     // Create ACP connection using the SDK
-    const stream = ndJsonStream(
-      agentProcess.getStdinWeb(),
-      agentProcess.getStdoutWeb()
-    )
+    const stream = ndJsonStream(agentProcess.getStdinWeb(), agentProcess.getStdoutWeb())
 
     // Create client-side connection with our Client implementation
     const connection = new ClientSideConnection(
@@ -135,8 +130,8 @@ export class Conductor {
           sessionStore: this.sessionStore,
           callbacks: {
             onSessionUpdate: this.events.onSessionUpdate,
-            onPermissionRequest: this.events.onPermissionRequest,
-          },
+            onPermissionRequest: this.events.onPermissionRequest
+          }
         }),
       stream
     )
@@ -147,23 +142,27 @@ export class Conductor {
       clientCapabilities: {
         fs: {
           readTextFile: false,
-          writeTextFile: false,
+          writeTextFile: false
         },
-        terminal: false,
-      },
+        terminal: false
+      }
     })
 
-    console.log(`[Conductor] ACP connected to ${config.name} (protocol v${initResult.protocolVersion})`)
+    console.log(
+      `[Conductor] ACP connected to ${config.name} (protocol v${initResult.protocolVersion})`
+    )
 
     // Create ACP session
     const acpResult = await connection.newSession({
       cwd,
-      mcpServers: [],
+      mcpServers: []
     })
 
     // Handle agent process exit
     agentProcess.onExit((code, signal) => {
-      console.log(`[Conductor] Agent for session ${sessionId} exited (code: ${code}, signal: ${signal})`)
+      console.log(
+        `[Conductor] Agent for session ${sessionId} exited (code: ${code}, signal: ${signal})`
+      )
       this.sessions.delete(sessionId)
     })
 
@@ -173,7 +172,7 @@ export class Conductor {
       connection,
       agentConfig: config,
       agentSessionId: acpResult.sessionId,
-      needsHistoryReplay: isResumed, // True when resuming, agent needs conversation context
+      needsHistoryReplay: isResumed // True when resuming, agent needs conversation context
     })
 
     return { connection, agentSessionId: acpResult.sessionId }
@@ -185,7 +184,9 @@ export class Conductor {
   async stopSession(sessionId: string): Promise<void> {
     const sessionAgent = this.sessions.get(sessionId)
     if (sessionAgent) {
-      console.log(`[Conductor] Stopping session ${sessionId} agent: ${sessionAgent.agentConfig.name}`)
+      console.log(
+        `[Conductor] Stopping session ${sessionId} agent: ${sessionAgent.agentConfig.name}`
+      )
       await sessionAgent.agentProcess.stop()
       this.sessions.delete(sessionId)
       console.log(`[Conductor] Session ${sessionId} agent stopped`)
@@ -213,7 +214,7 @@ export class Conductor {
       session = await this.sessionStore.create({
         agentSessionId: '', // Will be updated after agent starts
         agentId: agentConfig.id,
-        workingDirectory: cwd,
+        workingDirectory: cwd
       })
     } else {
       // CLI mode: in-memory session
@@ -227,7 +228,7 @@ export class Conductor {
         createdAt: now,
         updatedAt: now,
         status: 'active',
-        messageCount: 0,
+        messageCount: 0
       }
       this.inMemorySession = session
     }
@@ -284,7 +285,7 @@ export class Conductor {
     // Update agentSessionId (new ACP session)
     const updatedSession = await this.sessionStore.updateMeta(sessionId, {
       agentSessionId,
-      status: 'active',
+      status: 'active'
     })
 
     console.log(`[Conductor] Resumed session: ${sessionId} (new agent session: ${agentSessionId})`)
@@ -310,7 +311,9 @@ export class Conductor {
     const { connection, agentSessionId } = sessionAgent
 
     // Convert MessageContent to ACP SDK format
-    const convertToAcpFormat = (items: MessageContent): Array<{ type: string; text?: string; data?: string; mimeType?: string }> => {
+    const convertToAcpFormat = (
+      items: MessageContent
+    ): Array<{ type: string; text?: string; data?: string; mimeType?: string }> => {
       return items.map((item: MessageContentItem) => {
         if (item.type === 'text') {
           return { type: 'text', text: item.text }
@@ -331,7 +334,9 @@ export class Conductor {
         if (data && hasReplayableHistory(data.updates)) {
           const history = formatHistoryForReplay(data.updates)
           if (history) {
-            console.log(`[Conductor] Prepending conversation history (${data.updates.length} updates)`)
+            console.log(
+              `[Conductor] Prepending conversation history (${data.updates.length} updates)`
+            )
             // Prepend history as text block before other content
             promptContent = [{ type: 'text', text: history }, ...promptContent]
           }
@@ -349,17 +354,16 @@ export class Conductor {
     // See pendingAnswers field comment for the full explanation
     const pendingAnswers = this.getPendingAnswers(sessionId)
     if (pendingAnswers.length > 0) {
-      const answerContext = pendingAnswers.map(a =>
-        `[User's answer to "${a.question}"]: ${a.answer}`
-      ).join('\n')
+      const answerContext = pendingAnswers
+        .map((a) => `[User's answer to "${a.question}"]: ${a.answer}`)
+        .join('\n')
 
-      console.log(`[Conductor] Injecting ${pendingAnswers.length} pending answer(s) for session ${sessionId}`)
+      console.log(
+        `[Conductor] Injecting ${pendingAnswers.length} pending answer(s) for session ${sessionId}`
+      )
 
       // Prepend answers as context before user's message
-      promptContent = [
-        { type: 'text', text: `---\n${answerContext}\n---\n` },
-        ...promptContent
-      ]
+      promptContent = [{ type: 'text', text: `---\n${answerContext}\n---\n` }, ...promptContent]
 
       // Clear pending answers after injection
       this.clearPendingAnswers(sessionId)
@@ -370,7 +374,9 @@ export class Conductor {
     const imageCount = content.filter((c: MessageContentItem) => c.type === 'image').length
     console.log(`[Conductor] Sending prompt to session ${agentSessionId}`)
     if (textContent && textContent.type === 'text') {
-      console.log(`[Conductor]   Text: ${textContent.text.slice(0, 100)}${textContent.text.length > 100 ? '...' : ''}`)
+      console.log(
+        `[Conductor]   Text: ${textContent.text.slice(0, 100)}${textContent.text.length > 100 ? '...' : ''}`
+      )
     }
     if (imageCount > 0) {
       console.log(`[Conductor]   Images: ${imageCount}`)
@@ -384,8 +390,8 @@ export class Conductor {
         update: {
           sessionUpdate: 'user_message',
           content: content, // Store full MessageContent array
-          _internal: options?.internal ?? false, // G-3: internal messages not shown in UI
-        },
+          _internal: options?.internal ?? false // G-3: internal messages not shown in UI
+        }
       }
       await this.sessionStore.appendUpdate(sessionId, userUpdate as any)
     }
@@ -397,7 +403,7 @@ export class Conductor {
     try {
       const result = await connection.prompt({
         sessionId: agentSessionId,
-        prompt: promptContent as any,
+        prompt: promptContent as any
       })
 
       console.log(`[Conductor] Prompt completed with stopReason: ${result.stopReason}`)
@@ -500,7 +506,7 @@ export class Conductor {
     // Update session with new agentSessionId
     const updatedSession = await this.sessionStore.updateMeta(sessionId, {
       agentSessionId,
-      status: 'active',
+      status: 'active'
     })
 
     // Notify frontend of session metadata change (important for agentSessionId update)
@@ -560,14 +566,16 @@ export class Conductor {
       throw new Error(`Unknown agent: ${newAgentId}`)
     }
 
-    console.log(`[Conductor] Switching session ${sessionId} from ${data.session.agentId} to ${newAgentId}`)
+    console.log(
+      `[Conductor] Switching session ${sessionId} from ${data.session.agentId} to ${newAgentId}`
+    )
 
     // Stop current agent if running
     await this.stopSession(sessionId)
 
     // Update session's agentId
     let updatedSession = await this.sessionStore.updateMeta(sessionId, {
-      agentId: newAgentId,
+      agentId: newAgentId
     })
 
     // Start new agent (isResumed = true to replay history)
@@ -581,7 +589,7 @@ export class Conductor {
     // Update agentSessionId
     updatedSession = await this.sessionStore.updateMeta(sessionId, {
       agentSessionId,
-      status: 'active',
+      status: 'active'
     })
 
     // Notify frontend
@@ -589,7 +597,9 @@ export class Conductor {
       this.events.onSessionMetaUpdated(updatedSession)
     }
 
-    console.log(`[Conductor] Session ${sessionId} switched to ${newAgentId} (agent session: ${agentSessionId})`)
+    console.log(
+      `[Conductor] Session ${sessionId} switched to ${newAgentId} (agent session: ${agentSessionId})`
+    )
 
     return updatedSession
   }
@@ -695,8 +705,8 @@ export class Conductor {
       update: {
         sessionUpdate: 'askuserquestion_response',
         toolCallId,
-        response,
-      },
+        response
+      }
     }
 
     console.log(`[Conductor] Storing AskUserQuestion response for toolCallId=${toolCallId}`)
@@ -706,7 +716,7 @@ export class Conductor {
     if (this.events.onSessionUpdate) {
       this.events.onSessionUpdate({
         sessionId,
-        update: update.update,
+        update: update.update
       } as SessionNotification)
     }
   }

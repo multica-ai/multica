@@ -14,7 +14,7 @@ vi.mock('../../../src/main/conductor/AgentProcess', () => {
       getPid = vi.fn().mockReturnValue(12345)
       getStdinWeb = vi.fn().mockReturnValue(new WritableStream())
       getStdoutWeb = vi.fn().mockReturnValue(new ReadableStream())
-    },
+    }
   }
 })
 
@@ -26,16 +26,16 @@ vi.mock('@agentclientprotocol/sdk', () => {
     ClientSideConnection: class MockClientSideConnection {
       initialize = vi.fn().mockResolvedValue({
         protocolVersion: '1.0',
-        agentInfo: { name: 'mock-agent' },
+        agentInfo: { name: 'mock-agent' }
       })
       newSession = vi.fn().mockResolvedValue({
-        sessionId: 'mock-acp-session-id',
+        sessionId: 'mock-acp-session-id'
       })
       prompt = vi.fn().mockResolvedValue({
-        stopReason: 'end_turn',
+        stopReason: 'end_turn'
       })
       cancel = vi.fn().mockResolvedValue(undefined)
-    },
+    }
   }
 })
 
@@ -77,7 +77,7 @@ describe('Conductor', () => {
       name: 'OpenCode',
       command: 'opencode',
       args: ['--mcp'],
-      enabled: true,
+      enabled: true
     }
 
     beforeEach(async () => {
@@ -92,7 +92,7 @@ describe('Conductor', () => {
         id: expect.any(String),
         agentId: 'opencode',
         workingDirectory: '/test/project',
-        status: 'active',
+        status: 'active'
       })
     })
 
@@ -154,7 +154,7 @@ describe('Conductor', () => {
       name: 'OpenCode',
       command: 'opencode',
       args: ['--mcp'],
-      enabled: true,
+      enabled: true
     }
 
     beforeEach(async () => {
@@ -189,14 +189,14 @@ describe('Conductor', () => {
       name: 'OpenCode',
       command: 'opencode',
       args: ['--mcp'],
-      enabled: true,
+      enabled: true
     }
 
     it('should call onStatusChange when session starts processing', async () => {
       const onStatusChange = vi.fn()
       conductor = new Conductor({
         storagePath: tempDir,
-        events: { onStatusChange },
+        events: { onStatusChange }
       })
       await conductor.initialize()
 

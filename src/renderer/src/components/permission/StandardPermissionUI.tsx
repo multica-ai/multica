@@ -81,7 +81,11 @@ export function StandardPermissionUI({ request, isPending }: StandardPermissionU
           ) : (
             // Simple allow/deny
             <>
-              <Button size="sm" variant="outline" onClick={() => respondToRequest(denyOption.optionId)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => respondToRequest(denyOption.optionId)}
+              >
                 {denyOption.name || 'Deny'}
               </Button>
               <Button size="sm" onClick={() => respondToRequest(allowOption.optionId)}>

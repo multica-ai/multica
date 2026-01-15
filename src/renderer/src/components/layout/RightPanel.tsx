@@ -6,11 +6,7 @@ import * as React from 'react'
 import { PanelLeftIcon, PanelRightIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import {
-  useUIStore,
-  RIGHT_PANEL_MIN_WIDTH,
-  RIGHT_PANEL_MAX_WIDTH,
-} from '@/stores/uiStore'
+import { useUIStore, RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH } from '@/stores/uiStore'
 import { useSidebar } from '@/components/ui/sidebar'
 import { useResize } from '@/hooks/useResize'
 
@@ -29,7 +25,7 @@ export function RightPanel({ children, className }: RightPanelProps) {
     minWidth: RIGHT_PANEL_MIN_WIDTH,
     maxWidth: RIGHT_PANEL_MAX_WIDTH,
     onWidthChange: setRightPanelWidth,
-    direction: 'left',
+    direction: 'left'
   })
 
   return (
@@ -69,10 +65,7 @@ export function RightPanel({ children, className }: RightPanelProps) {
 }
 
 // Trigger button - desktop only, secondary variant when panel is open
-export function RightPanelTrigger({
-  className,
-  ...props
-}: React.ComponentProps<typeof Button>) {
+export function RightPanelTrigger({ className, ...props }: React.ComponentProps<typeof Button>) {
   const isOpen = useUIStore((s) => s.rightPanelOpen)
   const toggle = useUIStore((s) => s.toggleRightPanel)
 
@@ -117,41 +110,18 @@ export function SidebarTrigger({
 }
 
 // Sub-components for consistent structure
-export function RightPanelHeader({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<'div'>) {
+export function RightPanelHeader({ className, children, ...props }: React.ComponentProps<'div'>) {
   return (
-    <div
-      className={cn('flex h-11 items-center border-b px-4', className)}
-      {...props}
-    >
+    <div className={cn('flex h-11 items-center border-b px-4', className)} {...props}>
       {children}
     </div>
   )
 }
 
-export function RightPanelContent({
-  className,
-  ...props
-}: React.ComponentProps<'div'>) {
-  return (
-    <div
-      className={cn('flex-1 overflow-auto p-4', className)}
-      {...props}
-    />
-  )
+export function RightPanelContent({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div className={cn('flex-1 overflow-auto p-4', className)} {...props} />
 }
 
-export function RightPanelFooter({
-  className,
-  ...props
-}: React.ComponentProps<'div'>) {
-  return (
-    <div
-      className={cn('border-t p-4', className)}
-      {...props}
-    />
-  )
+export function RightPanelFooter({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div className={cn('border-t p-4', className)} {...props} />
 }

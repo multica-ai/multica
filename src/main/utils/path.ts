@@ -14,7 +14,7 @@ export function getEnhancedPath(): string {
     `${home}/.claude/local/bin`,
     `${home}/.local/bin`,
     '/opt/homebrew/bin',
-    '/usr/local/bin',
+    '/usr/local/bin'
   ]
   return `${customPaths.join(':')}:${process.env.PATH || ''}`
 }

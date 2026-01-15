@@ -21,16 +21,22 @@ interface ChatViewProps {
   onSelectFolder?: () => void
 }
 
-export function ChatView({ updates, isProcessing, hasSession, isInitializing, currentSessionId, onSelectFolder }: ChatViewProps) {
+export function ChatView({
+  updates,
+  isProcessing,
+  hasSession,
+  isInitializing,
+  currentSessionId,
+  onSelectFolder
+}: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
 
   // Only show permission request if it belongs to the current session
-  const currentPermission = pendingPermission?.multicaSessionId === currentSessionId
-    ? pendingPermission
-    : null
+  const currentPermission =
+    pendingPermission?.multicaSessionId === currentSessionId ? pendingPermission : null
 
   // Track scroll position to determine if user is near bottom
   const handleScroll = () => {
@@ -90,9 +96,7 @@ export function ChatView({ updates, isProcessing, hasSession, isInitializing, cu
 
         {/* Permission request - show in feed (only for current session) */}
         {/* Completed state is shown inline with the tool call, like other tools */}
-        {currentPermission && (
-          <PermissionRequestItem request={currentPermission} />
-        )}
+        {currentPermission && <PermissionRequestItem request={currentPermission} />}
 
         {isProcessing && !currentPermission && (
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -179,7 +183,7 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
     if (currentBlocks.length > 0) {
       messages.push({
         role: 'assistant',
-        blocks: currentBlocks,
+        blocks: currentBlocks
       })
       currentBlocks = []
       toolCallMap.clear()
@@ -217,11 +221,20 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
                 if (item.type === 'text' && typeof item.text === 'string') {
                   userBlocks.push({ type: 'text', content: item.text })
                 } else if (item.type === 'image' && typeof item.data === 'string') {
-                  userBlocks.push({ type: 'image', data: item.data, mimeType: item.mimeType || 'image/png' })
+                  userBlocks.push({
+                    type: 'image',
+                    data: item.data,
+                    mimeType: item.mimeType || 'image/png'
+                  })
                 }
               }
             }
-          } else if (content && typeof content === 'object' && 'type' in content && 'text' in content) {
+          } else if (
+            content &&
+            typeof content === 'object' &&
+            'type' in content &&
+            'text' in content
+          ) {
             // Old format: single text content object { type: 'text', text: '...' }
             const textContent = content as { type: string; text: unknown }
             if (textContent.type === 'text' && typeof textContent.text === 'string') {
@@ -235,7 +248,7 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
           if (userBlocks.length > 0) {
             messages.push({
               role: 'user',
-              blocks: userBlocks,
+              blocks: userBlocks
             })
           }
         }
@@ -272,14 +285,16 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
             if (update.kind) toolCall.kind = update.kind
             if (update.rawInput && Object.keys(update.rawInput).length > 0) {
               toolCall.rawInput = update.rawInput as Record<string, unknown>
-              toolCall.input = typeof update.rawInput === 'string'
-                ? update.rawInput
-                : JSON.stringify(update.rawInput, null, 2)
+              toolCall.input =
+                typeof update.rawInput === 'string'
+                  ? update.rawInput
+                  : JSON.stringify(update.rawInput, null, 2)
             }
             if (update.rawOutput) {
-              toolCall.output = typeof update.rawOutput === 'string'
-                ? update.rawOutput
-                : JSON.stringify(update.rawOutput, null, 2)
+              toolCall.output =
+                typeof update.rawOutput === 'string'
+                  ? update.rawOutput
+                  : JSON.stringify(update.rawOutput, null, 2)
             }
           } else {
             // Create new toolCall
@@ -294,16 +309,18 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
               kind: update.kind,
               toolName: meta?.claudeCode?.toolName,
               rawInput: update.rawInput as Record<string, unknown> | undefined,
-              input: typeof update.rawInput === 'string'
-                ? update.rawInput
-                : update.rawInput && Object.keys(update.rawInput).length > 0
-                  ? JSON.stringify(update.rawInput, null, 2)
-                  : undefined,
+              input:
+                typeof update.rawInput === 'string'
+                  ? update.rawInput
+                  : update.rawInput && Object.keys(update.rawInput).length > 0
+                    ? JSON.stringify(update.rawInput, null, 2)
+                    : undefined
             }
             if (update.rawOutput) {
-              toolCall.output = typeof update.rawOutput === 'string'
-                ? update.rawOutput
-                : JSON.stringify(update.rawOutput, null, 2)
+              toolCall.output =
+                typeof update.rawOutput === 'string'
+                  ? update.rawOutput
+                  : JSON.stringify(update.rawOutput, null, 2)
             }
             toolCallMap.set(update.toolCallId, toolCall)
 
@@ -328,14 +345,16 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
             if (updateMeta?.claudeCode?.toolName) toolCall.toolName = updateMeta.claudeCode.toolName
             if (update.rawInput && Object.keys(update.rawInput).length > 0) {
               toolCall.rawInput = update.rawInput as Record<string, unknown>
-              toolCall.input = typeof update.rawInput === 'string'
-                ? update.rawInput
-                : JSON.stringify(update.rawInput, null, 2)
+              toolCall.input =
+                typeof update.rawInput === 'string'
+                  ? update.rawInput
+                  : JSON.stringify(update.rawInput, null, 2)
             }
             if (update.rawOutput) {
-              toolCall.output = typeof update.rawOutput === 'string'
-                ? update.rawOutput
-                : JSON.stringify(update.rawOutput, null, 2)
+              toolCall.output =
+                typeof update.rawOutput === 'string'
+                  ? update.rawOutput
+                  : JSON.stringify(update.rawOutput, null, 2)
             }
           } else {
             // Create new entry if we see update before the initial tool_call
@@ -349,17 +368,19 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
               status: update.status || 'pending',
               kind: update.kind ?? undefined,
               toolName: updateMeta?.claudeCode?.toolName,
-              rawInput: update.rawInput as Record<string, unknown> | undefined,
+              rawInput: update.rawInput as Record<string, unknown> | undefined
             }
             if (update.rawInput && Object.keys(update.rawInput).length > 0) {
-              toolCall.input = typeof update.rawInput === 'string'
-                ? update.rawInput
-                : JSON.stringify(update.rawInput, null, 2)
+              toolCall.input =
+                typeof update.rawInput === 'string'
+                  ? update.rawInput
+                  : JSON.stringify(update.rawInput, null, 2)
             }
             if (update.rawOutput) {
-              toolCall.output = typeof update.rawOutput === 'string'
-                ? update.rawOutput
-                : JSON.stringify(update.rawOutput, null, 2)
+              toolCall.output =
+                typeof update.rawOutput === 'string'
+                  ? update.rawOutput
+                  : JSON.stringify(update.rawOutput, null, 2)
             }
             toolCallMap.set(update.toolCallId, toolCall)
 
@@ -377,16 +398,20 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
         if ('entries' in update && Array.isArray(update.entries)) {
           flushPendingThought()
           flushPendingText()
-          const entries: PlanEntry[] = update.entries.map((entry: { content?: string; status?: string; priority?: string }) => ({
-            content: entry.content || '',
-            status: (entry.status as PlanEntry['status']) || 'pending',
-            priority: entry.priority as PlanEntry['priority'],
-          }))
+          const entries: PlanEntry[] = update.entries.map(
+            (entry: { content?: string; status?: string; priority?: string }) => ({
+              content: entry.content || '',
+              status: (entry.status as PlanEntry['status']) || 'pending',
+              priority: entry.priority as PlanEntry['priority']
+            })
+          )
           if (entries.length > 0) {
             // Find existing plan block and update it instead of creating new one
-            const existingPlanIndex = currentBlocks.findIndex(b => b.type === 'plan')
+            const existingPlanIndex = currentBlocks.findIndex((b) => b.type === 'plan')
             if (existingPlanIndex >= 0) {
-              ;(currentBlocks[existingPlanIndex] as { type: 'plan'; entries: PlanEntry[] }).entries = entries
+              ;(
+                currentBlocks[existingPlanIndex] as { type: 'plan'; entries: PlanEntry[] }
+              ).entries = entries
             } else {
               currentBlocks.push({ type: 'plan', entries })
             }
@@ -444,9 +469,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
           {/* Render text content */}
-          {textBlock && (
-            <div className="whitespace-pre-wrap">{textBlock.content}</div>
-          )}
+          {textBlock && <div className="whitespace-pre-wrap">{textBlock.content}</div>}
         </div>
       </div>
     )
@@ -492,9 +515,7 @@ function TextContentBlock({ content }: { content: string }) {
         remarkPlugins={[remarkGfm]}
         components={{
           // Paragraphs: consistent spacing, tighter line height for readability
-          p: ({ children }) => (
-            <p className="mb-4 last:mb-0">{children}</p>
-          ),
+          p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
           // Headings: more space above (1.5x) than below (0.5x) for visual grouping
           h1: ({ children }) => (
             <h1 className="text-xl font-bold mt-6 mb-3 first:mt-0">{children}</h1>
@@ -534,7 +555,12 @@ function TextContentBlock({ content }: { content: string }) {
           ),
           // Links
           a: ({ href, children }) => (
-            <a href={href} className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">
+            <a
+              href={href}
+              className="text-primary hover:underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {children}
             </a>
           ),
@@ -555,21 +581,13 @@ function TextContentBlock({ content }: { content: string }) {
               </table>
             </div>
           ),
-          thead: ({ children }) => (
-            <thead className="bg-muted/50">{children}</thead>
-          ),
+          thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
           tbody: ({ children }) => <tbody>{children}</tbody>,
-          tr: ({ children }) => (
-            <tr className="border-b border-border">{children}</tr>
-          ),
+          tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
           th: ({ children }) => (
-            <th className="border border-border px-3 py-2 text-left font-semibold">
-              {children}
-            </th>
+            <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>
           ),
-          td: ({ children }) => (
-            <td className="border border-border px-3 py-2">{children}</td>
-          ),
+          td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>
         }}
       >
         {content}
@@ -593,7 +611,9 @@ function ThoughtBlockView({ text }: { text: string }) {
           <span className="opacity-60">⊛</span>
           <span className="font-medium">Thinking</span>
           {isLong && (
-            <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            <ChevronDown
+              className={`ml-auto h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+            />
           )}
         </CollapsibleTrigger>
 
@@ -606,7 +626,7 @@ function ThoughtBlockView({ text }: { text: string }) {
                   <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
                     {children}
                   </code>
-                ),
+                )
               }}
             >
               {text}
@@ -624,7 +644,7 @@ function ThoughtBlockView({ text }: { text: string }) {
                   <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
                     {children}
                   </code>
-                ),
+                )
               }}
             >
               {text}
@@ -642,7 +662,7 @@ function ThoughtBlockView({ text }: { text: string }) {
                   <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
                     {children}
                   </code>
-                ),
+                )
               }}
             >
               {text}
@@ -657,9 +677,18 @@ function ThoughtBlockView({ text }: { text: string }) {
 function LoadingDots() {
   return (
     <span className="inline-flex gap-1">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" style={{ animationDelay: '0ms' }} />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" style={{ animationDelay: '150ms' }} />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" style={{ animationDelay: '300ms' }} />
+      <span
+        className="h-1.5 w-1.5 animate-bounce rounded-full bg-current"
+        style={{ animationDelay: '0ms' }}
+      />
+      <span
+        className="h-1.5 w-1.5 animate-bounce rounded-full bg-current"
+        style={{ animationDelay: '150ms' }}
+      />
+      <span
+        className="h-1.5 w-1.5 animate-bounce rounded-full bg-current"
+        style={{ animationDelay: '300ms' }}
+      />
     </span>
   )
 }
@@ -715,10 +744,9 @@ function PlanBlockView({ entries }: { entries: PlanEntry[] }) {
         )}
 
         {/* Chevron */}
-        <ChevronDown className={cn(
-          "ml-auto h-3.5 w-3.5 transition-transform",
-          isExpanded && "rotate-180"
-        )} />
+        <ChevronDown
+          className={cn('ml-auto h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-180')}
+        />
       </CollapsibleTrigger>
 
       <CollapsibleContent>
@@ -734,12 +762,14 @@ function PlanBlockView({ entries }: { entries: PlanEntry[] }) {
                 <Circle className="h-3 w-3 text-muted-foreground/50 flex-shrink-0 mt-0.5" />
               )}
               {/* Content - smaller text */}
-              <span className={cn(
-                'leading-relaxed',
-                entry.status === 'completed' && 'text-muted-foreground line-through',
-                entry.status === 'in_progress' && 'text-secondary-foreground',
-                entry.status === 'pending' && 'text-muted-foreground'
-              )}>
+              <span
+                className={cn(
+                  'leading-relaxed',
+                  entry.status === 'completed' && 'text-muted-foreground line-through',
+                  entry.status === 'in_progress' && 'text-secondary-foreground',
+                  entry.status === 'pending' && 'text-muted-foreground'
+                )}
+              >
                 {entry.content}
               </span>
             </div>

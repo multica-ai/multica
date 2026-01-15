@@ -9,7 +9,7 @@ import {
   FolderOpenIcon,
   FileIcon,
   ImageIcon,
-  LockIcon,
+  LockIcon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -18,15 +18,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuTrigger,
+  ContextMenuTrigger
 } from '@/components/ui/context-menu'
-import {
-  getFileIcon,
-  isConfigFile,
-  isGitFile,
-  ConfigIcon,
-  GitIcon,
-} from './FileIcons'
+import { getFileIcon, isConfigFile, isGitFile, ConfigIcon, GitIcon } from './FileIcons'
 import type { FileTreeNode, DetectedApp } from '../../../shared/electron-api'
 import { useFileChangeStore } from '../stores/fileChangeStore'
 
@@ -45,13 +39,7 @@ interface TreeItemProps {
 }
 
 // Get the appropriate icon for a file/directory
-function FileTreeIcon({
-  node,
-  isExpanded,
-}: {
-  node: FileTreeNode
-  isExpanded?: boolean
-}) {
+function FileTreeIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded?: boolean }) {
   const className = 'h-4 w-4 flex-shrink-0'
 
   if (node.type === 'directory') {
@@ -97,7 +85,7 @@ function TreeItem({
   onToggle,
   childrenCache,
   loadChildren,
-  availableApps,
+  availableApps
 }: TreeItemProps) {
   const isExpanded = expandedPaths.has(node.path)
   const isDirectory = node.type === 'directory'
@@ -137,9 +125,7 @@ function TreeItem({
 
   // Separate apps into categories
   const finderApp = availableApps.find((app) => app.id === 'finder')
-  const editorApps = availableApps.filter((app) =>
-    ['cursor', 'vscode', 'xcode'].includes(app.id)
-  )
+  const editorApps = availableApps.filter((app) => ['cursor', 'vscode', 'xcode'].includes(app.id))
   const terminalApps = availableApps.filter((app) =>
     ['ghostty', 'iterm', 'terminal'].includes(app.id)
   )
@@ -181,9 +167,7 @@ function TreeItem({
             <span className="truncate text-sm">{node.name}</span>
 
             {/* Loading indicator */}
-            {isLoading && (
-              <span className="text-xs text-muted-foreground ml-auto">...</span>
-            )}
+            {isLoading && <span className="text-xs text-muted-foreground ml-auto">...</span>}
           </div>
         </ContextMenuTrigger>
 
@@ -299,7 +283,7 @@ export function FileTree({ rootPath }: FileTreeProps) {
       try {
         const [children, apps] = await Promise.all([
           window.electronAPI.listDirectory(rootPath),
-          window.electronAPI.detectApps(),
+          window.electronAPI.detectApps()
         ])
         setRootChildren(filterHidden(children))
         setAvailableApps(apps)
@@ -332,7 +316,12 @@ export function FileTree({ rootPath }: FileTreeProps) {
         console.log('[FileTree] Fetching root directory:', rootPath)
         const children = await window.electronAPI.listDirectory(rootPath)
         const filtered = filterHidden(children)
-        console.log('[FileTree] Root directory result:', filtered.length, 'items', filtered.map(c => c.name))
+        console.log(
+          '[FileTree] Root directory result:',
+          filtered.length,
+          'items',
+          filtered.map((c) => c.name)
+        )
         setRootChildren(filtered)
 
         // Re-fetch all expanded directories to update them

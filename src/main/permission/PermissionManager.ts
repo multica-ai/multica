@@ -57,13 +57,13 @@ export class PermissionManager {
           title: params.toolCall.title,
           kind: params.toolCall.kind,
           status: params.toolCall.status,
-          rawInput: params.toolCall.rawInput,
+          rawInput: params.toolCall.rawInput
         },
         options: params.options.map((o) => ({
           optionId: o.optionId,
           name: o.name,
-          kind: o.kind,
-        })),
+          kind: o.kind
+        }))
       })
     }
 
@@ -86,7 +86,7 @@ export class PermissionManager {
             hasSelectedOptions: !!response.data.selectedOptions,
             selectedOptionsCount: response.data.selectedOptions?.length,
             selectedOption: response.data.selectedOption,
-            customText: response.data.customText,
+            customText: response.data.customText
           })
 
           // Check if we have any answer
@@ -111,7 +111,7 @@ export class PermissionManager {
             this.askUserQuestionHandler.handle({
               acpSessionId: params.sessionId,
               toolCall: params.toolCall,
-              responseData: response.data,
+              responseData: response.data
             })
           }
         }
@@ -139,10 +139,10 @@ export class PermissionManager {
                         ? 'multi-selected'
                         : response.data.selectedOption
                           ? 'selected'
-                          : 'custom',
+                          : 'custom'
                 }
-              : undefined,
-          },
+              : undefined
+          }
         })
       })
 
@@ -158,8 +158,8 @@ export class PermissionManager {
             resolve({
               outcome: {
                 outcome: 'selected',
-                optionId: denyOption?.optionId ?? '',
-              },
+                optionId: denyOption?.optionId ?? ''
+              }
             })
           }
         },
@@ -176,7 +176,9 @@ export class PermissionManager {
     console.log(`[Permission] Response data:`, JSON.stringify(response.data, null, 2))
 
     if (response.data?.selectedOptions) {
-      console.log(`[Permission] Multi-select detected: ${response.data.selectedOptions.length} options`)
+      console.log(
+        `[Permission] Multi-select detected: ${response.data.selectedOptions.length} options`
+      )
     }
 
     const resolver = this.pendingRequests.get(response.requestId)

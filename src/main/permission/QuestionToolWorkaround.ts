@@ -69,7 +69,9 @@ export class QuestionToolWorkaround {
       // Use setImmediate to avoid blocking the event handler
       setImmediate(async () => {
         try {
-          console.log('[Question] Tool detected (will hang forever), cancelling and notifying agent')
+          console.log(
+            '[Question] Tool detected (will hang forever), cancelling and notifying agent'
+          )
           console.log('[Question] Original questions:', questionTexts)
 
           // Cancel the current turn to stop the hanging question tool
@@ -84,7 +86,9 @@ export class QuestionToolWorkaround {
             ? `The "question" tool is not available in this environment. You tried to ask:\n\n${questionTexts}\n\nPlease ask these questions directly in the conversation (as plain text) so the user can respond.`
             : 'The "question" tool is not available in this environment. Please ask your question directly in the conversation instead of using the question tool.'
 
-          await this.conductor.sendPrompt(multicaSessionId, [{ type: 'text', text: prompt }], { internal: true })
+          await this.conductor.sendPrompt(multicaSessionId, [{ type: 'text', text: prompt }], {
+            internal: true
+          })
           console.log('[Question] Agent notified internally to ask directly')
         } catch (error) {
           console.error('[Question] Failed to handle question tool:', error)

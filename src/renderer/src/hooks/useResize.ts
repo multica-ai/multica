@@ -31,7 +31,7 @@ export function useResize({
   minWidth,
   maxWidth,
   onWidthChange,
-  direction,
+  direction
 }: UseResizeOptions): UseResizeReturn {
   const [isResizing, setIsResizing] = useState(false)
   const startXRef = useRef(0)
@@ -55,9 +55,7 @@ export function useResize({
       // For left sidebar, dragging right increases width
       // For right panel, dragging left increases width
       const newWidth =
-        direction === 'right'
-          ? startWidthRef.current + delta
-          : startWidthRef.current - delta
+        direction === 'right' ? startWidthRef.current + delta : startWidthRef.current - delta
       const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth))
       onWidthChange(clampedWidth)
     }
@@ -85,7 +83,7 @@ export function useResize({
     isResizing,
     handleProps: {
       onMouseDown: handleMouseDown,
-      style: { cursor: 'col-resize' },
-    },
+      style: { cursor: 'col-resize' }
+    }
   }
 }

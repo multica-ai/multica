@@ -10,7 +10,7 @@ export function QuestionOptions({
   options,
   isMultiSelect,
   selectedOptions,
-  onOptionClick,
+  onOptionClick
 }: QuestionOptionsProps) {
   return (
     <div className="flex flex-col gap-2">

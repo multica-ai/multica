@@ -21,8 +21,8 @@ import opencodeIcon from '../assets/agents/opencode.png'
 
 const AGENT_ICONS: Record<string, string> = {
   'claude-code': claudeIcon,
-  'codex': openaiIcon,
-  'opencode': opencodeIcon,
+  codex: openaiIcon,
+  opencode: opencodeIcon
 }
 
 // Icons that need dark mode inversion (monochrome black icons)
@@ -33,7 +33,7 @@ interface SettingsProps {
   onClose: () => void
   defaultAgentId: string
   onSetDefaultAgent: (agentId: string) => void
-  highlightAgent?: string  // Agent to highlight (when opened due to missing dependency)
+  highlightAgent?: string // Agent to highlight (when opened due to missing dependency)
 }
 
 type ThemeMode = 'light' | 'dark' | 'system'
@@ -247,7 +247,7 @@ interface AgentItemProps {
   onSelect: (agentId: string) => void
   installStatus: InstallStatus
   onInstall: (agentId: string) => void
-  isHighlighted?: boolean  // When true, auto-expand and highlight this agent
+  isHighlighted?: boolean // When true, auto-expand and highlight this agent
 }
 
 function AgentItem({
@@ -320,7 +320,7 @@ function AgentItem({
           <img
             src={AGENT_ICONS[agentId]}
             alt=""
-            className={cn("h-4 w-4", INVERT_IN_DARK.has(agentId) && "dark:invert")}
+            className={cn('h-4 w-4', INVERT_IN_DARK.has(agentId) && 'dark:invert')}
           />
         )}
 

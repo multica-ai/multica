@@ -12,8 +12,8 @@ import opencodeIcon from '../assets/agents/opencode.png'
 
 const AGENT_ICONS: Record<string, string> = {
   'claude-code': claudeIcon,
-  'codex': openaiIcon,
-  'opencode': opencodeIcon,
+  codex: openaiIcon,
+  opencode: opencodeIcon
 }
 
 // Icons that need dark mode inversion (monochrome black icons)
@@ -22,7 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuItem
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -38,7 +38,7 @@ export function AgentSelector({
   currentAgentId,
   onAgentChange,
   disabled = false,
-  isSwitching = false,
+  isSwitching = false
 }: AgentSelectorProps) {
   const [agents, setAgents] = useState<AgentCheckResult[]>([])
   const [loading, setLoading] = useState(true)
@@ -77,15 +77,15 @@ export function AgentSelector({
       <DropdownMenuTrigger asChild disabled={disabled || isLoading}>
         <button
           className={cn(
-            "flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50",
-            (disabled || isLoading) && "opacity-50 cursor-not-allowed"
+            'flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50',
+            (disabled || isLoading) && 'opacity-50 cursor-not-allowed'
           )}
         >
           {AGENT_ICONS[currentAgentId] ? (
             <img
               src={AGENT_ICONS[currentAgentId]}
               alt=""
-              className={cn("h-3.5 w-3.5", INVERT_IN_DARK.has(currentAgentId) && "dark:invert")}
+              className={cn('h-3.5 w-3.5', INVERT_IN_DARK.has(currentAgentId) && 'dark:invert')}
             />
           ) : (
             <span className="h-3.5 w-3.5" />
@@ -112,21 +112,22 @@ export function AgentSelector({
               <Tooltip key={agent.id}>
                 <TooltipTrigger asChild>
                   <div>
-                    <DropdownMenuItem
-                      disabled
-                      className="flex items-center justify-between gap-2"
-                    >
+                    <DropdownMenuItem disabled className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        {icon && <img src={icon} alt="" className={cn("h-4 w-4", needsInvert && "dark:invert")} />}
+                        {icon && (
+                          <img
+                            src={icon}
+                            alt=""
+                            className={cn('h-4 w-4', needsInvert && 'dark:invert')}
+                          />
+                        )}
                         <span>{agent.name}</span>
                       </div>
                       <span className="h-2 w-2 rounded-full bg-muted" />
                     </DropdownMenuItem>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent side="right">
-                  Setup required in Settings
-                </TooltipContent>
+                <TooltipContent side="right">Setup required in Settings</TooltipContent>
               </Tooltip>
             )
           }
@@ -138,13 +139,15 @@ export function AgentSelector({
               className="flex items-center justify-between gap-2"
             >
               <div className="flex items-center gap-2">
-                {icon && <img src={icon} alt="" className={cn("h-4 w-4", needsInvert && "dark:invert")} />}
+                {icon && (
+                  <img src={icon} alt="" className={cn('h-4 w-4', needsInvert && 'dark:invert')} />
+                )}
                 <span>{agent.name}</span>
               </div>
               <span
                 className={cn(
-                  "h-2 w-2 rounded-full",
-                  isSelected ? "bg-green-500" : "bg-green-500/50"
+                  'h-2 w-2 rounded-full',
+                  isSelected ? 'bg-green-500' : 'bg-green-500/50'
                 )}
               />
             </DropdownMenuItem>
