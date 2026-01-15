@@ -26,7 +26,6 @@ function getEnhancedPath(): string {
 export interface CommandInfo {
   command: string
   path?: string
-  version?: string
 }
 
 export interface AgentCheckResult {
@@ -35,7 +34,6 @@ export interface AgentCheckResult {
   command: string
   installed: boolean
   path?: string
-  version?: string
   installHint?: string
   commands?: CommandInfo[]
 }
@@ -59,32 +57,13 @@ const AGENT_COMMANDS: Record<string, string[]> = {
 /**
  * Check if a command exists in the system PATH (async for true concurrency)
  */
-export async function commandExists(cmd: string): Promise<{ exists: boolean; path?: string; version?: string }> {
-  const isWindows = platform() === 'win32'
-  const whichCmd = isWindows ? 'where' : 'which'
-
+export async function commandExists(cmd: string): Promise<{ exists: boolean; path?: string }> {
+  const whichCmd = platform() === 'win32' ? 'where' : 'which'
   const enhancedEnv = { ...process.env, PATH: getEnhancedPath() }
 
   try {
-    const { stdout } = await execAsync(`${whichCmd} ${cmd}`, {
-      env: enhancedEnv,
-    })
-    const cmdPath = stdout.trim().split('\n')[0]
-
-    // Try to get version
-    let version: string | undefined
-    try {
-      const { stdout: versionOutput } = await execAsync(`${cmd} --version`, {
-        env: enhancedEnv,
-        timeout: 5000,
-      })
-      // Extract first line or first meaningful part
-      version = versionOutput.trim().split('\n')[0].slice(0, 50)
-    } catch {
-      // Some commands don't support --version
-    }
-
-    return { exists: true, path: cmdPath, version }
+    const { stdout } = await execAsync(`${whichCmd} ${cmd}`, { env: enhancedEnv })
+    return { exists: true, path: stdout.trim().split('\n')[0] }
   } catch {
     return { exists: false }
   }
@@ -107,7 +86,6 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
       return {
         command: cmd,
         path: cmdCheck.path,
-        version: cmdCheck.version,
         exists: cmdCheck.exists,
       }
     })
@@ -122,9 +100,8 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
     command: config.command,
     installed: primaryResult?.exists ?? false,
     path: primaryResult?.path,
-    version: primaryResult?.version,
     installHint: INSTALL_HINTS[agentId],
-    commands: commandChecks.map(({ command, path, version }) => ({ command, path, version })),
+    commands: commandChecks.map(({ command, path }) => ({ command, path })),
   }
 }
 
