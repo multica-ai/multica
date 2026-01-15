@@ -9,6 +9,7 @@ import { checkAgents } from '../utils/agent-check'
 import type { Conductor } from '../conductor/Conductor'
 import type { ListSessionsOptions, MulticaSession } from '../../shared/types'
 import type { FileTreeNode, DetectedApp } from '../../shared/electron-api'
+import type { MessageContent } from '../../shared/types/message'
 import * as fs from 'fs'
 import * as path from 'path'
 import { spawn } from 'child_process'
@@ -48,7 +49,7 @@ function isValidPath(inputPath: string): boolean {
 export function registerIPCHandlers(conductor: Conductor): void {
   // --- Agent handlers (per-session) ---
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_PROMPT, async (_event, sessionId: string, content: string) => {
+  ipcMain.handle(IPC_CHANNELS.AGENT_PROMPT, async (_event, sessionId: string, content: MessageContent) => {
     const stopReason = await conductor.sendPrompt(sessionId, content)
     return { stopReason }
   })

@@ -24,6 +24,7 @@ import type {
   SessionData,
   ListSessionsOptions,
 } from '../../shared/types'
+import type { MessageContent, MessageContentItem } from '../../shared/types/message'
 import { formatHistoryForReplay, hasReplayableHistory } from './historyReplay'
 
 export interface SessionUpdateCallback {
@@ -290,15 +291,27 @@ export class Conductor {
   }
 
   /**
-   * Send a prompt to the agent
+   * Send a prompt to the agent (supports text and images)
    */
-  async sendPrompt(sessionId: string, content: string): Promise<string> {
+  async sendPrompt(sessionId: string, content: MessageContent): Promise<string> {
     // Ensure agent is running (lazy start if needed)
     const sessionAgent = await this.ensureAgentForSession(sessionId)
     const { connection, agentSessionId } = sessionAgent
 
-    // Prepare the final prompt content
-    let finalContent = content
+    // Convert MessageContent to ACP SDK format
+    const convertToAcpFormat = (items: MessageContent): Array<{ type: string; text?: string; data?: string; mimeType?: string }> => {
+      return items.map((item: MessageContentItem) => {
+        if (item.type === 'text') {
+          return { type: 'text', text: item.text }
+        } else if (item.type === 'image') {
+          return { type: 'image', data: item.data, mimeType: item.mimeType }
+        }
+        return { type: 'text', text: '' } // fallback
+      })
+    }
+
+    // Build prompt content array
+    let promptContent = convertToAcpFormat(content)
 
     // If this is a resumed session, prepend conversation history to first prompt
     if (sessionAgent.needsHistoryReplay && this.sessionStore) {
@@ -308,7 +321,8 @@ export class Conductor {
           const history = formatHistoryForReplay(data.updates)
           if (history) {
             console.log(`[Conductor] Prepending conversation history (${data.updates.length} updates)`)
-            finalContent = history + content
+            // Prepend history as text block before other content
+            promptContent = [{ type: 'text', text: history }, ...promptContent]
           }
         }
       } catch (error) {
@@ -320,17 +334,24 @@ export class Conductor {
       }
     }
 
+    // Log prompt info
+    const textContent = content.find((c: MessageContentItem) => c.type === 'text')
+    const imageCount = content.filter((c: MessageContentItem) => c.type === 'image').length
     console.log(`[Conductor] Sending prompt to session ${agentSessionId}`)
-    console.log(`[Conductor]   Content: ${finalContent.slice(0, 100)}${finalContent.length > 100 ? '...' : ''}`)
+    if (textContent && textContent.type === 'text') {
+      console.log(`[Conductor]   Text: ${textContent.text.slice(0, 100)}${textContent.text.length > 100 ? '...' : ''}`)
+    }
+    if (imageCount > 0) {
+      console.log(`[Conductor]   Images: ${imageCount}`)
+    }
 
     // Store user message before sending (so it appears in history)
-    // Note: We store the original content, not the history-prepended version
     if (this.sessionStore) {
       const userUpdate = {
         sessionId: agentSessionId,
         update: {
           sessionUpdate: 'user_message',
-          content: { type: 'text', text: content },
+          content: content, // Store full MessageContent array
         },
       }
       await this.sessionStore.appendUpdate(sessionId, userUpdate as any)
@@ -343,7 +364,7 @@ export class Conductor {
     try {
       const result = await connection.prompt({
         sessionId: agentSessionId,
-        prompt: [{ type: 'text', text: finalContent }],
+        prompt: promptContent as any,
       })
 
       console.log(`[Conductor] Prompt completed with stopReason: ${result.stopReason}`)

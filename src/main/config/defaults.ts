@@ -9,7 +9,7 @@ export const DEFAULT_AGENTS: Record<string, AgentConfig> = {
     name: 'Claude Code',
     command: 'claude-code-acp',
     args: [],
-    enabled: true,
+    enabled: true
     // Note: Uses https://github.com/zed-industries/claude-code-acp
     // Requires ANTHROPIC_API_KEY environment variable
   },
@@ -18,24 +18,17 @@ export const DEFAULT_AGENTS: Record<string, AgentConfig> = {
     name: 'opencode',
     command: 'opencode',
     args: ['acp'],
-    enabled: true,
+    enabled: true
   },
   codex: {
     id: 'codex',
     name: 'Codex CLI (ACP)',
     command: 'codex-acp',
     args: [],
-    enabled: true,
+    enabled: true
     // Note: Uses https://github.com/zed-industries/codex-acp
     // Official Codex CLI doesn't support ACP
-  },
-  gemini: {
-    id: 'gemini',
-    name: 'Gemini CLI',
-    command: 'gemini',
-    args: ['acp'],
-    enabled: true,
-  },
+  }
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -44,6 +37,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   agents: DEFAULT_AGENTS,
   ui: {
     theme: 'system',
-    fontSize: 14,
-  },
+    fontSize: 14
+  }
 }

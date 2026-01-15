@@ -1,13 +1,14 @@
 /**
- * Message input component
+ * Message input component with image upload support
  */
-import { useState, useRef, useEffect } from 'react'
-import { ArrowUp, Square, Folder } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { ArrowUp, Square, Folder, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import type { MessageContent, ImageContentItem } from '../../../shared/types/message'
 
 interface MessageInputProps {
-  onSend: (content: string) => void
+  onSend: (content: MessageContent) => void
   onCancel: () => void
   isProcessing: boolean
   disabled: boolean
@@ -15,6 +16,9 @@ interface MessageInputProps {
   workingDirectory?: string | null
   onSelectFolder: () => Promise<void>
 }
+
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
+const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 
 export function MessageInput({
   onSend,
@@ -27,7 +31,9 @@ export function MessageInput({
 }: MessageInputProps) {
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
+  const [images, setImages] = useState<ImageContentItem[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Get folder name from path
   const folderName = workingDirectory
@@ -48,13 +54,107 @@ export function MessageInput({
     textareaRef.current?.focus()
   }, [])
 
-  const handleSubmit = () => {
-    const trimmed = value.trim()
-    if (!trimmed || disabled || isProcessing) return
+  // Convert file to base64
+  const fileToBase64 = useCallback((file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result as string
+        // Remove data URL prefix (e.g., "data:image/png;base64,")
+        const base64 = result.split(',')[1]
+        resolve(base64)
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }, [])
 
-    onSend(trimmed)
+  // Process and add image
+  const addImage = useCallback(async (file: File) => {
+    // Validate file type
+    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+      console.warn('Unsupported image type:', file.type)
+      return
+    }
+
+    // Validate file size
+    if (file.size > MAX_IMAGE_SIZE) {
+      console.warn('Image too large:', file.size)
+      return
+    }
+
+    try {
+      const base64 = await fileToBase64(file)
+      const imageItem: ImageContentItem = {
+        type: 'image',
+        data: base64,
+        mimeType: file.type,
+      }
+      setImages((prev) => [...prev, imageItem])
+    } catch (err) {
+      console.error('Failed to process image:', err)
+    }
+  }, [fileToBase64])
+
+  // Handle paste event
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) {
+          await addImage(file)
+        }
+        break
+      }
+    }
+  }, [addImage])
+
+  // Handle file selection
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+
+    for (const file of files) {
+      await addImage(file)
+    }
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [addImage])
+
+  // Remove image
+  const removeImage = useCallback((index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  // Handle submit
+  const handleSubmit = useCallback(() => {
+    const trimmed = value.trim()
+    if ((!trimmed && images.length === 0) || disabled || isProcessing) return
+
+    // Build message content array
+    const content: MessageContent = []
+
+    // Add images first
+    for (const img of images) {
+      content.push(img)
+    }
+
+    // Add text if present
+    if (trimmed) {
+      content.push({ type: 'text', text: trimmed })
+    }
+
+    onSend(content)
     setValue('')
-  }
+    setImages([])
+  }, [value, images, disabled, isProcessing, onSend])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Don't submit while IME is composing
@@ -64,7 +164,7 @@ export function MessageInput({
     }
   }
 
-  const canSubmit = !disabled && value.trim().length > 0
+  const canSubmit = !disabled && (value.trim().length > 0 || images.length > 0)
   const hasFolder = !!workingDirectory
 
   // Render folder selection mode when no folder is selected
@@ -104,12 +204,37 @@ export function MessageInput({
     <div className="p-4">
       <div className="mx-auto max-w-3xl">
         <div className="bg-secondary/50 hover:bg-secondary focus-within:bg-secondary transition-colors duration-200 rounded-xl p-3 border border-border">
+          {/* Image previews */}
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3 pb-3 border-b border-border/50">
+              {images.map((img, index) => (
+                <div
+                  key={index}
+                  className="relative group w-16 h-16 rounded-lg overflow-hidden border border-border bg-background"
+                >
+                  <img
+                    src={`data:${img.mimeType};base64,${img.data}`}
+                    alt={`Upload ${index + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                  <button
+                    onClick={() => removeImage(index)}
+                    className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-background/80 hover:bg-background text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Text input */}
           <textarea
             ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
             placeholder={placeholder}
@@ -118,21 +243,48 @@ export function MessageInput({
             className="w-full resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
           />
 
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={SUPPORTED_IMAGE_TYPES.join(',')}
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between pt-2">
-            {/* Folder indicator */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onSelectFolder}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50"
-                >
-                  <Folder className="h-3.5 w-3.5" />
-                  <span className="max-w-[150px] truncate">{folderName}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Change folder</TooltipContent>
-            </Tooltip>
+            {/* Left side: folder and image button */}
+            <div className="flex items-center gap-1">
+              {/* Folder indicator */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={onSelectFolder}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-background/50"
+                  >
+                    <Folder className="h-3.5 w-3.5" />
+                    <span className="max-w-[150px] truncate">{folderName}</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Change folder</TooltipContent>
+              </Tooltip>
+
+              {/* Image upload button */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={disabled}
+                    className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-background/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Attach image (or paste with Cmd+V)</TooltipContent>
+              </Tooltip>
+            </div>
 
             {/* Send button */}
             <Tooltip>

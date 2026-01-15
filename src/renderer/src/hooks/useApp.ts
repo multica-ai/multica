@@ -7,6 +7,7 @@ import type {
   StoredSessionUpdate,
 } from '../../../shared/types'
 import type { RunningSessionsStatus } from '../../../shared/electron-api'
+import type { MessageContent } from '../../../shared/types/message'
 import { usePermissionStore } from '../stores/permissionStore'
 import { useFileChangeStore } from '../stores/fileChangeStore'
 
@@ -34,7 +35,7 @@ export interface AppActions {
   clearCurrentSession: () => void
 
   // Agent actions (per-session)
-  sendPrompt: (content: string) => Promise<void>
+  sendPrompt: (content: MessageContent) => Promise<void>
   cancelRequest: () => Promise<void>
 
   // UI actions
@@ -258,7 +259,7 @@ export function useApp(): AppState & AppActions {
     setSessionUpdates([])
   }, [])
 
-  const sendPrompt = useCallback(async (content: string) => {
+  const sendPrompt = useCallback(async (content: MessageContent) => {
     if (!currentSession) {
       setError('No active session')
       return
@@ -275,7 +276,7 @@ export function useApp(): AppState & AppActions {
           sessionId: currentSession.agentSessionId,
           update: {
             sessionUpdate: 'user_message',
-            content: { type: 'text', text: content },
+            content: content, // Now stores full MessageContent array
           },
         },
       } as unknown as StoredSessionUpdate

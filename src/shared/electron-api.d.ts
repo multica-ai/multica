@@ -8,6 +8,7 @@ import type {
   SessionData,
   ListSessionsOptions,
 } from './types'
+import type { MessageContent } from './types/message'
 
 export interface AgentMessage {
   sessionId: string
@@ -93,7 +94,7 @@ export interface ElectronAPI {
   getAgentStatus(): Promise<RunningSessionsStatus>
 
   // Agent communication
-  sendPrompt(sessionId: string, content: string): Promise<{ stopReason: string }>
+  sendPrompt(sessionId: string, content: MessageContent): Promise<{ stopReason: string }>
   cancelRequest(sessionId: string): Promise<{ success: boolean }>
 
   // Session management (agent starts when session is created)

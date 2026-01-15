@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
 import type { ElectronAPI, OpenWithOptions } from '../shared/electron-api'
 import type { ListSessionsOptions, MulticaSession } from '../shared/types'
+import type { MessageContent } from '../shared/types/message'
 
 // Electron API exposed to renderer process
 const electronAPI: ElectronAPI = {
@@ -9,7 +10,7 @@ const electronAPI: ElectronAPI = {
   getAgentStatus: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_STATUS),
 
   // Agent communication
-  sendPrompt: (sessionId: string, content: string) =>
+  sendPrompt: (sessionId: string, content: MessageContent) =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_PROMPT, sessionId, content),
 
   cancelRequest: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_CANCEL, sessionId),

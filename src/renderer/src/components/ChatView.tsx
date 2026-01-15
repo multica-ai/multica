@@ -81,6 +81,12 @@ interface TextBlock {
   content: string
 }
 
+interface ImageBlock {
+  type: 'image'
+  data: string
+  mimeType: string
+}
+
 interface ThoughtBlock {
   type: 'thought'
   content: string
@@ -91,7 +97,7 @@ interface ToolCallBlock {
   toolCall: ToolCall
 }
 
-type ContentBlock = TextBlock | ThoughtBlock | ToolCallBlock
+type ContentBlock = TextBlock | ImageBlock | ThoughtBlock | ToolCallBlock
 
 interface Message {
   role: 'user' | 'assistant'
@@ -148,13 +154,38 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
       case 'user_message' as string:
         // Flush any pending assistant message
         flushAssistantMessage()
-        // Add user message
+        // Add user message - supports multiple formats for backward compatibility
         {
-          const userUpdate = update as { content?: { type: string; text: string } }
-          if (userUpdate.content?.type === 'text') {
+          const userUpdate = update as { content?: unknown }
+          const userBlocks: ContentBlock[] = []
+          const content = userUpdate.content
+
+          if (Array.isArray(content)) {
+            // New format: MessageContent array (e.g., [{ type: 'text', text: '...' }, { type: 'image', ... }])
+            for (const item of content) {
+              if (item && typeof item === 'object') {
+                if (item.type === 'text' && typeof item.text === 'string') {
+                  userBlocks.push({ type: 'text', content: item.text })
+                } else if (item.type === 'image' && typeof item.data === 'string') {
+                  userBlocks.push({ type: 'image', data: item.data, mimeType: item.mimeType || 'image/png' })
+                }
+              }
+            }
+          } else if (content && typeof content === 'object' && 'type' in content && 'text' in content) {
+            // Old format: single text content object { type: 'text', text: '...' }
+            const textContent = content as { type: string; text: unknown }
+            if (textContent.type === 'text' && typeof textContent.text === 'string') {
+              userBlocks.push({ type: 'text', content: textContent.text })
+            }
+          } else if (typeof content === 'string') {
+            // Fallback: plain string content
+            userBlocks.push({ type: 'text', content: content })
+          }
+
+          if (userBlocks.length > 0) {
             messages.push({
               role: 'user',
-              blocks: [{ type: 'text', content: userUpdate.content.text }],
+              blocks: userBlocks,
             })
           }
         }
@@ -269,14 +300,31 @@ interface MessageBubbleProps {
 function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
-  // User message - bubble style
+  // User message - bubble style with support for images
   if (isUser) {
-    // Get the text content from blocks
+    const imageBlocks = message.blocks.filter((b): b is ImageBlock => b.type === 'image')
     const textBlock = message.blocks.find((b): b is TextBlock => b.type === 'text')
+
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-[15px]">
-          {textBlock?.content || ''}
+        <div className="max-w-[85%] rounded-lg bg-muted px-4 py-3 text-[15px]">
+          {/* Render images first */}
+          {imageBlocks.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {imageBlocks.map((img, idx) => (
+                <img
+                  key={idx}
+                  src={`data:${img.mimeType};base64,${img.data}`}
+                  alt={`Uploaded image ${idx + 1}`}
+                  className="max-w-[200px] max-h-[200px] rounded-md object-cover"
+                />
+              ))}
+            </div>
+          )}
+          {/* Render text content */}
+          {textBlock && (
+            <div className="whitespace-pre-wrap">{textBlock.content}</div>
+          )}
         </div>
       </div>
     )
@@ -293,6 +341,15 @@ function MessageBubble({ message }: MessageBubbleProps) {
             return <ToolCallItem key={block.toolCall.id} toolCall={block.toolCall} />
           case 'text':
             return <TextContentBlock key={`text-${idx}`} content={block.content} />
+          case 'image':
+            return (
+              <img
+                key={`image-${idx}`}
+                src={`data:${block.mimeType};base64,${block.data}`}
+                alt={`Image ${idx + 1}`}
+                className="max-w-[300px] max-h-[300px] rounded-md object-cover"
+              />
+            )
           default:
             return null
         }

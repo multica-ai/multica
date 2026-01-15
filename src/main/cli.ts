@@ -464,7 +464,9 @@ async function sendPrompt(state: CLIState, content: string): Promise<void> {
   print(`\n${c.blue}🤖 Agent:${c.reset}`)
 
   try {
-    const stopReason = await state.conductor.sendPrompt(state.currentSession.id, content)
+    // Convert string to MessageContent format
+    const messageContent = [{ type: 'text' as const, text: content }]
+    const stopReason = await state.conductor.sendPrompt(state.currentSession.id, messageContent)
     print(`\n\n${c.dim}[${stopReason}]${c.reset}\n`)
   } catch (err) {
     printError(`${err}`)
