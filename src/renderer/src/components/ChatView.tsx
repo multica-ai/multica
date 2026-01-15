@@ -269,7 +269,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
     const textBlock = message.blocks.find((b): b is TextBlock => b.type === 'text')
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-muted px-4 py-3 text-[15px]">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-[15px]">
           {textBlock?.content || ''}
         </div>
       </div>
