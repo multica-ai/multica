@@ -175,4 +175,4 @@ Multica maintains its own session layer on top of ACP:
 
 ## License
 
-MIT
+Apache-2.0

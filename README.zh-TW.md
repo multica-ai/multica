@@ -175,4 +175,4 @@ Multica 在 ACP 之上維護自己的工作階段層：
 
 ## 授權條款
 
-MIT
+Apache-2.0

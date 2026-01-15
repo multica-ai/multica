@@ -175,4 +175,4 @@ Multica 在 ACP 之上维护自己的会话层：
 
 ## 许可证
 
-MIT
+Apache-2.0
