@@ -377,6 +377,9 @@ function TextContentBlock({ content }: { content: string }) {
 
 // Thought block view - expanded, collapsible
 function ThoughtBlockView({ text }: { text: string }) {
+  // Skip rendering if content is empty or only whitespace
+  if (!text || !text.trim()) return null
+
   const [isExpanded, setIsExpanded] = useState(false)
   const isLong = text.length > 200
 
