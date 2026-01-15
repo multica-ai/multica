@@ -59,9 +59,9 @@ function FileTreeIcon({
       return <GitIcon className={className} />
     }
     return isExpanded ? (
-      <FolderOpenIcon className={cn(className, 'text-sky-500')} />
+      <FolderOpenIcon className={cn(className, 'text-muted-foreground')} />
     ) : (
-      <FolderIcon className={cn(className, 'text-sky-500')} />
+      <FolderIcon className={cn(className, 'text-muted-foreground')} />
     )
   }
 
@@ -83,7 +83,7 @@ function FileTreeIcon({
 
   // Image files
   if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(node.extension || '')) {
-    return <ImageIcon className={cn(className, 'text-green-500')} />
+    return <ImageIcon className={cn(className, 'text-muted-foreground')} />
   }
 
   // Default file icon
