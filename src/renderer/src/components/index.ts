@@ -1,3 +1,4 @@
+export { AgentSelector } from './AgentSelector'
 export { AppSidebar } from './AppSidebar'
 export { ChatView } from './ChatView'
 export { MessageInput } from './MessageInput'
