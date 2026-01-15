@@ -47,6 +47,16 @@ const electronAPI: ElectronAPI = {
   // System
   checkAgents: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_AGENTS),
 
+  // Agent installation
+  installAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_INSTALL, agentId),
+
+  onInstallProgress: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: unknown) =>
+      callback(progress as Parameters<typeof callback>[0])
+    ipcRenderer.on(IPC_CHANNELS.AGENT_INSTALL_PROGRESS, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_INSTALL_PROGRESS, listener)
+  },
+
   // File tree
   listDirectory: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.FS_LIST_DIRECTORY, path),
   detectApps: () => ipcRenderer.invoke(IPC_CHANNELS.FS_DETECT_APPS),

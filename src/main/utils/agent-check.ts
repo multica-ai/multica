@@ -2,8 +2,23 @@
  * Utility to check agent installations
  */
 import { execSync } from 'node:child_process'
-import { platform } from 'node:os'
+import { platform, homedir } from 'node:os'
 import { DEFAULT_AGENTS } from '../config/defaults'
+
+/**
+ * Get enhanced PATH that includes common custom installation directories
+ */
+function getEnhancedPath(): string {
+  const home = homedir()
+  const customPaths = [
+    `${home}/.opencode/bin`,
+    `${home}/.claude/local/bin`,
+    `${home}/.local/bin`,
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ]
+  return `${customPaths.join(':')}:${process.env.PATH || ''}`
+}
 
 export interface AgentCheckResult {
   id: string
@@ -30,10 +45,13 @@ export function commandExists(cmd: string): { exists: boolean; path?: string; ve
   const isWindows = platform() === 'win32'
   const whichCmd = isWindows ? 'where' : 'which'
 
+  const enhancedEnv = { ...process.env, PATH: getEnhancedPath() }
+
   try {
     const path = execSync(`${whichCmd} ${cmd}`, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: enhancedEnv,
     })
       .trim()
       .split('\n')[0]
@@ -45,6 +63,7 @@ export function commandExists(cmd: string): { exists: boolean; path?: string; ve
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
+        env: enhancedEnv,
       }).trim()
       // Extract first line or first meaningful part
       version = versionOutput.split('\n')[0].slice(0, 50)

@@ -89,6 +89,22 @@ export interface OpenWithOptions {
   appId: string
 }
 
+// Agent installation
+export type InstallStep = 'check-npm' | 'install-cli' | 'install-acp'
+
+export interface InstallProgressEvent {
+  agentId: string
+  step: InstallStep
+  status: 'started' | 'progress' | 'completed' | 'error'
+  message?: string
+  error?: string
+}
+
+export interface InstallResult {
+  success: boolean
+  error?: string
+}
+
 export interface ElectronAPI {
   // Agent status (per-session agents)
   getAgentStatus(): Promise<RunningSessionsStatus>
@@ -116,6 +132,10 @@ export interface ElectronAPI {
 
   // System
   checkAgents(): Promise<AgentCheckResult[]>
+
+  // Agent installation
+  installAgent(agentId: string): Promise<InstallResult>
+  onInstallProgress(callback: (event: InstallProgressEvent) => void): () => void
 
   // File tree
   listDirectory(path: string): Promise<FileTreeNode[]>
