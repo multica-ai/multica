@@ -14,7 +14,7 @@ The name is inspired by [Multics](https://en.wikipedia.org/wiki/Multics) (Multip
 
 ## The Problem
 
-Coding agents (like Claude Code, Codex, Gemini CLI) have become incredibly powerful in 2025, capable of solving complex tasks far beyond just writing code. However, 95% of knowledge workers are locked out of these capabilities due to three core barriers:
+Coding agents (like Claude Code, Codex CLI, OpenCode) have become incredibly powerful in 2025, capable of solving complex tasks far beyond just writing code. However, 95% of knowledge workers are locked out of these capabilities due to three core barriers:
 
 **1. Interaction Mismatch**
 
@@ -45,11 +45,11 @@ Multica bridges this gap by providing a visual, native desktop interface that le
 
 ## Supported Agents
 
-| Agent                                                          | Command        | Install                                             |
-| -------------------------------------------------------------- | -------------- | --------------------------------------------------- |
-| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`    | `npm install -g codex-acp`                          |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli)      | `gemini acp`   | `npm install -g @google/gemini-cli`                 |
+| Agent                                                          | Command           | Install                                             |
+| -------------------------------------------------------------- | ----------------- | --------------------------------------------------- |
+| [Claude Code](https://github.com/anthropics/claude-code)       | `claude-code-acp` | `npm install -g @anthropics/claude-code-acp`        |
+| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp`    | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`       | `npm install -g codex-acp`                          |
 
 ## Quick Start
 

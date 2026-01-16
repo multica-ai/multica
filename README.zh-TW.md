@@ -14,7 +14,7 @@
 
 ## 解決的問題
 
-程式智能體（如 Claude Code、Codex、Gemini CLI）在 2025 年變得極其強大，其能力已經遠遠超出了單純的程式碼編寫。然而，95% 的知識工作者因為三個核心障礙而無法使用這些能力：
+程式智能體（如 Claude Code、Codex CLI、OpenCode）在 2025 年變得極其強大，其能力已經遠遠超出了單純的程式碼編寫。然而，95% 的知識工作者因為三個核心障礙而無法使用這些能力：
 
 **1. 互動形態的錯配**
 
@@ -45,11 +45,11 @@ Multica 透過提供視覺化的原生桌面介面來彌合這一鴻溝，在保
 
 ## 支援的智能體
 
-| 智能體                                                         | 命令           | 安裝方式                                            |
-| -------------------------------------------------------------- | -------------- | --------------------------------------------------- |
-| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`    | `npm install -g codex-acp`                          |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli)      | `gemini acp`   | `npm install -g @google/gemini-cli`                 |
+| 智能體                                                         | 命令              | 安裝方式                                            |
+| -------------------------------------------------------------- | ----------------- | --------------------------------------------------- |
+| [Claude Code](https://github.com/anthropics/claude-code)       | `claude-code-acp` | `npm install -g @anthropics/claude-code-acp`        |
+| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp`    | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`       | `npm install -g codex-acp`                          |
 
 ## 快速開始
 

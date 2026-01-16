@@ -14,7 +14,7 @@
 
 ## 解決する課題
 
-コーディングエージェント（Claude Code、Codex、Gemini CLIなど）は2025年に非常に強力になり、単なるコード作成をはるかに超えた複雑なタスクを解決できるようになりました。しかし、95%のナレッジワーカーは3つの主要な障壁によってこれらの能力を利用できません：
+コーディングエージェント（Claude Code、Codex CLI、OpenCodeなど）は2025年に非常に強力になり、単なるコード作成をはるかに超えた複雑なタスクを解決できるようになりました。しかし、95%のナレッジワーカーは3つの主要な障壁によってこれらの能力を利用できません：
 
 **1. インタラクションのミスマッチ**
 
@@ -45,11 +45,11 @@ Multicaは、データをローカルに保持しながらコーディングエ�
 
 ## サポートされているエージェント
 
-| エージェント                                                   | コマンド       | インストール                                        |
-| -------------------------------------------------------------- | -------------- | --------------------------------------------------- |
-| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`    | `npm install -g codex-acp`                          |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli)      | `gemini acp`   | `npm install -g @google/gemini-cli`                 |
+| エージェント                                                   | コマンド          | インストール                                        |
+| -------------------------------------------------------------- | ----------------- | --------------------------------------------------- |
+| [Claude Code](https://github.com/anthropics/claude-code)       | `claude-code-acp` | `npm install -g @anthropics/claude-code-acp`        |
+| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp`    | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`       | `npm install -g codex-acp`                          |
 
 ## クイックスタート
 

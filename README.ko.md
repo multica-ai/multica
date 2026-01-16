@@ -14,7 +14,7 @@
 
 ## 해결하는 문제
 
-코딩 에이전트(Claude Code, Codex, Gemini CLI 등)는 2025년에 매우 강력해져서 단순한 코드 작성을 훨씬 넘어서는 복잡한 작업을 해결할 수 있게 되었습니다. 그러나 95%의 지식 근로자들은 세 가지 핵심 장벽으로 인해 이러한 기능을 활용하지 못하고 있습니다:
+코딩 에이전트(Claude Code, Codex CLI, OpenCode 등)는 2025년에 매우 강력해져서 단순한 코드 작성을 훨씬 넘어서는 복잡한 작업을 해결할 수 있게 되었습니다. 그러나 95%의 지식 근로자들은 세 가지 핵심 장벽으로 인해 이러한 기능을 활용하지 못하고 있습니다:
 
 **1. 상호작용 불일치**
 
@@ -45,11 +45,11 @@ Multica는 데이터를 로컬에 유지하면서 코딩 에이전트의 기능�
 
 ## 지원되는 에이전트
 
-| 에이전트                                                       | 명령어         | 설치                                                |
-| -------------------------------------------------------------- | -------------- | --------------------------------------------------- |
-| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp` | `go install github.com/opencode-ai/opencode@latest` |
-| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`    | `npm install -g codex-acp`                          |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli)      | `gemini acp`   | `npm install -g @google/gemini-cli`                 |
+| 에이전트                                                       | 명령어            | 설치                                                |
+| -------------------------------------------------------------- | ----------------- | --------------------------------------------------- |
+| [Claude Code](https://github.com/anthropics/claude-code)       | `claude-code-acp` | `npm install -g @anthropics/claude-code-acp`        |
+| [OpenCode](https://github.com/opencode-ai/opencode)            | `opencode acp`    | `go install github.com/opencode-ai/opencode@latest` |
+| [Codex CLI (ACP)](https://github.com/zed-industries/codex-acp) | `codex-acp`       | `npm install -g codex-acp`                          |
 
 ## 빠른 시작
 
