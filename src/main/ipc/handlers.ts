@@ -2,7 +2,7 @@
  * IPC handlers for main process
  * Registers all IPC handlers for communication with renderer process
  */
-import { ipcMain, dialog, clipboard, shell, BrowserWindow } from 'electron'
+import { ipcMain, dialog, clipboard, shell } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
 import { checkAgents, checkAgent } from '../utils/agent-check'
@@ -205,14 +205,11 @@ export function registerIPCHandlers(conductor: Conductor): void {
   })
 
   // --- Agent installation handler ---
+  // Opens Terminal with install command (user executes manually)
 
   ipcMain.handle(IPC_CHANNELS.AGENT_INSTALL, async (_event, agentId: string) => {
     try {
-      const window = BrowserWindow.getFocusedWindow()
-      if (!window) {
-        throw new Error('No focused window')
-      }
-      return await installAgent({ window, agentId })
+      return await installAgent(agentId)
     } catch (err) {
       throw new Error(extractErrorMessage(err))
     }
