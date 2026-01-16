@@ -204,15 +204,15 @@ export class Conductor {
   }
 
   /**
-   * Create a new session with a new agent process
+   * Create a new session (agent starts lazily on first prompt)
    */
   async createSession(cwd: string, agentConfig: AgentConfig): Promise<MulticaSession> {
     let session: MulticaSession
 
     if (this.sessionStore) {
-      // Create session record first to get the ID
+      // Create session record - agent will be started lazily via ensureAgentForSession
       session = await this.sessionStore.create({
-        agentSessionId: '', // Will be updated after agent starts
+        agentSessionId: '', // Will be filled by ensureAgentForSession on first prompt
         agentId: agentConfig.id,
         workingDirectory: cwd
       })
@@ -233,18 +233,8 @@ export class Conductor {
       this.inMemorySession = session
     }
 
-    // Start agent process for this session
-    const { agentSessionId } = await this.startAgentForSession(session.id, agentConfig, cwd)
-
-    // Update session with agentSessionId
-    if (this.sessionStore) {
-      session = await this.sessionStore.updateMeta(session.id, { agentSessionId })
-    } else {
-      session.agentSessionId = agentSessionId
-      this.inMemorySession = session
-    }
-
-    console.log(`[Conductor] Created session: ${session.id} (agent: ${agentSessionId})`)
+    // Agent will be started lazily when user sends first prompt (via ensureAgentForSession)
+    console.log(`[Conductor] Created session: ${session.id} (agent: pending)`)
 
     return session
   }

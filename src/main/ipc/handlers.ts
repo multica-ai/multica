@@ -335,5 +335,30 @@ export function registerIPCHandlers(conductor: Conductor): void {
     }
   )
 
+  // Terminal: Run command in a new terminal window
+  ipcMain.handle(IPC_CHANNELS.TERMINAL_RUN, async (_event, command: string) => {
+    if (!command || typeof command !== 'string') {
+      throw new Error('Invalid command')
+    }
+
+    // Escape the command for AppleScript
+    const escapedCommand = command.replace(/"/g, '\\"')
+
+    // Use AppleScript to open Terminal and run the command
+    const script = `
+      tell application "Terminal"
+        activate
+        do script "${escapedCommand}"
+      end tell
+    `
+
+    try {
+      await spawnAsync('osascript', ['-e', script])
+    } catch (error) {
+      console.error('[IPC] Failed to run command in terminal:', error)
+      throw error
+    }
+  })
+
   console.log('[IPC] All handlers registered')
 }

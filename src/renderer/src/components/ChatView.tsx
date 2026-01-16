@@ -145,7 +145,15 @@ interface PlanBlock {
   entries: PlanEntry[]
 }
 
-type ContentBlock = TextBlock | ImageBlock | ThoughtBlock | ToolCallBlock | PlanBlock
+interface ErrorBlock {
+  type: 'error'
+  errorType: 'auth' | 'general'
+  agentId?: string
+  authCommand?: string
+  message: string
+}
+
+type ContentBlock = TextBlock | ImageBlock | ThoughtBlock | ToolCallBlock | PlanBlock | ErrorBlock
 
 interface Message {
   role: 'user' | 'assistant'
@@ -442,6 +450,31 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
           }
         }
         break
+
+      case 'error_message' as string:
+        // Handle error messages (shown in chat instead of toast)
+        {
+          const errorUpdate = update as {
+            errorType?: string
+            agentId?: string
+            authCommand?: string
+            message?: string
+          }
+          flushAssistantMessage()
+          const errorBlock: ErrorBlock = {
+            type: 'error',
+            errorType: (errorUpdate.errorType as 'auth' | 'general') || 'general',
+            agentId: errorUpdate.agentId,
+            authCommand: errorUpdate.authCommand,
+            message: errorUpdate.message || 'An error occurred'
+          }
+          // Add error as a standalone "assistant" message
+          messages.push({
+            role: 'assistant',
+            blocks: [errorBlock]
+          })
+        }
+        break
     }
   }
 
@@ -508,6 +541,16 @@ function MessageBubble({ message }: MessageBubbleProps) {
             )
           case 'plan':
             return <PlanBlockView key={`plan-${idx}`} entries={block.entries} />
+          case 'error':
+            return (
+              <AuthErrorBlockView
+                key={`error-${idx}`}
+                errorType={block.errorType}
+                agentId={block.agentId}
+                authCommand={block.authCommand}
+                message={block.message}
+              />
+            )
           default:
             return null
         }
@@ -788,5 +831,102 @@ function PlanBlockView({ entries }: { entries: PlanEntry[] }) {
         </div>
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+// Agent name mapping for display
+const AGENT_DISPLAY_NAMES: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  opencode: 'OpenCode',
+  codex: 'Codex'
+}
+
+// Auth error block view - displays authentication required message with command
+function AuthErrorBlockView({
+  errorType,
+  agentId,
+  authCommand,
+  message
+}: {
+  errorType: 'auth' | 'general'
+  agentId?: string
+  authCommand?: string
+  message: string
+}) {
+  const agentName = agentId ? AGENT_DISPLAY_NAMES[agentId] || agentId : 'Agent'
+
+  const handleRunInTerminal = async () => {
+    if (authCommand) {
+      try {
+        await window.electronAPI.runInTerminal(authCommand)
+      } catch (err) {
+        // Fallback to copying if terminal open fails
+        await navigator.clipboard.writeText(authCommand)
+        console.error('Failed to open terminal:', err)
+      }
+    }
+  }
+
+  if (errorType !== 'auth') {
+    // General error - simple display
+    return (
+      <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs font-mono px-2 py-0.5 rounded border border-destructive/50 text-destructive">
+            ERROR
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">{message}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-destructive/30 bg-background p-4 space-y-4">
+      {/* Error badges */}
+      <div className="flex flex-wrap gap-2">
+        <span className="text-xs font-mono px-2 py-1 rounded border border-destructive/50 text-destructive">
+          SESSION ERROR
+        </span>
+        <span className="text-xs font-mono px-2 py-1 rounded border border-destructive/50 text-destructive">
+          AUTHENTICATION REQUIRED
+        </span>
+      </div>
+
+      {/* Resolution steps */}
+      <div className="space-y-3">
+        <p className="text-sm text-foreground">To resolve, please:</p>
+
+        <ol className="space-y-3 text-sm list-none">
+          {/* Step 1: Run command */}
+          <li className="flex items-center gap-3">
+            <span className="text-muted-foreground w-4 shrink-0">1.</span>
+            <span>Run</span>
+            <button
+              onClick={handleRunInTerminal}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted hover:bg-muted/80 transition-colors border border-border"
+              title="Click to run in terminal"
+            >
+              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              <code className="text-sm font-mono">{authCommand}</code>
+            </button>
+          </li>
+
+          {/* Step 2: Send message again */}
+          <li className="flex items-center gap-3">
+            <span className="text-muted-foreground w-4 shrink-0">2.</span>
+            <span>Send your last message again</span>
+          </li>
+        </ol>
+      </div>
+
+      {/* Additional info */}
+      <p className="text-xs text-muted-foreground">
+        This will authenticate {agentName}. Follow the prompts in your terminal to complete the
+        login process.
+      </p>
+    </div>
   )
 }

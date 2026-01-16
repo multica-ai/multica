@@ -15,6 +15,20 @@ const FILE_MODIFYING_KINDS = new Set(['edit', 'write', 'delete', 'execute'])
 // Actual tool names from _meta.claudeCode.toolName (used for Claude Code)
 const FILE_MODIFYING_TOOL_NAMES = new Set(['write', 'edit', 'bash', 'notebookedit'])
 
+// Auth commands for each agent
+const AGENT_AUTH_COMMANDS: Record<string, string> = {
+  'claude-code': 'claude login',
+  opencode: 'opencode auth',
+  codex: 'codex auth'
+}
+
+// Check if error is authentication related
+function isAuthError(errorMessage: string): boolean {
+  const authKeywords = ['authentication required', 'unauthorized', 'not authenticated', 'login required']
+  const lowerMessage = errorMessage.toLowerCase()
+  return authKeywords.some((keyword) => lowerMessage.includes(keyword))
+}
+
 export interface AppState {
   // Sessions
   sessions: MulticaSession[]
@@ -285,7 +299,32 @@ export function useApp(): AppState & AppActions {
 
         await window.electronAPI.sendPrompt(currentSession.id, content)
       } catch (err) {
-        toast.error(`Failed to send prompt: ${getErrorMessage(err)}`)
+        const errorMessage = getErrorMessage(err)
+
+        // Check if this is an authentication error
+        if (isAuthError(errorMessage)) {
+          // Get the auth command for the current agent
+          const authCommand = AGENT_AUTH_COMMANDS[currentSession.agentId] || 'Please authenticate'
+
+          // Add error message to chat instead of toast
+          const errorUpdate = {
+            timestamp: new Date().toISOString(),
+            update: {
+              sessionId: currentSession.agentSessionId || currentSession.id,
+              update: {
+                sessionUpdate: 'error_message',
+                errorType: 'auth',
+                agentId: currentSession.agentId,
+                authCommand: authCommand,
+                message: errorMessage
+              }
+            }
+          } as unknown as StoredSessionUpdate
+          setSessionUpdates((prev) => [...prev, errorUpdate])
+        } else {
+          // For other errors, use toast
+          toast.error(`Failed to send prompt: ${errorMessage}`)
+        }
       }
     },
     [currentSession]

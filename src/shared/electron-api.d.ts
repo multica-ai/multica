@@ -174,6 +174,9 @@ export interface ElectronAPI {
 
   // Permission response
   respondToPermission(response: PermissionResponse): void
+
+  // Terminal
+  runInTerminal(command: string): Promise<void>
 }
 
 declare global {

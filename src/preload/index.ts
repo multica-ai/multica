@@ -100,7 +100,10 @@ const electronAPI: ElectronAPI = {
       callback(session as Parameters<typeof callback>[0])
     ipcRenderer.on(IPC_CHANNELS.SESSION_META_UPDATED, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.SESSION_META_UPDATED, listener)
-  }
+  },
+
+  // Terminal
+  runInTerminal: (command: string) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RUN, command)
 }
 
 // Expose API to renderer via contextBridge
