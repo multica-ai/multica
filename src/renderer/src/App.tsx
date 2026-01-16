@@ -169,7 +169,7 @@ function AppContent(): React.JSX.Element {
       />
 
       {/* Toast notifications */}
-      <Toaster position="top-center" />
+      <Toaster position="bottom-right" />
     </div>
   )
 }

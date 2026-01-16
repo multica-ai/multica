@@ -299,7 +299,7 @@ export function useApp(): AppState & AppActions {
         )
         setCurrentSession(updatedSession)
         await loadRunningStatus()
-        toast.success(`Switched to ${newAgentId}`)
+        toast.success(`Successfully switched to ${newAgentId}`)
       } catch (err) {
         toast.error(`Failed to switch agent: ${getErrorMessage(err)}`)
       } finally {
