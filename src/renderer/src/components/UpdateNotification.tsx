@@ -47,7 +47,9 @@ export function UpdateNotification(): React.JSX.Element | null {
     <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-2 fade-in duration-300">
       <div className="flex items-center gap-3 rounded-lg border bg-card p-3 shadow-lg">
         {/* Icon */}
-        <div className={`flex h-8 w-8 items-center justify-center rounded-full ${isError ? 'bg-destructive/10' : 'bg-primary/10'}`}>
+        <div
+          className={`flex h-8 w-8 items-center justify-center rounded-full ${isError ? 'bg-destructive/10' : 'bg-primary/10'}`}
+        >
           {isError ? (
             <AlertCircle className="h-4 w-4 text-destructive" />
           ) : updateStatus.status === 'downloaded' ? (
@@ -97,7 +99,9 @@ export function UpdateNotification(): React.JSX.Element | null {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => window.open('https://github.com/multica-ai/multica/releases', '_blank')}
+              onClick={() =>
+                window.open('https://github.com/multica-ai/multica/releases', '_blank')
+              }
             >
               View Releases
             </Button>
