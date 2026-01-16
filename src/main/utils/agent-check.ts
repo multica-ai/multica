@@ -27,7 +27,7 @@ export interface AgentCheckResult {
 // Install hints for each agent
 const INSTALL_HINTS: Record<string, string> = {
   'claude-code': 'npm install -g @zed-industries/claude-code-acp',
-  opencode: 'go install github.com/anomalyco/opencode@latest',
+  opencode: 'curl -fsSL https://opencode.ai/install | bash',
   codex: 'npm install -g @openai/codex',
   gemini: 'npm install -g @google/gemini-cli'
 }
@@ -80,11 +80,16 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
   // Find primary command result from already-checked commands (avoid duplicate check)
   const primaryResult = commandChecks.find((c) => c.command === config.command)
 
+  // Only consider installed when all related commands exist
+  // This ensures agents with multiple components (e.g., claude-code requiring both CLI and ACP)
+  // are not marked as installed until all components are present
+  const allCommandsInstalled = commandChecks.every((c) => c.exists)
+
   return {
     id: agentId,
     name: config.name,
     command: config.command,
-    installed: primaryResult?.exists ?? false,
+    installed: allCommandsInstalled,
     path: primaryResult?.path,
     installHint: INSTALL_HINTS[agentId],
     commands: commandChecks.map(({ command, path }) => ({ command, path }))

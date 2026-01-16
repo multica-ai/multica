@@ -2,12 +2,8 @@
  * Settings component - simplified agent selector
  * Using Linear-style design: minimal UI, direct interactions
  */
-import React, { useState, useEffect } from 'react'
-import type {
-  AgentCheckResult,
-  InstallProgressEvent,
-  InstallStep
-} from '../../../shared/electron-api'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import type { AgentCheckResult } from '../../../shared/electron-api'
 import { useTheme } from '../contexts/ThemeContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -40,8 +36,7 @@ type ThemeMode = 'light' | 'dark' | 'system'
 
 interface InstallStatus {
   agentId: string | null
-  state: 'idle' | 'installing' | 'success' | 'error'
-  currentStep?: InstallStep
+  state: 'idle' | 'waiting' | 'success' | 'error'
   error?: string
 }
 
@@ -51,6 +46,9 @@ const AGENT_LIST = [
   { id: 'opencode', name: 'opencode' },
   { id: 'codex', name: 'Codex CLI (ACP)' }
 ]
+
+// Polling interval for checking installation status (ms)
+const INSTALL_CHECK_INTERVAL = 2500
 
 export function Settings({
   isOpen,
@@ -66,6 +64,7 @@ export function Settings({
     state: 'idle'
   })
   const { mode, setMode } = useTheme()
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     if (isOpen) {
@@ -73,50 +72,58 @@ export function Settings({
     }
   }, [isOpen])
 
-  // Listen to install progress events
+  // Cleanup polling on unmount or when dialog closes
   useEffect(() => {
-    const unsubscribe = window.electronAPI.onInstallProgress((event: InstallProgressEvent) => {
-      if (event.status === 'error') {
-        setInstallStatus({
-          agentId: event.agentId,
-          state: 'error',
-          currentStep: event.step,
-          error: event.error
-        })
-      } else if (event.status === 'completed' && isLastInstallStep(event.agentId, event.step)) {
-        setInstallStatus({ agentId: event.agentId, state: 'success' })
-        // Refresh this agent after installation
-        refreshAgent(event.agentId)
-      } else {
-        setInstallStatus({
-          agentId: event.agentId,
-          state: 'installing',
-          currentStep: event.step
-        })
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
       }
-    })
-
-    return unsubscribe
+    }
   }, [])
 
-  // Refresh a single agent
-  async function refreshAgent(agentId: string): Promise<void> {
-    setCheckingAgents((prev) => new Set(prev).add(agentId))
-    try {
-      const result = await window.electronAPI.checkAgent(agentId)
-      if (result) {
-        setAgentResults((prev) => new Map(prev).set(agentId, result))
-      }
-    } catch (err) {
-      console.error(`Failed to check agent ${agentId}:`, err)
-    } finally {
-      setCheckingAgents((prev) => {
-        const next = new Set(prev)
-        next.delete(agentId)
-        return next
-      })
+  // Stop polling when dialog closes
+  useEffect(() => {
+    if (!isOpen && pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+      // Reset install status when closing
+      setInstallStatus({ agentId: null, state: 'idle' })
     }
-  }
+  }, [isOpen])
+
+  // Polling logic for checking installation
+  const startPolling = useCallback(
+    (agentId: string) => {
+      // Clear any existing polling
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          const result = await window.electronAPI.checkAgent(agentId)
+          if (result?.installed) {
+            // Installation detected! Stop polling and update state
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current)
+              pollingIntervalRef.current = null
+            }
+            setAgentResults((prev) => new Map(prev).set(agentId, result))
+            setInstallStatus({ agentId, state: 'success' })
+
+            // Clear success state after a moment
+            setTimeout(() => {
+              setInstallStatus({ agentId: null, state: 'idle' })
+            }, 2000)
+          }
+        } catch (err) {
+          console.error(`Failed to check agent ${agentId}:`, err)
+        }
+      }, INSTALL_CHECK_INTERVAL)
+    },
+    [setAgentResults, setInstallStatus]
+  )
 
   // Load all agents concurrently
   async function loadAgents(): Promise<void> {
@@ -151,12 +158,17 @@ export function Settings({
     }
   }
 
-  // Handle agent installation
+  // Handle agent installation - opens Terminal
   async function handleInstall(agentId: string): Promise<void> {
-    setInstallStatus({ agentId, state: 'installing' })
+    // Set waiting state immediately to prevent double-clicks
+    setInstallStatus({ agentId, state: 'waiting' })
+
     try {
       const result = await window.electronAPI.installAgent(agentId)
-      if (!result.success) {
+      if (result.success) {
+        // Terminal opened successfully, start polling for installation
+        startPolling(agentId)
+      } else {
         setInstallStatus({ agentId, state: 'error', error: result.error })
       }
     } catch (err) {
@@ -166,6 +178,15 @@ export function Settings({
         error: err instanceof Error ? err.message : 'Unknown error'
       })
     }
+  }
+
+  // Cancel waiting/polling for a specific agent
+  function handleCancelWaiting(): void {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+    setInstallStatus({ agentId: null, state: 'idle' })
   }
 
   return (
@@ -227,6 +248,7 @@ export function Settings({
                   onSelect={handleSelectAgent}
                   installStatus={installStatus}
                   onInstall={handleInstall}
+                  onCancelWaiting={handleCancelWaiting}
                   isHighlighted={id === highlightAgent}
                 />
               )
@@ -247,6 +269,7 @@ interface AgentItemProps {
   onSelect: (agentId: string) => void
   installStatus: InstallStatus
   onInstall: (agentId: string) => void
+  onCancelWaiting: () => void
   isHighlighted?: boolean // When true, auto-expand and highlight this agent
 }
 
@@ -259,6 +282,7 @@ function AgentItem({
   onSelect,
   installStatus,
   onInstall,
+  onCancelWaiting,
   isHighlighted
 }: AgentItemProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
@@ -270,8 +294,9 @@ function AgentItem({
     }
   }, [isHighlighted])
 
-  const isInstalling = installStatus.agentId === agentId && installStatus.state === 'installing'
+  const isWaiting = installStatus.agentId === agentId && installStatus.state === 'waiting'
   const hasInstallError = installStatus.agentId === agentId && installStatus.state === 'error'
+  const hasInstallSuccess = installStatus.agentId === agentId && installStatus.state === 'success'
   const canInstall = ['claude-code', 'opencode', 'codex'].includes(agentId)
 
   // Determine status: checking -> setup/selected/ready
@@ -283,12 +308,12 @@ function AgentItem({
         ? 'selected'
         : 'ready'
 
-  // Auto-expand when installing
+  // Auto-expand when waiting for install
   useEffect(() => {
-    if (isInstalling) {
+    if (isWaiting) {
       setExpanded(true)
     }
-  }, [isInstalling])
+  }, [isWaiting])
 
   // Click row to expand/collapse only
   const handleRowClick = (): void => {
@@ -338,22 +363,22 @@ function AgentItem({
           >
             Use
           </button>
+        ) : hasInstallSuccess ? (
+          <span className="text-xs text-green-600">Installed</span>
+        ) : isWaiting ? (
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Waiting...
+          </span>
         ) : canInstall ? (
           <button
             onClick={(e) => {
               e.stopPropagation()
               onInstall(agentId)
             }}
-            disabled={isInstalling}
-            className={cn(
-              'text-xs px-2 py-0.5 rounded transition-colors flex items-center gap-1',
-              isInstalling
-                ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                : 'bg-primary/10 text-primary hover:bg-primary/20'
-            )}
+            className="text-xs px-2 py-0.5 rounded transition-colors bg-primary/10 text-primary hover:bg-primary/20"
           >
-            {isInstalling && <Loader2 className="h-3 w-3 animate-spin" />}
-            {isInstalling ? 'Installing...' : 'Install'}
+            Install
           </button>
         ) : (
           <span className="text-xs text-muted-foreground">Setup required</span>
@@ -367,11 +392,33 @@ function AgentItem({
             <p className="text-xs">Checking installation status...</p>
           ) : status === 'setup' ? (
             hasInstallError ? (
-              <p className="text-xs text-destructive">Installation failed: {installStatus.error}</p>
-            ) : isInstalling ? (
-              <p className="text-xs">{getStepDescription(installStatus.currentStep, agentId)}</p>
+              <p className="text-xs text-destructive">
+                Failed to open Terminal: {installStatus.error}
+              </p>
+            ) : hasInstallSuccess ? (
+              <p className="text-xs text-green-600">Installation detected!</p>
+            ) : isWaiting ? (
+              <div className="space-y-2">
+                <p className="text-xs">
+                  Terminal opened. Please complete the installation in the terminal window.
+                </p>
+                <p className="text-xs text-muted-foreground/70">
+                  This will automatically detect when installation is complete.
+                </p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onCancelWaiting()
+                  }}
+                  className="text-xs px-2 py-0.5 rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
+                >
+                  Cancel
+                </button>
+              </div>
             ) : canInstall ? (
-              <p className="text-xs">Click Install to set up {agentName} automatically.</p>
+              <p className="text-xs">
+                Click Install to open Terminal with the installation command.
+              </p>
             ) : agent?.installHint ? (
               <p className="text-xs">
                 To install, run in Terminal:{' '}
@@ -407,34 +454,4 @@ function getAgentDescription(agentId: string): string {
     gemini: "Google's AI assistant. By Google."
   }
   return descriptions[agentId] || 'AI coding assistant'
-}
-
-function isLastInstallStep(agentId: string, step: InstallStep): boolean {
-  if (agentId === 'claude-code' || agentId === 'codex') {
-    return step === 'install-acp'
-  }
-  // opencode and others: install-cli is the last step
-  return step === 'install-cli'
-}
-
-function getStepDescription(step?: InstallStep, agentId?: string): string {
-  switch (step) {
-    case 'check-npm':
-      return 'Checking npm installation...'
-    case 'install-cli':
-      if (agentId === 'opencode') {
-        return 'Installing opencode...'
-      }
-      if (agentId === 'codex') {
-        return 'Installing Codex CLI...'
-      }
-      return 'Installing Claude Code CLI...'
-    case 'install-acp':
-      if (agentId === 'codex') {
-        return 'Installing codex-acp...'
-      }
-      return 'Installing claude-code-acp...'
-    default:
-      return 'Preparing installation...'
-  }
 }
