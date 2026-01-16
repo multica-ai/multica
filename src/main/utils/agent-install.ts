@@ -4,10 +4,12 @@
  */
 import { spawn } from 'child_process'
 import { platform } from 'os'
+import * as fs from 'fs'
 import type { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import type { InstallStep, InstallResult } from '../../shared/electron-api'
 import { commandExists } from './agent-check'
+import { getEnhancedPath, getNpmUserPrefix } from './path'
 
 interface InstallOptions {
   window: BrowserWindow
@@ -31,8 +33,8 @@ function spawnWithProgress(
   useShell: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
-    // Ensure common paths are in PATH for npm, node, etc.
-    const enhancedPath = `/usr/local/bin:/opt/homebrew/bin:${process.env.PATH || ''}`
+    // Use enhanced PATH that includes user-level npm global directory
+    const enhancedPath = getEnhancedPath()
 
     console.log(`[agent-install] Spawning: ${command} ${args.join(' ')} (shell: ${useShell})`)
 
@@ -109,14 +111,19 @@ async function installClaudeCLI(
 }
 
 /**
- * Install claude-code-acp via npm
+ * Install claude-code-acp via npm to user-level directory
  */
 async function installClaudeCodeACP(
   onProgress: (message: string) => void
 ): Promise<{ success: boolean; error?: string }> {
+  const prefix = getNpmUserPrefix()
+
+  // Ensure the user-level npm global directory exists
+  await fs.promises.mkdir(prefix, { recursive: true }).catch(() => {})
+
   return spawnWithProgress(
     'npm',
-    ['install', '-g', '@zed-industries/claude-code-acp'],
+    ['install', '-g', '--prefix', prefix, '@zed-industries/claude-code-acp'],
     onProgress,
     true
   )
@@ -217,21 +224,41 @@ async function installClaudeCode(options: InstallOptions): Promise<InstallResult
 }
 
 /**
- * Install Codex CLI via npm
+ * Install Codex CLI via npm to user-level directory
  */
 async function installCodexCLI(
   onProgress: (message: string) => void
 ): Promise<{ success: boolean; error?: string }> {
-  return spawnWithProgress('npm', ['install', '-g', '@openai/codex'], onProgress, true)
+  const prefix = getNpmUserPrefix()
+
+  // Ensure the user-level npm global directory exists
+  await fs.promises.mkdir(prefix, { recursive: true }).catch(() => {})
+
+  return spawnWithProgress(
+    'npm',
+    ['install', '-g', '--prefix', prefix, '@openai/codex'],
+    onProgress,
+    true
+  )
 }
 
 /**
- * Install codex-acp via npm
+ * Install codex-acp via npm to user-level directory
  */
 async function installCodexACP(
   onProgress: (message: string) => void
 ): Promise<{ success: boolean; error?: string }> {
-  return spawnWithProgress('npm', ['install', '-g', '@zed-industries/codex-acp'], onProgress, true)
+  const prefix = getNpmUserPrefix()
+
+  // Ensure the user-level npm global directory exists
+  await fs.promises.mkdir(prefix, { recursive: true }).catch(() => {})
+
+  return spawnWithProgress(
+    'npm',
+    ['install', '-g', '--prefix', prefix, '@zed-industries/codex-acp'],
+    onProgress,
+    true
+  )
 }
 
 /**
@@ -360,9 +387,9 @@ export async function installAgent(options: InstallOptions): Promise<InstallResu
 /**
  * Format installation error messages for user display
  */
-function formatInstallError(error: string): string {
+export function formatInstallError(error: string): string {
   if (error.includes('EACCES') || error.includes('permission denied')) {
-    return 'Permission denied. Please check your permissions and try again.'
+    return 'Permission denied. Please run: chmod -R u+w ~/.npm-global'
   }
   if (error.includes('Could not resolve host') || error.includes('ENOTFOUND')) {
     return 'Network error. Please check your internet connection and try again.'
