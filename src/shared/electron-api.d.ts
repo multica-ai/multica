@@ -199,6 +199,9 @@ export interface ElectronAPI {
   // Terminal
   runInTerminal(command: string): Promise<void>
 
+  // App lifecycle
+  onAppFocus(callback: () => void): () => void
+
   // Auto-update
   checkForUpdates(): Promise<void>
   downloadUpdate(): Promise<void>

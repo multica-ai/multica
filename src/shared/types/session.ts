@@ -25,6 +25,9 @@ export interface MulticaSession {
   // Metadata
   title?: string // User-defined or auto-generated title
   messageCount: number // Message count for list display
+
+  // Runtime state (not persisted)
+  directoryExists?: boolean // true = exists, false = deleted/moved, undefined = not checked
 }
 
 /**

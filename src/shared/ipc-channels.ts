@@ -51,6 +51,9 @@ export const IPC_CHANNELS = {
   // Terminal
   TERMINAL_RUN: 'terminal:run',
 
+  // App lifecycle
+  APP_FOCUS: 'app:focus',
+
   // Auto-update
   UPDATE_CHECK: 'update:check',
   UPDATE_DOWNLOAD: 'update:download',

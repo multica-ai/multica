@@ -93,6 +93,12 @@ function AppContent(): React.JSX.Element {
     ? runningSessionsStatus.sessionIds.includes(currentSession.id)
     : false
 
+  // Handler for deleting the current session (opens delete modal)
+  const handleDeleteCurrentSession = () => {
+    if (!currentSession) return
+    openModal('deleteSession', currentSession)
+  }
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Main content */}
@@ -135,11 +141,13 @@ function AppContent(): React.JSX.Element {
             onSend={sendPrompt}
             onCancel={cancelRequest}
             isProcessing={isProcessing}
-            disabled={!currentSession}
+            disabled={!currentSession || currentSession.directoryExists === false}
             workingDirectory={currentSession?.workingDirectory}
             currentAgentId={currentSession?.agentId}
             onAgentChange={switchSessionAgent}
             isSwitchingAgent={isSwitchingAgent}
+            directoryExists={currentSession?.directoryExists}
+            onDeleteSession={handleDeleteCurrentSession}
           />
         </main>
 
@@ -150,7 +158,10 @@ function AppContent(): React.JSX.Element {
           </RightPanelHeader>
           <RightPanelContent className="p-0">
             {currentSession ? (
-              <FileTree rootPath={currentSession.workingDirectory} />
+              <FileTree
+                rootPath={currentSession.workingDirectory}
+                directoryExists={currentSession.directoryExists}
+              />
             ) : (
               <div className="flex h-full items-center justify-center text-muted-foreground p-4">
                 <p className="text-sm">No session selected</p>

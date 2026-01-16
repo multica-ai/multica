@@ -2,7 +2,7 @@
  * Message input component with image upload support
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowUp, Square, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, X, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { AgentSelector } from './AgentSelector'
@@ -18,10 +18,41 @@ interface MessageInputProps {
   currentAgentId?: string
   onAgentChange?: (agentId: string) => void
   isSwitchingAgent?: boolean
+  directoryExists?: boolean
+  onDeleteSession?: () => void
 }
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
 const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+// Warning banner component for missing directory
+function DirectoryWarningBanner({ onDeleteSession }: { onDeleteSession?: () => void }) {
+  return (
+    <div className="mx-auto max-w-3xl mb-2">
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
+        <div className="flex items-center justify-between gap-4">
+          {/* Left: Icon + Text */}
+          <div className="flex items-center gap-3 min-w-0">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">Directory not found</p>
+              <p className="text-xs text-muted-foreground truncate hidden sm:block">
+                The directory may have been moved or deleted.
+              </p>
+            </div>
+          </div>
+
+          {/* Right: Delete button */}
+          {onDeleteSession && (
+            <Button variant="outline" size="sm" onClick={onDeleteSession}>
+              Delete Session
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function MessageInput({
   onSend,
@@ -32,7 +63,9 @@ export function MessageInput({
   workingDirectory,
   currentAgentId,
   onAgentChange,
-  isSwitchingAgent = false
+  isSwitchingAgent = false,
+  directoryExists,
+  onDeleteSession
 }: MessageInputProps) {
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -184,6 +217,7 @@ export function MessageInput({
   // Normal chat input mode
   return (
     <div className="p-4">
+      {directoryExists === false && <DirectoryWarningBanner onDeleteSession={onDeleteSession} />}
       <div className="mx-auto max-w-3xl">
         <div className="bg-card transition-colors duration-200 rounded-xl p-3 border border-border">
           {/* Image previews */}

@@ -224,6 +224,40 @@ export function useApp(): AppState & AppActions {
     }
   }, [])
 
+  // Validate current session directory exists (called on app focus)
+  const validateCurrentSessionDirectory = useCallback(async () => {
+    if (!currentSession) return
+
+    try {
+      // Reload session to get latest directoryExists state from backend
+      const session = await window.electronAPI.loadSession(currentSession.id)
+
+      // Only update if state changed to avoid unnecessary re-renders
+      if (session.directoryExists !== currentSession.directoryExists) {
+        setCurrentSession(session)
+        // Also refresh sidebar list to update directory status indicators
+        const list = await window.electronAPI.listSessions()
+        setSessions(list)
+      }
+    } catch (err) {
+      console.error('Failed to validate session directory:', err)
+    }
+  }, [currentSession])
+
+  // Subscribe to app focus event to validate directory existence
+  useEffect(() => {
+    const unsubFocus = window.electronAPI.onAppFocus(async () => {
+      // Only validate if we have a current session
+      if (currentSession) {
+        await validateCurrentSessionDirectory()
+      }
+    })
+
+    return () => {
+      unsubFocus()
+    }
+  }, [currentSession?.id, validateCurrentSessionDirectory])
+
   const createSession = useCallback(
     async (cwd: string, agentId: string) => {
       try {

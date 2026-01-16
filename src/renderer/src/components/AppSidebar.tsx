@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
+import { AlertTriangle, CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
 import { useModalStore } from '../stores/modalStore'
 
 interface AppSidebarProps {
@@ -70,13 +70,14 @@ function SessionItem({
   onDelete
 }: SessionItemProps) {
   const [isHovered, setIsHovered] = useState(false)
+  const isInvalid = session.directoryExists === false
 
   return (
     <SidebarMenuItem
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <Tooltip delayDuration={600}>
+      <Tooltip delayDuration={600} open={isActive ? false : undefined}>
         <TooltipTrigger asChild>
           <SidebarMenuButton
             isActive={isActive}
@@ -92,10 +93,13 @@ function SessionItem({
               {/* Line 1: Title + Status indicator */}
               <div className="flex items-center gap-1.5">
                 <span className="truncate text-sm font-medium">{getSessionTitle(session)}</span>
-                {needsPermission ? (
-                  <CirclePause className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
+                {/* Status indicators - invalid directory has highest priority */}
+                {isInvalid ? (
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                ) : needsPermission ? (
+                  <CirclePause className="h-3.5 w-3.5 shrink-0 text-amber-500" />
                 ) : isProcessing ? (
-                  <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-primary" />
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
                 ) : null}
               </div>
 
@@ -112,7 +116,7 @@ function SessionItem({
                 onDelete()
               }}
               className={cn(
-                'flex-shrink-0 self-start rounded p-1 transition-opacity duration-150',
+                'shrink-0 self-start rounded p-1 transition-opacity duration-150',
                 'hover:bg-muted active:bg-muted',
                 isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
               )}
@@ -121,8 +125,12 @@ function SessionItem({
             </button>
           </SidebarMenuButton>
         </TooltipTrigger>
-        <TooltipContent side="right">
-          <p>{session.workingDirectory}</p>
+        <TooltipContent>
+          {isInvalid ? (
+            <p className="text-amber-500">Directory not found: {session.workingDirectory}</p>
+          ) : (
+            <p>{session.workingDirectory}</p>
+          )}
         </TooltipContent>
       </Tooltip>
     </SidebarMenuItem>

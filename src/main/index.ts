@@ -129,6 +129,13 @@ app.whenReady().then(async () => {
 
   mainWindow = createWindow()
 
+  // Notify renderer when app window gains focus
+  mainWindow.on('focus', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.APP_FOCUS)
+    }
+  })
+
   // Initialize auto-updater
   // Set FORCE_DEV_UPDATE=true to test updates in dev mode
   const forceDevUpdate = process.env.FORCE_DEV_UPDATE === 'true'

@@ -48,6 +48,18 @@ function isValidPath(inputPath: string): boolean {
 }
 
 /**
+ * Adds directoryExists field to a session by checking if workingDirectory exists
+ */
+function withDirectoryExists<T extends MulticaSession>(
+  session: T
+): T & { directoryExists: boolean } {
+  return {
+    ...session,
+    directoryExists: fs.existsSync(session.workingDirectory)
+  }
+}
+
+/**
  * Extract error message from various error types
  * Handles ACP SDK errors which are plain objects with message property
  */
@@ -113,7 +125,8 @@ export function registerIPCHandlers(conductor: Conductor): void {
         if (!config) {
           throw new Error(`Unknown agent: ${agentId}`)
         }
-        return await conductor.createSession(workingDirectory, config)
+        const session = await conductor.createSession(workingDirectory, config)
+        return withDirectoryExists(session)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
       }
@@ -121,7 +134,8 @@ export function registerIPCHandlers(conductor: Conductor): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, async (_event, options?: ListSessionsOptions) => {
-    return conductor.listSessions(options)
+    const sessions = await conductor.listSessions(options)
+    return sessions.map(withDirectoryExists)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_GET, async (_event, sessionId: string) => {
@@ -129,11 +143,13 @@ export function registerIPCHandlers(conductor: Conductor): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LOAD, async (_event, sessionId: string) => {
-    return conductor.loadSession(sessionId)
+    const session = await conductor.loadSession(sessionId)
+    return withDirectoryExists(session)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_RESUME, async (_event, sessionId: string) => {
-    return conductor.resumeSession(sessionId)
+    const session = await conductor.resumeSession(sessionId)
+    return withDirectoryExists(session)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, async (_event, sessionId: string) => {
@@ -144,7 +160,15 @@ export function registerIPCHandlers(conductor: Conductor): void {
   ipcMain.handle(
     IPC_CHANNELS.SESSION_UPDATE,
     async (_event, sessionId: string, updates: Partial<MulticaSession>) => {
-      return conductor.updateSessionMeta(sessionId, updates)
+      // If updating workingDirectory, validate it exists
+      if (updates.workingDirectory) {
+        if (!fs.existsSync(updates.workingDirectory)) {
+          throw new Error('Selected directory does not exist')
+        }
+      }
+
+      const updated = await conductor.updateSessionMeta(sessionId, updates)
+      return withDirectoryExists(updated)
     }
   )
 
@@ -152,7 +176,8 @@ export function registerIPCHandlers(conductor: Conductor): void {
     IPC_CHANNELS.SESSION_SWITCH_AGENT,
     async (_event, sessionId: string, newAgentId: string) => {
       try {
-        return await conductor.switchSessionAgent(sessionId, newAgentId)
+        const session = await conductor.switchSessionAgent(sessionId, newAgentId)
+        return withDirectoryExists(session)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
       }

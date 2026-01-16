@@ -127,7 +127,7 @@ export function AgentSelector({
                     </DropdownMenuItem>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent side="right">Setup required in Settings</TooltipContent>
+                <TooltipContent>Setup required in Settings</TooltipContent>
               </Tooltip>
             )
           }

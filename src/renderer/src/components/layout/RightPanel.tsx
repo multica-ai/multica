@@ -40,7 +40,7 @@ export function RightPanel({ children, className }: RightPanelProps) {
     >
       <div
         className={cn(
-          'fixed inset-y-0 right-0 z-10 h-svh border-l bg-background',
+          'fixed inset-y-0 right-0 z-10 h-svh border-l bg-background flex flex-col',
           // Disable transition during resize for smoother dragging
           !isResizing && 'transition-[transform,opacity,width] duration-200 ease-linear',
           isOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
