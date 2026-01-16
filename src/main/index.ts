@@ -7,12 +7,13 @@ import { Conductor } from './conductor/Conductor'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
 import type { PermissionResponse } from '../shared/electron-api'
 import { PermissionManager } from './permission'
-import { updater } from './updater'
+import { createUpdater, AutoUpdater } from './updater'
 
 // Global instances
 let conductor: Conductor
 let mainWindow: BrowserWindow | null = null
 let permissionManager: PermissionManager
+let updater: AutoUpdater
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -122,10 +123,14 @@ app.whenReady().then(async () => {
 
   mainWindow = createWindow()
 
-  // Initialize auto-updater (only in production)
-  if (!is.dev) {
-    updater.setMainWindow(() => mainWindow)
-    // Check for updates after window is ready
+  // Initialize auto-updater
+  // Set FORCE_DEV_UPDATE=true to test updates in dev mode
+  const forceDevUpdate = process.env.FORCE_DEV_UPDATE === 'true'
+  updater = createUpdater(forceDevUpdate)
+  updater.setMainWindow(() => mainWindow)
+
+  // Auto-check for updates (in production or when forced)
+  if (!is.dev || forceDevUpdate) {
     mainWindow.once('ready-to-show', () => {
       updater.checkForUpdates()
     })

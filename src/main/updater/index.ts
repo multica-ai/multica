@@ -16,10 +16,24 @@ export interface UpdateStatus {
 export class AutoUpdater {
   private mainWindow: (() => BrowserWindow | null) | null = null
 
-  constructor() {
+  constructor(forceDevUpdateConfig = false) {
     // Configure auto-updater
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
+
+    // Enable update checking in dev mode for testing
+    if (forceDevUpdateConfig) {
+      autoUpdater.forceDevUpdateConfig = true
+      console.log('[AutoUpdater] Force dev update config enabled')
+    }
+
+    // Enable logging
+    autoUpdater.logger = {
+      info: (msg) => console.log('[AutoUpdater]', msg),
+      warn: (msg) => console.warn('[AutoUpdater]', msg),
+      error: (msg) => console.error('[AutoUpdater]', msg),
+      debug: (msg) => console.log('[AutoUpdater:debug]', msg)
+    }
 
     // Set up event handlers
     autoUpdater.on('checking-for-update', () => {
@@ -102,5 +116,7 @@ export class AutoUpdater {
   }
 }
 
-// Singleton instance
-export const updater = new AutoUpdater()
+// Factory function to create updater with options
+export function createUpdater(forceDevUpdateConfig = false): AutoUpdater {
+  return new AutoUpdater(forceDevUpdateConfig)
+}
