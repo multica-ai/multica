@@ -49,7 +49,13 @@ export const IPC_CHANNELS = {
   FS_OPEN_WITH: 'fs:open-with',
 
   // Terminal
-  TERMINAL_RUN: 'terminal:run'
+  TERMINAL_RUN: 'terminal:run',
+
+  // Auto-update
+  UPDATE_CHECK: 'update:check',
+  UPDATE_DOWNLOAD: 'update:download',
+  UPDATE_INSTALL: 'update:install',
+  UPDATE_STATUS: 'update:status'
 } as const
 
 export type IPCChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]

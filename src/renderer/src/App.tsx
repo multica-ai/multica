@@ -3,7 +3,7 @@
  */
 import { useState } from 'react'
 import { useApp } from './hooks/useApp'
-import { ChatView, MessageInput, StatusBar } from './components'
+import { ChatView, MessageInput, StatusBar, UpdateNotification } from './components'
 import { AppSidebar } from './components/AppSidebar'
 import { Modals } from './components/Modals'
 import { ThemeProvider } from './contexts/ThemeContext'
@@ -170,6 +170,9 @@ function AppContent(): React.JSX.Element {
 
       {/* Toast notifications */}
       <Toaster position="bottom-right" />
+
+      {/* Update notification */}
+      <UpdateNotification />
     </div>
   )
 }

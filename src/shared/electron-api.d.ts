@@ -127,6 +127,27 @@ export interface InstallResult {
   error?: string
 }
 
+// Auto-update types
+export interface UpdateInfo {
+  version: string
+  releaseDate?: string
+  releaseNotes?: string | null
+}
+
+export interface UpdateProgress {
+  percent: number
+  bytesPerSecond: number
+  total: number
+  transferred: number
+}
+
+export interface UpdateStatus {
+  status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  info?: UpdateInfo
+  progress?: UpdateProgress
+  error?: string
+}
+
 export interface ElectronAPI {
   // Agent status (per-session agents)
   getAgentStatus(): Promise<RunningSessionsStatus>
@@ -177,6 +198,12 @@ export interface ElectronAPI {
 
   // Terminal
   runInTerminal(command: string): Promise<void>
+
+  // Auto-update
+  checkForUpdates(): Promise<void>
+  downloadUpdate(): Promise<void>
+  installUpdate(): Promise<void>
+  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void
 }
 
 declare global {

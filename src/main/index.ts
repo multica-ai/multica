@@ -7,11 +7,13 @@ import { Conductor } from './conductor/Conductor'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
 import type { PermissionResponse } from '../shared/electron-api'
 import { PermissionManager } from './permission'
+import { createUpdater, AutoUpdater } from './updater'
 
 // Global instances
 let conductor: Conductor
 let mainWindow: BrowserWindow | null = null
 let permissionManager: PermissionManager
+let updater: AutoUpdater
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -120,6 +122,32 @@ app.whenReady().then(async () => {
   registerIPCHandlers(conductor)
 
   mainWindow = createWindow()
+
+  // Initialize auto-updater
+  // Set FORCE_DEV_UPDATE=true to test updates in dev mode
+  const forceDevUpdate = process.env.FORCE_DEV_UPDATE === 'true'
+  updater = createUpdater(forceDevUpdate)
+  updater.setMainWindow(() => mainWindow)
+
+  // Auto-check for updates (in production or when forced)
+  if (!is.dev || forceDevUpdate) {
+    mainWindow.once('ready-to-show', () => {
+      updater.checkForUpdates()
+    })
+  }
+
+  // Register update IPC handlers
+  ipcMain.handle(IPC_CHANNELS.UPDATE_CHECK, async () => {
+    await updater.checkForUpdates()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.UPDATE_DOWNLOAD, async () => {
+    await updater.downloadUpdate()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.UPDATE_INSTALL, () => {
+    updater.quitAndInstall()
+  })
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window when dock icon is clicked

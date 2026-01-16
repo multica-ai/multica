@@ -103,7 +103,19 @@ const electronAPI: ElectronAPI = {
   },
 
   // Terminal
-  runInTerminal: (command: string) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RUN, command)
+  runInTerminal: (command: string) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RUN, command),
+
+  // Auto-update
+  checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_CHECK),
+  downloadUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_DOWNLOAD),
+  installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_INSTALL),
+
+  onUpdateStatus: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown) =>
+      callback(status as Parameters<typeof callback>[0])
+    ipcRenderer.on(IPC_CHANNELS.UPDATE_STATUS, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_STATUS, listener)
+  }
 }
 
 // Expose API to renderer via contextBridge
