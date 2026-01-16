@@ -127,6 +127,13 @@ app.whenReady().then(async () => {
 
   mainWindow = createWindow()
 
+  // Notify renderer when app window gains focus
+  mainWindow.on('focus', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.APP_FOCUS)
+    }
+  })
+
   app.on('activate', function () {
     // On macOS it's common to re-create a window when dock icon is clicked
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -9,7 +9,8 @@ import {
   FolderOpenIcon,
   FileIcon,
   ImageIcon,
-  LockIcon
+  LockIcon,
+  FolderX
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -26,6 +27,7 @@ import { useFileChangeStore } from '../stores/fileChangeStore'
 
 interface FileTreeProps {
   rootPath: string
+  directoryExists?: boolean
 }
 
 interface TreeItemProps {
@@ -262,10 +264,22 @@ function TreeItem({
   )
 }
 
+/**
+ * Displayed when the session's directory no longer exists
+ */
+function DirectoryNotFound(): React.JSX.Element {
+  return (
+    <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+      <FolderX className="h-8 w-8 mb-2 opacity-40" />
+      <span className="text-sm">Directory not found</span>
+    </div>
+  )
+}
+
 // Filter out hidden files (starting with .)
 const filterHidden = (nodes: FileTreeNode[]) => nodes.filter((n) => !n.name.startsWith('.'))
 
-export function FileTree({ rootPath }: FileTreeProps) {
+export function FileTree({ rootPath, directoryExists = true }: FileTreeProps) {
   const [rootChildren, setRootChildren] = useState<FileTreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Map<string, FileTreeNode[]>>(new Map())
@@ -278,6 +292,12 @@ export function FileTree({ rootPath }: FileTreeProps) {
 
   // Load root directory and detect apps on mount
   useEffect(() => {
+    // Skip if directory doesn't exist
+    if (!directoryExists) {
+      setIsLoading(false)
+      return
+    }
+
     async function init() {
       setIsLoading(true)
       try {
@@ -293,7 +313,7 @@ export function FileTree({ rootPath }: FileTreeProps) {
       setIsLoading(false)
     }
     init()
-  }, [rootPath])
+  }, [rootPath, directoryExists])
 
   // Keep a ref to expandedPaths for use in refresh effect without triggering it
   const expandedPathsRef = useRef(expandedPaths)
@@ -306,6 +326,9 @@ export function FileTree({ rootPath }: FileTreeProps) {
       isInitialMount.current = false
       return
     }
+
+    // Skip if directory doesn't exist
+    if (!directoryExists) return
 
     console.log('[FileTree] Refresh triggered, counter:', refreshCounter)
 
@@ -351,7 +374,7 @@ export function FileTree({ rootPath }: FileTreeProps) {
     }
 
     refresh()
-  }, [refreshCounter, rootPath])
+  }, [refreshCounter, rootPath, directoryExists])
 
   const handleToggle = useCallback((path: string) => {
     setExpandedPaths((prev) => {
@@ -375,6 +398,11 @@ export function FileTree({ rootPath }: FileTreeProps) {
       return new Map(prev).set(path, filtered)
     })
   }, [])
+
+  // If directory doesn't exist, show the not found UI
+  if (directoryExists === false) {
+    return <DirectoryNotFound />
+  }
 
   if (isLoading) {
     return (

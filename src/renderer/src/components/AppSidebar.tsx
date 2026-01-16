@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
+import { AlertTriangle, CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
 import { useModalStore } from '../stores/modalStore'
 
 interface AppSidebarProps {
@@ -70,6 +70,7 @@ function SessionItem({
   onDelete
 }: SessionItemProps) {
   const [isHovered, setIsHovered] = useState(false)
+  const isInvalid = session.directoryExists === false
 
   return (
     <SidebarMenuItem
@@ -92,7 +93,10 @@ function SessionItem({
               {/* Line 1: Title + Status indicator */}
               <div className="flex items-center gap-1.5">
                 <span className="truncate text-sm font-medium">{getSessionTitle(session)}</span>
-                {needsPermission ? (
+                {/* Status indicators - invalid directory has highest priority */}
+                {isInvalid ? (
+                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
+                ) : needsPermission ? (
                   <CirclePause className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
                 ) : isProcessing ? (
                   <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-primary" />
@@ -122,7 +126,11 @@ function SessionItem({
           </SidebarMenuButton>
         </TooltipTrigger>
         <TooltipContent side="right">
-          <p>{session.workingDirectory}</p>
+          {isInvalid ? (
+            <p className="text-amber-500">Directory not found: {session.workingDirectory}</p>
+          ) : (
+            <p>{session.workingDirectory}</p>
+          )}
         </TooltipContent>
       </Tooltip>
     </SidebarMenuItem>

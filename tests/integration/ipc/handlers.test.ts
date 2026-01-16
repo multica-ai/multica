@@ -53,7 +53,8 @@ const createMockConductor = () => ({
   loadSession: vi.fn().mockResolvedValue({ id: 'loaded-session' }),
   resumeSession: vi.fn().mockResolvedValue({ id: 'resumed-session' }),
   deleteSession: vi.fn().mockResolvedValue(undefined),
-  updateSessionMeta: vi.fn().mockResolvedValue({ id: 'updated-session' })
+  updateSessionMeta: vi.fn().mockResolvedValue({ id: 'updated-session' }),
+  switchSessionAgent: vi.fn().mockResolvedValue({ id: 'switched-session' })
 })
 
 describe('IPC Handlers', () => {
@@ -97,13 +98,17 @@ describe('IPC Handlers', () => {
         'session:resume',
         'session:delete',
         'session:update',
+        'session:switch-agent',
         'config:get',
         'config:update',
         'dialog:select-directory',
         'system:check-agents',
+        'system:check-agent',
+        'agent:install',
         'fs:list-directory',
         'fs:detect-apps',
-        'fs:open-with'
+        'fs:open-with',
+        'terminal:run'
       ]
 
       for (const channel of expectedChannels) {
@@ -147,6 +152,30 @@ describe('IPC Handlers', () => {
       expect(mockConductor.createSession).toHaveBeenCalled()
     })
 
+    it('session:create should add directoryExists to session', async () => {
+      mockConductor.createSession.mockResolvedValue({
+        id: 'new-session',
+        workingDirectory: tempDir
+      })
+
+      const handler = handlers.get('session:create')!
+      const result = await handler({}, tempDir, 'opencode')
+
+      expect(result.directoryExists).toBe(true)
+    })
+
+    it('session:create should return directoryExists false for non-existent directory', async () => {
+      mockConductor.createSession.mockResolvedValue({
+        id: 'new-session',
+        workingDirectory: '/nonexistent/directory/path'
+      })
+
+      const handler = handlers.get('session:create')!
+      const result = await handler({}, '/nonexistent/directory/path', 'opencode')
+
+      expect(result.directoryExists).toBe(false)
+    })
+
     it('session:create should throw for unknown agent', async () => {
       const handler = handlers.get('session:create')!
 
@@ -166,6 +195,132 @@ describe('IPC Handlers', () => {
 
       expect(mockConductor.deleteSession).toHaveBeenCalledWith('session-1')
       expect(result).toEqual({ success: true })
+    })
+
+    it('session:resume should add directoryExists to session', async () => {
+      mockConductor.resumeSession.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: tempDir
+      })
+
+      const handler = handlers.get('session:resume')!
+      const result = await handler({}, 'session-1')
+
+      expect(result.directoryExists).toBe(true)
+    })
+
+    it('session:resume should return directoryExists false for non-existent directory', async () => {
+      mockConductor.resumeSession.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: '/nonexistent/directory/path'
+      })
+
+      const handler = handlers.get('session:resume')!
+      const result = await handler({}, 'session-1')
+
+      expect(result.directoryExists).toBe(false)
+    })
+
+    it('session:switch-agent should add directoryExists to session', async () => {
+      mockConductor.switchSessionAgent.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: tempDir,
+        agentId: 'claude-code'
+      })
+
+      const handler = handlers.get('session:switch-agent')!
+      const result = await handler({}, 'session-1', 'claude-code')
+
+      expect(result.directoryExists).toBe(true)
+      expect(mockConductor.switchSessionAgent).toHaveBeenCalledWith('session-1', 'claude-code')
+    })
+
+    it('session:switch-agent should return directoryExists false for non-existent directory', async () => {
+      mockConductor.switchSessionAgent.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: '/nonexistent/directory/path',
+        agentId: 'claude-code'
+      })
+
+      const handler = handlers.get('session:switch-agent')!
+      const result = await handler({}, 'session-1', 'claude-code')
+
+      expect(result.directoryExists).toBe(false)
+    })
+
+    it('session:list should add directoryExists to sessions', async () => {
+      // Mock conductor to return sessions with existing and non-existing directories
+      mockConductor.listSessions.mockResolvedValue([
+        { id: 'session-1', workingDirectory: tempDir },
+        { id: 'session-2', workingDirectory: '/nonexistent/directory/path' }
+      ])
+
+      const handler = handlers.get('session:list')!
+      const result = await handler({})
+
+      expect(result).toHaveLength(2)
+      expect(result[0].directoryExists).toBe(true)
+      expect(result[1].directoryExists).toBe(false)
+    })
+
+    it('session:load should add directoryExists to session', async () => {
+      mockConductor.loadSession.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: tempDir
+      })
+
+      const handler = handlers.get('session:load')!
+      const result = await handler({}, 'session-1')
+
+      expect(result.directoryExists).toBe(true)
+    })
+
+    it('session:load should return directoryExists false for non-existent directory', async () => {
+      mockConductor.loadSession.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: '/nonexistent/directory/path'
+      })
+
+      const handler = handlers.get('session:load')!
+      const result = await handler({}, 'session-1')
+
+      expect(result.directoryExists).toBe(false)
+    })
+
+    it('session:update should validate workingDirectory exists', async () => {
+      const handler = handlers.get('session:update')!
+
+      await expect(
+        handler({}, 'session-1', { workingDirectory: '/nonexistent/directory/path' })
+      ).rejects.toThrow('Selected directory does not exist')
+    })
+
+    it('session:update should allow updating workingDirectory to existing path', async () => {
+      mockConductor.updateSessionMeta.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: tempDir
+      })
+
+      const handler = handlers.get('session:update')!
+      const result = await handler({}, 'session-1', { workingDirectory: tempDir })
+
+      expect(mockConductor.updateSessionMeta).toHaveBeenCalledWith('session-1', {
+        workingDirectory: tempDir
+      })
+      expect(result.directoryExists).toBe(true)
+    })
+
+    it('session:update should add directoryExists to result', async () => {
+      mockConductor.updateSessionMeta.mockResolvedValue({
+        id: 'session-1',
+        workingDirectory: tempDir,
+        title: 'Updated'
+      })
+
+      const handler = handlers.get('session:update')!
+      const result = await handler({}, 'session-1', { title: 'Updated' })
+
+      expect(result.directoryExists).toBe(true)
     })
   })
 

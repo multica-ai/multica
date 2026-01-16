@@ -177,6 +177,9 @@ export interface ElectronAPI {
 
   // Terminal
   runInTerminal(command: string): Promise<void>
+
+  // App lifecycle
+  onAppFocus(callback: () => void): () => void
 }
 
 declare global {

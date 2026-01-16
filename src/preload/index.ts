@@ -103,7 +103,14 @@ const electronAPI: ElectronAPI = {
   },
 
   // Terminal
-  runInTerminal: (command: string) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RUN, command)
+  runInTerminal: (command: string) => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RUN, command),
+
+  // App lifecycle
+  onAppFocus: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on(IPC_CHANNELS.APP_FOCUS, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_FOCUS, listener)
+  }
 }
 
 // Expose API to renderer via contextBridge

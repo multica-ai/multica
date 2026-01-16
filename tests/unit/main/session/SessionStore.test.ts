@@ -230,6 +230,26 @@ describe('SessionStore', () => {
         'Session not found'
       )
     })
+
+    it('should update workingDirectory', async () => {
+      const created = await store.create({
+        agentSessionId: 'agent-123',
+        agentId: 'opencode',
+        workingDirectory: '/original/path'
+      })
+
+      const updated = await store.updateMeta(created.id, {
+        workingDirectory: '/new/path'
+      })
+
+      expect(updated.workingDirectory).toBe('/new/path')
+
+      // Verify persisted by loading from a new store instance
+      const newStore = new SessionStore(tempDir)
+      await newStore.initialize()
+      const loaded = await newStore.get(created.id)
+      expect(loaded?.session.workingDirectory).toBe('/new/path')
+    })
   })
 
   describe('delete', () => {
