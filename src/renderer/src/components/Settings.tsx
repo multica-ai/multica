@@ -302,11 +302,13 @@ function AgentItem({
   // Determine status: checking -> setup/selected/ready
   const status = isChecking
     ? 'checking'
-    : !agent?.installed
-      ? 'setup'
-      : isSelected
-        ? 'selected'
-        : 'ready'
+    : agent === undefined
+      ? 'checking' // Still loading agent status
+      : !agent?.installed
+        ? 'setup'
+        : isSelected
+          ? 'selected'
+          : 'ready'
 
   // Auto-expand when waiting for install
   useEffect(() => {

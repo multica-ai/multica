@@ -1,7 +1,7 @@
 /**
  * Path utilities for agent process management
  */
-import { homedir } from 'node:os'
+import { homedir, platform } from 'node:os'
 
 /**
  * Get enhanced PATH that includes common custom installation directories
@@ -9,6 +9,8 @@ import { homedir } from 'node:os'
  */
 export function getEnhancedPath(): string {
   const home = homedir()
+  const isWindows = platform() === 'win32'
+  const separator = isWindows ? ';' : ':'
   const customPaths = [
     `${home}/.opencode/bin`,
     `${home}/.claude/local/bin`,
@@ -16,5 +18,5 @@ export function getEnhancedPath(): string {
     '/opt/homebrew/bin',
     '/usr/local/bin'
   ]
-  return `${customPaths.join(':')}:${process.env.PATH || ''}`
+  return `${customPaths.join(separator)}${separator}${process.env.PATH || ''}`
 }
