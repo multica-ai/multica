@@ -409,6 +409,40 @@ export class Conductor {
       console.log(`[Conductor] Prompt completed with stopReason: ${result.stopReason}`)
 
       return result.stopReason
+    } catch (error) {
+      console.error(`[Conductor] ACP error for session ${sessionId}:`, error)
+
+      // Parse ACP error to user-friendly message
+      const message = this.parseAcpError(error)
+
+      // DESIGN DECISION: Event-driven error handling instead of throwing
+      //
+      // Why not throw?
+      // - Throwing causes IPC handler to fail, frontend receives an error response
+      // - This typically triggers a toast/dialog, interrupting user flow
+      //
+      // Why emit an event?
+      // - Error appears inline in the chat as a message, keeping context visible
+      // - User can read the error and continue the conversation naturally
+      // - Consistent with how agent responses are already delivered (via events)
+      //
+      // This pattern is similar to how OpenWork handles task errors:
+      // errors are forwarded to the renderer as updates, not thrown as exceptions.
+      if (this.events.onSessionUpdate) {
+        this.events.onSessionUpdate({
+          sessionId: agentSessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text: `\n\n**Error:** ${message}\n`
+            }
+          }
+        } as SessionNotification)
+      }
+
+      // Return 'error' as stopReason - IPC succeeds, caller knows it was an error
+      return 'error'
     } finally {
       // Always remove from processing when done (success or error)
       this.processingSessions.delete(sessionId)
@@ -639,6 +673,32 @@ export class Conductor {
    */
   isSessionProcessing(sessionId: string): boolean {
     return this.processingSessions.has(sessionId)
+  }
+
+  /**
+   * Parse ACP error and return user-friendly message
+   */
+  private parseAcpError(error: unknown): string {
+    const errorStr = String(error)
+
+    // MCP server missing environment variables
+    if (errorStr.includes('Missing environment variables')) {
+      const match = errorStr.match(/Missing environment variables: ([A-Z_]+)/)
+      return `MCP server requires environment variable: ${match?.[1] || 'unknown'}`
+    }
+
+    // File too large to read
+    if (errorStr.includes('MaxFileReadTokenExceededError')) {
+      return 'File is too large to read. Try reading smaller portions.'
+    }
+
+    // MCP configuration invalid
+    if (errorStr.includes('mcp-config-invalid')) {
+      return 'MCP server configuration is invalid. Check your settings.'
+    }
+
+    // Generic fallback
+    return 'Agent encountered an error. Please try again.'
   }
 
   /**
