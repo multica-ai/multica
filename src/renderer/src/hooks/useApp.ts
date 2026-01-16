@@ -1,7 +1,7 @@
 /**
  * Main application state hook
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { MulticaSession, StoredSessionUpdate } from '../../../shared/types'
 import type { RunningSessionsStatus } from '../../../shared/electron-api'
 import type { MessageContent } from '../../../shared/types/message'
@@ -10,9 +10,9 @@ import { useFileChangeStore } from '../stores/fileChangeStore'
 import { toast } from 'sonner'
 import { getErrorMessage } from '../utils/error'
 
-// ACP standard tool kinds that modify files
-const FILE_MODIFYING_KINDS = new Set(['edit', 'write', 'delete'])
-// Actual tool names from _meta.claudeCode.toolName (case-insensitive)
+// ACP standard tool kinds that modify files (used for Codex and other agents)
+const FILE_MODIFYING_KINDS = new Set(['edit', 'write', 'delete', 'execute'])
+// Actual tool names from _meta.claudeCode.toolName (used for Claude Code)
 const FILE_MODIFYING_TOOL_NAMES = new Set(['write', 'edit', 'bash', 'notebookedit'])
 
 export interface AppState {
@@ -45,6 +45,10 @@ export interface AppActions {
 }
 
 export function useApp(): AppState & AppActions {
+  // Store toolCallId -> kind mapping for file tree refresh
+  // This is needed because tool_call_update events don't include kind
+  const toolKindMapRef = useRef<Map<string, string>>(new Map())
+
   // State
   const [sessions, setSessions] = useState<MulticaSession[]>([])
   const [currentSession, setCurrentSession] = useState<MulticaSession | null>(null)
@@ -112,22 +116,33 @@ export function useApp(): AppState & AppActions {
 
       // Check for file-modifying tool completion to trigger FileTree refresh
       const update = message.update
-      const kind = update?.kind?.toLowerCase() || ''
       const status = update?.status?.toLowerCase() || ''
+      const toolCallId = update?.toolCallId
 
-      // Get actual tool name from _meta.claudeCode.toolName
+      // Get tool name from _meta.claudeCode.toolName (Claude Code specific)
       const meta = update?._meta as { claudeCode?: { toolName?: string } } | undefined
       const toolName = meta?.claudeCode?.toolName?.toLowerCase() || ''
 
-      // Trigger refresh when a file-modifying tool completes
-      // Check both ACP kind and actual toolName for compatibility
-      const isFileModifying =
-        FILE_MODIFYING_KINDS.has(kind) || FILE_MODIFYING_TOOL_NAMES.has(toolName)
-      // More lenient: trigger on any status that isn't "running" or "pending" or "in_progress"
-      const isCompleted = status && !['running', 'pending', 'in_progress', ''].includes(status)
+      // Handle tool_call event: store toolCallId -> kind mapping
+      // This is needed because tool_call_update events don't include kind (for Codex etc.)
+      if (update?.sessionUpdate === 'tool_call' && toolCallId && update?.kind) {
+        const kind = update.kind.toLowerCase()
+        toolKindMapRef.current.set(toolCallId, kind)
+      }
 
-      if (update?.sessionUpdate === 'tool_call_update' && isFileModifying && isCompleted) {
-        triggerRefresh()
+      // Handle tool_call_update event: check if we should trigger refresh
+      if (update?.sessionUpdate === 'tool_call_update' && toolCallId) {
+        // Get kind from our stored mapping (for Codex) or from toolName (for Claude Code)
+        const storedKind = toolKindMapRef.current.get(toolCallId) || ''
+        const isFileModifying =
+          FILE_MODIFYING_KINDS.has(storedKind) || FILE_MODIFYING_TOOL_NAMES.has(toolName)
+        const isCompleted = status === 'completed' || status === 'failed'
+
+        if (isFileModifying && isCompleted) {
+          triggerRefresh()
+          // Clean up the mapping
+          toolKindMapRef.current.delete(toolCallId)
+        }
       }
 
       // Pass through original update without any accumulation
@@ -166,6 +181,8 @@ export function useApp(): AppState & AppActions {
       unsubStatus()
       unsubError()
       unsubPermission()
+      // Clear the toolKindMap when session changes to avoid stale data
+      toolKindMapRef.current.clear()
     }
   }, [currentAgentSessionId])
 
