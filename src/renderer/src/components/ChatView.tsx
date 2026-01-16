@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { StoredSessionUpdate } from '../../../shared/types'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown, CheckCircle2, Circle, Loader2, Folder } from 'lucide-react'
+import { ChevronDown, ChevronRight, CheckCircle2, Circle, Loader2, Folder } from 'lucide-react'
 import { ToolCallItem, type ToolCall, type AnsweredResponse } from './ToolCallItem'
 import { PermissionRequestItem } from './permission'
 import { usePermissionStore } from '../stores/permissionStore'
@@ -91,7 +91,12 @@ export function ChatView({
     <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-5 px-8 py-6">
         {messages.map((msg, idx) => (
-          <MessageBubble key={idx} message={msg} />
+          <MessageBubble
+            key={idx}
+            message={msg}
+            isLastMessage={idx === messages.length - 1}
+            isProcessing={isProcessing}
+          />
         ))}
 
         {/* Permission request - show in feed (only for current session) */}
@@ -486,10 +491,13 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
 
 interface MessageBubbleProps {
   message: Message
+  isLastMessage: boolean
+  isProcessing: boolean
 }
 
-function MessageBubble({ message }: MessageBubbleProps) {
+function MessageBubble({ message, isLastMessage, isProcessing }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  const isComplete = !isLastMessage || !isProcessing
 
   // User message - bubble style with support for images
   if (isUser) {
@@ -519,42 +527,135 @@ function MessageBubble({ message }: MessageBubbleProps) {
     )
   }
 
-  // Assistant message - render blocks in order to preserve time sequence
+  // Assistant message - use collapsible wrapper for completed messages
+  return <CollapsibleAssistantMessage blocks={message.blocks} isComplete={isComplete} />
+}
+
+// Render a single content block
+function renderContentBlock(block: ContentBlock, idx: number) {
+  switch (block.type) {
+    case 'thought':
+      return <ThoughtBlockView key={`thought-${idx}`} text={block.content} />
+    case 'tool_call':
+      return <ToolCallItem key={block.toolCall.id} toolCall={block.toolCall} />
+    case 'text':
+      return <TextContentBlock key={`text-${idx}`} content={block.content} />
+    case 'image':
+      return (
+        <img
+          key={`image-${idx}`}
+          src={`data:${block.mimeType};base64,${block.data}`}
+          alt={`Image ${idx + 1}`}
+          className="max-w-[300px] max-h-[300px] rounded-md object-cover"
+        />
+      )
+    case 'plan':
+      return <PlanBlockView key={`plan-${idx}`} entries={block.entries} />
+    case 'error':
+      return (
+        <AuthErrorBlockView
+          key={`error-${idx}`}
+          errorType={block.errorType}
+          agentId={block.agentId}
+          authCommand={block.authCommand}
+          message={block.message}
+        />
+      )
+    default:
+      return null
+  }
+}
+
+// Collapsible assistant message - collapses tool calls and thoughts when message is complete
+// Collapse condition: tool + thought >= 2
+// Collapse range: from first tool/thought to last tool/thought (inclusive), with all content in between
+function CollapsibleAssistantMessage({
+  blocks,
+  isComplete
+}: {
+  blocks: ContentBlock[]
+  isComplete: boolean
+}) {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  // Count tool calls and thoughts (used for collapse condition)
+  const toolCallCount = blocks.filter((b) => b.type === 'tool_call').length
+  const thoughtCount = blocks.filter((b) => b.type === 'thought').length
+
+  // Collapse condition: tool + thought >= 2
+  const shouldCollapse = isComplete && toolCallCount + thoughtCount >= 2
+
+  // Not collapsible - render all blocks normally
+  if (!shouldCollapse) {
+    return (
+      <div className="space-y-3">{blocks.map((block, idx) => renderContentBlock(block, idx))}</div>
+    )
+  }
+
+  // Find first and last tool/thought indices (needed for both expanded and collapsed states)
+  const firstCollapsibleIdx = blocks.findIndex(
+    (b) => b.type === 'tool_call' || b.type === 'thought'
+  )
+  const lastCollapsibleIdx = blocks.findLastIndex(
+    (b) => b.type === 'tool_call' || b.type === 'thought'
+  )
+
+  // Split blocks:
+  // - beforeBlocks: content before first tool/thought (always visible)
+  // - collapsedBlocks: from first to last tool/thought inclusive (collapsible)
+  // - afterBlocks: content after last tool/thought (always visible)
+  const beforeBlocks = blocks.slice(0, firstCollapsibleIdx)
+  const collapsedBlocks = blocks.slice(firstCollapsibleIdx, lastCollapsibleIdx + 1)
+  const afterBlocks = blocks.slice(lastCollapsibleIdx + 1)
+
+  // Count items within the collapsed region for summary
+  const collapsedToolCount = collapsedBlocks.filter((b) => b.type === 'tool_call').length
+  const collapsedThoughtCount = collapsedBlocks.filter((b) => b.type === 'thought').length
+  const collapsedMessageCount = collapsedBlocks.filter((b) => b.type === 'text').length
+
+  // Build summary text
+  const summaryParts: string[] = []
+  if (collapsedToolCount > 0) {
+    summaryParts.push(`${collapsedToolCount} tool call${collapsedToolCount > 1 ? 's' : ''}`)
+  }
+  if (collapsedThoughtCount > 0) {
+    summaryParts.push(`${collapsedThoughtCount} thought${collapsedThoughtCount > 1 ? 's' : ''}`)
+  }
+  if (collapsedMessageCount > 0) {
+    summaryParts.push(`${collapsedMessageCount} message${collapsedMessageCount > 1 ? 's' : ''}`)
+  }
+
   return (
     <div className="space-y-3">
-      {message.blocks.map((block, idx) => {
-        switch (block.type) {
-          case 'thought':
-            return <ThoughtBlockView key={`thought-${idx}`} text={block.content} />
-          case 'tool_call':
-            return <ToolCallItem key={block.toolCall.id} toolCall={block.toolCall} />
-          case 'text':
-            return <TextContentBlock key={`text-${idx}`} content={block.content} />
-          case 'image':
-            return (
-              <img
-                key={`image-${idx}`}
-                src={`data:${block.mimeType};base64,${block.data}`}
-                alt={`Image ${idx + 1}`}
-                className="max-w-[300px] max-h-[300px] rounded-md object-cover"
-              />
-            )
-          case 'plan':
-            return <PlanBlockView key={`plan-${idx}`} entries={block.entries} />
-          case 'error':
-            return (
-              <AuthErrorBlockView
-                key={`error-${idx}`}
-                errorType={block.errorType}
-                agentId={block.agentId}
-                authCommand={block.authCommand}
-                message={block.message}
-              />
-            )
-          default:
-            return null
-        }
-      })}
+      {/* Content before first tool/thought (always visible) */}
+      {beforeBlocks.map((block, idx) => renderContentBlock(block, idx))}
+
+      {/* Collapsible section using Collapsible component */}
+      <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+        <CollapsibleTrigger
+          className={cn(
+            'flex w-full items-center gap-2 rounded px-1.5 py-0.5',
+            'text-sm text-muted-foreground transition-colors duration-100',
+            'hover:bg-muted/20 hover:text-foreground cursor-pointer'
+          )}
+        >
+          <ChevronRight
+            className={cn('h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-90')}
+          />
+          <span>{summaryParts.join(', ')}</span>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent className="space-y-3 mt-3">
+          {collapsedBlocks.map((block, idx) =>
+            renderContentBlock(block, firstCollapsibleIdx + idx)
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Content after last tool/thought (always visible) */}
+      {afterBlocks.map((block, idx) =>
+        renderContentBlock(block, firstCollapsibleIdx + collapsedBlocks.length + idx)
+      )}
     </div>
   )
 }

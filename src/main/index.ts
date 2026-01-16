@@ -1,3 +1,9 @@
+import fixPath from 'fix-path'
+
+// Fix PATH for macOS GUI apps (must be called before any command execution)
+// GUI apps don't inherit PATH from shell dotfiles (.zshrc, .bashrc, etc.)
+fixPath()
+
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
