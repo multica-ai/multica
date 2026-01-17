@@ -9,7 +9,7 @@ Before making any code changes, read and follow the guidelines in [AGENTS.md](./
 ## Key Requirements
 
 1. **Always write tests** - Every code change must include corresponding unit tests
-2. **Run checks before committing** - Use `pnpm typecheck && pnpm lint && pnpm test:run`
+2. **Run checks before committing** - Use `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:run`
 3. **Follow test conventions** - See AGENTS.md for test file location patterns
 
 ## Quick Reference

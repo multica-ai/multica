@@ -10,7 +10,7 @@
 
 body {
   -webkit-font-smoothing: antialiased;
-  font-family: 'Geist Sans', system-ui, sans-serif;
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
 }
 
 /* Draggable title bar region for macOS */
