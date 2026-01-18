@@ -46,34 +46,34 @@ ACP Agent Process
 
 ### ACP Standard Types
 
-| Type | Description | Source |
-|------|-------------|--------|
-| `agent_message_chunk` | Streaming text content from agent | ACP SDK |
+| Type                  | Description                                    | Source  |
+| --------------------- | ---------------------------------------------- | ------- |
+| `agent_message_chunk` | Streaming text content from agent              | ACP SDK |
 | `agent_thought_chunk` | Agent's thinking/reasoning (extended thinking) | ACP SDK |
-| `tool_call` | Tool invocation event with initial data | ACP SDK |
-| `tool_call_update` | Tool status updates (running/completed/failed) | ACP SDK |
-| `plan` | Task list from TodoWrite tool | ACP SDK |
+| `tool_call`           | Tool invocation event with initial data        | ACP SDK |
+| `tool_call_update`    | Tool status updates (running/completed/failed) | ACP SDK |
+| `plan`                | Task list from TodoWrite tool                  | ACP SDK |
 
 ### Multica Custom Types
 
-| Type | Description | Purpose |
-|------|-------------|---------|
-| `user_message` | User's input message | Internal storage, not in ACP spec |
-| `error_message` | Error display (e.g., auth failures) | UI error rendering |
-| `askuserquestion_response` | Persisted user response to questions | State restoration after restart |
+| Type                       | Description                          | Purpose                           |
+| -------------------------- | ------------------------------------ | --------------------------------- |
+| `user_message`             | User's input message                 | Internal storage, not in ACP spec |
+| `error_message`            | Error display (e.g., auth failures)  | UI error rendering                |
+| `askuserquestion_response` | Persisted user response to questions | State restoration after restart   |
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/main/conductor/AcpClientFactory.ts` | Creates ACP client, handles sessionUpdate callbacks |
-| `src/main/session/SessionStore.ts` | Persists messages, generates sequence numbers |
-| `src/main/index.ts` | Bridges Conductor to Electron IPC |
-| `src/preload/index.ts` | Exposes Electron API to renderer |
-| `src/renderer/src/hooks/useApp.ts` | Subscribes to messages, manages state |
-| `src/renderer/src/components/ChatView.tsx` | Parses updates, renders messages |
-| `src/renderer/src/components/ToolCallItem.tsx` | Renders individual tool calls |
-| `src/shared/ipc-channels.ts` | IPC channel names |
+| File                                           | Purpose                                             |
+| ---------------------------------------------- | --------------------------------------------------- |
+| `src/main/conductor/AcpClientFactory.ts`       | Creates ACP client, handles sessionUpdate callbacks |
+| `src/main/session/SessionStore.ts`             | Persists messages, generates sequence numbers       |
+| `src/main/index.ts`                            | Bridges Conductor to Electron IPC                   |
+| `src/preload/index.ts`                         | Exposes Electron API to renderer                    |
+| `src/renderer/src/hooks/useApp.ts`             | Subscribes to messages, manages state               |
+| `src/renderer/src/components/ChatView.tsx`     | Parses updates, renders messages                    |
+| `src/renderer/src/components/ToolCallItem.tsx` | Renders individual tool calls                       |
+| `src/shared/ipc-channels.ts`                   | IPC channel names                                   |
 
 ## Message Parsing Logic
 
@@ -116,32 +116,32 @@ const meta = update._meta as { claudeCode?: { toolName?: string } }
 
 ### Supported Tools (ToolCallItem.tsx)
 
-| toolName | Icon | Display |
-|----------|------|---------|
-| `read` | FileText | Read file |
-| `write` | FilePen | Write file |
-| `edit` | FilePen | Edit file |
-| `bash`, `execute` | Terminal | Terminal command |
-| `grep` | Search | Content search |
-| `glob` | Search | File pattern match |
-| `search` | Search | Generic search |
-| `websearch` | Globe | Web search |
-| `webfetch`, `fetch` | Globe | Fetch URL |
-| `task` | Bot | Sub-agent task |
-| `todowrite` | ListTodo | Task list |
-| `askuserquestion`, `question` | MessageSquare | User prompt |
-| (default) | Circle | Unknown tool |
+| toolName                      | Icon          | Display            |
+| ----------------------------- | ------------- | ------------------ |
+| `read`                        | FileText      | Read file          |
+| `write`                       | FilePen       | Write file         |
+| `edit`                        | FilePen       | Edit file          |
+| `bash`, `execute`             | Terminal      | Terminal command   |
+| `grep`                        | Search        | Content search     |
+| `glob`                        | Search        | File pattern match |
+| `search`                      | Search        | Generic search     |
+| `websearch`                   | Globe         | Web search         |
+| `webfetch`, `fetch`           | Globe         | Fetch URL          |
+| `task`                        | Bot           | Sub-agent task     |
+| `todowrite`                   | ListTodo      | Task list          |
+| `askuserquestion`, `question` | MessageSquare | User prompt        |
+| (default)                     | Circle        | Unknown tool       |
 
 ## Agent-Specific Differences
 
 ### Claude Code vs Codex vs OpenCode
 
-| Feature | Claude Code | Codex | OpenCode |
-|---------|-------------|-------|----------|
-| Tool name source | `_meta.claudeCode.toolName` | `kind` field | `kind` or `title` |
-| Command execution | `bash` | `execute` | varies |
-| Question tool | `AskUserQuestion` | - | `question` |
-| Kind in updates | Sometimes | Yes (tool_call only) | varies |
+| Feature           | Claude Code                 | Codex                | OpenCode          |
+| ----------------- | --------------------------- | -------------------- | ----------------- |
+| Tool name source  | `_meta.claudeCode.toolName` | `kind` field         | `kind` or `title` |
+| Command execution | `bash`                      | `execute`            | varies            |
+| Question tool     | `AskUserQuestion`           | -                    | `question`        |
+| Kind in updates   | Sometimes                   | Yes (tool_call only) | varies            |
 
 ### Codex Kind Caching
 
@@ -163,9 +163,11 @@ if (update?.sessionUpdate === 'tool_call_update' && toolCallId) {
 ## Sequence Number System
 
 ### Purpose
+
 Handles concurrent async updates arriving out of order.
 
 ### Implementation
+
 - `SessionStore.ts` assigns monotonically increasing sequence numbers
 - `ChatView.tsx:171-178` sorts updates by sequence number before processing
 - Ensures correct message reconstruction regardless of arrival order
@@ -199,7 +201,7 @@ if (isAuthError(errorMessage)) {
     authCommand: AGENT_AUTH_COMMANDS[agentId],
     message: errorMessage
   }
-  setSessionUpdates(prev => [...prev, errorUpdate])
+  setSessionUpdates((prev) => [...prev, errorUpdate])
 }
 ```
 
