@@ -154,7 +154,7 @@ function AppContent(): React.JSX.Element {
           <div className="relative flex-1 overflow-hidden flex flex-col">
             {/* Chat scroll area - only messages */}
             <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4">
-              <div className="mx-auto max-w-3xl pb-12 px-2">
+              <div className="mx-auto max-w-3xl pb-12 px-8">
                 <ChatView
                   updates={sessionUpdates}
                   isProcessing={isProcessing}
@@ -169,10 +169,10 @@ function AppContent(): React.JSX.Element {
 
             {/* Input area - fixed at bottom, outside scroll */}
             <div>
-              <div className="relative mx-auto max-w-3xl">
+              <div className="relative mx-auto max-w-3xl px-4">
                 {/* Scroll to bottom button - above input, left-aligned */}
                 {!isAtBottom && currentSession && (
-                  <div className="absolute bottom-full left-0 pb-2 pointer-events-none">
+                  <div className="absolute bottom-full left-4 pb-2 pointer-events-none">
                     <button
                       onClick={handleScrollToBottom}
                       className={cn(
