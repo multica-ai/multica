@@ -6,6 +6,8 @@ A native desktop client that brings coding agent capabilities to everyone throug
 
 English | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
+[**Download the latest release**](https://github.com/multica-ai/multica/releases)
+
 ![Multica Screenshot](docs/images/screenshot.png)
 
 ## Why "Multica"?
