@@ -109,20 +109,29 @@ function SessionItem({
               </span>
             </div>
 
-            {/* Delete button - always rendered, visibility via opacity */}
-            <button
+            {/* Delete button - using div with role="button" to avoid nested button hydration error */}
+            <div
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete()
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onDelete()
+                }
+              }}
               className={cn(
-                'shrink-0 self-start rounded p-1 transition-opacity duration-150',
+                'shrink-0 cursor-pointer self-start rounded p-1 transition-opacity duration-150',
                 'hover:bg-muted active:bg-muted',
                 isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
               )}
             >
               <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
+            </div>
           </SidebarMenuButton>
         </TooltipTrigger>
         <TooltipContent>
