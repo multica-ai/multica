@@ -154,7 +154,7 @@ function AppContent(): React.JSX.Element {
           <div className="relative flex-1 overflow-hidden flex flex-col">
             {/* Chat scroll area - only messages */}
             <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4">
-              <div className="mx-auto max-w-3xl pb-12 px-6">
+              <div className="mx-auto max-w-3xl pb-12 px-8">
                 <ChatView
                   updates={sessionUpdates}
                   isProcessing={isProcessing}
