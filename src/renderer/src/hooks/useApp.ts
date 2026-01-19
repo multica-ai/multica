@@ -68,6 +68,9 @@ export function useApp(): AppState & AppActions {
   // This is needed because tool_call_update events don't include kind
   const toolKindMapRef = useRef<Map<string, string>>(new Map())
 
+  // Track pending session selection to handle rapid switching
+  const pendingSessionRef = useRef<string | null>(null)
+
   // State
   const [sessions, setSessions] = useState<MulticaSession[]>([])
   const [currentSession, setCurrentSession] = useState<MulticaSession | null>(null)
@@ -278,17 +281,28 @@ export function useApp(): AppState & AppActions {
 
   const selectSession = useCallback(async (sessionId: string) => {
     try {
-      // Load session without starting agent (lazy loading)
-      const session = await window.electronAPI.loadSession(sessionId)
-      setCurrentSession(session)
+      // Mark this as the pending session (for rapid switching protection)
+      pendingSessionRef.current = sessionId
 
-      // Load session data for history
-      const data = await window.electronAPI.getSession(sessionId)
-      if (data) {
-        setSessionUpdates(data.updates)
+      // Load session and history in parallel
+      const [session, data] = await Promise.all([
+        window.electronAPI.loadSession(sessionId),
+        window.electronAPI.getSession(sessionId)
+      ])
+
+      // Verify: user might have switched to another session while loading
+      if (pendingSessionRef.current !== sessionId) {
+        return // Discard, user already switched elsewhere
       }
+
+      // Update both states together - React will batch them into one render
+      setCurrentSession(session)
+      setSessionUpdates(data?.updates ?? [])
     } catch (err) {
-      toast.error(`Failed to select session: ${getErrorMessage(err)}`)
+      // Only show error if this is still the pending session
+      if (pendingSessionRef.current === sessionId) {
+        toast.error(`Failed to select session: ${getErrorMessage(err)}`)
+      }
     }
   }, [])
 

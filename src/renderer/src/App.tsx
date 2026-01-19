@@ -1,7 +1,7 @@
 /**
  * Main App component
  */
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useApp } from './hooks/useApp'
 import { ChatView, MessageInput, StatusBar, UpdateNotification } from './components'
 import { AppSidebar } from './components/AppSidebar'
@@ -14,6 +14,9 @@ import { useModalStore } from './stores/modalStore'
 import { RightPanel, RightPanelHeader, RightPanelContent } from './components/layout'
 import { FileTree } from './components/FileTree'
 import { Toaster } from '@/components/ui/sonner'
+import { useChatScroll } from './hooks/useChatScroll'
+import { ChevronDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -55,21 +58,24 @@ function AppContent(): React.JSX.Element {
   })
 
   // Wrapper to also persist to localStorage
-  const handleSetDefaultAgent = (agentId: string) => {
+  const handleSetDefaultAgent = useCallback((agentId: string) => {
     localStorage.setItem('multica:defaultAgentId', agentId)
     setDefaultAgentId(agentId)
-  }
+  }, [])
 
-  const handleNewSession = () => {
+  const handleNewSession = useCallback(() => {
     clearCurrentSession()
-  }
+  }, [clearCurrentSession])
 
-  const handleCreateSession = async (cwd: string) => {
-    // Create session with default agent (agent starts automatically)
-    await createSession(cwd, defaultAgentId)
-  }
+  const handleCreateSession = useCallback(
+    async (cwd: string) => {
+      // Create session with default agent (agent starts automatically)
+      await createSession(cwd, defaultAgentId)
+    },
+    [createSession, defaultAgentId]
+  )
 
-  const handleSelectFolder = async () => {
+  const handleSelectFolder = useCallback(async () => {
     const dir = await window.electronAPI.selectDirectory()
     if (dir) {
       // Check if the default agent is installed before creating session
@@ -81,12 +87,15 @@ function AppContent(): React.JSX.Element {
       }
       await createSession(dir, defaultAgentId)
     }
-  }
+  }, [createSession, defaultAgentId, openModal])
 
-  const handleSelectSession = async (sessionId: string) => {
-    // Select session (agent starts automatically via resumeSession)
-    await selectSession(sessionId)
-  }
+  const handleSelectSession = useCallback(
+    async (sessionId: string) => {
+      // Select session (agent starts automatically via resumeSession)
+      await selectSession(sessionId)
+    },
+    [selectSession]
+  )
 
   // Check if current session has a running agent
   const isCurrentSessionRunning = currentSession
@@ -94,10 +103,25 @@ function AppContent(): React.JSX.Element {
     : false
 
   // Handler for deleting the current session (opens delete modal)
-  const handleDeleteCurrentSession = () => {
+  const handleDeleteCurrentSession = useCallback(() => {
     if (!currentSession) return
     openModal('deleteSession', currentSession)
-  }
+  }, [currentSession, openModal])
+
+  // Chat scroll - managed at App level for unified scroll context
+  const { containerRef, bottomRef, isAtBottom, handleScroll, scrollToBottom, onContentUpdate } =
+    useChatScroll({
+      sessionId: currentSession?.id ?? null,
+      isStreaming: isProcessing
+    })
+
+  // Memoized scroll button handler
+  const handleScrollToBottom = useCallback(() => scrollToBottom(true), [scrollToBottom])
+
+  // Trigger scroll update when content changes
+  useEffect(() => {
+    onContentUpdate()
+  }, [sessionUpdates, onContentUpdate])
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
@@ -118,37 +142,69 @@ function AppContent(): React.JSX.Element {
         />
 
         {/* Main area */}
-        <main className="flex min-w-0 flex-1 flex-col">
-          {/* Status bar */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Status bar - fixed height */}
           <StatusBar
             runningSessionsCount={runningSessionsStatus.runningSessions}
             currentSession={currentSession}
             isCurrentSessionRunning={isCurrentSessionRunning}
           />
 
-          {/* Chat view */}
-          <ChatView
-            updates={sessionUpdates}
-            isProcessing={isProcessing}
-            hasSession={!!currentSession}
-            isInitializing={isInitializing}
-            currentSessionId={currentSession?.id ?? null}
-            onSelectFolder={handleSelectFolder}
-          />
+          {/* Chat and Input container */}
+          <div className="relative flex-1 overflow-hidden flex flex-col">
+            {/* Chat scroll area - only messages */}
+            <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4">
+              <div className="mx-auto max-w-3xl pb-12 px-2">
+                <ChatView
+                  updates={sessionUpdates}
+                  isProcessing={isProcessing}
+                  hasSession={!!currentSession}
+                  isInitializing={isInitializing}
+                  currentSessionId={currentSession?.id ?? null}
+                  onSelectFolder={handleSelectFolder}
+                  bottomRef={bottomRef}
+                />
+              </div>
+            </div>
 
-          {/* Input */}
-          <MessageInput
-            onSend={sendPrompt}
-            onCancel={cancelRequest}
-            isProcessing={isProcessing}
-            disabled={!currentSession || currentSession.directoryExists === false}
-            workingDirectory={currentSession?.workingDirectory}
-            currentAgentId={currentSession?.agentId}
-            onAgentChange={switchSessionAgent}
-            isSwitchingAgent={isSwitchingAgent}
-            directoryExists={currentSession?.directoryExists}
-            onDeleteSession={handleDeleteCurrentSession}
-          />
+            {/* Input area - fixed at bottom, outside scroll */}
+            <div>
+              <div className="relative mx-auto max-w-3xl">
+                {/* Scroll to bottom button - above input, left-aligned */}
+                {!isAtBottom && currentSession && (
+                  <div className="absolute bottom-full left-0 pb-2 pointer-events-none">
+                    <button
+                      onClick={handleScrollToBottom}
+                      className={cn(
+                        'pointer-events-auto',
+                        'flex items-center gap-1.5 px-2.5 py-1 rounded-md',
+                        'bg-card/80 backdrop-blur-sm border border-border/50',
+                        'text-xs text-muted-foreground hover:text-foreground hover:bg-card',
+                        'shadow-md hover:shadow-lg',
+                        'transition-all duration-200 ease-out cursor-pointer',
+                        'animate-in fade-in slide-in-from-bottom-2 duration-200'
+                      )}
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                      <span>Scroll to bottom</span>
+                    </button>
+                  </div>
+                )}
+                <MessageInput
+                  onSend={sendPrompt}
+                  onCancel={cancelRequest}
+                  isProcessing={isProcessing}
+                  disabled={!currentSession || currentSession.directoryExists === false}
+                  workingDirectory={currentSession?.workingDirectory}
+                  currentAgentId={currentSession?.agentId}
+                  onAgentChange={switchSessionAgent}
+                  isSwitchingAgent={isSwitchingAgent}
+                  directoryExists={currentSession?.directoryExists}
+                  onDeleteSession={handleDeleteCurrentSession}
+                />
+              </div>
+            </div>
+          </div>
         </main>
 
         {/* Right panel - file tree */}

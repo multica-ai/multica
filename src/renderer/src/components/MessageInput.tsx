@@ -28,7 +28,7 @@ const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/we
 // Warning banner component for missing directory
 function DirectoryWarningBanner({ onDeleteSession }: { onDeleteSession?: () => void }) {
   return (
-    <div className="mx-auto max-w-3xl mb-2">
+    <div className="mb-2">
       <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
         <div className="flex items-center justify-between gap-4">
           {/* Left: Icon + Text */}
@@ -216,9 +216,9 @@ export function MessageInput({
 
   // Normal chat input mode
   return (
-    <div className="p-4">
+    <div className="pb-2">
       {directoryExists === false && <DirectoryWarningBanner onDeleteSession={onDeleteSession} />}
-      <div className="mx-auto max-w-3xl">
+      <div>
         <div className="bg-card transition-colors duration-200 rounded-xl p-3 border border-border">
           {/* Image previews */}
           {images.length > 0 && (

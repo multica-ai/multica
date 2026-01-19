@@ -1,7 +1,8 @@
 /**
  * Chat view component - displays messages and tool calls
+ * Note: Scroll behavior is managed by parent (App.tsx) for unified scroll context
  */
-import { useEffect, useRef, useState } from 'react'
+import { useState, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { StoredSessionUpdate } from '../../../shared/types'
@@ -12,6 +13,96 @@ import { PermissionRequestItem } from './permission'
 import { usePermissionStore } from '../stores/permissionStore'
 import { cn } from '@/lib/utils'
 
+// Hoisted ReactMarkdown components for better performance (avoids object recreation on each render)
+const TEXT_MARKDOWN_COMPONENTS = {
+  // Paragraphs: consistent spacing, tighter line height for readability
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-4 last:mb-0">{children}</p>,
+  // Headings: more space above (1.5x) than below (0.5x) for visual grouping
+  h1: ({ children }: { children?: React.ReactNode }) => (
+    <h1 className="text-xl font-bold mt-6 mb-3 first:mt-0">{children}</h1>
+  ),
+  h2: ({ children }: { children?: React.ReactNode }) => (
+    <h2 className="text-lg font-bold mt-5 mb-2.5 first:mt-0">{children}</h2>
+  ),
+  h3: ({ children }: { children?: React.ReactNode }) => (
+    <h3 className="text-base font-semibold mt-4 mb-2 first:mt-0">{children}</h3>
+  ),
+  // Lists: consistent spacing with content
+  ul: ({ children }: { children?: React.ReactNode }) => (
+    <ul className="list-disc pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ul>
+  ),
+  ol: ({ children }: { children?: React.ReactNode }) => (
+    <ol className="list-decimal pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ol>
+  ),
+  li: ({ children }: { children?: React.ReactNode }) => <li>{children}</li>,
+  // Code: pre handles container, code is transparent for blocks
+  code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
+    const isBlock = className?.includes('language-')
+    if (isBlock) {
+      // Block code inside pre - no extra styling, pre handles it
+      return <code>{children}</code>
+    }
+    // Inline code
+    return (
+      <code className="bg-muted/70 rounded px-1.5 py-0.5 text-[13px] font-mono">{children}</code>
+    )
+  },
+  pre: ({ children }: { children?: React.ReactNode }) => (
+    <pre className="bg-muted rounded-lg px-4 py-3 mb-4 last:mb-0 overflow-x-auto text-[13px] font-mono leading-relaxed">
+      {children}
+    </pre>
+  ),
+  // Links
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a
+      href={href}
+      className="text-primary hover:underline"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {children}
+    </a>
+  ),
+  // Blockquote: subtle styling
+  blockquote: ({ children }: { children?: React.ReactNode }) => (
+    <blockquote className="border-l-2 border-border pl-4 my-4 text-muted-foreground">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="border-border my-6" />,
+  strong: ({ children }: { children?: React.ReactNode }) => (
+    <strong className="font-semibold">{children}</strong>
+  ),
+  em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
+  // Table components for GFM table support
+  table: ({ children }: { children?: React.ReactNode }) => (
+    <div className="overflow-x-auto mb-4 last:mb-0">
+      <table className="min-w-full border-collapse border border-border text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }: { children?: React.ReactNode }) => (
+    <thead className="bg-muted/50">{children}</thead>
+  ),
+  tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
+  tr: ({ children }: { children?: React.ReactNode }) => (
+    <tr className="border-b border-border">{children}</tr>
+  ),
+  th: ({ children }: { children?: React.ReactNode }) => (
+    <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>
+  ),
+  td: ({ children }: { children?: React.ReactNode }) => (
+    <td className="border border-border px-3 py-2">{children}</td>
+  )
+}
+
+// Simpler markdown components for thought blocks
+const THOUGHT_MARKDOWN_COMPONENTS = {
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+  code: ({ children }: { children?: React.ReactNode }) => (
+    <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">{children}</code>
+  )
+}
+
 interface ChatViewProps {
   updates: StoredSessionUpdate[]
   isProcessing: boolean
@@ -19,6 +110,8 @@ interface ChatViewProps {
   isInitializing: boolean
   currentSessionId: string | null
   onSelectFolder?: () => void
+  /** Ref for bottom anchor - passed from parent for scroll management */
+  bottomRef?: React.RefObject<HTMLDivElement | null>
 }
 
 export function ChatView({
@@ -27,36 +120,17 @@ export function ChatView({
   hasSession,
   isInitializing,
   currentSessionId,
-  onSelectFolder
+  onSelectFolder,
+  bottomRef
 }: ChatViewProps) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const isNearBottomRef = useRef(true)
   const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
 
   // Only show permission request if it belongs to the current session
   const currentPermission =
     pendingPermission?.multicaSessionId === currentSessionId ? pendingPermission : null
 
-  // Track scroll position to determine if user is near bottom
-  const handleScroll = () => {
-    const container = scrollContainerRef.current
-    if (!container) return
-    // Consider "near bottom" if within 100px of the bottom
-    const threshold = 100
-    const isNear = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
-    isNearBottomRef.current = isNear
-  }
-
-  // Auto-scroll to bottom only if user is already near bottom
-  useEffect(() => {
-    if (isNearBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [updates, currentPermission])
-
-  // Group updates into messages
-  const messages = groupUpdatesIntoMessages(updates)
+  // Group updates into messages (memoized to avoid expensive recomputation)
+  const messages = useMemo(() => groupUpdatesIntoMessages(updates), [updates])
 
   // Show initializing state
   if (isInitializing) {
@@ -65,7 +139,7 @@ export function ChatView({
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center py-20">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold">Multica</h1>
           <p className="text-muted-foreground mb-6">
@@ -88,30 +162,28 @@ export function ChatView({
   }
 
   return (
-    <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-5 px-8 py-6">
-        {messages.map((msg, idx) => (
-          <MessageBubble
-            key={idx}
-            message={msg}
-            isLastMessage={idx === messages.length - 1}
-            isProcessing={isProcessing}
-          />
-        ))}
+    <div className="space-y-5 py-5">
+      {messages.map((msg, idx) => (
+        <MessageBubble
+          key={idx}
+          message={msg}
+          isLastMessage={idx === messages.length - 1}
+          isProcessing={isProcessing}
+        />
+      ))}
 
-        {/* Permission request - show in feed (only for current session) */}
-        {/* Completed state is shown inline with the tool call, like other tools */}
-        {currentPermission && <PermissionRequestItem request={currentPermission} />}
+      {/* Permission request - show in feed (only for current session) */}
+      {currentPermission && <PermissionRequestItem request={currentPermission} />}
 
-        {isProcessing && !currentPermission && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <LoadingDots />
-            <span className="text-sm">Agent is thinking...</span>
-          </div>
-        )}
+      {isProcessing && !currentPermission && (
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <LoadingDots />
+          <span className="text-sm">Agent is thinking...</span>
+        </div>
+      )}
 
-        <div ref={bottomRef} />
-      </div>
+      {/* Bottom anchor for scroll */}
+      <div ref={bottomRef} />
     </div>
   )
 }
@@ -666,85 +738,7 @@ function TextContentBlock({ content }: { content: string }) {
 
   return (
     <div className="prose prose-invert max-w-none text-[15px] leading-[1.7]">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          // Paragraphs: consistent spacing, tighter line height for readability
-          p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
-          // Headings: more space above (1.5x) than below (0.5x) for visual grouping
-          h1: ({ children }) => (
-            <h1 className="text-xl font-bold mt-6 mb-3 first:mt-0">{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 className="text-lg font-bold mt-5 mb-2.5 first:mt-0">{children}</h2>
-          ),
-          h3: ({ children }) => (
-            <h3 className="text-base font-semibold mt-4 mb-2 first:mt-0">{children}</h3>
-          ),
-          // Lists: consistent spacing with content
-          ul: ({ children }) => (
-            <ul className="list-disc pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ul>
-          ),
-          ol: ({ children }) => (
-            <ol className="list-decimal pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ol>
-          ),
-          li: ({ children }) => <li>{children}</li>,
-          // Code: pre handles container, code is transparent for blocks
-          code: ({ className, children }) => {
-            const isBlock = className?.includes('language-')
-            if (isBlock) {
-              // Block code inside pre - no extra styling, pre handles it
-              return <code>{children}</code>
-            }
-            // Inline code
-            return (
-              <code className="bg-muted/70 rounded px-1.5 py-0.5 text-[13px] font-mono">
-                {children}
-              </code>
-            )
-          },
-          pre: ({ children }) => (
-            <pre className="bg-muted rounded-lg px-4 py-3 mb-4 last:mb-0 overflow-x-auto text-[13px] font-mono leading-relaxed">
-              {children}
-            </pre>
-          ),
-          // Links
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              className="text-primary hover:underline"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {children}
-            </a>
-          ),
-          // Blockquote: subtle styling
-          blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-border pl-4 my-4 text-muted-foreground">
-              {children}
-            </blockquote>
-          ),
-          hr: () => <hr className="border-border my-6" />,
-          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-          em: ({ children }) => <em className="italic">{children}</em>,
-          // Table components for GFM table support
-          table: ({ children }) => (
-            <div className="overflow-x-auto mb-4 last:mb-0">
-              <table className="min-w-full border-collapse border border-border text-sm">
-                {children}
-              </table>
-            </div>
-          ),
-          thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
-          tbody: ({ children }) => <tbody>{children}</tbody>,
-          tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
-          th: ({ children }) => (
-            <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>
-          ),
-          td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>
-        }}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={TEXT_MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
@@ -753,11 +747,12 @@ function TextContentBlock({ content }: { content: string }) {
 
 // Thought block view - expanded, collapsible
 function ThoughtBlockView({ text }: { text: string }) {
-  // Skip rendering if content is empty or only whitespace
-  if (!text || !text.trim()) return null
-
+  // Hooks must be called before any conditional returns (Rules of Hooks)
   const [isExpanded, setIsExpanded] = useState(false)
   const isLong = text.length > 200
+
+  // Skip rendering if content is empty or only whitespace
+  if (!text || !text.trim()) return null
 
   return (
     <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
@@ -774,54 +769,21 @@ function ThoughtBlockView({ text }: { text: string }) {
 
         <CollapsibleContent>
           <div className="mt-2 text-sm text-muted-foreground">
-            <ReactMarkdown
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                code: ({ children }) => (
-                  <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
-                    {children}
-                  </code>
-                )
-              }}
-            >
-              {text}
-            </ReactMarkdown>
+            <ReactMarkdown components={THOUGHT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
           </div>
         </CollapsibleContent>
 
         {/* Preview when collapsed */}
         {!isExpanded && isLong && (
           <div className="mt-2 text-sm text-muted-foreground line-clamp-3">
-            <ReactMarkdown
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                code: ({ children }) => (
-                  <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
-                    {children}
-                  </code>
-                )
-              }}
-            >
-              {text}
-            </ReactMarkdown>
+            <ReactMarkdown components={THOUGHT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
           </div>
         )}
 
         {/* Show full content when not long */}
         {!isLong && (
           <div className="mt-2 text-sm text-muted-foreground">
-            <ReactMarkdown
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                code: ({ children }) => (
-                  <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">
-                    {children}
-                  </code>
-                )
-              }}
-            >
-              {text}
-            </ReactMarkdown>
+            <ReactMarkdown components={THOUGHT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
           </div>
         )}
       </div>
