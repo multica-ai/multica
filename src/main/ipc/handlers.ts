@@ -19,6 +19,7 @@ import type { MessageContent } from '../../shared/types/message'
 import * as fs from 'fs'
 import * as path from 'path'
 import { spawn } from 'child_process'
+import { getGitBranch } from '../utils/git'
 
 /**
  * Promisified spawn that waits for the process to complete
@@ -53,14 +54,17 @@ function isValidPath(inputPath: string): boolean {
 }
 
 /**
- * Adds directoryExists field to a session by checking if workingDirectory exists
+ * Adds directoryExists and gitBranch fields to a session
  */
-function withDirectoryExists<T extends MulticaSession>(
+async function withRuntimeInfo<T extends MulticaSession>(
   session: T
-): T & { directoryExists: boolean } {
+): Promise<T & { directoryExists: boolean; gitBranch?: string }> {
+  const directoryExists = fs.existsSync(session.workingDirectory)
+  const gitBranch = directoryExists ? await getGitBranch(session.workingDirectory) : undefined
   return {
     ...session,
-    directoryExists: fs.existsSync(session.workingDirectory)
+    directoryExists,
+    gitBranch
   }
 }
 
@@ -131,7 +135,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
           throw new Error(`Unknown agent: ${agentId}`)
         }
         const session = await conductor.createSession(workingDirectory, config)
-        return withDirectoryExists(session)
+        return withRuntimeInfo(session)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
       }
@@ -140,7 +144,8 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, async (_event, options?: ListSessionsOptions) => {
     const sessions = await conductor.listSessions(options)
-    return sessions.map(withDirectoryExists)
+    // Fetch git branch info in parallel for all sessions
+    return Promise.all(sessions.map(withRuntimeInfo))
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_GET, async (_event, sessionId: string) => {
@@ -149,17 +154,17 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LOAD, async (_event, sessionId: string) => {
     const session = await conductor.loadSession(sessionId)
-    return withDirectoryExists(session)
+    return withRuntimeInfo(session)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_RESUME, async (_event, sessionId: string) => {
     const session = await conductor.resumeSession(sessionId)
-    return withDirectoryExists(session)
+    return withRuntimeInfo(session)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_START_AGENT, async (_event, sessionId: string) => {
     const session = await conductor.startSessionAgent(sessionId)
-    return withDirectoryExists(session)
+    return withRuntimeInfo(session)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, async (_event, sessionId: string) => {
@@ -178,7 +183,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
       }
 
       const updated = await conductor.updateSessionMeta(sessionId, updates)
-      return withDirectoryExists(updated)
+      return withRuntimeInfo(updated)
     }
   )
 
@@ -187,7 +192,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
     async (_event, sessionId: string, newAgentId: string) => {
       try {
         const session = await conductor.switchSessionAgent(sessionId, newAgentId)
-        return withDirectoryExists(session)
+        return withRuntimeInfo(session)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
       }

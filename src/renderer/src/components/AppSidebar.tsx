@@ -103,8 +103,14 @@ function SessionItem({
                 ) : null}
               </div>
 
-              {/* Line 2: Timestamp */}
+              {/* Line 2: Git branch (if available) + Timestamp */}
               <span className="text-xs text-muted-foreground/60">
+                {session.gitBranch && (
+                  <>
+                    <span className="font-medium">{session.gitBranch}</span>
+                    <span className="mx-1">·</span>
+                  </>
+                )}
                 {formatDate(session.updatedAt)}
               </span>
             </div>

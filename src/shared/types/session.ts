@@ -28,6 +28,7 @@ export interface MulticaSession {
 
   // Runtime state (not persisted)
   directoryExists?: boolean // true = exists, false = deleted/moved, undefined = not checked
+  gitBranch?: string // Current git branch name (runtime only, refreshed on load)
 }
 
 /**
