@@ -44,8 +44,7 @@ jobs:
         run: pnpm typecheck
 
       - name: ESLint
-        # TODO: Reduce --max-warnings to 0 as pre-existing issues are fixed
-        run: pnpm lint --max-warnings 250
+        run: pnpm lint --max-warnings 0
 
       - name: Prettier check
         run: pnpm format:check
