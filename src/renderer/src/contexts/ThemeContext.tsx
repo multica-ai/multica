@@ -15,7 +15,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 const STORAGE_KEY = 'multica-theme'
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
+export function ThemeProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [mode, setModeState] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(STORAGE_KEY)
@@ -36,11 +36,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Listen for system theme changes
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = (e: MediaQueryListEvent) => {
+    const handler = (e: MediaQueryListEvent): void => {
       setSystemTheme(e.matches ? 'dark' : 'light')
     }
     mediaQuery.addEventListener('change', handler)
-    return () => mediaQuery.removeEventListener('change', handler)
+    return (): void => {
+      mediaQuery.removeEventListener('change', handler)
+    }
   }, [])
 
   const resolvedTheme = mode === 'system' ? systemTheme : mode
@@ -52,7 +54,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.classList.add(resolvedTheme)
   }, [resolvedTheme])
 
-  const setMode = (newMode: ThemeMode) => {
+  const setMode = (newMode: ThemeMode): void => {
     setModeState(newMode)
     localStorage.setItem(STORAGE_KEY, newMode)
   }
@@ -64,7 +66,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function useTheme() {
+// eslint-disable-next-line react-refresh/only-export-components
+export function useTheme(): ThemeContextValue {
   const context = useContext(ThemeContext)
   if (!context) {
     throw new Error('useTheme must be used within a ThemeProvider')

@@ -21,7 +21,19 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
-import { getFileIcon, isConfigFile, isGitFile, ConfigIcon, GitIcon } from './FileIcons'
+import {
+  isConfigFile,
+  isGitFile,
+  ConfigIcon,
+  GitIcon,
+  TypeScriptIcon,
+  JavaScriptIcon,
+  JsonIcon,
+  YamlIcon,
+  MarkdownIcon,
+  CssIcon,
+  HtmlIcon
+} from './FileIcons'
 import type { FileTreeNode, DetectedApp } from '../../../shared/electron-api'
 import { useFileChangeStore } from '../stores/fileChangeStore'
 
@@ -41,7 +53,13 @@ interface TreeItemProps {
 }
 
 // Get the appropriate icon for a file/directory
-function FileTreeIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded?: boolean }) {
+function FileTreeIcon({
+  node,
+  isExpanded
+}: {
+  node: FileTreeNode
+  isExpanded?: boolean
+}): React.JSX.Element {
   const className = 'h-4 w-4 flex-shrink-0'
 
   if (node.type === 'directory') {
@@ -65,10 +83,28 @@ function FileTreeIcon({ node, isExpanded }: { node: FileTreeNode; isExpanded?: b
     return <GitIcon className={className} />
   }
 
-  // Check for file type icon
-  const TypeIcon = getFileIcon(node.extension)
-  if (TypeIcon) {
-    return <TypeIcon className={className} />
+  // Check for file type icon based on extension
+  const ext = node.extension
+  if (ext === 'ts' || ext === 'tsx' || ext === 'mts' || ext === 'cts') {
+    return <TypeScriptIcon className={className} />
+  }
+  if (ext === 'js' || ext === 'jsx' || ext === 'mjs' || ext === 'cjs') {
+    return <JavaScriptIcon className={className} />
+  }
+  if (ext === 'json') {
+    return <JsonIcon className={className} />
+  }
+  if (ext === 'yaml' || ext === 'yml') {
+    return <YamlIcon className={className} />
+  }
+  if (ext === 'md' || ext === 'mdx') {
+    return <MarkdownIcon className={className} />
+  }
+  if (ext === 'css' || ext === 'scss' || ext === 'sass' || ext === 'less') {
+    return <CssIcon className={className} />
+  }
+  if (ext === 'html' || ext === 'htm') {
+    return <HtmlIcon className={className} />
   }
 
   // Image files
@@ -88,7 +124,7 @@ function TreeItem({
   childrenCache,
   loadChildren,
   availableApps
-}: TreeItemProps) {
+}: TreeItemProps): React.JSX.Element {
   const isExpanded = expandedPaths.has(node.path)
   const isDirectory = node.type === 'directory'
   const children = childrenCache.get(node.path)
@@ -277,14 +313,16 @@ function DirectoryNotFound(): React.JSX.Element {
 }
 
 // Filter out hidden files (starting with .)
-const filterHidden = (nodes: FileTreeNode[]) => nodes.filter((n) => !n.name.startsWith('.'))
+const filterHidden = (nodes: FileTreeNode[]): FileTreeNode[] =>
+  nodes.filter((n) => !n.name.startsWith('.'))
 
-export function FileTree({ rootPath, directoryExists = true }: FileTreeProps) {
+export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): React.JSX.Element {
   const [rootChildren, setRootChildren] = useState<FileTreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Map<string, FileTreeNode[]>>(new Map())
   const [availableApps, setAvailableApps] = useState<DetectedApp[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  // Initialize loading state based on directoryExists
+  const [isLoading, setIsLoading] = useState(directoryExists)
 
   // Subscribe to file change events for auto-refresh
   const refreshCounter = useFileChangeStore((s) => s.refreshCounter)
@@ -294,11 +332,10 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps) {
   useEffect(() => {
     // Skip if directory doesn't exist
     if (!directoryExists) {
-      setIsLoading(false)
       return
     }
 
-    async function init() {
+    async function init(): Promise<void> {
       setIsLoading(true)
       try {
         const [children, apps] = await Promise.all([
@@ -312,12 +349,14 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps) {
       }
       setIsLoading(false)
     }
-    init()
+    void init()
   }, [rootPath, directoryExists])
 
   // Keep a ref to expandedPaths for use in refresh effect without triggering it
   const expandedPathsRef = useRef(expandedPaths)
-  expandedPathsRef.current = expandedPaths
+  useEffect(() => {
+    expandedPathsRef.current = expandedPaths
+  }, [expandedPaths])
 
   // Refresh file tree when files change (from agent tool calls)
   useEffect(() => {
@@ -333,7 +372,7 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps) {
     console.log('[FileTree] Refresh triggered, counter:', refreshCounter)
 
     // Refresh: clear cache and re-fetch root + expanded directories
-    async function refresh() {
+    async function refresh(): Promise<void> {
       try {
         // Re-fetch root directory
         console.log('[FileTree] Fetching root directory:', rootPath)
@@ -373,7 +412,7 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps) {
       }
     }
 
-    refresh()
+    void refresh()
   }, [refreshCounter, rootPath, directoryExists])
 
   const handleToggle = useCallback((path: string) => {

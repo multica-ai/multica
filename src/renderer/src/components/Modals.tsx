@@ -32,7 +32,7 @@ export function Modals({
   onSetDefaultAgent,
   onCreateSession,
   onDeleteSession
-}: ModalsProps) {
+}: ModalsProps): React.JSX.Element {
   const closeModal = useModalStore((s) => s.closeModal)
 
   return (
@@ -65,10 +65,10 @@ function SettingsModal({
   onSetDefaultAgent,
   onCreateSession,
   onClose
-}: SettingsModalProps) {
+}: SettingsModalProps): React.JSX.Element {
   const { isOpen, data } = useModal('settings')
 
-  const handleClose = async () => {
+  const handleClose = async (): Promise<void> => {
     const pendingFolder = data?.pendingFolder
     onClose()
 
@@ -98,18 +98,18 @@ interface NewSessionModalProps {
   onClose: () => void
 }
 
-function NewSessionModal({ onCreateSession, onClose }: NewSessionModalProps) {
+function NewSessionModal({ onCreateSession, onClose }: NewSessionModalProps): React.JSX.Element {
   const { isOpen } = useModal('newSession')
   const [cwd, setCwd] = useState('')
 
-  const handleCreate = async () => {
+  const handleCreate = async (): Promise<void> => {
     if (!cwd.trim()) return
     await onCreateSession(cwd.trim())
     setCwd('')
     onClose()
   }
 
-  const handleOpenChange = (open: boolean) => {
+  const handleOpenChange = (open: boolean): void => {
     if (!open) {
       setCwd('')
       onClose()
@@ -167,10 +167,13 @@ interface DeleteSessionModalProps {
   onClose: () => void
 }
 
-function DeleteSessionModal({ onDeleteSession, onClose }: DeleteSessionModalProps) {
+function DeleteSessionModal({
+  onDeleteSession,
+  onClose
+}: DeleteSessionModalProps): React.JSX.Element {
   const { isOpen, data: session } = useModal('deleteSession')
 
-  const handleConfirm = () => {
+  const handleConfirm = (): void => {
     if (session) {
       onDeleteSession(session.id)
       onClose()
@@ -189,8 +192,8 @@ function DeleteSessionModal({ onDeleteSession, onClose }: DeleteSessionModalProp
         <DialogHeader>
           <DialogTitle>Delete Task</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete "{session && getSessionTitle(session)}"? This action
-            cannot be undone.
+            Are you sure you want to delete &quot;{session && getSessionTitle(session)}&quot;? This
+            action cannot be undone.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

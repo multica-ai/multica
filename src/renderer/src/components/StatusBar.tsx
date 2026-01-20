@@ -16,7 +16,7 @@ export function StatusBar({
   runningSessionsCount,
   currentSession,
   isCurrentSessionRunning
-}: StatusBarProps) {
+}: StatusBarProps): React.JSX.Element {
   const { state, isMobile } = useSidebar()
 
   // Need left padding for traffic lights when sidebar is not visible
@@ -61,7 +61,10 @@ interface SessionStatusBadgeProps {
   runningCount: number
 }
 
-function SessionStatusBadge({ isRunning, runningCount }: SessionStatusBadgeProps) {
+function SessionStatusBadge({
+  isRunning,
+  runningCount
+}: SessionStatusBadgeProps): React.JSX.Element {
   const dotColor = isRunning ? 'bg-green-500' : 'bg-gray-500'
   const text = isRunning
     ? `Running (${runningCount} session${runningCount !== 1 ? 's' : ''})`

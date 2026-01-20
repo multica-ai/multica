@@ -39,7 +39,7 @@ export function AgentSelector({
   onAgentChange,
   disabled = false,
   isSwitching = false
-}: AgentSelectorProps) {
+}: AgentSelectorProps): React.JSX.Element {
   const [agents, setAgents] = useState<AgentCheckResult[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -48,7 +48,7 @@ export function AgentSelector({
     loadAgents()
   }, [])
 
-  async function loadAgents() {
+  async function loadAgents(): Promise<void> {
     setLoading(true)
     try {
       const results = await window.electronAPI.checkAgents()
@@ -63,7 +63,7 @@ export function AgentSelector({
   const currentAgent = agents.find((a) => a.id === currentAgentId)
   const currentAgentName = currentAgent?.name || currentAgentId
 
-  function handleSelect(agentId: string) {
+  function handleSelect(agentId: string): void {
     if (agentId !== currentAgentId) {
       onAgentChange(agentId)
     }

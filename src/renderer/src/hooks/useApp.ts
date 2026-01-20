@@ -112,6 +112,7 @@ export function useApp(): AppState & AppActions {
   useEffect(() => {
     loadSessions()
     loadRunningStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only load on mount
   }, [])
 
   // Get current session ID for stable reference in effect
@@ -215,13 +216,16 @@ export function useApp(): AppState & AppActions {
       addPendingRequest(request)
     })
 
+    // Copy ref to local variable for cleanup
+    const currentToolKindMap = toolKindMapRef.current
+
     return () => {
       unsubMessage()
       unsubStatus()
       unsubError()
       unsubPermission()
       // Clear the toolKindMap when session changes to avoid stale data
-      toolKindMapRef.current.clear()
+      currentToolKindMap.clear()
     }
   }, [currentAgentSessionId])
 
@@ -293,6 +297,7 @@ export function useApp(): AppState & AppActions {
     return () => {
       unsubFocus()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only re-subscribe on session ID change
   }, [currentSession?.id, validateCurrentSessionDirectory])
 
   const createSession = useCallback(

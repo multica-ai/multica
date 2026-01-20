@@ -8,7 +8,7 @@ interface IconProps {
 }
 
 // TypeScript icon (TS box)
-export function TypeScriptIcon({ className }: IconProps) {
+export function TypeScriptIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -19,7 +19,7 @@ export function TypeScriptIcon({ className }: IconProps) {
 }
 
 // JavaScript icon (JS box)
-export function JavaScriptIcon({ className }: IconProps) {
+export function JavaScriptIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -36,7 +36,7 @@ export function JavaScriptIcon({ className }: IconProps) {
 }
 
 // JSON icon (curly braces)
-export function JsonIcon({ className }: IconProps) {
+export function JsonIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -53,7 +53,7 @@ export function JsonIcon({ className }: IconProps) {
 }
 
 // YAML icon
-export function YamlIcon({ className }: IconProps) {
+export function YamlIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -65,7 +65,7 @@ export function YamlIcon({ className }: IconProps) {
 }
 
 // Markdown icon
-export function MarkdownIcon({ className }: IconProps) {
+export function MarkdownIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -76,7 +76,7 @@ export function MarkdownIcon({ className }: IconProps) {
 }
 
 // CSS icon
-export function CssIcon({ className }: IconProps) {
+export function CssIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -88,7 +88,7 @@ export function CssIcon({ className }: IconProps) {
 }
 
 // HTML icon
-export function HtmlIcon({ className }: IconProps) {
+export function HtmlIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -100,7 +100,7 @@ export function HtmlIcon({ className }: IconProps) {
 }
 
 // Config file icon (gear)
-export function ConfigIcon({ className }: IconProps) {
+export function ConfigIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="currentColor">
       <path d="M7.068 1.262A1 1 0 0 1 8.932 1.262L9.254 2.316A1.1 1.1 0 0 0 10.608 2.948L11.662 2.626A1 1 0 0 1 12.876 3.876L12.554 4.93A1.1 1.1 0 0 0 13.186 6.284L14.24 6.606A1 1 0 0 1 14.24 8.47L13.186 8.792A1.1 1.1 0 0 0 12.554 10.146L12.876 11.2A1 1 0 0 1 11.662 12.414L10.608 12.092A1.1 1.1 0 0 0 9.254 12.724L8.932 13.778A1 1 0 0 1 7.068 13.778L6.746 12.724A1.1 1.1 0 0 0 5.392 12.092L4.338 12.414A1 1 0 0 1 3.124 11.2L3.446 10.146A1.1 1.1 0 0 0 2.814 8.792L1.76 8.47A1 1 0 0 1 1.76 6.606L2.814 6.284A1.1 1.1 0 0 0 3.446 4.93L3.124 3.876A1 1 0 0 1 4.338 2.626L5.392 2.948A1.1 1.1 0 0 0 6.746 2.316L7.068 1.262ZM8 10A2 2 0 1 0 8 6A2 2 0 0 0 8 10Z" />
@@ -109,7 +109,7 @@ export function ConfigIcon({ className }: IconProps) {
 }
 
 // Git icon
-export function GitIcon({ className }: IconProps) {
+export function GitIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none">
       <rect width="16" height="16" rx="2" fill="currentColor" fillOpacity="0.2" />
@@ -124,41 +124,8 @@ export function GitIcon({ className }: IconProps) {
   )
 }
 
-// Map file extension to icon component
-export function getFileIcon(extension?: string): React.ComponentType<IconProps> | null {
-  switch (extension) {
-    case 'ts':
-    case 'tsx':
-    case 'mts':
-    case 'cts':
-      return TypeScriptIcon
-    case 'js':
-    case 'jsx':
-    case 'mjs':
-    case 'cjs':
-      return JavaScriptIcon
-    case 'json':
-      return JsonIcon
-    case 'yaml':
-    case 'yml':
-      return YamlIcon
-    case 'md':
-    case 'mdx':
-      return MarkdownIcon
-    case 'css':
-    case 'scss':
-    case 'sass':
-    case 'less':
-      return CssIcon
-    case 'html':
-    case 'htm':
-      return HtmlIcon
-    default:
-      return null
-  }
-}
-
 // Check if filename is a config file
+// eslint-disable-next-line react-refresh/only-export-components
 export function isConfigFile(name: string): boolean {
   const configPatterns = [
     '.gitignore',
@@ -187,6 +154,7 @@ export function isConfigFile(name: string): boolean {
 }
 
 // Check if file is git-related
+// eslint-disable-next-line react-refresh/only-export-components
 export function isGitFile(name: string): boolean {
   return name === '.git' || name === '.gitignore' || name === '.gitattributes'
 }

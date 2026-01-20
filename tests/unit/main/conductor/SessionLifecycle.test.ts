@@ -6,7 +6,7 @@ import type {
   ConductorEvents,
   SessionAgent
 } from '../../../../src/main/conductor/types'
-import type { AgentConfig, MulticaSession, SessionData } from '../../../../src/shared/types'
+import type { AgentConfig, MulticaSession } from '../../../../src/shared/types'
 
 describe('SessionLifecycle', () => {
   let lifecycle: SessionLifecycle
@@ -34,7 +34,9 @@ describe('SessionLifecycle', () => {
   }
 
   const mockSessionAgent: SessionAgent = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     agentProcess: {} as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     connection: {} as any,
     agentConfig: mockAgentConfig,
     agentSessionId: 'acp-123',
@@ -150,7 +152,7 @@ describe('SessionLifecycle', () => {
 
   describe('resume', () => {
     it('should start agent for existing session', async () => {
-      const session = await lifecycle.resume('session-123')
+      await lifecycle.resume('session-123')
 
       expect(mockAgentProcessManager.start).toHaveBeenCalledWith(
         'session-123',
@@ -167,10 +169,10 @@ describe('SessionLifecycle', () => {
     it('should return existing session if agent already running', async () => {
       mockAgentProcessManager.get = vi.fn().mockReturnValue(mockSessionAgent)
 
-      const session = await lifecycle.resume('session-123')
+      const result = await lifecycle.resume('session-123')
 
       expect(mockAgentProcessManager.start).not.toHaveBeenCalled()
-      expect(session).toEqual(mockSession)
+      expect(result).toEqual(mockSession)
     })
 
     it('should throw for unknown agent', async () => {
@@ -373,8 +375,9 @@ describe('SessionLifecycle', () => {
         .mockReturnValueOnce(undefined) // First call: not running
         .mockReturnValueOnce(mockSessionAgent) // Second call: after start
 
-      const result = await lifecycle.ensureAgentForSession('session-123')
+      const sessionAgent = await lifecycle.ensureAgentForSession('session-123')
 
+      expect(sessionAgent).toBe(mockSessionAgent)
       expect(mockAgentProcessManager.start).toHaveBeenCalledWith(
         'session-123',
         expect.objectContaining({ id: 'opencode' }),

@@ -34,7 +34,9 @@ describe('PromptHandler', () => {
     }
 
     mockSessionAgent = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       agentProcess: {} as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       connection: mockConnection as any,
       agentConfig: mockAgentConfig,
       agentSessionId: 'acp-session-123',
@@ -101,6 +103,7 @@ describe('PromptHandler', () => {
         { type: 'image', data: 'base64data', mimeType: 'image/png' }
       ])
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const connection = mockSessionAgent.connection as any
       expect(connection.prompt).toHaveBeenCalledWith({
         sessionId: 'acp-session-123',
@@ -160,6 +163,7 @@ describe('PromptHandler', () => {
 
       await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const connection = mockSessionAgent.connection as any
       const callArgs = connection.prompt.mock.calls[0][0]
 
@@ -173,6 +177,7 @@ describe('PromptHandler', () => {
     })
 
     it('should handle errors gracefully', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(new Error('Test error'))
 
@@ -195,6 +200,7 @@ describe('PromptHandler', () => {
     })
 
     it('should clear processing state on error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(new Error('Test error'))
 
@@ -208,6 +214,7 @@ describe('PromptHandler', () => {
     it('should cancel ongoing request', async () => {
       await handler.cancel('session-1')
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const connection = mockSessionAgent.connection as any
       expect(connection.cancel).toHaveBeenCalledWith({ sessionId: 'acp-session-123' })
     })
@@ -282,6 +289,7 @@ describe('PromptHandler', () => {
 
       await handler.send('session-1', [{ type: 'text', text: 'New message' }])
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const connection = mockSessionAgent.connection as any
       const callArgs = connection.prompt.mock.calls[0][0]
 
@@ -307,6 +315,7 @@ describe('PromptHandler', () => {
 
       await handler.send('session-1', [{ type: 'text', text: 'New message' }])
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const connection = mockSessionAgent.connection as any
       const callArgs = connection.prompt.mock.calls[0][0]
 
@@ -333,6 +342,7 @@ describe('PromptHandler', () => {
       // Should mark as replayed even on error (to prevent repeated attempts)
       expect(resumedSessionAgent.needsHistoryReplay).toBe(false)
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const connection = mockSessionAgent.connection as any
       const callArgs = connection.prompt.mock.calls[0][0]
 
@@ -344,6 +354,7 @@ describe('PromptHandler', () => {
 
   describe('error parsing', () => {
     it('should parse MCP missing environment variable error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(
         new Error('Missing environment variables: OPENAI_API_KEY')
@@ -366,6 +377,7 @@ describe('PromptHandler', () => {
     })
 
     it('should parse MaxFileReadTokenExceededError', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(
         new Error('MaxFileReadTokenExceededError: file too large')
@@ -386,6 +398,7 @@ describe('PromptHandler', () => {
     })
 
     it('should parse mcp-config-invalid error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(new Error('mcp-config-invalid: server name missing'))
 
@@ -403,7 +416,8 @@ describe('PromptHandler', () => {
       )
     })
 
-    it('should use generic fallback for unknown errors', async () => {
+    it('should show error message in fallback for unknown errors', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(new Error('Some completely unknown error'))
 
@@ -413,7 +427,110 @@ describe('PromptHandler', () => {
         expect.objectContaining({
           update: expect.objectContaining({
             content: expect.objectContaining({
-              text: expect.stringContaining('Agent encountered an error')
+              text: expect.stringContaining('Agent error: Error: Some completely unknown error')
+            })
+          })
+        }),
+        undefined
+      )
+    })
+
+    it('should truncate long error messages', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      const longError = 'A'.repeat(200)
+      mockConnection.prompt.mockRejectedValue(new Error(longError))
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      expect(mockEvents.onSessionUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            content: expect.objectContaining({
+              // Error message should be truncated and end with "..."
+              text: expect.stringMatching(/Agent error: Error: A+\.\.\./)
+            })
+          })
+        }),
+        undefined
+      )
+
+      // Verify the error text doesn't exceed expected length
+      // Format: "\n\n**Error:** Agent error: " + truncated (max 153) + "...\n"
+      const callArgs = mockEvents.onSessionUpdate.mock.calls[0][0]
+      const errorText = callArgs.update.content.text
+      expect(errorText.length).toBeLessThanOrEqual(200)
+    })
+
+    it('should parse ECONNREFUSED error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8080'))
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      expect(mockEvents.onSessionUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            content: expect.objectContaining({
+              text: expect.stringContaining('Failed to connect to agent')
+            })
+          })
+        }),
+        undefined
+      )
+    })
+
+    it('should parse timeout error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue(new Error('Request timeout after 30000ms'))
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      expect(mockEvents.onSessionUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            content: expect.objectContaining({
+              text: expect.stringContaining('Request timed out')
+            })
+          })
+        }),
+        undefined
+      )
+    })
+
+    it('should parse rate limit error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue(new Error('429 Too Many Requests'))
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      expect(mockEvents.onSessionUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            content: expect.objectContaining({
+              text: expect.stringContaining('Rate limit exceeded')
+            })
+          })
+        }),
+        undefined
+      )
+    })
+
+    it('should parse authentication error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue(new Error('401 Unauthorized: Invalid API key'))
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      expect(mockEvents.onSessionUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            content: expect.objectContaining({
+              text: expect.stringContaining('Authentication failed')
             })
           })
         }),

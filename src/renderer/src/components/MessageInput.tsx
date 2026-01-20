@@ -39,7 +39,11 @@ const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
 const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 
 // Warning banner component for missing directory
-function DirectoryWarningBanner({ onDeleteSession }: { onDeleteSession?: () => void }) {
+function DirectoryWarningBanner({
+  onDeleteSession
+}: {
+  onDeleteSession?: () => void
+}): React.JSX.Element {
   return (
     <div className="mb-2">
       <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
@@ -83,7 +87,7 @@ export function MessageInput({
   sessionModelState,
   onModeChange,
   onModelChange
-}: MessageInputProps) {
+}: MessageInputProps): React.JSX.Element | null {
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
   const [images, setImages] = useState<ImageContentItem[]>([])
@@ -215,7 +219,7 @@ export function MessageInput({
     setImages([])
   }, [value, images, disabled, isProcessing, onSend])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     // Don't submit while IME is composing
     if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault()

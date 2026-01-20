@@ -11,6 +11,7 @@
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type { MessageContent, MessageContentItem } from '../../shared/types/message'
 import { formatHistoryForReplay, hasReplayableHistory } from './historyReplay'
+import log from '../logger'
 import type {
   IPromptHandler,
   PromptHandlerOptions,
@@ -173,12 +174,14 @@ export class PromptHandler implements IPromptHandler {
           _internal: options?.internal ?? false // G-3: internal messages not shown in UI
         }
       }
-      await this.sessionStore.appendUpdate(sessionId, userUpdate as any)
+      await this.sessionStore.appendUpdate(sessionId, userUpdate as unknown as SessionNotification)
     }
 
     try {
+      // Cast promptContent to satisfy ACP SDK types - our MessageContentItem maps to ContentBlock
       const result = await connection.prompt({
         sessionId: agentSessionId,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ACP SDK types don't match our MessageContentItem
         prompt: promptContent as any
       })
 
@@ -186,7 +189,7 @@ export class PromptHandler implements IPromptHandler {
 
       return result.stopReason
     } catch (error) {
-      console.error(`[PromptHandler] ACP error for session ${sessionId}:`, error)
+      log.error(`[PromptHandler] ACP error for session ${sessionId}:`, error)
 
       // Parse ACP error to user-friendly message
       const message = this.parseAcpError(error)
@@ -273,7 +276,38 @@ export class PromptHandler implements IPromptHandler {
       return 'MCP server configuration is invalid. Check your settings.'
     }
 
-    // Generic fallback
-    return 'Agent encountered an error. Please try again.'
+    // Connection/network errors
+    if (errorStr.includes('ECONNREFUSED') || errorStr.includes('ECONNRESET')) {
+      return 'Failed to connect to agent. Please check if the agent is running.'
+    }
+
+    // Timeout errors
+    if (errorStr.includes('ETIMEDOUT') || errorStr.includes('timeout')) {
+      return 'Request timed out. Please try again.'
+    }
+
+    // Process exit errors
+    if (errorStr.includes('process exited') || errorStr.includes('spawn')) {
+      return 'Agent process terminated unexpectedly.'
+    }
+
+    // API authentication errors
+    if (
+      errorStr.includes('401') ||
+      errorStr.includes('authentication') ||
+      errorStr.includes('API key')
+    ) {
+      return 'Authentication failed. Please check your API credentials.'
+    }
+
+    // Rate limit errors
+    if (errorStr.includes('429') || errorStr.includes('rate limit')) {
+      return 'Rate limit exceeded. Please wait and try again.'
+    }
+
+    // Improved fallback: show first line of error (truncated to 150 chars)
+    const firstLine = errorStr.split('\n')[0].trim()
+    const truncated = firstLine.length > 150 ? firstLine.slice(0, 150) + '...' : firstLine
+    return `Agent error: ${truncated}`
   }
 }

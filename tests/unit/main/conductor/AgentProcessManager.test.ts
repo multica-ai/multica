@@ -205,7 +205,9 @@ describe('AgentProcessManager', () => {
   describe('set and remove', () => {
     it('should allow setting session agent directly', async () => {
       const mockSessionAgent = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         agentProcess: {} as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         connection: {} as any,
         agentConfig: mockAgentConfig,
         agentSessionId: 'acp-123',

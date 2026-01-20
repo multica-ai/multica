@@ -19,7 +19,11 @@ interface ModeSelectorProps {
   disabled?: boolean
 }
 
-export function ModeSelector({ modeState, onModeChange, disabled = false }: ModeSelectorProps) {
+export function ModeSelector({
+  modeState,
+  onModeChange,
+  disabled = false
+}: ModeSelectorProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
 
   // Don't render if no mode state (agent doesn't support modes)
@@ -30,7 +34,7 @@ export function ModeSelector({ modeState, onModeChange, disabled = false }: Mode
   const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId)
   const currentModeName = currentMode?.name || modeState.currentModeId
 
-  function handleSelect(modeId: SessionModeId) {
+  function handleSelect(modeId: SessionModeId): void {
     if (modeId !== modeState?.currentModeId) {
       onModeChange(modeId)
     }

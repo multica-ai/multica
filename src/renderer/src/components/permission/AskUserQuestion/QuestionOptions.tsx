@@ -11,7 +11,7 @@ export function QuestionOptions({
   isMultiSelect,
   selectedOptions,
   onOptionClick
-}: QuestionOptionsProps) {
+}: QuestionOptionsProps): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
       {options.map((opt, idx) => {

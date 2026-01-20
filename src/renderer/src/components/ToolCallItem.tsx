@@ -218,7 +218,7 @@ function getDisplayInfo(toolCall: ToolCall): {
 }
 
 // Status dot component - displays tool call status with color and animation
-function StatusDot({ status }: { status: string }) {
+function StatusDot({ status }: { status: string }): React.JSX.Element {
   const statusStyles: Record<string, string> = {
     pending: 'bg-[var(--tool-pending)]',
     running: 'bg-[var(--tool-running)] animate-[glow-pulse_2s_ease-in-out_infinite]',
@@ -238,7 +238,7 @@ function StatusDot({ status }: { status: string }) {
 }
 
 // Tool call details - shows input and output separated by a line
-function ToolCallDetails({ toolCall }: { toolCall: ToolCall }) {
+function ToolCallDetails({ toolCall }: { toolCall: ToolCall }): React.JSX.Element {
   return (
     <div className="ml-4 mt-1 mb-2 bg-muted/50 rounded-md p-2">
       {/* Input */}
@@ -276,7 +276,7 @@ function formatJson(input: string): string {
 }
 
 // Tool call item - expandable display with input/output details
-export function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
+export function ToolCallItem({ toolCall }: { toolCall: ToolCall }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false)
 
   // Check if this is an AskUserQuestion/question that has been responded to

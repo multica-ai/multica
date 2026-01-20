@@ -68,14 +68,14 @@ function SessionItem({
   needsPermission,
   onSelect,
   onDelete
-}: SessionItemProps) {
+}: SessionItemProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false)
   const isInvalid = session.directoryExists === false
 
   return (
     <SidebarMenuItem
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={(): void => setIsHovered(true)}
+      onMouseLeave={(): void => setIsHovered(false)}
     >
       <Tooltip delayDuration={600} open={isActive ? false : undefined}>
         <TooltipTrigger asChild>
@@ -119,11 +119,11 @@ function SessionItem({
             <div
               role="button"
               tabIndex={0}
-              onClick={(e) => {
+              onClick={(e): void => {
                 e.stopPropagation()
                 onDelete()
               }}
-              onKeyDown={(e) => {
+              onKeyDown={(e): void => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
                   e.stopPropagation()
@@ -169,7 +169,7 @@ function SessionList({
   permissionPendingSessionId,
   onSelect,
   onDeleteRequest
-}: SessionListProps) {
+}: SessionListProps): React.JSX.Element {
   if (sessions.length === 0) {
     return <p className="px-2 py-4 text-center text-sm text-muted-foreground">No tasks yet</p>
   }
@@ -183,8 +183,8 @@ function SessionList({
           isActive={session.id === currentSessionId}
           isProcessing={processingSessionIds.includes(session.id)}
           needsPermission={session.id === permissionPendingSessionId}
-          onSelect={() => onSelect(session.id)}
-          onDelete={() => onDeleteRequest(session)}
+          onSelect={(): void => onSelect(session.id)}
+          onDelete={(): void => onDeleteRequest(session)}
         />
       ))}
     </SidebarMenu>
@@ -198,7 +198,7 @@ export function AppSidebar({
   permissionPendingSessionId,
   onSelect,
   onNewSession
-}: AppSidebarProps) {
+}: AppSidebarProps): React.JSX.Element {
   const openModal = useModalStore((s) => s.openModal)
 
   return (
@@ -227,7 +227,7 @@ export function AppSidebar({
           processingSessionIds={processingSessionIds}
           permissionPendingSessionId={permissionPendingSessionId}
           onSelect={onSelect}
-          onDeleteRequest={(session) => openModal('deleteSession', session)}
+          onDeleteRequest={(session): void => openModal('deleteSession', session)}
         />
       </SidebarContent>
 
@@ -235,7 +235,7 @@ export function AppSidebar({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => openModal('settings')}
+          onClick={(): void => openModal('settings')}
           className="w-full justify-center gap-2 hover:bg-sidebar-accent"
         >
           <Settings className="h-4 w-4" />

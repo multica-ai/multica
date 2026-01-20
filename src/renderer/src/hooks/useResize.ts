@@ -50,7 +50,7 @@ export function useResize({
   useEffect(() => {
     if (!isResizing) return
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (e: MouseEvent): void => {
       const delta = e.clientX - startXRef.current
       // For left sidebar, dragging right increases width
       // For right panel, dragging left increases width
@@ -60,7 +60,7 @@ export function useResize({
       onWidthChange(clampedWidth)
     }
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (): void => {
       setIsResizing(false)
     }
 

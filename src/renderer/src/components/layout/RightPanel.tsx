@@ -15,7 +15,7 @@ interface RightPanelProps {
   className?: string
 }
 
-export function RightPanel({ children, className }: RightPanelProps) {
+export function RightPanel({ children, className }: RightPanelProps): React.JSX.Element {
   const isOpen = useUIStore((s) => s.rightPanelOpen)
   const rightPanelWidth = useUIStore((s) => s.rightPanelWidth)
   const setRightPanelWidth = useUIStore((s) => s.setRightPanelWidth)
@@ -65,7 +65,10 @@ export function RightPanel({ children, className }: RightPanelProps) {
 }
 
 // Trigger button - desktop only, secondary variant when panel is open
-export function RightPanelTrigger({ className, ...props }: React.ComponentProps<typeof Button>) {
+export function RightPanelTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof Button>): React.JSX.Element {
   const isOpen = useUIStore((s) => s.rightPanelOpen)
   const toggle = useUIStore((s) => s.toggleRightPanel)
 
@@ -88,7 +91,7 @@ export function SidebarTrigger({
   className,
   onClick,
   ...props
-}: React.ComponentProps<typeof Button>) {
+}: React.ComponentProps<typeof Button>): React.JSX.Element {
   const { toggleSidebar } = useSidebar()
   const isOpen = useUIStore((s) => s.sidebarOpen)
 
@@ -110,7 +113,11 @@ export function SidebarTrigger({
 }
 
 // Sub-components for consistent structure
-export function RightPanelHeader({ className, children, ...props }: React.ComponentProps<'div'>) {
+export function RightPanelHeader({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div className={cn('flex h-11 items-center border-b px-4', className)} {...props}>
       {children}
@@ -118,10 +125,16 @@ export function RightPanelHeader({ className, children, ...props }: React.Compon
   )
 }
 
-export function RightPanelContent({ className, ...props }: React.ComponentProps<'div'>) {
+export function RightPanelContent({
+  className,
+  ...props
+}: React.ComponentProps<'div'>): React.JSX.Element {
   return <div className={cn('flex-1 overflow-auto p-4', className)} {...props} />
 }
 
-export function RightPanelFooter({ className, ...props }: React.ComponentProps<'div'>) {
+export function RightPanelFooter({
+  className,
+  ...props
+}: React.ComponentProps<'div'>): React.JSX.Element {
   return <div className={cn('border-t p-4', className)} {...props} />
 }

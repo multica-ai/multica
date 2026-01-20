@@ -57,9 +57,9 @@ export class AgentProcessManager implements IAgentProcessManager {
 
     // Create client-side connection with our Client implementation
     const connection = new ClientSideConnection(
-      (_agent) =>
+      () =>
         createAcpClient(sessionId, {
-          sessionStore: this.sessionStore as any, // Cast to SessionStore for compatibility
+          sessionStore: this.sessionStore, // Type is compatible with ISessionStore
           callbacks: {
             onSessionUpdate: this.events.onSessionUpdate,
             onPermissionRequest: this.events.onPermissionRequest,

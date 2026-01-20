@@ -66,15 +66,15 @@ export function Settings({
   const { mode, setMode } = useTheme()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
+  useEffect((): void => {
     if (isOpen) {
       loadAgents()
     }
   }, [isOpen])
 
   // Cleanup polling on unmount or when dialog closes
-  useEffect(() => {
-    return () => {
+  useEffect((): (() => void) => {
+    return (): void => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
@@ -83,7 +83,7 @@ export function Settings({
   }, [])
 
   // Stop polling when dialog closes
-  useEffect(() => {
+  useEffect((): void => {
     if (!isOpen && pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current)
       pollingIntervalRef.current = null
@@ -94,13 +94,13 @@ export function Settings({
 
   // Polling logic for checking installation
   const startPolling = useCallback(
-    (agentId: string) => {
+    (agentId: string): void => {
       // Clear any existing polling
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
       }
 
-      pollingIntervalRef.current = setInterval(async () => {
+      pollingIntervalRef.current = setInterval(async (): Promise<void> => {
         try {
           const result = await window.electronAPI.checkAgent(agentId)
           if (result?.installed) {
@@ -109,11 +109,13 @@ export function Settings({
               clearInterval(pollingIntervalRef.current)
               pollingIntervalRef.current = null
             }
-            setAgentResults((prev) => new Map(prev).set(agentId, result))
+            setAgentResults(
+              (prev): Map<string, AgentCheckResult> => new Map(prev).set(agentId, result)
+            )
             setInstallStatus({ agentId, state: 'success' })
 
             // Clear success state after a moment
-            setTimeout(() => {
+            setTimeout((): void => {
               setInstallStatus({ agentId: null, state: 'idle' })
             }, 2000)
           }
@@ -132,16 +134,16 @@ export function Settings({
 
     // Check all agents concurrently
     await Promise.all(
-      allIds.map(async (id) => {
+      allIds.map(async (id): Promise<void> => {
         try {
           const result = await window.electronAPI.checkAgent(id)
           if (result) {
-            setAgentResults((prev) => new Map(prev).set(id, result))
+            setAgentResults((prev): Map<string, AgentCheckResult> => new Map(prev).set(id, result))
           }
         } catch (err) {
           console.error(`Failed to check agent ${id}:`, err)
         } finally {
-          setCheckingAgents((prev) => {
+          setCheckingAgents((prev): Set<string> => {
             const next = new Set(prev)
             next.delete(id)
             return next
@@ -202,7 +204,9 @@ export function Settings({
           <ToggleGroup
             type="single"
             value={mode}
-            onValueChange={(value) => value && setMode(value as ThemeMode)}
+            onValueChange={(value): void => {
+              value && setMode(value as ThemeMode)
+            }}
           >
             <ToggleGroupItem value="light" className="gap-2">
               <Sun className="h-4 w-4" />
@@ -234,7 +238,7 @@ export function Settings({
           )}
 
           <div className="space-y-1">
-            {AGENT_LIST.map(({ id, name }) => {
+            {AGENT_LIST.map(({ id, name }): React.ReactElement => {
               const agent = agentResults.get(id)
               const isChecking = checkingAgents.has(id)
               return (
@@ -288,8 +292,9 @@ function AgentItem({
   const [expanded, setExpanded] = useState(false)
 
   // Auto-expand when highlighted
-  useEffect(() => {
+  useEffect((): void => {
     if (isHighlighted) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync UI state with prop
       setExpanded(true)
     }
   }, [isHighlighted])
@@ -311,8 +316,9 @@ function AgentItem({
           : 'ready'
 
   // Auto-expand when waiting for install
-  useEffect(() => {
+  useEffect((): void => {
     if (isWaiting) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync UI state with install status
       setExpanded(true)
     }
   }, [isWaiting])
@@ -374,7 +380,7 @@ function AgentItem({
           </span>
         ) : canInstall ? (
           <button
-            onClick={(e) => {
+            onClick={(e: React.MouseEvent): void => {
               e.stopPropagation()
               onInstall(agentId)
             }}
@@ -408,7 +414,7 @@ function AgentItem({
                   This will automatically detect when installation is complete.
                 </p>
                 <button
-                  onClick={(e) => {
+                  onClick={(e: React.MouseEvent): void => {
                     e.stopPropagation()
                     onCancelWaiting()
                   }}
@@ -432,12 +438,14 @@ function AgentItem({
               <p className="text-xs">{getAgentDescription(agentId)}</p>
               {agent?.commands && agent.commands.length > 0 && (
                 <div className="mt-2 space-y-0.5">
-                  {agent.commands.map((cmd) => (
-                    <div key={cmd.command} className="text-xs font-mono text-muted-foreground/70">
-                      <span className="text-muted-foreground">{cmd.command}:</span>{' '}
-                      {cmd.path || <span className="italic">not installed</span>}
-                    </div>
-                  ))}
+                  {agent.commands.map(
+                    (cmd): React.ReactElement => (
+                      <div key={cmd.command} className="text-xs font-mono text-muted-foreground/70">
+                        <span className="text-muted-foreground">{cmd.command}:</span>{' '}
+                        {cmd.path || <span className="italic">not installed</span>}
+                      </div>
+                    )
+                  )}
                 </div>
               )}
             </div>

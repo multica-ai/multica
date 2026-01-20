@@ -55,8 +55,11 @@ export const useModalStore = create<ModalStore>((set) => ({
 }))
 
 // Convenience selectors
-export const useModal = <T extends ModalType>(type: T) =>
+
+export const useModal = <T extends ModalType>(type: T): ModalState<T> =>
   useModalStore((state) => state.modals[type] as ModalState<T>)
 
-export const useOpenModal = () => useModalStore((state) => state.openModal)
-export const useCloseModal = () => useModalStore((state) => state.closeModal)
+export const useOpenModal = (): ModalStore['openModal'] => useModalStore((state) => state.openModal)
+
+export const useCloseModal = (): ModalStore['closeModal'] =>
+  useModalStore((state) => state.closeModal)

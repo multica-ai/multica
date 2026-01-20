@@ -16,27 +16,35 @@ import { cn } from '@/lib/utils'
 // Hoisted ReactMarkdown components for better performance (avoids object recreation on each render)
 const TEXT_MARKDOWN_COMPONENTS = {
   // Paragraphs: consistent spacing, tighter line height for readability
-  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-4 last:mb-0">{children}</p>,
+  p: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
+    <p className="mb-4 last:mb-0">{children}</p>
+  ),
   // Headings: more space above (1.5x) than below (0.5x) for visual grouping
-  h1: ({ children }: { children?: React.ReactNode }) => (
+  h1: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <h1 className="text-xl font-bold mt-6 mb-3 first:mt-0">{children}</h1>
   ),
-  h2: ({ children }: { children?: React.ReactNode }) => (
+  h2: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <h2 className="text-lg font-bold mt-5 mb-2.5 first:mt-0">{children}</h2>
   ),
-  h3: ({ children }: { children?: React.ReactNode }) => (
+  h3: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <h3 className="text-base font-semibold mt-4 mb-2 first:mt-0">{children}</h3>
   ),
   // Lists: consistent spacing with content
-  ul: ({ children }: { children?: React.ReactNode }) => (
+  ul: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <ul className="list-disc pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ul>
   ),
-  ol: ({ children }: { children?: React.ReactNode }) => (
+  ol: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <ol className="list-decimal pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ol>
   ),
-  li: ({ children }: { children?: React.ReactNode }) => <li>{children}</li>,
+  li: ({ children }: { children?: React.ReactNode }): React.JSX.Element => <li>{children}</li>,
   // Code: pre handles container, code is transparent for blocks
-  code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
+  code: ({
+    className,
+    children
+  }: {
+    className?: string
+    children?: React.ReactNode
+  }): React.JSX.Element => {
     const isBlock = className?.includes('language-')
     if (isBlock) {
       // Block code inside pre - no extra styling, pre handles it
@@ -47,13 +55,13 @@ const TEXT_MARKDOWN_COMPONENTS = {
       <code className="bg-muted/70 rounded px-1.5 py-0.5 text-[13px] font-mono">{children}</code>
     )
   },
-  pre: ({ children }: { children?: React.ReactNode }) => (
+  pre: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <pre className="bg-muted rounded-lg px-4 py-3 mb-4 last:mb-0 overflow-x-auto text-[13px] font-mono leading-relaxed">
       {children}
     </pre>
   ),
   // Links
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }): React.JSX.Element => (
     <a
       href={href}
       className="text-primary hover:underline"
@@ -64,41 +72,47 @@ const TEXT_MARKDOWN_COMPONENTS = {
     </a>
   ),
   // Blockquote: subtle styling
-  blockquote: ({ children }: { children?: React.ReactNode }) => (
+  blockquote: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <blockquote className="border-l-2 border-border pl-4 my-4 text-muted-foreground">
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="border-border my-6" />,
-  strong: ({ children }: { children?: React.ReactNode }) => (
+  hr: (): React.JSX.Element => <hr className="border-border my-6" />,
+  strong: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <strong className="font-semibold">{children}</strong>
   ),
-  em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
+  em: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
+    <em className="italic">{children}</em>
+  ),
   // Table components for GFM table support
-  table: ({ children }: { children?: React.ReactNode }) => (
+  table: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <div className="overflow-x-auto mb-4 last:mb-0">
       <table className="min-w-full border-collapse border border-border text-sm">{children}</table>
     </div>
   ),
-  thead: ({ children }: { children?: React.ReactNode }) => (
+  thead: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <thead className="bg-muted/50">{children}</thead>
   ),
-  tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
-  tr: ({ children }: { children?: React.ReactNode }) => (
+  tbody: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
+    <tbody>{children}</tbody>
+  ),
+  tr: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <tr className="border-b border-border">{children}</tr>
   ),
-  th: ({ children }: { children?: React.ReactNode }) => (
+  th: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>
   ),
-  td: ({ children }: { children?: React.ReactNode }) => (
+  td: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <td className="border border-border px-3 py-2">{children}</td>
   )
 }
 
 // Simpler markdown components for thought blocks
 const THOUGHT_MARKDOWN_COMPONENTS = {
-  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
-  code: ({ children }: { children?: React.ReactNode }) => (
+  p: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
+    <p className="mb-2 last:mb-0">{children}</p>
+  ),
+  code: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
     <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">{children}</code>
   )
 }
@@ -122,7 +136,7 @@ export function ChatView({
   currentSessionId,
   onSelectFolder,
   bottomRef
-}: ChatViewProps) {
+}: ChatViewProps): React.JSX.Element {
   const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
 
   // Only show permission request if it belongs to the current session
@@ -240,7 +254,7 @@ interface Message {
 function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
   // Sort updates by sequence number to ensure correct ordering despite async delivery
   // Updates without sequence numbers (e.g., user messages, legacy data) keep their relative position
-  const sortedUpdates = [...updates].sort((a, b) => {
+  const sortedUpdates = [...updates].sort((a, b): number => {
     // If both have sequence numbers, sort by sequence
     if (a.sequenceNumber !== undefined && b.sequenceNumber !== undefined) {
       return a.sequenceNumber - b.sequenceNumber
@@ -259,21 +273,21 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
   let pendingText = ''
   let pendingThought = ''
 
-  const flushPendingText = () => {
+  const flushPendingText = (): void => {
     if (pendingText) {
       currentBlocks.push({ type: 'text', content: pendingText })
       pendingText = ''
     }
   }
 
-  const flushPendingThought = () => {
+  const flushPendingThought = (): void => {
     if (pendingThought) {
       currentBlocks.push({ type: 'thought', content: pendingThought })
       pendingThought = ''
     }
   }
 
-  const flushAssistantMessage = () => {
+  const flushAssistantMessage = (): void => {
     flushPendingThought()
     flushPendingText()
     if (currentBlocks.length > 0) {
@@ -567,7 +581,11 @@ interface MessageBubbleProps {
   isProcessing: boolean
 }
 
-function MessageBubble({ message, isLastMessage, isProcessing }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  isLastMessage,
+  isProcessing
+}: MessageBubbleProps): React.JSX.Element {
   const isUser = message.role === 'user'
   const isComplete = !isLastMessage || !isProcessing
 
@@ -604,7 +622,7 @@ function MessageBubble({ message, isLastMessage, isProcessing }: MessageBubblePr
 }
 
 // Render a single content block
-function renderContentBlock(block: ContentBlock, idx: number) {
+function renderContentBlock(block: ContentBlock, idx: number): React.JSX.Element | null {
   switch (block.type) {
     case 'thought':
       return <ThoughtBlockView key={`thought-${idx}`} text={block.content} />
@@ -647,7 +665,7 @@ function CollapsibleAssistantMessage({
 }: {
   blocks: ContentBlock[]
   isComplete: boolean
-}) {
+}): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false)
 
   // Count tool calls and thoughts (used for collapse condition)
@@ -733,7 +751,7 @@ function CollapsibleAssistantMessage({
 }
 
 // Text content block with markdown rendering
-function TextContentBlock({ content }: { content: string }) {
+function TextContentBlock({ content }: { content: string }): React.JSX.Element | null {
   if (!content) return null
 
   return (
@@ -746,7 +764,7 @@ function TextContentBlock({ content }: { content: string }) {
 }
 
 // Thought block view - expanded, collapsible
-function ThoughtBlockView({ text }: { text: string }) {
+function ThoughtBlockView({ text }: { text: string }): React.JSX.Element | null {
   // Hooks must be called before any conditional returns (Rules of Hooks)
   const [isExpanded, setIsExpanded] = useState(false)
   const isLong = text.length > 200
@@ -791,7 +809,7 @@ function ThoughtBlockView({ text }: { text: string }) {
   )
 }
 
-function LoadingDots() {
+function LoadingDots(): React.JSX.Element {
   return (
     <span className="inline-flex gap-1">
       <span
@@ -810,7 +828,7 @@ function LoadingDots() {
   )
 }
 
-function SessionInitializing() {
+function SessionInitializing(): React.JSX.Element {
   return (
     <div className="flex flex-1 items-center justify-center">
       <div className="flex flex-col items-center gap-6">
@@ -826,7 +844,7 @@ function SessionInitializing() {
 }
 
 // Plan block view - displays todo list from TodoWrite tool (collapsible)
-function PlanBlockView({ entries }: { entries: PlanEntry[] }) {
+function PlanBlockView({ entries }: { entries: PlanEntry[] }): React.JSX.Element | null {
   const [isExpanded, setIsExpanded] = useState(false)
 
   if (!entries || entries.length === 0) return null
@@ -915,10 +933,10 @@ function AuthErrorBlockView({
   agentId?: string
   authCommand?: string
   message: string
-}) {
+}): React.JSX.Element {
   const agentName = agentId ? AGENT_DISPLAY_NAMES[agentId] || agentId : 'Agent'
 
-  const handleRunInTerminal = async () => {
+  const handleRunInTerminal = async (): Promise<void> => {
     if (authCommand) {
       try {
         await window.electronAPI.runInTerminal(authCommand)

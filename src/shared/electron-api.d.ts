@@ -2,7 +2,6 @@
  * Type declarations for the Electron API exposed to the renderer process
  */
 import type {
-  AgentStatus,
   AppConfig,
   MulticaSession,
   SessionData,

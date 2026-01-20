@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import * as path from 'path'
-import * as fs from 'fs'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -38,10 +36,10 @@ vi.mock('../../../src/main/utils/agent-check', () => ({
 }))
 
 import { ipcMain, dialog, clipboard, shell } from 'electron'
-import { spawn } from 'child_process'
 import { registerIPCHandlers } from '../../../src/main/ipc/handlers'
 
 // Create mock conductor
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 const createMockConductor = () => ({
   sendPrompt: vi.fn().mockResolvedValue('end_turn'),
   cancelRequest: vi.fn().mockResolvedValue(undefined),
@@ -59,7 +57,8 @@ const createMockConductor = () => ({
 
 describe('IPC Handlers', () => {
   let tempDir: string
-  let handlers: Map<string, Function>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let handlers: Map<string, (...args: any[]) => any>
   let mockConductor: ReturnType<typeof createMockConductor>
 
   beforeEach(() => {
@@ -68,11 +67,15 @@ describe('IPC Handlers', () => {
     mockConductor = createMockConductor()
 
     // Capture all registered handlers
-    vi.mocked(ipcMain.handle).mockImplementation((channel: string, handler: Function) => {
-      handlers.set(channel, handler)
-    })
+    vi.mocked(ipcMain.handle).mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (channel: string, handler: (...args: any[]) => any) => {
+        handlers.set(channel, handler)
+      }
+    )
 
     // Register handlers with mock conductor
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerIPCHandlers(mockConductor as any)
 
     // Create temp directory for file system tests
@@ -352,6 +355,7 @@ describe('IPC Handlers', () => {
       expect(result[0].type).toBe('directory')
       expect(result[0].name).toBe('subdir')
       // Files should be sorted alphabetically
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const files = result.filter((n: any) => n.type === 'file')
       expect(files[0].name).toBe('file.txt')
       expect(files[0].extension).toBe('txt')
@@ -381,6 +385,7 @@ describe('IPC Handlers', () => {
       const result = await handler({})
 
       // Should always include Finder, Terminal, and Copy path
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const appIds = result.map((a: any) => a.id)
       expect(appIds).toContain('finder')
       expect(appIds).toContain('terminal')

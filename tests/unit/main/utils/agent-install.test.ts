@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ChildProcess } from 'child_process'
-import type { EventEmitter } from 'events'
 
 // Mock child_process
 vi.mock('child_process', () => ({
