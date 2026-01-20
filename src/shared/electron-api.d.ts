@@ -15,7 +15,8 @@ import type {
 import type { MessageContent } from './types/message'
 
 export interface AgentMessage {
-  sessionId: string
+  sessionId: string // ACP agent session ID
+  multicaSessionId: string // Multica session ID (stable, for filtering)
   sequenceNumber?: number // Monotonically increasing for ordering concurrent updates
   update: {
     sessionUpdate: string

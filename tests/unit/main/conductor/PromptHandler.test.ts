@@ -195,7 +195,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -372,7 +372,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -393,7 +393,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -412,7 +412,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -431,7 +431,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -452,7 +452,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
 
       // Verify the error text doesn't exceed expected length
@@ -477,7 +477,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -496,7 +496,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -515,7 +515,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
 
@@ -534,7 +534,7 @@ describe('PromptHandler', () => {
             })
           })
         }),
-        undefined
+        'session-1' // multicaSessionId
       )
     })
   })

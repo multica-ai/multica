@@ -116,7 +116,7 @@ describe('G3Workaround', () => {
             response
           }
         },
-        undefined
+        'session-1' // multicaSessionId is same as sessionId here
       )
     })
 

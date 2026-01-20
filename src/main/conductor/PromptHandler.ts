@@ -216,7 +216,7 @@ export class PromptHandler implements IPromptHandler {
               }
             }
           } as SessionNotification,
-          undefined
+          sessionId // Pass Multica session ID for stable filtering
         )
       }
 

@@ -79,7 +79,7 @@ export function MessageInput({
   onCancel,
   isProcessing,
   disabled,
-  placeholder = 'Type a message...',
+  placeholder = 'Type a message, or / for commands',
   workingDirectory,
   currentAgentId,
   onAgentChange,

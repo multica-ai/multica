@@ -118,8 +118,8 @@ export function SlashCommandMenu({
             }}
             onClick={() => onSelect(command)}
             className={cn(
-              'w-full text-left px-3 py-2 flex flex-col gap-0.5 transition-colors',
-              index === clampedIndex ? 'bg-accent' : 'hover:bg-accent/50'
+              'w-full text-left px-3 flex flex-col gap-0.5 transition-colors',
+              index === clampedIndex ? 'bg-accent py-2' : 'hover:bg-accent/50 py-1.5'
             )}
           >
             <div className="flex items-center gap-2">
@@ -128,8 +128,8 @@ export function SlashCommandMenu({
                 <span className="text-xs text-muted-foreground">{'{argument}'}</span>
               )}
             </div>
-            {command.description && (
-              <span className="text-xs text-muted-foreground line-clamp-1">
+            {index === clampedIndex && command.description && (
+              <span className="text-xs text-muted-foreground line-clamp-2">
                 {command.description}
               </span>
             )}

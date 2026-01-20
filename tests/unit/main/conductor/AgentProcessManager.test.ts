@@ -6,7 +6,8 @@ const testState = {
   instanceCounter: 0,
   mockStartError: null as Error | null,
   mockInitializeError: null as Error | null,
-  mockNewSessionError: null as Error | null
+  mockNewSessionError: null as Error | null,
+  mockAvailableCommands: [] as Array<{ name: string; description: string; input: null }>
 }
 
 // Mock AgentProcess to avoid spawning real processes
@@ -40,12 +41,35 @@ vi.mock('../../../../src/main/conductor/AgentProcess', () => {
   }
 })
 
+// Mock ACP client factory to simulate early available_commands_update events
+vi.mock('../../../../src/main/conductor/AcpClientFactory', () => {
+  return {
+    createAcpClient: vi.fn(
+      (
+        sessionId: string,
+        options: { callbacks: { onAvailableCommandsUpdate?: (commands: unknown[]) => void } }
+      ) => {
+        options.callbacks.onAvailableCommandsUpdate?.(testState.mockAvailableCommands)
+        return {
+          sessionUpdate: vi.fn(),
+          requestPermission: vi.fn()
+        }
+      }
+    )
+  }
+})
+
 // Mock ACP SDK
 vi.mock('@agentclientprotocol/sdk', () => {
   return {
     PROTOCOL_VERSION: '1.0',
     ndJsonStream: vi.fn().mockReturnValue({}),
     ClientSideConnection: class MockClientSideConnection {
+      // Trigger client factory immediately to simulate early server updates.
+      constructor(createClient: () => unknown) {
+        createClient()
+      }
+
       initialize = vi.fn().mockImplementation(() => {
         if (testState.mockInitializeError) {
           return Promise.reject(testState.mockInitializeError)
@@ -99,6 +123,7 @@ describe('AgentProcessManager', () => {
     testState.mockStartError = null
     testState.mockInitializeError = null
     testState.mockNewSessionError = null
+    testState.mockAvailableCommands = []
 
     mockSessionStore = {
       initialize: vi.fn(),
@@ -149,6 +174,17 @@ describe('AgentProcessManager', () => {
 
       const session = manager.get('session-1')
       expect(session?.needsHistoryReplay).toBe(false)
+    })
+
+    it('should retain available commands emitted before session registration', async () => {
+      testState.mockAvailableCommands = [
+        { name: 'create_plan', description: 'Create a plan', input: null }
+      ]
+
+      await manager.start('session-1', mockAgentConfig, '/test/project')
+
+      const session = manager.get('session-1')
+      expect(session?.availableCommands).toEqual(testState.mockAvailableCommands)
     })
   })
 

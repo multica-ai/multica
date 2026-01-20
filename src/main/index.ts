@@ -76,11 +76,13 @@ app.whenReady().then(async () => {
   // Initialize conductor with event handlers
   conductor = new Conductor({
     events: {
-      onSessionUpdate: (params, sequenceNumber) => {
+      onSessionUpdate: (params, multicaSessionId, sequenceNumber) => {
         // Forward ALL session updates to renderer with sequence number for ordering
+        // Include multicaSessionId for stable filtering (avoids race condition with agentSessionId)
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE, {
-            sessionId: params.sessionId,
+            sessionId: params.sessionId, // ACP agent session ID
+            multicaSessionId, // Multica session ID (stable)
             sequenceNumber,
             update: params.update,
             done: false

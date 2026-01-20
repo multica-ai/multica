@@ -69,9 +69,12 @@ export interface AgentStartResult {
 
 /**
  * Session update callback signature
+ * @param update - The session notification from ACP
+ * @param multicaSessionId - The Multica session ID (stable, set before agent starts)
+ * @param sequenceNumber - Optional sequence number for ordering
  */
 export interface SessionUpdateCallback {
-  (update: SessionNotification, sequenceNumber?: number): void
+  (update: SessionNotification, multicaSessionId: string, sequenceNumber?: number): void
 }
 
 /**

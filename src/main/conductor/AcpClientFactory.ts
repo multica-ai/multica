@@ -15,7 +15,11 @@ import type { AvailableCommand } from '@agentclientprotocol/sdk/dist/schema/type
 import type { ISessionStore } from './types'
 
 export interface AcpClientCallbacks {
-  onSessionUpdate?: (update: SessionNotification, sequenceNumber?: number) => void
+  onSessionUpdate?: (
+    update: SessionNotification,
+    multicaSessionId: string,
+    sequenceNumber?: number
+  ) => void
   onPermissionRequest?: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>
   /** Called when server sends a mode update notification */
   onModeUpdate?: (modeId: SessionModeId) => void
@@ -94,9 +98,9 @@ export function createAcpClient(sessionId: string, options: AcpClientFactoryOpti
         }
       }
 
-      // Trigger UI callback with sequence number for ordering
+      // Trigger UI callback with Multica session ID and sequence number for ordering
       if (callbacks.onSessionUpdate) {
-        callbacks.onSessionUpdate(params, sequenceNumber)
+        callbacks.onSessionUpdate(params, sessionId, sequenceNumber)
       }
     },
 

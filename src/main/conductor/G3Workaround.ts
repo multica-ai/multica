@@ -93,7 +93,7 @@ export class G3Workaround implements IG3Workaround {
           sessionId,
           update: update.update
         } as SessionNotification,
-        undefined
+        sessionId // Pass Multica session ID for stable filtering
       )
     }
   }
