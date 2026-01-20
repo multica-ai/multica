@@ -12,6 +12,7 @@ import type {
   SessionModeState,
   SessionModelState
 } from '@agentclientprotocol/sdk'
+import type { AvailableCommand } from '@agentclientprotocol/sdk/dist/schema/types.gen'
 import type { AgentProcess } from './AgentProcess'
 import type {
   AgentConfig,
@@ -42,6 +43,8 @@ export interface SessionAgent {
   sessionModeState: SessionModeState | null
   /** Model state from ACP server (available models and current model) */
   sessionModelState: SessionModelState | null
+  /** Available slash commands from ACP server */
+  availableCommands: AvailableCommand[]
 }
 
 /**

@@ -14,6 +14,7 @@ import type { RunningSessionsStatus } from '../../../shared/electron-api'
 import type { MessageContent } from '../../../shared/types/message'
 import { usePermissionStore } from '../stores/permissionStore'
 import { useFileChangeStore } from '../stores/fileChangeStore'
+import { useCommandStore } from '../stores/commandStore'
 import { toast } from 'sonner'
 import { getErrorMessage } from '../utils/error'
 
@@ -145,6 +146,8 @@ export function useApp(): AppState & AppActions {
   useEffect(() => {
     // Get triggerRefresh from store for file change detection
     const triggerRefresh = useFileChangeStore.getState().triggerRefresh
+    // Get setAvailableCommands from store for command updates
+    const setAvailableCommands = useCommandStore.getState().setAvailableCommands
 
     const unsubMessage = window.electronAPI.onAgentMessage((message) => {
       // Only process messages for the current session
@@ -181,6 +184,16 @@ export function useApp(): AppState & AppActions {
           triggerRefresh()
           // Clean up the mapping
           toolKindMapRef.current.delete(toolCallId)
+        }
+      }
+
+      // Handle available_commands_update event: update slash commands store
+      if (update?.sessionUpdate === 'available_commands_update') {
+        const commandsUpdate = update as { availableCommands?: unknown[] }
+        if (commandsUpdate.availableCommands) {
+          setAvailableCommands(
+            commandsUpdate.availableCommands as Parameters<typeof setAvailableCommands>[0]
+          )
         }
       }
 
@@ -247,17 +260,20 @@ export function useApp(): AppState & AppActions {
   // Load mode/model state for current session (if agent supports it)
   const loadSessionModeModel = useCallback(async (sessionId: string) => {
     try {
-      const [modes, models] = await Promise.all([
+      const [modes, models, commands] = await Promise.all([
         window.electronAPI.getSessionModes(sessionId),
-        window.electronAPI.getSessionModels(sessionId)
+        window.electronAPI.getSessionModels(sessionId),
+        window.electronAPI.getSessionCommands(sessionId)
       ])
       setSessionModeState(modes)
       setSessionModelState(models)
+      useCommandStore.getState().setAvailableCommands(commands)
     } catch (err) {
       console.error('Failed to load session mode/model:', err)
       // Reset to null on error (agent may not support modes/models)
       setSessionModeState(null)
       setSessionModelState(null)
+      useCommandStore.getState().clearCommands()
     }
   }, [])
 
@@ -383,6 +399,7 @@ export function useApp(): AppState & AppActions {
     setSessionUpdates([])
     setSessionModeState(null)
     setSessionModelState(null)
+    useCommandStore.getState().clearCommands()
   }, [])
 
   const sendPrompt = useCallback(

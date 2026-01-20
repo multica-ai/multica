@@ -76,6 +76,13 @@ export class AgentProcessManager implements IAgentProcessManager {
               if (sessionAgent?.sessionModelState) {
                 sessionAgent.sessionModelState.currentModelId = modelId
               }
+            },
+            // Handle available commands updates
+            onAvailableCommandsUpdate: (commands) => {
+              const sessionAgent = this.sessions.get(sessionId)
+              if (sessionAgent) {
+                sessionAgent.availableCommands = commands
+              }
             }
           }
         }),
@@ -124,7 +131,8 @@ export class AgentProcessManager implements IAgentProcessManager {
       agentSessionId: acpResult.sessionId,
       needsHistoryReplay: isResumed, // True when resuming, agent needs conversation context
       sessionModeState,
-      sessionModelState
+      sessionModelState,
+      availableCommands: [] // Will be populated by available_commands_update
     }
     this.sessions.set(sessionId, sessionAgent)
 

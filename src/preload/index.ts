@@ -46,6 +46,10 @@ const electronAPI: ElectronAPI = {
   getSessionModels: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET_MODELS, sessionId),
 
+  // Slash commands
+  getSessionCommands: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET_COMMANDS, sessionId),
+
   setSessionMode: (sessionId: string, modeId: SessionModeId) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_SET_MODE, sessionId, modeId),
 

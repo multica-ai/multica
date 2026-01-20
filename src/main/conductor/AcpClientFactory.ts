@@ -11,6 +11,7 @@ import type {
   SessionModeId,
   ModelId
 } from '@agentclientprotocol/sdk'
+import type { AvailableCommand } from '@agentclientprotocol/sdk/dist/schema/types.gen'
 import type { SessionStore } from '../session/SessionStore'
 
 export interface AcpClientCallbacks {
@@ -20,6 +21,8 @@ export interface AcpClientCallbacks {
   onModeUpdate?: (modeId: SessionModeId) => void
   /** Called when server sends a model update notification */
   onModelUpdate?: (modelId: ModelId) => void
+  /** Called when server sends available commands update */
+  onAvailableCommandsUpdate?: (commands: AvailableCommand[]) => void
 }
 
 export interface AcpClientFactoryOptions {
@@ -67,6 +70,13 @@ export function createAcpClient(sessionId: string, options: AcpClientFactoryOpti
           const modeUpdate = update as { currentModeId?: SessionModeId }
           if (modeUpdate.currentModeId) {
             callbacks.onModeUpdate(modeUpdate.currentModeId)
+          }
+        }
+        // Handle available commands update notification
+        if (updateType === 'available_commands_update' && callbacks.onAvailableCommandsUpdate) {
+          const commandsUpdate = update as { availableCommands?: AvailableCommand[] }
+          if (commandsUpdate.availableCommands) {
+            callbacks.onAvailableCommandsUpdate(commandsUpdate.availableCommands)
           }
         }
       } else {

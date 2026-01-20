@@ -85,3 +85,6 @@ export * from './types/session'
 // Re-export mode/model types from ACP SDK for frontend use
 export * from './types/mode'
 export * from './types/model'
+
+// Re-export AvailableCommand type from ACP SDK
+export type { AvailableCommand } from '@agentclientprotocol/sdk/dist/schema/types.gen'

@@ -24,6 +24,7 @@ export const IPC_CHANNELS = {
   SESSION_GET_MODELS: 'session:get-models', // Get current session's available models
   SESSION_SET_MODE: 'session:set-mode', // Set session mode
   SESSION_SET_MODEL: 'session:set-model', // Set session model
+  SESSION_GET_COMMANDS: 'session:get-commands', // Get current session's available slash commands
 
   // Configuration
   CONFIG_GET: 'config:get',

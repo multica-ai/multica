@@ -211,6 +211,11 @@ export function registerIPCHandlers(conductor: Conductor): void {
     return sessionAgent?.sessionModelState ?? null
   })
 
+  ipcMain.handle(IPC_CHANNELS.SESSION_GET_COMMANDS, async (_event, sessionId: string) => {
+    const sessionAgent = conductor.getSessionAgent(sessionId)
+    return sessionAgent?.availableCommands ?? []
+  })
+
   ipcMain.handle(
     IPC_CHANNELS.SESSION_SET_MODE,
     async (_event, sessionId: string, modeId: SessionModeId) => {

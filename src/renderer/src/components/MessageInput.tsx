@@ -1,19 +1,22 @@
 /**
- * Message input component with image upload support
+ * Message input component with image upload and slash command support
  */
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ArrowUp, Square, Paperclip, X, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { AgentSelector } from './AgentSelector'
 import { ModeSelector } from './ModeSelector'
 import { ModelSelector } from './ModelSelector'
+import { SlashCommandMenu, parseSlashCommand, validateCommand } from './SlashCommandMenu'
+import { useCommandStore } from '../stores/commandStore'
 import type { MessageContent, ImageContentItem } from '../../../shared/types/message'
 import type {
   SessionModeState,
   SessionModelState,
   SessionModeId,
-  ModelId
+  ModelId,
+  AvailableCommand
 } from '../../../shared/types'
 
 interface MessageInputProps {
@@ -87,8 +90,38 @@ export function MessageInput({
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
   const [images, setImages] = useState<ImageContentItem[]>([])
+  const [showCommandMenu, setShowCommandMenu] = useState(false)
+  const [commandMenuIndex, setCommandMenuIndex] = useState(0)
+  const [commandError, setCommandError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputContainerRef = useRef<HTMLDivElement>(null)
+
+  // Get available commands from store
+  const availableCommands = useCommandStore((state) => state.availableCommands)
+
+  // Parse current slash command state
+  const parsedCommand = useMemo(() => parseSlashCommand(value), [value])
+  const commandFilter = parsedCommand?.command || ''
+  const isInCommandMode = parsedCommand !== null && parsedCommand.argument === undefined
+
+  // Update command menu visibility when typing
+  useEffect(() => {
+    if (isInCommandMode && availableCommands.length > 0) {
+      setShowCommandMenu(true)
+      setCommandMenuIndex(0)
+      setCommandError(null)
+    } else {
+      setShowCommandMenu(false)
+      // Validate command when not in autocomplete mode (has argument or space after command)
+      if (parsedCommand && parsedCommand.command && availableCommands.length > 0) {
+        const error = validateCommand(value, availableCommands)
+        setCommandError(error)
+      } else {
+        setCommandError(null)
+      }
+    }
+  }, [isInCommandMode, availableCommands, parsedCommand, value])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -192,10 +225,26 @@ export function MessageInput({
     setImages((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
+  // Handle slash command selection from menu
+  const handleCommandSelect = useCallback((command: AvailableCommand) => {
+    // Replace the current "/" text with the selected command
+    const hasInput = command.input
+    setValue(`/${command.name}${hasInput ? ' ' : ''}`)
+    setShowCommandMenu(false)
+    setCommandError(null)
+    // Focus back on textarea
+    textareaRef.current?.focus()
+  }, [])
+
   // Handle submit
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim()
     if ((!trimmed && images.length === 0) || disabled || isProcessing) return
+
+    // Check for command errors before sending
+    if (commandError) {
+      return
+    }
 
     // Build message content array
     const content: MessageContent = []
@@ -213,9 +262,14 @@ export function MessageInput({
     onSend(content)
     setValue('')
     setImages([])
-  }, [value, images, disabled, isProcessing, onSend])
+    setCommandError(null)
+  }, [value, images, disabled, isProcessing, onSend, commandError])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Don't handle Enter/Tab/arrows while command menu is open (SlashCommandMenu handles these)
+    if (showCommandMenu && ['Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'Escape'].includes(e.key)) {
+      return
+    }
     // Don't submit while IME is composing
     if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault()
@@ -223,7 +277,7 @@ export function MessageInput({
     }
   }
 
-  const canSubmit = !disabled && (value.trim().length > 0 || images.length > 0)
+  const canSubmit = !disabled && !commandError && (value.trim().length > 0 || images.length > 0)
   const hasFolder = !!workingDirectory
 
   // Don't render when no folder is selected
@@ -235,7 +289,18 @@ export function MessageInput({
   return (
     <div className="pb-2">
       {directoryExists === false && <DirectoryWarningBanner onDeleteSession={onDeleteSession} />}
-      <div>
+      <div ref={inputContainerRef} className="relative">
+        {/* Slash command autocomplete menu */}
+        <SlashCommandMenu
+          commands={availableCommands}
+          filter={commandFilter}
+          selectedIndex={commandMenuIndex}
+          onSelect={handleCommandSelect}
+          onIndexChange={setCommandMenuIndex}
+          onClose={() => setShowCommandMenu(false)}
+          visible={showCommandMenu}
+        />
+
         <div className="bg-card transition-colors duration-200 rounded-xl p-3 border border-border">
           {/* Image previews */}
           {images.length > 0 && (
@@ -275,6 +340,9 @@ export function MessageInput({
             rows={2}
             className="w-full resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
           />
+
+          {/* Command error message */}
+          {commandError && <div className="px-1 py-1 text-xs text-destructive">{commandError}</div>}
 
           {/* Hidden file input */}
           <input
