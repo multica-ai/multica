@@ -20,7 +20,7 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:mac": "electron-vite build && electron-builder --mac --arm64 --x64",
     "build:linux": "electron-vite build && electron-builder --linux",
     "cli": "tsx src/main/cli.ts",
     "test:acp": "tsx src/main/cli.ts prompt",

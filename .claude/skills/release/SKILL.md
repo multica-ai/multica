@@ -108,8 +108,11 @@ This will:
 - Build x64 (Intel) version
 - Automatically notarize with Apple (notarize: true in config)
 - Output files to `dist/` directory:
-  - `Multica-{version}-arm64.dmg`
-  - `Multica-{version}-x64.dmg`
+  - `Multica-{version}-arm64.dmg` and `.blockmap`
+  - `Multica-{version}-x64.dmg` and `.blockmap`
+  - `Multica-{version}-arm64-mac.zip` and `.blockmap`
+  - `Multica-{version}-x64-mac.zip` and `.blockmap`
+  - `latest-mac.yml` (auto-updater manifest)
 
 ### Step 6: Commit Version Change
 
@@ -165,15 +168,28 @@ Format example:
 
 ### Step 8: Create GitHub Release
 
-1. Create the release with generated notes:
+1. Create the release with generated notes and all build artifacts:
 
    ```bash
    gh release create v{version} \
      --title "v{version}" \
      --notes "{release_notes}" \
      dist/Multica-{version}-arm64.dmg \
-     dist/Multica-{version}-x64.dmg
+     dist/Multica-{version}-arm64.dmg.blockmap \
+     dist/Multica-{version}-x64.dmg \
+     dist/Multica-{version}-x64.dmg.blockmap \
+     dist/Multica-{version}-arm64-mac.zip \
+     dist/Multica-{version}-arm64-mac.zip.blockmap \
+     dist/Multica-{version}-x64-mac.zip \
+     dist/Multica-{version}-x64-mac.zip.blockmap \
+     dist/latest-mac.yml
    ```
+
+   The uploaded files include:
+   - **DMG files**: Primary installers for each architecture
+   - **ZIP files**: Alternative distribution format (required by auto-updater)
+   - **Blockmap files**: Enable incremental/delta updates
+   - **latest-mac.yml**: Manifest file for electron-updater to check for new versions
 
 2. Confirm the release was created successfully
 3. Provide the release URL to the user
