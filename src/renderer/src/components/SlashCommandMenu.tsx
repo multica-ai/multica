@@ -8,9 +8,6 @@ import { useEffect, useRef, useCallback } from 'react'
 import type { AvailableCommand } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 
-// Re-export utility functions for convenience
-export { parseSlashCommand, validateCommand } from '../utils/slashCommand'
-
 interface SlashCommandMenuProps {
   /** Available commands to display */
   commands: AvailableCommand[]
@@ -36,7 +33,7 @@ export function SlashCommandMenu({
   onIndexChange,
   onClose,
   visible
-}: SlashCommandMenuProps) {
+}: SlashCommandMenuProps): React.JSX.Element | null {
   const menuRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
 

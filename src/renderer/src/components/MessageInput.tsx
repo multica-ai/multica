@@ -8,7 +8,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { AgentSelector } from './AgentSelector'
 import { ModeSelector } from './ModeSelector'
 import { ModelSelector } from './ModelSelector'
-import { SlashCommandMenu, parseSlashCommand, validateCommand } from './SlashCommandMenu'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import { parseSlashCommand, validateCommand } from '../utils/slashCommand'
 import { useCommandStore } from '../stores/commandStore'
 import type { MessageContent, ImageContentItem } from '../../../shared/types/message'
 import type {
@@ -94,9 +95,8 @@ export function MessageInput({
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
   const [images, setImages] = useState<ImageContentItem[]>([])
-  const [showCommandMenu, setShowCommandMenu] = useState(false)
+  const [menuDismissed, setMenuDismissed] = useState(false)
   const [commandMenuIndex, setCommandMenuIndex] = useState(0)
-  const [commandError, setCommandError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
@@ -108,24 +108,12 @@ export function MessageInput({
   const parsedCommand = useMemo(() => parseSlashCommand(value), [value])
   const commandFilter = parsedCommand?.command || ''
   const isInCommandMode = parsedCommand !== null && parsedCommand.argument === undefined
-
-  // Update command menu visibility when typing
-  useEffect(() => {
-    if (isInCommandMode && availableCommands.length > 0) {
-      setShowCommandMenu(true)
-      setCommandMenuIndex(0)
-      setCommandError(null)
-    } else {
-      setShowCommandMenu(false)
-      // Validate command when not in autocomplete mode (has argument or space after command)
-      if (parsedCommand && parsedCommand.command && availableCommands.length > 0) {
-        const error = validateCommand(value, availableCommands)
-        setCommandError(error)
-      } else {
-        setCommandError(null)
-      }
-    }
-  }, [isInCommandMode, availableCommands, parsedCommand, value])
+  const showCommandMenu = isInCommandMode && availableCommands.length > 0 && !menuDismissed
+  const commandError = useMemo(() => {
+    if (!parsedCommand || !parsedCommand.command) return null
+    if (availableCommands.length === 0 || isInCommandMode) return null
+    return validateCommand(value, availableCommands)
+  }, [parsedCommand, availableCommands, isInCommandMode, value])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -234,8 +222,7 @@ export function MessageInput({
     // Replace the current "/" text with the selected command
     const hasInput = command.input
     setValue(`/${command.name}${hasInput ? ' ' : ''}`)
-    setShowCommandMenu(false)
-    setCommandError(null)
+    setMenuDismissed(true)
     // Focus back on textarea
     textareaRef.current?.focus()
   }, [])
@@ -266,7 +253,6 @@ export function MessageInput({
     onSend(content)
     setValue('')
     setImages([])
-    setCommandError(null)
   }, [value, images, disabled, isProcessing, onSend, commandError])
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -301,7 +287,7 @@ export function MessageInput({
           selectedIndex={commandMenuIndex}
           onSelect={handleCommandSelect}
           onIndexChange={setCommandMenuIndex}
-          onClose={() => setShowCommandMenu(false)}
+          onClose={() => setMenuDismissed(true)}
           visible={showCommandMenu}
         />
 
@@ -334,7 +320,18 @@ export function MessageInput({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              const nextValue = e.target.value
+              if (menuDismissed) {
+                setMenuDismissed(false)
+              }
+              const nextParsed = parseSlashCommand(nextValue)
+              const nextIsCommandMode = nextParsed !== null && nextParsed.argument === undefined
+              if (nextIsCommandMode && availableCommands.length > 0) {
+                setCommandMenuIndex(0)
+              }
+              setValue(nextValue)
+            }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onCompositionStart={() => setIsComposing(true)}
