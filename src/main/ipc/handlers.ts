@@ -403,7 +403,7 @@ export function registerIPCHandlers(conductor: Conductor): void {
 
       try {
         // Helper to get directory for terminal apps
-        const getDir = (p: string) => (fs.statSync(p).isDirectory() ? p : path.dirname(p))
+        const getDir = (p: string): string => (fs.statSync(p).isDirectory() ? p : path.dirname(p))
 
         switch (appId) {
           case 'finder':

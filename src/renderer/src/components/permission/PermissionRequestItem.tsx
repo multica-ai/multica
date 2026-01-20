@@ -11,7 +11,7 @@ import { AskUserQuestionUI, CompletedAnswer } from './AskUserQuestion'
 import { StandardPermissionUI } from './StandardPermissionUI'
 import type { PermissionRequestItemProps, AskUserQuestionInput } from './types'
 
-export function PermissionRequestItem({ request }: PermissionRequestItemProps) {
+export function PermissionRequestItem({ request }: PermissionRequestItemProps): React.JSX.Element {
   const currentRequest = usePermissionStore((s) => s.pendingRequests[0] ?? null)
   const currentQuestionIndex = usePermissionStore((s) => s.currentQuestionIndex)
   const getRespondedRequest = usePermissionStore((s) => s.getRespondedRequest)

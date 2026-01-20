@@ -19,7 +19,11 @@ interface ModelSelectorProps {
   disabled?: boolean
 }
 
-export function ModelSelector({ modelState, onModelChange, disabled = false }: ModelSelectorProps) {
+export function ModelSelector({
+  modelState,
+  onModelChange,
+  disabled = false
+}: ModelSelectorProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
 
   // Don't render if no model state (agent doesn't support model selection)
@@ -32,7 +36,7 @@ export function ModelSelector({ modelState, onModelChange, disabled = false }: M
   )
   const currentModelName = currentModel?.name || modelState.currentModelId
 
-  function handleSelect(modelId: ModelId) {
+  function handleSelect(modelId: ModelId): void {
     if (modelId !== modelState?.currentModelId) {
       onModelChange(modelId)
     }

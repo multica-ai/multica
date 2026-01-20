@@ -45,6 +45,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-log": "^5.4.3",
     "electron-updater": "^6.7.3",
     "fix-path": "^5.0.0",
     "lucide-react": "^0.562.0",

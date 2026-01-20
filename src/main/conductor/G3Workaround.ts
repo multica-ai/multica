@@ -84,7 +84,7 @@ export class G3Workaround implements IG3Workaround {
     }
 
     console.log(`[G3Workaround] Storing AskUserQuestion response for toolCallId=${toolCallId}`)
-    await this.sessionStore.appendUpdate(sessionId, update as any)
+    await this.sessionStore.appendUpdate(sessionId, update as unknown as SessionNotification)
 
     // Also notify frontend so it appears in sessionUpdates immediately
     if (this.events.onSessionUpdate) {

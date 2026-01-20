@@ -10,10 +10,10 @@ export function CustomInput({
   onChange,
   onSubmit,
   isMultiSelect = false
-}: CustomInputProps) {
+}: CustomInputProps): React.JSX.Element {
   // In multi-select mode, the Send button is hidden
   // User should use the Submit button in QuestionOptions instead
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !isMultiSelect) {
       onSubmit()
     }

@@ -20,7 +20,7 @@ export function AskUserQuestionUI({
   request,
   questions,
   currentQuestionIndex
-}: AskUserQuestionUIProps) {
+}: AskUserQuestionUIProps): React.JSX.Element | null {
   const respondToRequest = usePermissionStore((s) => s.respondToRequest)
   const answerCurrentQuestion = usePermissionStore((s) => s.answerCurrentQuestion)
   const [customInput, setCustomInput] = useState('')
@@ -42,13 +42,16 @@ export function AskUserQuestionUI({
   const hasOtherSelected = selectedOptions.some(isOtherOption)
 
   // Reset local state when question changes (for multi-question flow)
+  // This is an intentional pattern to reset form state when navigating between questions
+  /* eslint-disable react-hooks/set-state-in-effect -- Intentional reset on question change */
   useEffect(() => {
     setCustomInput('')
     setSelectedOptions([])
   }, [currentQuestionIndex])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Handle custom input submission
-  const handleCustomSubmit = () => {
+  const handleCustomSubmit = (): void => {
     if (customInput.trim()) {
       if (questions.length > 0) {
         answerCurrentQuestion(customInput.trim(), true)
@@ -59,14 +62,14 @@ export function AskUserQuestionUI({
   }
 
   // Toggle option selection for multi-select mode
-  const toggleOption = (label: string) => {
+  const toggleOption = (label: string): void => {
     setSelectedOptions((prev) =>
       prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label]
     )
   }
 
   // Submit multi-select selections (including custom input)
-  const handleMultiSelectSubmit = () => {
+  const handleMultiSelectSubmit = (): void => {
     // Build final options list
     let finalOptions = [...selectedOptions]
 
@@ -90,7 +93,7 @@ export function AskUserQuestionUI({
   }
 
   // Handle single option click
-  const handleOptionClick = (optionLabel: string) => {
+  const handleOptionClick = (optionLabel: string): void => {
     if (isMultiSelect) {
       toggleOption(optionLabel)
     } else {

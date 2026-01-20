@@ -23,15 +23,15 @@ export function UpdateNotification(): React.JSX.Element | null {
     return () => unsubscribe()
   }, [])
 
-  const handleDownload = async () => {
+  const handleDownload = async (): Promise<void> => {
     await window.electronAPI.downloadUpdate()
   }
 
-  const handleInstall = () => {
+  const handleInstall = (): void => {
     window.electronAPI.installUpdate()
   }
 
-  const handleDismiss = () => {
+  const handleDismiss = (): void => {
     setDismissed(true)
   }
 

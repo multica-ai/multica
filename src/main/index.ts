@@ -4,6 +4,10 @@ import fixPath from 'fix-path'
 // GUI apps don't inherit PATH from shell dotfiles (.zshrc, .bashrc, etc.)
 fixPath()
 
+import log from './logger'
+
+log.info('Multica starting...')
+
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'

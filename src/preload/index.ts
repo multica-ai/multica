@@ -72,10 +72,13 @@ const electronAPI: ElectronAPI = {
   installAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_INSTALL, agentId),
 
   onInstallProgress: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, progress: unknown) =>
+    const listener = (_event: Electron.IpcRendererEvent, progress: unknown): void => {
       callback(progress as Parameters<typeof callback>[0])
+    }
     ipcRenderer.on(IPC_CHANNELS.AGENT_INSTALL_PROGRESS, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_INSTALL_PROGRESS, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AGENT_INSTALL_PROGRESS, listener)
+    }
   },
 
   // File tree
@@ -85,30 +88,43 @@ const electronAPI: ElectronAPI = {
 
   // Event listeners
   onAgentMessage: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, message: unknown) =>
+    const listener = (_event: Electron.IpcRendererEvent, message: unknown): void => {
       callback(message as Parameters<typeof callback>[0])
+    }
     ipcRenderer.on(IPC_CHANNELS.AGENT_MESSAGE, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_MESSAGE, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AGENT_MESSAGE, listener)
+    }
   },
 
   onAgentStatus: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, status: unknown) =>
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {
       callback(status as Parameters<typeof callback>[0])
+    }
     ipcRenderer.on(IPC_CHANNELS.AGENT_STATUS, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_STATUS, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AGENT_STATUS, listener)
+    }
   },
 
   onAgentError: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, error: unknown) => callback(error as Error)
+    const listener = (_event: Electron.IpcRendererEvent, error: unknown): void => {
+      callback(error as Error)
+    }
     ipcRenderer.on(IPC_CHANNELS.AGENT_ERROR, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_ERROR, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AGENT_ERROR, listener)
+    }
   },
 
   onPermissionRequest: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, request: unknown) =>
+    const listener = (_event: Electron.IpcRendererEvent, request: unknown): void => {
       callback(request as Parameters<typeof callback>[0])
+    }
     ipcRenderer.on(IPC_CHANNELS.PERMISSION_REQUEST, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.PERMISSION_REQUEST, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PERMISSION_REQUEST, listener)
+    }
   },
 
   respondToPermission: (response) => {
@@ -116,10 +132,13 @@ const electronAPI: ElectronAPI = {
   },
 
   onSessionMetaUpdated: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, session: unknown) =>
+    const listener = (_event: Electron.IpcRendererEvent, session: unknown): void => {
       callback(session as Parameters<typeof callback>[0])
+    }
     ipcRenderer.on(IPC_CHANNELS.SESSION_META_UPDATED, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.SESSION_META_UPDATED, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.SESSION_META_UPDATED, listener)
+    }
   },
 
   // Terminal
@@ -127,9 +146,13 @@ const electronAPI: ElectronAPI = {
 
   // App lifecycle
   onAppFocus: (callback: () => void) => {
-    const listener = () => callback()
+    const listener = (): void => {
+      callback()
+    }
     ipcRenderer.on(IPC_CHANNELS.APP_FOCUS, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_FOCUS, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.APP_FOCUS, listener)
+    }
   },
 
   // Auto-update
@@ -138,10 +161,13 @@ const electronAPI: ElectronAPI = {
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_INSTALL),
 
   onUpdateStatus: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, status: unknown) =>
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {
       callback(status as Parameters<typeof callback>[0])
+    }
     ipcRenderer.on(IPC_CHANNELS.UPDATE_STATUS, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_STATUS, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_STATUS, listener)
+    }
   }
 }
 

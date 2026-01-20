@@ -12,7 +12,7 @@ import type {
   ModelId
 } from '@agentclientprotocol/sdk'
 import type { AvailableCommand } from '@agentclientprotocol/sdk/dist/schema/types.gen'
-import type { SessionStore } from '../session/SessionStore'
+import type { ISessionStore } from './types'
 
 export interface AcpClientCallbacks {
   onSessionUpdate?: (update: SessionNotification, sequenceNumber?: number) => void
@@ -26,7 +26,7 @@ export interface AcpClientCallbacks {
 }
 
 export interface AcpClientFactoryOptions {
-  sessionStore: SessionStore | null
+  sessionStore: ISessionStore | null
   callbacks: AcpClientCallbacks
 }
 

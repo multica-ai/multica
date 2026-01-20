@@ -27,7 +27,7 @@ function ToggleGroup({
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Root> &
   VariantProps<typeof toggleVariants> & {
     spacing?: number
-  }) {
+  }): React.JSX.Element {
   return (
     <ToggleGroupPrimitive.Root
       data-slot="toggle-group"
@@ -54,7 +54,8 @@ function ToggleGroupItem({
   variant,
   size,
   ...props
-}: React.ComponentProps<typeof ToggleGroupPrimitive.Item> & VariantProps<typeof toggleVariants>) {
+}: React.ComponentProps<typeof ToggleGroupPrimitive.Item> &
+  VariantProps<typeof toggleVariants>): React.JSX.Element {
   const context = React.useContext(ToggleGroupContext)
 
   return (

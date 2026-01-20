@@ -99,6 +99,7 @@ export function useChatScroll({
 
       // Reset to "at bottom" state - onContentUpdate will scroll when content arrives
       isAtBottomRef.current = true
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: need to reset UI state on session change
       setIsAtBottom(true)
     }
   }, [sessionId, cleanup])

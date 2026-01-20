@@ -5,7 +5,10 @@ import { usePermissionStore } from '../../stores/permissionStore'
 import { Button } from '@/components/ui/button'
 import type { StandardPermissionUIProps } from './types'
 
-export function StandardPermissionUI({ request, isPending }: StandardPermissionUIProps) {
+export function StandardPermissionUI({
+  request,
+  isPending
+}: StandardPermissionUIProps): React.JSX.Element {
   const respondToRequest = usePermissionStore((s) => s.respondToRequest)
   const { toolCall, options } = request
 

@@ -8,7 +8,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
 
-const Toaster = ({ ...props }: ToasterProps) => {
+const Toaster = ({ ...props }: ToasterProps): React.JSX.Element => {
   const { resolvedTheme } = useTheme()
 
   return (

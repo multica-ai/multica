@@ -10,7 +10,7 @@ export function CompletedAnswer({
   selectedOptions,
   customText,
   firstQuestionHeader
-}: CompletedAnswerProps) {
+}: CompletedAnswerProps): React.JSX.Element {
   // Multi-question: simply show "Answered"
   if (answers && answers.length > 1) {
     return (
