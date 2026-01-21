@@ -15,7 +15,7 @@ import { RightPanel, RightPanelHeader, RightPanelContent } from './components/la
 import { FileTree } from './components/FileTree'
 import { Toaster } from '@/components/ui/sonner'
 import { useChatScroll } from './hooks/useChatScroll'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 function AppContent(): React.JSX.Element {
@@ -46,6 +46,8 @@ function AppContent(): React.JSX.Element {
   // UI state
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen)
+  const showHiddenFiles = useUIStore((s) => s.showHiddenFiles)
+  const toggleShowHiddenFiles = useUIStore((s) => s.toggleShowHiddenFiles)
 
   // Permission state - get the session ID that has a pending permission request
   const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
@@ -218,14 +220,31 @@ function AppContent(): React.JSX.Element {
 
         {/* Right panel - file tree */}
         <RightPanel>
-          <RightPanelHeader>
+          <RightPanelHeader className="justify-between">
             <span className="text-sm font-medium">All files</span>
+            <button
+              onClick={toggleShowHiddenFiles}
+              className={cn(
+                'p-1 rounded hover:bg-accent transition-colors',
+                showHiddenFiles ? 'text-foreground' : 'text-muted-foreground'
+              )}
+              title={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
+              aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
+              aria-pressed={showHiddenFiles}
+            >
+              {showHiddenFiles ? (
+                <Eye className="h-3.5 w-3.5" />
+              ) : (
+                <EyeOff className="h-3.5 w-3.5" />
+              )}
+            </button>
           </RightPanelHeader>
           <RightPanelContent className="p-0">
             {currentSession ? (
               <FileTree
                 rootPath={currentSession.workingDirectory}
                 directoryExists={currentSession.directoryExists}
+                onCreateSession={handleCreateSession}
               />
             ) : (
               <div className="flex h-full items-center justify-center text-muted-foreground p-4">
