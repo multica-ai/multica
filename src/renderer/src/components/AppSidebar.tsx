@@ -70,18 +70,27 @@ function SessionItem({
   onDelete
 }: SessionItemProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false)
+  // Suppress tooltip briefly after clicking to prevent it from popping up immediately
+  const [suppressTooltip, setSuppressTooltip] = useState(false)
   const isInvalid = session.directoryExists === false
+
+  const handleSelect = (): void => {
+    // Suppress tooltip for 300ms after clicking
+    setSuppressTooltip(true)
+    setTimeout(() => setSuppressTooltip(false), 300)
+    onSelect()
+  }
 
   return (
     <SidebarMenuItem
       onMouseEnter={(): void => setIsHovered(true)}
       onMouseLeave={(): void => setIsHovered(false)}
     >
-      <Tooltip delayDuration={600} open={isActive ? false : undefined}>
+      <Tooltip delayDuration={600} open={suppressTooltip ? false : undefined}>
         <TooltipTrigger asChild>
           <SidebarMenuButton
             isActive={isActive}
-            onClick={onSelect}
+            onClick={handleSelect}
             className={cn(
               'h-auto py-2 transition-colors duration-150',
               'hover:bg-sidebar-accent/50',

@@ -12,6 +12,8 @@ import { ToolCallItem, type ToolCall, type AnsweredResponse } from './ToolCallIt
 import { PermissionRequestItem } from './permission'
 import { usePermissionStore } from '../stores/permissionStore'
 import { cn } from '@/lib/utils'
+import { MessageTimer, StatusIndicator, Spinner, type CurrentAction } from './ui/LoadingIndicator'
+import { CompletedMessageFooter } from './ui/CompletedMessageFooter'
 
 // Hoisted ReactMarkdown components for better performance (avoids object recreation on each render)
 const TEXT_MARKDOWN_COMPONENTS = {
@@ -126,6 +128,10 @@ interface ChatViewProps {
   onSelectFolder?: () => void
   /** Ref for bottom anchor - passed from parent for scroll management */
   bottomRef?: React.RefObject<HTMLDivElement | null>
+  /** Current model name for tooltip display */
+  currentModelName?: string
+  /** Current agent ID (claude-code, opencode, codex) */
+  currentAgentId?: string
 }
 
 export function ChatView({
@@ -135,7 +141,9 @@ export function ChatView({
   isInitializing,
   currentSessionId,
   onSelectFolder,
-  bottomRef
+  bottomRef,
+  currentModelName,
+  currentAgentId
 }: ChatViewProps): React.JSX.Element {
   const pendingPermission = usePermissionStore((s) => s.pendingRequests[0] ?? null)
 
@@ -175,6 +183,16 @@ export function ChatView({
     )
   }
 
+  // Get agent display name for tooltip
+  const agentDisplayName = currentAgentId
+    ? AGENT_DISPLAY_NAMES[currentAgentId] || currentAgentId
+    : undefined
+
+  // Determine if we need a standalone processing indicator
+  // Shown when isProcessing=true and the last message is a user message (no assistant response yet)
+  const showStandaloneProcessing =
+    isProcessing && (messages.length === 0 || messages[messages.length - 1].role === 'user')
+
   return (
     <div className="space-y-5 py-5">
       {messages.map((msg, idx) => (
@@ -183,18 +201,17 @@ export function ChatView({
           message={msg}
           isLastMessage={idx === messages.length - 1}
           isProcessing={isProcessing}
+          modelName={currentModelName}
+          agentName={agentDisplayName}
+          currentAction={msg.currentAction}
         />
       ))}
 
+      {/* Standalone processing indicator - shown when processing but no assistant content yet */}
+      {showStandaloneProcessing && <StatusIndicator label="Preparing..." />}
+
       {/* Permission request - show in feed (only for current session) */}
       {currentPermission && <PermissionRequestItem request={currentPermission} />}
-
-      {isProcessing && !currentPermission && (
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <LoadingDots />
-          <span className="text-sm">Agent is thinking...</span>
-        </div>
-      )}
 
       {/* Bottom anchor for scroll */}
       <div ref={bottomRef} />
@@ -249,6 +266,11 @@ type ContentBlock = TextBlock | ImageBlock | ThoughtBlock | ToolCallBlock | Plan
 interface Message {
   role: 'user' | 'assistant'
   blocks: ContentBlock[]
+  // Time tracking for assistant messages
+  startTime?: string // ISO 8601, first event timestamp
+  endTime?: string // ISO 8601, last event timestamp
+  // Current action for dynamic status label (only meaningful for last message during processing)
+  currentAction?: CurrentAction
 }
 
 function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
@@ -272,6 +294,11 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
   // Track accumulated text and thought for merging consecutive chunks
   let pendingText = ''
   let pendingThought = ''
+  // Track time for assistant messages
+  let assistantStartTime: string | undefined
+  let assistantEndTime: string | undefined
+  // Track current action for dynamic status label
+  let currentAction: CurrentAction | undefined
 
   const flushPendingText = (): void => {
     if (pendingText) {
@@ -293,11 +320,18 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
     if (currentBlocks.length > 0) {
       messages.push({
         role: 'assistant',
-        blocks: currentBlocks
+        blocks: currentBlocks,
+        startTime: assistantStartTime,
+        endTime: assistantEndTime,
+        currentAction
       })
       currentBlocks = []
       toolCallMap.clear()
       addedToolCallIds.clear()
+      // Reset tracking for next message
+      assistantStartTime = undefined
+      assistantEndTime = undefined
+      currentAction = undefined
     }
   }
 
@@ -365,6 +399,13 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
         break
 
       case 'agent_thought_chunk':
+        // Track time - first agent event sets start time
+        if (!assistantStartTime) {
+          assistantStartTime = stored.timestamp
+        }
+        assistantEndTime = stored.timestamp
+        // Track current action for status label
+        currentAction = { type: 'thinking' }
         // Accumulate thought chunks
         if ('content' in update && update.content?.type === 'text') {
           pendingThought += update.content.text
@@ -372,6 +413,13 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
         break
 
       case 'agent_message_chunk':
+        // Track time - first agent event sets start time
+        if (!assistantStartTime) {
+          assistantStartTime = stored.timestamp
+        }
+        assistantEndTime = stored.timestamp
+        // Track current action for status label
+        currentAction = { type: 'writing' }
         // Flush thought before text (thought usually comes first)
         flushPendingThought()
         // Accumulate text chunks
@@ -381,9 +429,20 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
         break
 
       case 'tool_call':
+        // Track time
+        if (!assistantStartTime) {
+          assistantStartTime = stored.timestamp
+        }
+        assistantEndTime = stored.timestamp
         if ('toolCallId' in update) {
           // Extract _meta.claudeCode.toolName (most reliable tool name source)
           const meta = update._meta as { claudeCode?: { toolName?: string } } | undefined
+          // Track current action for status label
+          currentAction = {
+            type: 'tool',
+            toolName: meta?.claudeCode?.toolName || update.title || undefined,
+            toolStatus: update.status || undefined
+          }
 
           // Check if toolCall already exists
           let toolCall = toolCallMap.get(update.toolCallId)
@@ -442,9 +501,17 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
         break
 
       case 'tool_call_update':
+        // Track time
+        assistantEndTime = stored.timestamp
         if ('toolCallId' in update) {
           // Extract _meta.claudeCode.toolName
           const updateMeta = update._meta as { claudeCode?: { toolName?: string } } | undefined
+          // Track current action for status label
+          currentAction = {
+            type: 'tool',
+            toolName: updateMeta?.claudeCode?.toolName || update.title || undefined,
+            toolStatus: update.status || undefined
+          }
 
           // Get or create the tool call entry
           let toolCall = toolCallMap.get(update.toolCallId)
@@ -579,12 +646,18 @@ interface MessageBubbleProps {
   message: Message
   isLastMessage: boolean
   isProcessing: boolean
+  modelName?: string
+  agentName?: string
+  currentAction?: CurrentAction
 }
 
 function MessageBubble({
   message,
   isLastMessage,
-  isProcessing
+  isProcessing,
+  modelName,
+  agentName,
+  currentAction
 }: MessageBubbleProps): React.JSX.Element {
   const isUser = message.role === 'user'
   const isComplete = !isLastMessage || !isProcessing
@@ -618,7 +691,18 @@ function MessageBubble({
   }
 
   // Assistant message - use collapsible wrapper for completed messages
-  return <CollapsibleAssistantMessage blocks={message.blocks} isComplete={isComplete} />
+  return (
+    <CollapsibleAssistantMessage
+      blocks={message.blocks}
+      isComplete={isComplete}
+      startTime={message.startTime}
+      endTime={message.endTime}
+      isProcessing={isLastMessage && isProcessing}
+      modelName={modelName}
+      agentName={agentName}
+      currentAction={currentAction}
+    />
+  )
 }
 
 // Render a single content block
@@ -661,10 +745,22 @@ function renderContentBlock(block: ContentBlock, idx: number): React.JSX.Element
 // Collapse range: from first tool/thought to last tool/thought (inclusive), with all content in between
 function CollapsibleAssistantMessage({
   blocks,
-  isComplete
+  isComplete,
+  startTime,
+  endTime,
+  isProcessing,
+  modelName,
+  agentName,
+  currentAction
 }: {
   blocks: ContentBlock[]
   isComplete: boolean
+  startTime?: string
+  endTime?: string
+  isProcessing?: boolean
+  modelName?: string
+  agentName?: string
+  currentAction?: CurrentAction
 }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false)
 
@@ -675,10 +771,43 @@ function CollapsibleAssistantMessage({
   // Collapse condition: tool + thought >= 2
   const shouldCollapse = isComplete && toolCallCount + thoughtCount >= 2
 
+  // Calculate duration for completed state
+  const durationMs =
+    startTime && endTime ? new Date(endTime).getTime() - new Date(startTime).getTime() : 0
+
+  // Extract text content for copying (only text blocks, skip thoughts/tools)
+  const textContent = blocks
+    .filter((b): b is TextBlock => b.type === 'text')
+    .map((b) => b.content)
+    .join('\n\n')
+
   // Not collapsible - render all blocks normally
   if (!shouldCollapse) {
     return (
-      <div className="space-y-3">{blocks.map((block, idx) => renderContentBlock(block, idx))}</div>
+      <div className="space-y-3">
+        {blocks.map((block, idx) => renderContentBlock(block, idx))}
+        {/* Processing: show spinner + time + label */}
+        {isProcessing && (
+          <MessageTimer
+            startTime={startTime}
+            endTime={endTime}
+            isProcessing={true}
+            modelName={modelName}
+            agentName={agentName}
+            currentAction={currentAction}
+          />
+        )}
+        {/* Completed: show duration + copy button */}
+        {isComplete && (
+          <CompletedMessageFooter
+            durationMs={durationMs}
+            startTime={startTime}
+            content={textContent}
+            modelName={modelName}
+            agentName={agentName}
+          />
+        )}
+      </div>
     )
   }
 
@@ -746,6 +875,17 @@ function CollapsibleAssistantMessage({
       {afterBlocks.map((block, idx) =>
         renderContentBlock(block, firstCollapsibleIdx + collapsedBlocks.length + idx)
       )}
+
+      {/* Completed: show duration + copy button */}
+      {isComplete && (
+        <CompletedMessageFooter
+          durationMs={durationMs}
+          startTime={startTime}
+          content={textContent}
+          modelName={modelName}
+          agentName={agentName}
+        />
+      )}
     </div>
   )
 }
@@ -809,35 +949,12 @@ function ThoughtBlockView({ text }: { text: string }): React.JSX.Element | null 
   )
 }
 
-function LoadingDots(): React.JSX.Element {
-  return (
-    <span className="inline-flex gap-1">
-      <span
-        className="h-1.5 w-1.5 animate-bounce rounded-full bg-current"
-        style={{ animationDelay: '0ms' }}
-      />
-      <span
-        className="h-1.5 w-1.5 animate-bounce rounded-full bg-current"
-        style={{ animationDelay: '150ms' }}
-      />
-      <span
-        className="h-1.5 w-1.5 animate-bounce rounded-full bg-current"
-        style={{ animationDelay: '300ms' }}
-      />
-    </span>
-  )
-}
-
 function SessionInitializing(): React.JSX.Element {
   return (
     <div className="flex flex-1 items-center justify-center">
-      <div className="flex flex-col items-center gap-6">
-        {/* Shimmer progress bar */}
-        <div className="relative h-1 w-48 overflow-hidden rounded-full bg-muted">
-          <div className="absolute inset-0 h-full w-1/2 rounded-full bg-gradient-to-r from-transparent via-primary/60 to-transparent animate-shimmer" />
-        </div>
-        {/* Text */}
-        <p className="text-sm text-muted-foreground">Initializing agent...</p>
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Spinner className="text-sm" />
+        <span className="text-sm">Starting agent...</span>
       </div>
     </div>
   )

@@ -96,6 +96,13 @@ export class AgentProcessManager implements IAgentProcessManager {
                 `[AgentProcessManager] Caching available commands for session ${sessionId} (${commands.length})`
               )
               this.pendingAvailableCommands.set(sessionId, commands)
+            },
+            // Track pending updates for completion detection
+            onUpdateStarted: (promise) => {
+              const sessionAgent = this.sessions.get(sessionId)
+              if (sessionAgent) {
+                sessionAgent.pendingUpdates.push(promise)
+              }
             }
           }
         }),
@@ -146,7 +153,8 @@ export class AgentProcessManager implements IAgentProcessManager {
       needsHistoryReplay: isResumed, // True when resuming, agent needs conversation context
       sessionModeState,
       sessionModelState,
-      availableCommands: [] // Will be populated by available_commands_update
+      availableCommands: [], // Will be populated by available_commands_update
+      pendingUpdates: [] // Track pending sessionUpdate promises for completion detection
     }
     this.sessions.set(sessionId, sessionAgent)
 

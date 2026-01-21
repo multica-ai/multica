@@ -167,6 +167,12 @@ function AppContent(): React.JSX.Element {
                   currentSessionId={currentSession?.id ?? null}
                   onSelectFolder={handleSelectFolder}
                   bottomRef={bottomRef}
+                  currentModelName={
+                    sessionModelState?.availableModels.find(
+                      (m) => m.modelId === sessionModelState?.currentModelId
+                    )?.name
+                  }
+                  currentAgentId={currentSession?.agentId}
                 />
               </div>
             </div>
