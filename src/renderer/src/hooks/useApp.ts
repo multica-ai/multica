@@ -18,11 +18,6 @@ import { useCommandStore } from '../stores/commandStore'
 import { toast } from 'sonner'
 import { getErrorMessage } from '../utils/error'
 
-// ACP standard tool kinds that modify files (used for Codex and other agents)
-const FILE_MODIFYING_KINDS = new Set(['edit', 'write', 'delete', 'execute'])
-// Actual tool names from _meta.claudeCode.toolName (used for Claude Code)
-const FILE_MODIFYING_TOOL_NAMES = new Set(['write', 'edit', 'bash', 'notebookedit'])
-
 // Auth commands for each agent
 const AGENT_AUTH_COMMANDS: Record<string, string> = {
   'claude-code': 'claude login',
@@ -80,10 +75,6 @@ export interface AppActions {
 }
 
 export function useApp(): AppState & AppActions {
-  // Store toolCallId -> kind mapping for file tree refresh
-  // This is needed because tool_call_update events don't include kind
-  const toolKindMapRef = useRef<Map<string, string>>(new Map())
-
   // Track pending session selection to handle rapid switching
   const pendingSessionRef = useRef<string | null>(null)
 
@@ -111,7 +102,7 @@ export function useApp(): AppState & AppActions {
     ? runningSessionsStatus.processingSessionIds.includes(currentSession.id)
     : false
 
-  // Note: File tree refresh is triggered by tool completion (see onAgentMessage handler below)
+  // Note: File tree refresh is handled by file system watcher (see fs:file-changed handler below)
   // No need for periodic refresh - it causes performance issues
 
   // Load sessions on mount
@@ -152,12 +143,53 @@ export function useApp(): AppState & AppActions {
     }
   }, [currentSessionId])
 
+  // Subscribe to file system change events (runs once on mount)
+  useEffect(() => {
+    const handleFileChange = useFileChangeStore.getState().handleFileChange
+
+    const unsubFileChange = window.electronAPI.onFileChanged((event) => {
+      // Notify the store of file changes for each affected session
+      for (const sessionId of event.sessionIds) {
+        handleFileChange(sessionId)
+      }
+    })
+
+    return () => {
+      unsubFileChange()
+    }
+  }, [])
+
+  // Start/stop file watching when current session changes
+  useEffect(() => {
+    const setWatchedSession = useFileChangeStore.getState().setWatchedSession
+
+    if (currentSession) {
+      // Start watching the session's working directory
+      setWatchedSession(currentSession.id)
+      window.electronAPI
+        .startFileWatch(currentSession.id, currentSession.workingDirectory)
+        .catch((err) => {
+          console.error('[useApp] Failed to start file watch:', err)
+        })
+    } else {
+      setWatchedSession(null)
+    }
+
+    // Cleanup: stop watching when session changes or component unmounts
+    return () => {
+      if (currentSession) {
+        window.electronAPI.stopFileWatch(currentSession.id).catch((err) => {
+          console.error('[useApp] Failed to stop file watch:', err)
+        })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only re-run when id or workingDirectory changes
+  }, [currentSession?.id, currentSession?.workingDirectory])
+
   // Subscribe to agent events (persistent subscription - only runs once on mount)
   // Uses refs to access current session ID, avoiding race condition where subscription
   // is being recreated while events are arriving
   useEffect(() => {
-    // Get triggerRefresh from store for file change detection
-    const triggerRefresh = useFileChangeStore.getState().triggerRefresh
     // Get setAvailableCommands from store for command updates
     const setAvailableCommands = useCommandStore.getState().setAvailableCommands
 
@@ -170,36 +202,7 @@ export function useApp(): AppState & AppActions {
         return
       }
 
-      // Check for file-modifying tool completion to trigger FileTree refresh
       const update = message.update
-      const status = update?.status?.toLowerCase() || ''
-      const toolCallId = update?.toolCallId
-
-      // Get tool name from _meta.claudeCode.toolName (Claude Code specific)
-      const meta = update?._meta as { claudeCode?: { toolName?: string } } | undefined
-      const toolName = meta?.claudeCode?.toolName?.toLowerCase() || ''
-
-      // Handle tool_call event: store toolCallId -> kind mapping
-      // This is needed because tool_call_update events don't include kind (for Codex etc.)
-      if (update?.sessionUpdate === 'tool_call' && toolCallId && update?.kind) {
-        const kind = update.kind.toLowerCase()
-        toolKindMapRef.current.set(toolCallId, kind)
-      }
-
-      // Handle tool_call_update event: check if we should trigger refresh
-      if (update?.sessionUpdate === 'tool_call_update' && toolCallId) {
-        // Get kind from our stored mapping (for Codex) or from toolName (for Claude Code)
-        const storedKind = toolKindMapRef.current.get(toolCallId) || ''
-        const isFileModifying =
-          FILE_MODIFYING_KINDS.has(storedKind) || FILE_MODIFYING_TOOL_NAMES.has(toolName)
-        const isCompleted = status === 'completed' || status === 'failed'
-
-        if (isFileModifying && isCompleted) {
-          triggerRefresh()
-          // Clean up the mapping
-          toolKindMapRef.current.delete(toolCallId)
-        }
-      }
 
       // Handle available_commands_update event: update slash commands store
       if (update?.sessionUpdate === 'available_commands_update') {
@@ -249,11 +252,6 @@ export function useApp(): AppState & AppActions {
       unsubPermission()
     }
   }, [])
-
-  // Clear toolKindMap when session changes to avoid stale data
-  useEffect(() => {
-    toolKindMapRef.current.clear()
-  }, [currentSessionId])
 
   // Actions
   const loadSessions = useCallback(async () => {

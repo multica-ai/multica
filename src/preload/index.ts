@@ -86,6 +86,20 @@ const electronAPI: ElectronAPI = {
   detectApps: () => ipcRenderer.invoke(IPC_CHANNELS.FS_DETECT_APPS),
   openWith: (options: OpenWithOptions) => ipcRenderer.invoke(IPC_CHANNELS.FS_OPEN_WITH, options),
 
+  // File watcher
+  startFileWatch: (sessionId: string, directory: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FS_WATCH_START, sessionId, directory),
+  stopFileWatch: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.FS_WATCH_STOP, sessionId),
+  onFileChanged: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, changeEvent: unknown): void => {
+      callback(changeEvent as Parameters<typeof callback>[0])
+    }
+    ipcRenderer.on(IPC_CHANNELS.FS_FILE_CHANGED, listener)
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.FS_FILE_CHANGED, listener)
+    }
+  },
+
   // Event listeners
   onAgentMessage: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, message: unknown): void => {

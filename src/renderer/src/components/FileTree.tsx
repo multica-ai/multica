@@ -358,7 +358,7 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
     expandedPathsRef.current = expandedPaths
   }, [expandedPaths])
 
-  // Refresh file tree when files change (from agent tool calls)
+  // Refresh file tree when files change (from file system watcher)
   useEffect(() => {
     // Skip on initial mount (already loaded above)
     if (isInitialMount.current) {

@@ -54,6 +54,11 @@ export const IPC_CHANNELS = {
   FS_DETECT_APPS: 'fs:detect-apps',
   FS_OPEN_WITH: 'fs:open-with',
 
+  // File watcher
+  FS_WATCH_START: 'fs:watch-start',
+  FS_WATCH_STOP: 'fs:watch-stop',
+  FS_FILE_CHANGED: 'fs:file-changed',
+
   // Terminal
   TERMINAL_RUN: 'terminal:run',
 

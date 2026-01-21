@@ -18,12 +18,14 @@ import { IPC_CHANNELS } from '../shared/ipc-channels'
 import type { PermissionResponse } from '../shared/electron-api'
 import { PermissionManager } from './permission'
 import { createUpdater, AutoUpdater } from './updater'
+import { FileWatcher } from './watcher'
 
 // Global instances
 let conductor: Conductor
 let mainWindow: BrowserWindow | null = null
 let permissionManager: PermissionManager
 let updater: AutoUpdater
+let fileWatcher: FileWatcher
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -130,8 +132,14 @@ app.whenReady().then(async () => {
     permissionManager.handlePermissionResponse(response)
   })
 
+  // Initialize file watcher
+  fileWatcher = new FileWatcher({
+    debounceMs: 300,
+    getMainWindow: () => mainWindow
+  })
+
   // Register IPC handlers
-  registerIPCHandlers(conductor)
+  registerIPCHandlers(conductor, fileWatcher)
 
   mainWindow = createWindow()
 
@@ -178,5 +186,12 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
+  }
+})
+
+// Clean up file watcher on quit
+app.on('will-quit', () => {
+  if (fileWatcher) {
+    fileWatcher.unwatchAll()
   }
 })
