@@ -20,13 +20,15 @@ interface ModeSelectorProps {
   onModeChange: (modeId: SessionModeId) => void
   disabled?: boolean
   isInitializing?: boolean
+  onSelectionComplete?: () => void
 }
 
 export function ModeSelector({
   modeState,
   onModeChange,
   disabled = false,
-  isInitializing = false
+  isInitializing = false,
+  onSelectionComplete
 }: ModeSelectorProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
@@ -53,6 +55,7 @@ export function ModeSelector({
       onModeChange(modeId)
     }
     setOpen(false)
+    onSelectionComplete?.()
   }
 
   return (
@@ -67,6 +70,7 @@ export function ModeSelector({
                 'flex items-center gap-1.5 text-xs text-muted-foreground transition-colors px-2 py-1 rounded-md',
                 'hover:bg-accent hover:text-accent-foreground',
                 'data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
+                'outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 disabled && 'opacity-50 cursor-not-allowed'
               )}
             >
@@ -80,7 +84,8 @@ export function ModeSelector({
       <DropdownMenuContent
         side="top"
         align="start"
-        className="min-w-[160px] max-h-[300px] overflow-y-auto p-1.5"
+        className="min-w-[160px] max-h-[300px] overflow-y-auto p-1.5 data-[state=open]:animate-none data-[state=closed]:animate-none"
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         {modeState.availableModes.map((mode) => {
           const isSelected = mode.id === modeState.currentModeId

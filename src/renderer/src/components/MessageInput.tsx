@@ -43,6 +43,8 @@ interface MessageInputProps {
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
 const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+// Minimal delay for focusing textarea after dropdown closes
+const DROPDOWN_CLOSE_DELAY_MS = 0
 
 // Warning banner component for missing directory
 function DirectoryWarningBanner({
@@ -285,6 +287,14 @@ export function MessageInput({
     textareaRef.current?.focus()
   }, [])
 
+  // Focus textarea after selector completion (model/agent/mode selection)
+  const handleSelectorComplete = useCallback(() => {
+    // Delay to allow dropdown close animation and Radix auto-focus to complete
+    setTimeout(() => {
+      textareaRef.current?.focus()
+    }, DROPDOWN_CLOSE_DELAY_MS)
+  }, [])
+
   // Handle submit
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim()
@@ -431,6 +441,7 @@ export function MessageInput({
                   disabled={isProcessing}
                   isSwitching={isSwitchingAgent}
                   isInitializing={isInitializing}
+                  onSelectionComplete={handleSelectorComplete}
                 />
               )}
 
@@ -441,6 +452,7 @@ export function MessageInput({
                   onModeChange={onModeChange}
                   disabled={isProcessing}
                   isInitializing={isInitializing}
+                  onSelectionComplete={handleSelectorComplete}
                 />
               )}
             </div>
