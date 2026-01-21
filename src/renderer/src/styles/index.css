@@ -219,3 +219,69 @@ body {
 .animate-shimmer {
   animation: shimmer 1.5s ease-in-out infinite;
 }
+
+/* SPINNER - SpinKit Grid (3x3) */
+.spinner {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 1em;
+  height: 1em;
+  gap: 0.08em;
+}
+
+.spinner-cube {
+  background-color: currentColor;
+  animation: spinner-grid 1.3s infinite ease-in-out;
+  transform: scale3d(0.5, 0.5, 1);
+}
+
+/* Staggered delays for wave effect */
+.spinner-cube:nth-child(1) {
+  animation-delay: 0.2s;
+}
+.spinner-cube:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.spinner-cube:nth-child(3) {
+  animation-delay: 0.4s;
+}
+.spinner-cube:nth-child(4) {
+  animation-delay: 0.1s;
+}
+.spinner-cube:nth-child(5) {
+  animation-delay: 0.2s;
+}
+.spinner-cube:nth-child(6) {
+  animation-delay: 0.3s;
+}
+.spinner-cube:nth-child(7) {
+  animation-delay: 0s;
+}
+.spinner-cube:nth-child(8) {
+  animation-delay: 0.1s;
+}
+.spinner-cube:nth-child(9) {
+  animation-delay: 0.2s;
+}
+
+@keyframes spinner-grid {
+  0%,
+  70%,
+  100% {
+    transform: scale3d(0.5, 0.5, 1);
+  }
+  35% {
+    transform: scale3d(0, 0, 1);
+  }
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .spinner-cube {
+    animation: none;
+    opacity: 0.7;
+  }
+  .animate-shimmer {
+    animation: none;
+  }
+}

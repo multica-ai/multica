@@ -27,6 +27,8 @@ export interface AcpClientCallbacks {
   onModelUpdate?: (modelId: ModelId) => void
   /** Called when server sends available commands update */
   onAvailableCommandsUpdate?: (commands: AvailableCommand[]) => void
+  /** Called when a sessionUpdate starts processing - used to track pending updates */
+  onUpdateStarted?: (promise: Promise<void>) => void
 }
 
 export interface AcpClientFactoryOptions {
@@ -46,62 +48,73 @@ export function createAcpClient(sessionId: string, options: AcpClientFactoryOpti
   return {
     // Handle session updates from agent
     sessionUpdate: async (params: SessionNotification) => {
-      // Log the update type
-      const update = params.update
-      if ('sessionUpdate' in update) {
-        const updateType = update.sessionUpdate
-        if (updateType === 'agent_message_chunk') {
-          const contentType = update.content?.type || 'unknown'
-          const textPreview =
-            update.content?.type === 'text' ? update.content.text?.slice(0, 50) : ''
-          console.log(`[ACP] ${updateType} (${contentType}): "${textPreview}"`)
-        } else if (updateType === 'agent_thought_chunk') {
-          const textPreview =
-            update.content?.type === 'text' ? update.content.text?.slice(0, 50) : ''
-          console.log(`[ACP] ${updateType}: "${textPreview}"`)
-        } else if (updateType === 'tool_call') {
-          console.log(`[ACP] ${updateType}: ${update.title} [${update.status}]`)
-        } else if (updateType === 'tool_call_update') {
-          console.log(
-            `[ACP] ${updateType}: ${update.title || update.toolCallId} [${update.status}]`
-          )
+      // Wrap the entire update processing in a promise for tracking
+      const updatePromise = (async (): Promise<void> => {
+        // Log the update type
+        const update = params.update
+        if ('sessionUpdate' in update) {
+          const updateType = update.sessionUpdate
+          if (updateType === 'agent_message_chunk') {
+            const contentType = update.content?.type || 'unknown'
+            const textPreview =
+              update.content?.type === 'text' ? update.content.text?.slice(0, 50) : ''
+            console.log(`[ACP] ${updateType} (${contentType}): "${textPreview}"`)
+          } else if (updateType === 'agent_thought_chunk') {
+            const textPreview =
+              update.content?.type === 'text' ? update.content.text?.slice(0, 50) : ''
+            console.log(`[ACP] ${updateType}: "${textPreview}"`)
+          } else if (updateType === 'tool_call') {
+            console.log(`[ACP] ${updateType}: ${update.title} [${update.status}]`)
+          } else if (updateType === 'tool_call_update') {
+            console.log(
+              `[ACP] ${updateType}: ${update.title || update.toolCallId} [${update.status}]`
+            )
+          } else {
+            // Log other types briefly
+            console.log(`[ACP] ${updateType}`)
+          }
+          // Handle mode update notification
+          if (updateType === 'current_mode_update' && callbacks.onModeUpdate) {
+            const modeUpdate = update as { currentModeId?: SessionModeId }
+            if (modeUpdate.currentModeId) {
+              callbacks.onModeUpdate(modeUpdate.currentModeId)
+            }
+          }
+          // Handle available commands update notification
+          if (updateType === 'available_commands_update' && callbacks.onAvailableCommandsUpdate) {
+            const commandsUpdate = update as { availableCommands?: AvailableCommand[] }
+            if (commandsUpdate.availableCommands) {
+              callbacks.onAvailableCommandsUpdate(commandsUpdate.availableCommands)
+            }
+          }
         } else {
-          // Log other types briefly
-          console.log(`[ACP] ${updateType}`)
+          console.log(`[ACP] raw update:`, params)
         }
-        // Handle mode update notification
-        if (updateType === 'current_mode_update' && callbacks.onModeUpdate) {
-          const modeUpdate = update as { currentModeId?: SessionModeId }
-          if (modeUpdate.currentModeId) {
-            callbacks.onModeUpdate(modeUpdate.currentModeId)
+
+        // Store raw update to SessionStore (if available) and get sequence number
+        let sequenceNumber: number | undefined
+        if (sessionStore) {
+          try {
+            const storedUpdate = await sessionStore.appendUpdate(sessionId, params)
+            sequenceNumber = storedUpdate.sequenceNumber
+          } catch (err) {
+            console.error('[Conductor] Failed to store session update:', err)
           }
         }
-        // Handle available commands update notification
-        if (updateType === 'available_commands_update' && callbacks.onAvailableCommandsUpdate) {
-          const commandsUpdate = update as { availableCommands?: AvailableCommand[] }
-          if (commandsUpdate.availableCommands) {
-            callbacks.onAvailableCommandsUpdate(commandsUpdate.availableCommands)
-          }
+
+        // Trigger UI callback with Multica session ID and sequence number for ordering
+        if (callbacks.onSessionUpdate) {
+          callbacks.onSessionUpdate(params, sessionId, sequenceNumber)
         }
-      } else {
-        console.log(`[ACP] raw update:`, params)
+      })()
+
+      // Register this update for tracking (so prompt can wait for all updates)
+      if (callbacks.onUpdateStarted) {
+        callbacks.onUpdateStarted(updatePromise)
       }
 
-      // Store raw update to SessionStore (if available) and get sequence number
-      let sequenceNumber: number | undefined
-      if (sessionStore) {
-        try {
-          const storedUpdate = await sessionStore.appendUpdate(sessionId, params)
-          sequenceNumber = storedUpdate.sequenceNumber
-        } catch (err) {
-          console.error('[Conductor] Failed to store session update:', err)
-        }
-      }
-
-      // Trigger UI callback with Multica session ID and sequence number for ordering
-      if (callbacks.onSessionUpdate) {
-        callbacks.onSessionUpdate(params, sessionId, sequenceNumber)
-      }
+      // Wait for this update to complete before returning
+      await updatePromise
     },
 
     // Handle permission requests from agent

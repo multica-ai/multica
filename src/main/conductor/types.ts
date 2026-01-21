@@ -45,6 +45,8 @@ export interface SessionAgent {
   sessionModelState: SessionModelState | null
   /** Available slash commands from ACP server */
   availableCommands: AvailableCommand[]
+  /** Pending sessionUpdate promises - used to wait for all updates before completing prompt */
+  pendingUpdates: Promise<void>[]
 }
 
 /**

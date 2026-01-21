@@ -92,6 +92,9 @@ export class PromptHandler implements IPromptHandler {
     const sessionAgent = await this.ensureAgent(sessionId)
     const { connection, agentSessionId } = sessionAgent
 
+    // Clear pending updates from previous prompt (start fresh)
+    sessionAgent.pendingUpdates = []
+
     // Convert MessageContent to ACP SDK format
     const convertToAcpFormat = (
       items: MessageContent
@@ -186,6 +189,14 @@ export class PromptHandler implements IPromptHandler {
       })
 
       console.log(`[PromptHandler] Prompt completed with stopReason: ${result.stopReason}`)
+
+      // Wait for all pending sessionUpdates to complete before returning
+      // This ensures isProcessing stays true until all updates have been processed
+      // Use Promise.allSettled to avoid failing if any update throws an error
+      if (sessionAgent.pendingUpdates.length > 0) {
+        await Promise.allSettled(sessionAgent.pendingUpdates)
+        sessionAgent.pendingUpdates = [] // Clear to prevent memory leak
+      }
 
       return result.stopReason
     } catch (error) {
