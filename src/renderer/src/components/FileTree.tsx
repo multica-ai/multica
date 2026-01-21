@@ -2,7 +2,7 @@
  * FileTree component for displaying directory structure
  * With lazy loading and context menu support
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   ChevronRightIcon,
   FolderIcon,
@@ -10,7 +10,12 @@ import {
   FileIcon,
   ImageIcon,
   LockIcon,
-  FolderX
+  FolderX,
+  Terminal,
+  Code2,
+  Hammer,
+  Copy,
+  AppWindowMac
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -36,10 +41,13 @@ import {
 } from './FileIcons'
 import type { FileTreeNode, DetectedApp } from '../../../shared/electron-api'
 import { useFileChangeStore } from '../stores/fileChangeStore'
+import { useUIStore } from '../stores/uiStore'
+import { excludeHiddenFiles } from '../utils/fileTree'
 
 interface FileTreeProps {
   rootPath: string
   directoryExists?: boolean
+  onCreateSession?: (cwd: string) => void
 }
 
 interface TreeItemProps {
@@ -47,9 +55,10 @@ interface TreeItemProps {
   level: number
   expandedPaths: Set<string>
   onToggle: (path: string) => void
-  childrenCache: Map<string, FileTreeNode[]>
+  getChildren: (path: string) => FileTreeNode[] | undefined
   loadChildren: (path: string) => Promise<void>
   availableApps: DetectedApp[]
+  onCreateSession?: (cwd: string) => void
 }
 
 // Get the appropriate icon for a file/directory
@@ -121,13 +130,14 @@ function TreeItem({
   level,
   expandedPaths,
   onToggle,
-  childrenCache,
+  getChildren,
   loadChildren,
-  availableApps
+  availableApps,
+  onCreateSession
 }: TreeItemProps): React.JSX.Element {
   const isExpanded = expandedPaths.has(node.path)
   const isDirectory = node.type === 'directory'
-  const children = childrenCache.get(node.path)
+  const children = getChildren(node.path)
   const [isLoading, setIsLoading] = useState(false)
   const [hasError, setHasError] = useState(false)
 
@@ -214,29 +224,41 @@ function TreeItem({
           {finderApp && (
             <ContextMenuItem onClick={() => handleOpenWith('finder')}>
               <span className="flex items-center gap-2">
-                <span>📁</span>
+                <FolderOpenIcon className="h-4 w-4" />
                 <span>Finder</span>
               </span>
               <span className="ml-auto text-xs text-muted-foreground">⌘O</span>
             </ContextMenuItem>
           )}
 
-          {/* Editors */}
-          {editorApps.length > 0 && (
+          {/* Apps (Multica + Editors) */}
+          {(isDirectory && onCreateSession) || editorApps.length > 0 ? (
             <>
               <ContextMenuSeparator />
+              {/* Multica - only for directories */}
+              {isDirectory && onCreateSession && (
+                <ContextMenuItem onClick={() => onCreateSession(node.path)}>
+                  <span className="flex items-center gap-2">
+                    <AppWindowMac className="h-4 w-4" />
+                    <span>Multica</span>
+                  </span>
+                </ContextMenuItem>
+              )}
+              {/* Editors */}
               {editorApps.map((app) => (
                 <ContextMenuItem key={app.id} onClick={() => handleOpenWith(app.id)}>
                   <span className="flex items-center gap-2">
-                    {app.id === 'cursor' && <span>🔵</span>}
-                    {app.id === 'vscode' && <span>🔷</span>}
-                    {app.id === 'xcode' && <span>🔧</span>}
+                    {app.id === 'xcode' ? (
+                      <Hammer className="h-4 w-4" />
+                    ) : (
+                      <Code2 className="h-4 w-4" />
+                    )}
                     <span>{app.name}</span>
                   </span>
                 </ContextMenuItem>
               ))}
             </>
-          )}
+          ) : null}
 
           {/* Terminals */}
           {terminalApps.length > 0 && (
@@ -245,9 +267,7 @@ function TreeItem({
               {terminalApps.map((app) => (
                 <ContextMenuItem key={app.id} onClick={() => handleOpenWith(app.id)}>
                   <span className="flex items-center gap-2">
-                    {app.id === 'ghostty' && <span>👻</span>}
-                    {app.id === 'iterm' && <span>📟</span>}
-                    {app.id === 'terminal' && <span>⬛</span>}
+                    <Terminal className="h-4 w-4" />
                     <span>{app.name}</span>
                   </span>
                 </ContextMenuItem>
@@ -261,7 +281,7 @@ function TreeItem({
               <ContextMenuSeparator />
               <ContextMenuItem onClick={() => handleOpenWith('copy-path')}>
                 <span className="flex items-center gap-2">
-                  <span>📋</span>
+                  <Copy className="h-4 w-4" />
                   <span>Copy path</span>
                 </span>
               </ContextMenuItem>
@@ -288,9 +308,10 @@ function TreeItem({
                 level={level + 1}
                 expandedPaths={expandedPaths}
                 onToggle={onToggle}
-                childrenCache={childrenCache}
+                getChildren={getChildren}
                 loadChildren={loadChildren}
                 availableApps={availableApps}
+                onCreateSession={onCreateSession}
               />
             ))
           )}
@@ -312,14 +333,34 @@ function DirectoryNotFound(): React.JSX.Element {
   )
 }
 
-// Filter out hidden files (starting with .)
-const filterHidden = (nodes: FileTreeNode[]): FileTreeNode[] =>
-  nodes.filter((n) => !n.name.startsWith('.'))
+export function FileTree({
+  rootPath,
+  directoryExists = true,
+  onCreateSession
+}: FileTreeProps): React.JSX.Element {
+  // Hidden files toggle state (controlled by parent via uiStore)
+  const showHiddenFiles = useUIStore((s) => s.showHiddenFiles)
 
-export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): React.JSX.Element {
-  const [rootChildren, setRootChildren] = useState<FileTreeNode[]>([])
+  // Store raw (unfiltered) data
+  const [rawRootChildren, setRawRootChildren] = useState<FileTreeNode[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
-  const [childrenCache, setChildrenCache] = useState<Map<string, FileTreeNode[]>>(new Map())
+  const [rawChildrenCache, setRawChildrenCache] = useState<Map<string, FileTreeNode[]>>(new Map())
+
+  // Compute filtered root children based on showHiddenFiles preference
+  const rootChildren = useMemo(
+    () => (showHiddenFiles ? rawRootChildren : excludeHiddenFiles(rawRootChildren)),
+    [rawRootChildren, showHiddenFiles]
+  )
+
+  // Helper to get filtered children for a given path (filters on demand)
+  const getFilteredChildren = useCallback(
+    (path: string): FileTreeNode[] | undefined => {
+      const children = rawChildrenCache.get(path)
+      if (!children) return undefined
+      return showHiddenFiles ? children : excludeHiddenFiles(children)
+    },
+    [rawChildrenCache, showHiddenFiles]
+  )
   const [availableApps, setAvailableApps] = useState<DetectedApp[]>([])
   // Initialize loading state based on directoryExists
   const [isLoading, setIsLoading] = useState(directoryExists)
@@ -342,7 +383,7 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
           window.electronAPI.listDirectory(rootPath),
           window.electronAPI.detectApps()
         ])
-        setRootChildren(filterHidden(children))
+        setRawRootChildren(children)
         setAvailableApps(apps)
       } catch (error) {
         console.error('Failed to load file tree:', error)
@@ -377,14 +418,13 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
         // Re-fetch root directory
         console.log('[FileTree] Fetching root directory:', rootPath)
         const children = await window.electronAPI.listDirectory(rootPath)
-        const filtered = filterHidden(children)
         console.log(
           '[FileTree] Root directory result:',
-          filtered.length,
+          children.length,
           'items',
-          filtered.map((c) => c.name)
+          children.map((c) => c.name)
         )
-        setRootChildren(filtered)
+        setRawRootChildren(children)
 
         // Re-fetch all expanded directories to update them
         const currentExpanded = Array.from(expandedPathsRef.current)
@@ -395,7 +435,7 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
             currentExpanded.map(async (path) => {
               try {
                 const dirChildren = await window.electronAPI.listDirectory(path)
-                return { path, children: filterHidden(dirChildren) }
+                return { path, children: dirChildren }
               } catch {
                 // Directory may no longer exist
                 return { path, children: [] }
@@ -405,7 +445,7 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
           for (const { path, children: dirChildren } of results) {
             newCache.set(path, dirChildren)
           }
-          setChildrenCache(newCache)
+          setRawChildrenCache(newCache)
         }
       } catch (error) {
         console.error('[FileTree] Failed to refresh file tree:', error)
@@ -430,11 +470,10 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
   const loadChildren = useCallback(async (path: string) => {
     // Fetch children first, then check cache in the setter to avoid stale closure
     const children = await window.electronAPI.listDirectory(path)
-    const filtered = filterHidden(children)
-    setChildrenCache((prev) => {
+    setRawChildrenCache((prev) => {
       // Skip if already cached (handles race conditions)
       if (prev.has(path)) return prev
-      return new Map(prev).set(path, filtered)
+      return new Map(prev).set(path, children)
     })
   }, [])
 
@@ -468,9 +507,10 @@ export function FileTree({ rootPath, directoryExists = true }: FileTreeProps): R
           level={0}
           expandedPaths={expandedPaths}
           onToggle={handleToggle}
-          childrenCache={childrenCache}
+          getChildren={getFilteredChildren}
           loadChildren={loadChildren}
           availableApps={availableApps}
+          onCreateSession={onCreateSession}
         />
       ))}
     </div>
