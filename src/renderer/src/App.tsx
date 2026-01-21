@@ -206,6 +206,7 @@ function AppContent(): React.JSX.Element {
                   currentAgentId={currentSession?.agentId}
                   onAgentChange={switchSessionAgent}
                   isSwitchingAgent={isSwitchingAgent}
+                  isInitializing={isInitializing}
                   directoryExists={currentSession?.directoryExists}
                   onDeleteSession={handleDeleteCurrentSession}
                   sessionModeState={sessionModeState}

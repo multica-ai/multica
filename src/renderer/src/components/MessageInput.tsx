@@ -2,12 +2,11 @@
  * Message input component with image upload and slash command support
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { ArrowUp, Square, Paperclip, X, AlertTriangle } from 'lucide-react'
+import { ArrowUp, Square, Plus, X, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { AgentSelector } from './AgentSelector'
+import { AgentModelSelector } from './AgentModelSelector'
 import { ModeSelector } from './ModeSelector'
-import { ModelSelector } from './ModelSelector'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { parseSlashCommand, validateCommand } from '../utils/slashCommand'
 import { useCommandStore } from '../stores/commandStore'
@@ -32,6 +31,7 @@ interface MessageInputProps {
   currentAgentId?: string
   onAgentChange?: (agentId: string) => void
   isSwitchingAgent?: boolean
+  isInitializing?: boolean
   directoryExists?: boolean
   onDeleteSession?: () => void
   // Mode/Model props
@@ -88,6 +88,7 @@ export function MessageInput({
   currentAgentId,
   onAgentChange,
   isSwitchingAgent = false,
+  isInitializing = false,
   directoryExists,
   onDeleteSession,
   sessionModeState,
@@ -418,69 +419,69 @@ export function MessageInput({
 
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between pt-2">
-            {/* Left side: agent selector, mode/model selectors, and image button */}
+            {/* Left side: agent/model selector, mode selector */}
             <div className="flex items-center gap-1">
-              {/* Agent selector */}
-              {currentAgentId && onAgentChange && (
-                <AgentSelector
+              {/* Combined Agent and Model selector */}
+              {currentAgentId && onAgentChange && onModelChange && (
+                <AgentModelSelector
                   currentAgentId={currentAgentId}
                   onAgentChange={onAgentChange}
-                  disabled={isProcessing}
-                  isSwitching={isSwitchingAgent}
-                />
-              )}
-
-              {/* Mode selector (only shown if agent supports modes) */}
-              {sessionModeState && onModeChange && (
-                <ModeSelector
-                  modeState={sessionModeState}
-                  onModeChange={onModeChange}
-                  disabled={isProcessing}
-                />
-              )}
-
-              {/* Model selector (only shown if agent supports model selection) */}
-              {sessionModelState && onModelChange && (
-                <ModelSelector
-                  modelState={sessionModelState}
+                  modelState={sessionModelState ?? null}
                   onModelChange={onModelChange}
                   disabled={isProcessing}
+                  isSwitching={isSwitchingAgent}
+                  isInitializing={isInitializing}
                 />
               )}
 
+              {/* Mode selector (only shown if agent supports modes, or skeleton during init) */}
+              {(sessionModeState || isInitializing) && onModeChange && (
+                <ModeSelector
+                  modeState={sessionModeState ?? null}
+                  onModeChange={onModeChange}
+                  disabled={isProcessing}
+                  isInitializing={isInitializing}
+                />
+              )}
+            </div>
+
+            {/* Right side: image upload and send button */}
+            <div className="flex items-center gap-1">
               {/* Image upload button */}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={disabled}
-                    className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-background/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="rounded-lg"
                   >
-                    <Paperclip className="h-4 w-4" />
-                  </button>
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">Attach image (or paste with Cmd+V)</TooltipContent>
               </Tooltip>
-            </div>
 
-            {/* Send button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  onClick={isProcessing ? onCancel : handleSubmit}
-                  disabled={!canSubmit && !isProcessing}
-                  className="h-8 w-8 rounded-full"
-                >
-                  {isProcessing ? (
-                    <Square className="h-3.5 w-3.5" fill="currentColor" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{isProcessing ? 'Stop' : 'Send message'}</TooltipContent>
-            </Tooltip>
+              {/* Send button */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-xs"
+                    onClick={isProcessing ? onCancel : handleSubmit}
+                    disabled={!canSubmit && !isProcessing}
+                    className="rounded-lg ml-1"
+                  >
+                    {isProcessing ? (
+                      <Square className="h-3 w-3" fill="currentColor" />
+                    ) : (
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{isProcessing ? 'Stop' : 'Send message'}</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         </div>
       </div>
