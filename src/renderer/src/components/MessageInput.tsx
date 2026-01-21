@@ -11,6 +11,7 @@ import { ModelSelector } from './ModelSelector'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { parseSlashCommand, validateCommand } from '../utils/slashCommand'
 import { useCommandStore } from '../stores/commandStore'
+import { useDraftStore } from '../stores/draftStore'
 import type { MessageContent, ImageContentItem } from '../../../shared/types/message'
 import type {
   SessionModeState,
@@ -21,6 +22,7 @@ import type {
 } from '../../../shared/types'
 
 interface MessageInputProps {
+  sessionId?: string
   onSend: (content: MessageContent) => void
   onCancel: () => void
   isProcessing: boolean
@@ -76,6 +78,7 @@ function DirectoryWarningBanner({
 }
 
 export function MessageInput({
+  sessionId,
   onSend,
   onCancel,
   isProcessing,
@@ -92,6 +95,12 @@ export function MessageInput({
   onModeChange,
   onModelChange
 }: MessageInputProps): React.JSX.Element | null {
+  // Draft store for per-session input persistence
+  const getDraft = useDraftStore((state) => state.getDraft)
+  const setDraft = useDraftStore((state) => state.setDraft)
+  const clearDraft = useDraftStore((state) => state.clearDraft)
+
+  // State is initialized empty; session drafts are restored via useEffect below
   const [value, setValue] = useState('')
   const [isComposing, setIsComposing] = useState(false)
   const [images, setImages] = useState<ImageContentItem[]>([])
@@ -100,6 +109,8 @@ export function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
+  // Initialize to undefined so the first useEffect run will restore the draft
+  const prevSessionIdRef = useRef<string | undefined>(undefined)
 
   // Get available commands from store
   const availableCommands = useCommandStore((state) => state.availableCommands)
@@ -128,6 +139,52 @@ export function MessageInput({
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
+
+  // Handle session switch: save/clear current draft and restore new session's draft
+  useEffect(() => {
+    const prevSessionId = prevSessionIdRef.current
+
+    if (prevSessionId !== sessionId) {
+      // Save or clear draft for previous session
+      if (prevSessionId) {
+        if (value.trim() || images.length > 0) {
+          setDraft(prevSessionId, { text: value, images })
+        } else {
+          clearDraft(prevSessionId)
+        }
+      }
+
+      // Restore draft for new session
+      if (sessionId) {
+        const draft = getDraft(sessionId)
+        setValue(draft.text)
+        setImages(draft.images)
+      } else {
+        setValue('')
+        setImages([])
+      }
+      setMenuDismissed(false)
+      setCommandMenuIndex(0)
+
+      prevSessionIdRef.current = sessionId
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only react to session changes; draft changes handled elsewhere
+  }, [sessionId, getDraft, setDraft, clearDraft])
+
+  // Auto-save draft with debounce
+  useEffect(() => {
+    if (!sessionId) return
+
+    const timer = setTimeout(() => {
+      if (value.trim() || images.length > 0) {
+        setDraft(sessionId, { text: value, images })
+      } else {
+        clearDraft(sessionId)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [sessionId, value, images, setDraft, clearDraft])
 
   // Convert file to base64
   const fileToBase64 = useCallback((file: File): Promise<string> => {
@@ -253,7 +310,11 @@ export function MessageInput({
     onSend(content)
     setValue('')
     setImages([])
-  }, [value, images, disabled, isProcessing, onSend, commandError])
+    // Clear draft after sending
+    if (sessionId) {
+      clearDraft(sessionId)
+    }
+  }, [value, images, disabled, isProcessing, onSend, commandError, sessionId, clearDraft])
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     // Don't handle Enter/Tab/arrows while command menu is open (SlashCommandMenu handles these)

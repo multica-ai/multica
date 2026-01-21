@@ -195,6 +195,7 @@ function AppContent(): React.JSX.Element {
                   </div>
                 )}
                 <MessageInput
+                  sessionId={currentSession?.id}
                   onSend={sendPrompt}
                   onCancel={cancelRequest}
                   isProcessing={isProcessing}

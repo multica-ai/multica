@@ -15,6 +15,7 @@ import type { MessageContent } from '../../../shared/types/message'
 import { usePermissionStore } from '../stores/permissionStore'
 import { useFileChangeStore } from '../stores/fileChangeStore'
 import { useCommandStore } from '../stores/commandStore'
+import { useDraftStore } from '../stores/draftStore'
 import { toast } from 'sonner'
 import { getErrorMessage } from '../utils/error'
 
@@ -397,6 +398,7 @@ export function useApp(): AppState & AppActions {
     async (sessionId: string) => {
       try {
         await window.electronAPI.deleteSession(sessionId)
+        useDraftStore.getState().clearDraft(sessionId)
         if (currentSession?.id === sessionId) {
           setCurrentSession(null)
           setSessionUpdates([])
