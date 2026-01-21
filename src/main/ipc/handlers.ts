@@ -8,6 +8,7 @@ import { DEFAULT_AGENTS } from '../config/defaults'
 import { checkAgents, checkAgent } from '../utils/agent-check'
 import { installAgent } from '../utils/agent-install'
 import type { Conductor } from '../conductor/Conductor'
+import type { FileWatcher } from '../watcher'
 import type {
   ListSessionsOptions,
   MulticaSession,
@@ -89,7 +90,7 @@ function extractErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export function registerIPCHandlers(conductor: Conductor): void {
+export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatcher): void {
   // --- Agent handlers (per-session) ---
 
   ipcMain.handle(
@@ -441,6 +442,23 @@ export function registerIPCHandlers(conductor: Conductor): void {
       }
     }
   )
+
+  // --- File watcher handlers ---
+
+  ipcMain.handle(
+    IPC_CHANNELS.FS_WATCH_START,
+    async (_event, sessionId: string, directory: string) => {
+      if (!isValidPath(directory)) {
+        console.warn(`[IPC] Invalid watch path rejected: ${directory}`)
+        throw new Error('Invalid directory path')
+      }
+      fileWatcher.watch(sessionId, directory)
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.FS_WATCH_STOP, async (_event, sessionId: string) => {
+    fileWatcher.unwatch(sessionId)
+  })
 
   // Terminal: Run command in a new terminal window
   ipcMain.handle(IPC_CHANNELS.TERMINAL_RUN, async (_event, command: string) => {

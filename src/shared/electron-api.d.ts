@@ -116,6 +116,16 @@ export interface OpenWithOptions {
   appId: string
 }
 
+// File watcher types
+// Note: fs.watch only provides 'rename' (add/delete) and 'change' (modify)
+// We normalize 'rename' to 'change' for simplicity
+export interface FileChangeEvent {
+  directory: string
+  eventType: 'change' | 'rename'
+  path: string
+  sessionIds: string[]
+}
+
 // Agent installation
 export type InstallStep = 'check-npm' | 'install-cli' | 'install-acp'
 
@@ -200,6 +210,11 @@ export interface ElectronAPI {
   listDirectory(path: string): Promise<FileTreeNode[]>
   detectApps(): Promise<DetectedApp[]>
   openWith(options: OpenWithOptions): Promise<void>
+
+  // File watcher
+  startFileWatch(sessionId: string, directory: string): Promise<void>
+  stopFileWatch(sessionId: string): Promise<void>
+  onFileChanged(callback: (event: FileChangeEvent) => void): () => void
 
   // Event listeners (return unsubscribe function)
   onAgentMessage(callback: (message: AgentMessage) => void): () => void
