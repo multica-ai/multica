@@ -146,18 +146,18 @@ export function AgentModelSelector({
       </Tooltip>
       <DropdownMenuContent side="top" align="start" className="min-w-[220px] p-1.5">
         {/* Current Agent Header */}
-        <div className="flex items-center justify-between gap-3 px-2 py-2">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+          <div className="flex items-center gap-1.5">
             {currentAgentIcon && (
               <img
                 src={currentAgentIcon}
                 alt={currentAgentName}
-                className={cn('h-4 w-4', currentAgentNeedsInvert && 'dark:invert')}
+                className={cn('h-3.5 w-3.5', currentAgentNeedsInvert && 'dark:invert')}
               />
             )}
-            <span className="text-sm">{currentAgentName}</span>
+            <span className="text-xs text-muted-foreground">{currentAgentName}</span>
           </div>
-          <span className="text-xs text-green-600/80">Active</span>
+          <span className="text-xs text-green-600/70">Active</span>
         </div>
 
         {/* Current Agent's Models */}
@@ -168,24 +168,15 @@ export function AgentModelSelector({
               <DropdownMenuItem
                 key={model.modelId}
                 onClick={() => handleModelSelect(model.modelId)}
-                className="flex items-center justify-between gap-6 pl-8 py-1.5"
+                className="flex items-center justify-between gap-6 pl-6 py-1.5"
               >
-                <span
-                  className={cn(
-                    'text-sm transition-colors',
-                    isSelectedModel
-                      ? 'text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {model.name}
-                </span>
+                <span className="text-sm">{model.name}</span>
                 {isSelectedModel && <Check className="h-3.5 w-3.5 text-primary/70" />}
               </DropdownMenuItem>
             )
           })
         ) : (
-          <div className="pl-8 pr-2 py-2 text-xs text-muted-foreground/70">No models available</div>
+          <div className="pl-6 pr-2 py-2 text-xs text-muted-foreground/70">No models available</div>
         )}
 
         {/* Separator if there are other agents */}
@@ -202,17 +193,17 @@ export function AgentModelSelector({
             return (
               <div
                 key={agent.id}
-                className="flex items-center justify-between gap-3 px-2 py-2 opacity-40"
+                className="flex items-center justify-between gap-3 px-2 py-1.5 opacity-40"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   {icon && (
                     <img
                       src={icon}
                       alt={agent.name}
-                      className={cn('h-4 w-4', needsInvert && 'dark:invert')}
+                      className={cn('h-3.5 w-3.5', needsInvert && 'dark:invert')}
                     />
                   )}
-                  <span className="text-sm">{agent.name}</span>
+                  <span className="text-xs text-muted-foreground">{agent.name}</span>
                 </div>
                 <span className="text-xs text-muted-foreground">Setup required</span>
               </div>
@@ -225,7 +216,7 @@ export function AgentModelSelector({
               key={agent.id}
               role="button"
               tabIndex={0}
-              className="flex items-center justify-between gap-3 px-2 py-2 hover:bg-accent/50 rounded-sm cursor-pointer transition-colors"
+              className="flex items-center justify-between gap-3 px-2 py-1.5 hover:bg-accent/50 rounded-sm cursor-pointer transition-colors"
               onClick={() => handleAgentSelect(agent.id)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -234,15 +225,15 @@ export function AgentModelSelector({
                 }
               }}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {icon && (
                   <img
                     src={icon}
                     alt={agent.name}
-                    className={cn('h-4 w-4', needsInvert && 'dark:invert')}
+                    className={cn('h-3.5 w-3.5', needsInvert && 'dark:invert')}
                   />
                 )}
-                <span className="text-sm">{agent.name}</span>
+                <span className="text-xs text-muted-foreground">{agent.name}</span>
               </div>
               <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:text-foreground transition-colors">
                 Switch
