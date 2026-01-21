@@ -28,6 +28,10 @@ interface UIStore {
   toggleRightPanel: () => void
   setRightPanelOpen: (open: boolean) => void
   setRightPanelWidth: (width: number) => void
+
+  // Hidden files visibility
+  showHiddenFiles: boolean
+  toggleShowHiddenFiles: () => void
 }
 
 export const useUIStore = create<UIStore>()(
@@ -49,7 +53,11 @@ export const useUIStore = create<UIStore>()(
       setRightPanelWidth: (width) =>
         set({
           rightPanelWidth: Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, width))
-        })
+        }),
+
+      // Hidden files - default hidden
+      showHiddenFiles: false,
+      toggleShowHiddenFiles: () => set((state) => ({ showHiddenFiles: !state.showHiddenFiles }))
     }),
     {
       name: 'ui-state' // localStorage key
