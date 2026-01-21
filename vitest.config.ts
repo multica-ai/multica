@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     setupFiles: ['tests/setup/vitest.setup.ts'],
     coverage: {
       provider: 'v8',
@@ -16,7 +16,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@main': resolve(__dirname, 'src/main'),
-      '@shared': resolve(__dirname, 'src/shared')
+      '@shared': resolve(__dirname, 'src/shared'),
+      '@renderer': resolve(__dirname, 'src/renderer/src'),
+      '@': resolve(__dirname, 'src/renderer/src')
     }
   }
 })
