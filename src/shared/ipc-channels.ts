@@ -41,6 +41,12 @@ export const IPC_CHANNELS = {
   AGENT_INSTALL: 'agent:install',
   AGENT_INSTALL_PROGRESS: 'agent:install-progress',
 
+  // Agent version checking
+  AGENT_CHECK_LATEST_VERSIONS: 'agent:check-latest-versions',
+
+  // Agent/command update
+  AGENT_UPDATE_COMMAND: 'agent:update-command',
+
   // File system (V2)
   FILE_APPROVAL_REQUEST: 'file:approval-request',
   FILE_APPROVAL_RESPONSE: 'file:approval-response',

@@ -6,12 +6,14 @@ import { promisify } from 'node:util'
 import { platform } from 'node:os'
 import { DEFAULT_AGENTS } from '../config/defaults'
 import { getEnhancedPath } from './path'
+import { getInstalledVersion, checkAgentVersions as checkVersions } from './agent-version'
 
 const execAsync = promisify(exec)
 
 export interface CommandInfo {
   command: string
   path?: string
+  version?: string
 }
 
 export interface AgentCheckResult {
@@ -68,11 +70,12 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
   const commandsToCheck = AGENT_COMMANDS[agentId] || [config.command]
   const commandChecks = await Promise.all(
     commandsToCheck.map(async (cmd) => {
-      const cmdCheck = await commandExists(cmd)
+      const [cmdCheck, version] = await Promise.all([commandExists(cmd), getInstalledVersion(cmd)])
       return {
         command: cmd,
         path: cmdCheck.path,
-        exists: cmdCheck.exists
+        exists: cmdCheck.exists,
+        version
       }
     })
   )
@@ -92,9 +95,13 @@ export async function checkAgent(agentId: string): Promise<AgentCheckResult | nu
     installed: allCommandsInstalled,
     path: primaryResult?.path,
     installHint: INSTALL_HINTS[agentId],
-    commands: commandChecks.map(({ command, path }) => ({ command, path }))
+    commands: commandChecks.map(({ command, path, version }) => ({ command, path, version }))
   }
 }
+
+// Re-export version checking functionality
+export { checkVersions as checkAgentVersions }
+export type { CommandVersionInfo, AgentVersionInfo } from './agent-version'
 
 /**
  * Check all configured agents and return their installation status (async for true concurrency)
