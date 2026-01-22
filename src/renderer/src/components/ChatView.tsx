@@ -669,7 +669,7 @@ function MessageBubble({
 
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] dark:bg-muted px-4 py-3 text-[15px]">
+        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] dark:bg-muted px-4 py-3 text-[15px] break-words overflow-hidden">
           {/* Render images first */}
           {imageBlocks.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -895,7 +895,7 @@ function TextContentBlock({ content }: { content: string }): React.JSX.Element |
   if (!content) return null
 
   return (
-    <div className="prose prose-invert max-w-none text-[15px] leading-[1.7]">
+    <div className="prose prose-invert max-w-none text-[15px] leading-[1.7] break-words overflow-hidden [&_*]:break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={TEXT_MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
