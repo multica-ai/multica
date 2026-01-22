@@ -5,7 +5,7 @@
  * Manages pending requests, generates request IDs, routes responses, and delegates
  * to specialized handlers for AskUserQuestion and question tool workarounds.
  */
-import type { BrowserWindow } from 'electron'
+import { app, type BrowserWindow } from 'electron'
 import type { Conductor } from '../conductor/Conductor'
 import type { PermissionResponse } from '../../shared/electron-api'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
@@ -26,6 +26,15 @@ export class PermissionManager {
     this.getMainWindow = getMainWindow
     this.askUserQuestionHandler = new AskUserQuestionHandler(conductor)
     this.questionToolWorkaround = new QuestionToolWorkaround(conductor)
+  }
+
+  /**
+   * Update dock badge count to show pending permission requests (macOS only)
+   */
+  private updateBadgeCount(): void {
+    if (process.platform === 'darwin') {
+      app.setBadgeCount(this.pendingRequests.size)
+    }
   }
 
   /**
@@ -146,12 +155,16 @@ export class PermissionManager {
         })
       })
 
+      // Update badge count after adding pending request
+      this.updateBadgeCount()
+
       // Timeout after 5 minutes (auto-deny)
       setTimeout(
         () => {
           if (this.pendingRequests.has(requestId)) {
             console.log(`[Permission] Timeout ${requestId}, auto-denying`)
             this.pendingRequests.delete(requestId)
+            this.updateBadgeCount()
             // Find a deny option or use first option
             const denyOption =
               params.options.find((o) => (o.kind as string) === 'deny') || params.options[0]
@@ -184,6 +197,7 @@ export class PermissionManager {
     const resolver = this.pendingRequests.get(response.requestId)
     if (resolver) {
       this.pendingRequests.delete(response.requestId)
+      this.updateBadgeCount()
       resolver(response)
     } else {
       console.warn(`[Permission] No resolver found for requestId: ${response.requestId}`)
