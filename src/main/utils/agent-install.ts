@@ -20,6 +20,21 @@ export const INSTALL_COMMANDS: Record<string, string> = {
   gemini: 'npm install -g @google/gemini-cli'
 }
 
+// Update commands for individual commands (not agents)
+// These are used when a specific command needs updating
+export const UPDATE_COMMANDS: Record<string, string> = {
+  // Claude Code CLI: use built-in update command
+  claude: 'claude update',
+  // ACP packages: npm update
+  'claude-code-acp': 'npm update -g @zed-industries/claude-code-acp',
+  // OpenCode: use built-in upgrade command
+  opencode: 'opencode upgrade',
+  // Codex CLI
+  codex: 'npm update -g @openai/codex',
+  // Codex ACP
+  'codex-acp': 'npm update -g @zed-industries/codex-acp'
+}
+
 /**
  * Open the system Terminal and type a command (without executing)
  * User will see the command and can press Enter to run it
@@ -139,5 +154,27 @@ export async function installAgent(agentId: string): Promise<InstallResult> {
   }
 
   // Success means terminal was opened (not that installation completed)
+  return { success: true }
+}
+
+/**
+ * Update a specific command to its latest version
+ * Opens Terminal with the update command for the user to execute
+ */
+export async function updateCommand(commandName: string): Promise<InstallResult> {
+  const command = UPDATE_COMMANDS[commandName]
+
+  if (!command) {
+    return { success: false, error: `Update not supported for: ${commandName}` }
+  }
+
+  console.log(`[agent-install] Opening terminal with update command: ${command}`)
+  const result = await openTerminalWithCommand(command)
+
+  if (!result.success) {
+    console.error(`[agent-install] Failed to open terminal:`, result.error)
+    return { success: false, error: result.error }
+  }
+
   return { success: true }
 }

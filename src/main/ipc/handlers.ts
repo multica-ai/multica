@@ -5,8 +5,8 @@
 import { ipcMain, dialog, clipboard, shell } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
-import { checkAgents, checkAgent } from '../utils/agent-check'
-import { installAgent } from '../utils/agent-install'
+import { checkAgents, checkAgent, checkAgentVersions } from '../utils/agent-check'
+import { installAgent, updateCommand } from '../utils/agent-install'
 import type { Conductor } from '../conductor/Conductor'
 import type { FileWatcher } from '../watcher'
 import type {
@@ -318,6 +318,27 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
   ipcMain.handle(IPC_CHANNELS.AGENT_INSTALL, async (_event, agentId: string) => {
     try {
       return await installAgent(agentId)
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  // --- Agent version checking handler ---
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_CHECK_LATEST_VERSIONS,
+    async (_event, agentId: string, commands: string[]) => {
+      const versionInfos = await checkAgentVersions(agentId, commands)
+      return {
+        agentId,
+        commands: versionInfos
+      }
+    }
+  )
+
+  // --- Agent/command update handler ---
+  ipcMain.handle(IPC_CHANNELS.AGENT_UPDATE_COMMAND, async (_event, commandName: string) => {
+    try {
+      return await updateCommand(commandName)
     } catch (err) {
       throw new Error(extractErrorMessage(err))
     }

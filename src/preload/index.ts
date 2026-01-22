@@ -71,6 +71,14 @@ const electronAPI: ElectronAPI = {
   // Agent installation
   installAgent: (agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_INSTALL, agentId),
 
+  // Agent version checking
+  checkAgentLatestVersions: (agentId: string, commands: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHECK_LATEST_VERSIONS, agentId, commands),
+
+  // Agent/command update
+  updateCommand: (commandName: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_UPDATE_COMMAND, commandName),
+
   onInstallProgress: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: unknown): void => {
       callback(progress as Parameters<typeof callback>[0])

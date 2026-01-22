@@ -15,12 +15,20 @@ vi.mock('../../../../src/main/utils/path', () => ({
   getEnhancedPath: vi.fn().mockReturnValue('/usr/local/bin:/usr/bin:/bin')
 }))
 
+// Mock version utilities
+vi.mock('../../../../src/main/utils/agent-version', () => ({
+  getInstalledVersion: vi.fn().mockResolvedValue(undefined),
+  checkAgentVersions: vi.fn()
+}))
+
 import { exec } from 'node:child_process'
 import { platform } from 'node:os'
 import { commandExists, checkAgents } from '../../../../src/main/utils/agent-check'
+import { getInstalledVersion } from '../../../../src/main/utils/agent-version'
 
 const mockExec = vi.mocked(exec)
 const mockPlatform = vi.mocked(platform)
+const mockGetInstalledVersion = vi.mocked(getInstalledVersion)
 
 // Helper to create a mock exec implementation
 function mockExecSuccess(stdout: string): void {
@@ -51,6 +59,7 @@ describe('agent-check', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockPlatform.mockReturnValue('darwin')
+    mockGetInstalledVersion.mockResolvedValue(undefined)
   })
 
   describe('commandExists', () => {
@@ -132,12 +141,16 @@ describe('agent-check', () => {
         }
         return {} as ReturnType<typeof exec>
       })
+      mockGetInstalledVersion.mockImplementation((command) =>
+        Promise.resolve(command === 'opencode' ? '1.2.3' : undefined)
+      )
 
       const results = await checkAgents()
 
       // The opencode agent should be marked as installed
       const opencodeAgent = results.find((r) => r.id === 'opencode')
       expect(opencodeAgent?.installed).toBe(true)
+      expect(opencodeAgent?.commands?.[0]?.version).toBe('1.2.3')
     })
 
     it('should include install hints', async () => {

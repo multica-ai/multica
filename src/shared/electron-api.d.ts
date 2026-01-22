@@ -35,6 +35,7 @@ export interface AgentMessage {
 export interface CommandInfo {
   command: string
   path?: string
+  version?: string
 }
 
 export interface AgentCheckResult {
@@ -163,6 +164,19 @@ export interface UpdateStatus {
   error?: string
 }
 
+// Agent version checking
+export interface CommandVersionInfo {
+  command: string
+  installedVersion?: string
+  latestVersion?: string
+  hasUpdate: boolean
+}
+
+export interface AgentVersionInfo {
+  agentId: string
+  commands: CommandVersionInfo[]
+}
+
 export interface ElectronAPI {
   // Agent status (per-session agents)
   getAgentStatus(): Promise<RunningSessionsStatus>
@@ -205,6 +219,12 @@ export interface ElectronAPI {
   // Agent installation
   installAgent(agentId: string): Promise<InstallResult>
   onInstallProgress(callback: (event: InstallProgressEvent) => void): () => void
+
+  // Agent version checking
+  checkAgentLatestVersions(agentId: string, commands: string[]): Promise<AgentVersionInfo>
+
+  // Agent/command update
+  updateCommand(commandName: string): Promise<InstallResult>
 
   // File tree
   listDirectory(path: string): Promise<FileTreeNode[]>
