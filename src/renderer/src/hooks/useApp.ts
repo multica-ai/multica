@@ -75,6 +75,76 @@ export interface AppActions {
   setSessionModel: (modelId: ModelId) => Promise<void>
 }
 
+function mergeSessionUpdates(
+  existing: StoredSessionUpdate[],
+  incoming: StoredSessionUpdate[]
+): StoredSessionUpdate[] {
+  if (incoming.length === 0) {
+    return existing
+  }
+
+  const merged: Array<StoredSessionUpdate | null> = []
+  const keyToIndex = new Map<string, number>()
+  const payloadToKey = new Map<string, string>()
+
+  const buildPayloadKey = (item: StoredSessionUpdate): string => {
+    try {
+      return JSON.stringify(item.update)
+    } catch {
+      return `unstringifiable:${item.timestamp}`
+    }
+  }
+
+  const addItem = (item: StoredSessionUpdate): void => {
+    const payloadKey = buildPayloadKey(item)
+    if (item.sequenceNumber !== undefined) {
+      const seqKey = `seq:${item.sequenceNumber}`
+      const existingPayloadKey = payloadToKey.get(payloadKey)
+      if (existingPayloadKey?.startsWith('payload:')) {
+        const existingIndex = keyToIndex.get(existingPayloadKey)
+        if (existingIndex !== undefined) {
+          merged[existingIndex] = null
+        }
+        keyToIndex.delete(existingPayloadKey)
+      }
+
+      const existingIndex = keyToIndex.get(seqKey)
+      if (existingIndex !== undefined) {
+        merged[existingIndex] = item
+      } else {
+        merged.push(item)
+        keyToIndex.set(seqKey, merged.length - 1)
+      }
+      payloadToKey.set(payloadKey, seqKey)
+      return
+    }
+
+    const payloadKeyWithPrefix = `payload:${payloadKey}`
+    const existingPayloadKey = payloadToKey.get(payloadKey)
+    if (existingPayloadKey?.startsWith('seq:')) {
+      return
+    }
+
+    const existingIndex = keyToIndex.get(payloadKeyWithPrefix)
+    if (existingIndex !== undefined) {
+      merged[existingIndex] = item
+    } else {
+      merged.push(item)
+      keyToIndex.set(payloadKeyWithPrefix, merged.length - 1)
+    }
+    payloadToKey.set(payloadKey, payloadKeyWithPrefix)
+  }
+
+  for (const item of existing) {
+    addItem(item)
+  }
+  for (const item of incoming) {
+    addItem(item)
+  }
+
+  return merged.filter((item): item is StoredSessionUpdate => item !== null)
+}
+
 export function useApp(): AppState & AppActions {
   // Track pending session selection to handle rapid switching
   const pendingSessionRef = useRef<string | null>(null)
@@ -88,6 +158,14 @@ export function useApp(): AppState & AppActions {
   const [sessions, setSessions] = useState<MulticaSession[]>([])
   const [currentSession, setCurrentSession] = useState<MulticaSession | null>(null)
   const [sessionUpdates, setSessionUpdates] = useState<StoredSessionUpdate[]>([])
+
+  // Helper to update current session with synchronous ref update
+  // This ensures currentSessionIdRef is always up-to-date before any async operations
+  // Critical for avoiding race conditions where messages arrive before useEffect updates the ref
+  const updateCurrentSession = useCallback((session: MulticaSession | null) => {
+    currentSessionIdRef.current = session?.id ?? null // Sync update FIRST
+    setCurrentSession(session)
+  }, [])
   const [runningSessionsStatus, setRunningSessionsStatus] = useState<RunningSessionsStatus>({
     runningSessions: 0,
     sessionIds: [],
@@ -135,14 +213,14 @@ export function useApp(): AppState & AppActions {
           'agentSessionId:',
           updatedSession.agentSessionId
         )
-        setCurrentSession(updatedSession)
+        updateCurrentSession(updatedSession)
       }
     })
 
     return () => {
       unsubSessionMeta()
     }
-  }, [currentSessionId])
+  }, [currentSessionId, updateCurrentSession])
 
   // Subscribe to file system change events (runs once on mount)
   useEffect(() => {
@@ -303,7 +381,7 @@ export function useApp(): AppState & AppActions {
 
       // Only update if state changed to avoid unnecessary re-renders
       if (session.directoryExists !== currentSession.directoryExists) {
-        setCurrentSession(session)
+        updateCurrentSession(session)
         // Also refresh sidebar list to update directory status indicators
         const list = await window.electronAPI.listSessions()
         setSessions(list)
@@ -311,7 +389,7 @@ export function useApp(): AppState & AppActions {
     } catch (err) {
       console.error('Failed to validate session directory:', err)
     }
-  }, [currentSession])
+  }, [currentSession, updateCurrentSession])
 
   // Subscribe to app focus event to validate directory existence
   useEffect(() => {
@@ -333,7 +411,7 @@ export function useApp(): AppState & AppActions {
       try {
         setIsInitializing(true)
         const session = await window.electronAPI.createSession(cwd, agentId)
-        setCurrentSession(session)
+        updateCurrentSession(session)
         setSessionUpdates([])
         await loadSessions()
         await loadRunningStatus()
@@ -345,7 +423,7 @@ export function useApp(): AppState & AppActions {
         setIsInitializing(false)
       }
     },
-    [loadSessions, loadRunningStatus, loadSessionModeModel]
+    [loadSessions, loadRunningStatus, loadSessionModeModel, updateCurrentSession]
   )
 
   const selectSession = useCallback(
@@ -366,7 +444,7 @@ export function useApp(): AppState & AppActions {
         }
 
         // Update both states together - React will batch them into one render
-        setCurrentSession(session)
+        updateCurrentSession(session)
         setSessionUpdates(data?.updates ?? [])
 
         // Start agent if not already running
@@ -376,7 +454,7 @@ export function useApp(): AppState & AppActions {
           try {
             const updatedSession = await window.electronAPI.startSessionAgent(sessionId)
             if (pendingSessionRef.current !== sessionId) return
-            setCurrentSession(updatedSession)
+            updateCurrentSession(updatedSession)
           } finally {
             setIsInitializing(false)
           }
@@ -384,6 +462,19 @@ export function useApp(): AppState & AppActions {
 
         // Agent now guaranteed running, load mode/model
         await loadSessionModeModel(sessionId)
+
+        // Reload session updates to catch any messages that arrived during async operations
+        // This is critical because messages may have arrived via IPC while we were:
+        // 1. Loading initial history
+        // 2. Starting the agent
+        // 3. Loading mode/model state
+        // Without this reload, those messages would be lost (overwritten by initial setSessionUpdates)
+        if (pendingSessionRef.current === sessionId) {
+          const freshData = await window.electronAPI.getSession(sessionId)
+          if (pendingSessionRef.current === sessionId && freshData?.updates) {
+            setSessionUpdates((prev) => mergeSessionUpdates(prev, freshData.updates))
+          }
+        }
       } catch (err) {
         // Only show error if this is still the pending session
         if (pendingSessionRef.current === sessionId) {
@@ -391,7 +482,7 @@ export function useApp(): AppState & AppActions {
         }
       }
     },
-    [loadSessionModeModel]
+    [loadSessionModeModel, updateCurrentSession]
   )
 
   const deleteSession = useCallback(
@@ -400,7 +491,7 @@ export function useApp(): AppState & AppActions {
         await window.electronAPI.deleteSession(sessionId)
         useDraftStore.getState().clearDraft(sessionId)
         if (currentSession?.id === sessionId) {
-          setCurrentSession(null)
+          updateCurrentSession(null)
           setSessionUpdates([])
         }
         await loadSessions()
@@ -409,16 +500,16 @@ export function useApp(): AppState & AppActions {
         toast.error(`Failed to delete session: ${getErrorMessage(err)}`)
       }
     },
-    [currentSession, loadSessions, loadRunningStatus]
+    [currentSession, loadSessions, loadRunningStatus, updateCurrentSession]
   )
 
   const clearCurrentSession = useCallback(() => {
-    setCurrentSession(null)
+    updateCurrentSession(null)
     setSessionUpdates([])
     setSessionModeState(null)
     setSessionModelState(null)
     useCommandStore.getState().clearCommands()
-  }, [])
+  }, [updateCurrentSession])
 
   const sendPrompt = useCallback(
     async (content: MessageContent) => {
@@ -502,7 +593,7 @@ export function useApp(): AppState & AppActions {
           currentSession.id,
           newAgentId
         )
-        setCurrentSession(updatedSession)
+        updateCurrentSession(updatedSession)
         await loadRunningStatus()
         // Reload mode/model state for the new agent
         await loadSessionModeModel(currentSession.id)
@@ -513,7 +604,7 @@ export function useApp(): AppState & AppActions {
         setIsSwitchingAgent(false)
       }
     },
-    [currentSession, loadRunningStatus, loadSessionModeModel]
+    [currentSession, loadRunningStatus, loadSessionModeModel, updateCurrentSession]
   )
 
   // Mode/Model actions
