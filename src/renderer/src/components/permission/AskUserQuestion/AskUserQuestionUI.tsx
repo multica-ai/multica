@@ -117,11 +117,13 @@ export function AskUserQuestionUI({
 
       {/* Question header */}
       {currentQuestion.header && (
-        <div className="font-medium text-sm text-foreground">{currentQuestion.header}</div>
+        <div className="font-medium text-sm text-foreground break-words">
+          {currentQuestion.header}
+        </div>
       )}
 
       {/* Question text */}
-      <div className="text-sm text-foreground">
+      <div className="text-sm text-foreground break-words">
         {currentQuestion.question}
         {isMultiSelect && (
           <span className="text-xs text-muted-foreground ml-2">(Select multiple)</span>

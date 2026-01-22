@@ -39,10 +39,12 @@ export function QuestionOptions({
                   {isSelected && <Check className="h-3 w-3 text-primary-foreground" />}
                 </div>
               )}
-              <div className="flex-1">
-                <div className="font-medium text-sm">{opt.label}</div>
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="font-medium text-sm break-words">{opt.label}</div>
                 {opt.description && (
-                  <div className="text-xs text-muted-foreground mt-0.5">{opt.description}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5 break-words">
+                    {opt.description}
+                  </div>
                 )}
               </div>
             </div>

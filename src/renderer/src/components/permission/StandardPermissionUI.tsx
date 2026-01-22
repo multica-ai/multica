@@ -44,10 +44,14 @@ export function StandardPermissionUI({
       </div>
 
       {/* Tool call info */}
-      <div className="rounded-md bg-muted/50 p-2.5">
-        <div className="font-medium text-sm text-foreground">{toolCall.title || 'Tool Call'}</div>
+      <div className="rounded-md bg-muted/50 p-2.5 overflow-hidden">
+        <div className="font-medium text-sm text-foreground break-words">
+          {toolCall.title || 'Tool Call'}
+        </div>
         {toolCall.kind && (
-          <div className="text-xs text-muted-foreground mt-0.5">Type: {toolCall.kind}</div>
+          <div className="text-xs text-muted-foreground mt-0.5 break-words">
+            Type: {toolCall.kind}
+          </div>
         )}
       </div>
 
@@ -62,7 +66,7 @@ export function StandardPermissionUI({
 
       {/* Action buttons */}
       {isPending ? (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 overflow-hidden">
           {options.length > 2 ? (
             // Multiple options - show all
             options.map((option) => (
@@ -77,8 +81,9 @@ export function StandardPermissionUI({
                       : 'outline'
                 }
                 onClick={() => respondToRequest(option.optionId)}
+                className="max-w-full truncate"
               >
-                {option.name}
+                <span className="truncate">{option.name}</span>
               </Button>
             ))
           ) : (
@@ -88,11 +93,16 @@ export function StandardPermissionUI({
                 size="sm"
                 variant="outline"
                 onClick={() => respondToRequest(denyOption.optionId)}
+                className="max-w-full truncate"
               >
-                {denyOption.name || 'Deny'}
+                <span className="truncate">{denyOption.name || 'Deny'}</span>
               </Button>
-              <Button size="sm" onClick={() => respondToRequest(allowOption.optionId)}>
-                {allowOption.name || 'Allow'}
+              <Button
+                size="sm"
+                onClick={() => respondToRequest(allowOption.optionId)}
+                className="max-w-full truncate"
+              >
+                <span className="truncate">{allowOption.name || 'Allow'}</span>
               </Button>
             </>
           )}
