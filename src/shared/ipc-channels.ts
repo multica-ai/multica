@@ -71,6 +71,9 @@ export const IPC_CHANNELS = {
   // App lifecycle
   APP_FOCUS: 'app:focus',
 
+  // App info
+  APP_GET_VERSION: 'app:get-version',
+
   // Auto-update
   UPDATE_CHECK: 'update:check',
   UPDATE_DOWNLOAD: 'update:download',
