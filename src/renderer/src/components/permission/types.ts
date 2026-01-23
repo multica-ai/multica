@@ -63,3 +63,16 @@ export interface StandardPermissionUIProps {
   request: PermissionRequest
   isPending: boolean
 }
+
+// PlanApproval rawInput structure
+export interface PlanApprovalInput {
+  plan?: string
+  allowedPrompts?: Array<{ tool: string; prompt: string }>
+  launchSwarm?: boolean
+  pushToRemote?: boolean
+}
+
+export interface PlanApprovalUIProps {
+  request: PermissionRequest
+  planContent: string
+}
