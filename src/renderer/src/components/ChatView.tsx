@@ -269,6 +269,8 @@ interface Message {
   // Time tracking for assistant messages
   startTime?: string // ISO 8601, first event timestamp
   endTime?: string // ISO 8601, last event timestamp
+  // Timestamp when the last event was received (Date.now() value, for LiveTimer projection)
+  lastEventTimestamp?: number
   // Current action for dynamic status label (only meaningful for last message during processing)
   currentAction?: CurrentAction
 }
@@ -297,6 +299,8 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
   // Track time for assistant messages
   let assistantStartTime: string | undefined
   let assistantEndTime: string | undefined
+  // Track when the last event was received (Date.now() value, for LiveTimer projection)
+  let lastEventTimestamp: number | undefined
   // Track current action for dynamic status label
   let currentAction: CurrentAction | undefined
 
@@ -323,6 +327,7 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
         blocks: currentBlocks,
         startTime: assistantStartTime,
         endTime: assistantEndTime,
+        lastEventTimestamp,
         currentAction
       })
       currentBlocks = []
@@ -331,6 +336,7 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
       // Reset tracking for next message
       assistantStartTime = undefined
       assistantEndTime = undefined
+      lastEventTimestamp = undefined
       currentAction = undefined
     }
   }
@@ -404,6 +410,8 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
           assistantStartTime = stored.timestamp
         }
         assistantEndTime = stored.timestamp
+        // Track when the frontend received this event (for LiveTimer projection)
+        lastEventTimestamp = new Date(stored.timestamp).getTime()
         // Track current action for status label
         currentAction = { type: 'thinking' }
         // Accumulate thought chunks
@@ -418,6 +426,8 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
           assistantStartTime = stored.timestamp
         }
         assistantEndTime = stored.timestamp
+        // Track when the frontend received this event (for LiveTimer projection)
+        lastEventTimestamp = new Date(stored.timestamp).getTime()
         // Track current action for status label
         currentAction = { type: 'writing' }
         // Flush thought before text (thought usually comes first)
@@ -434,6 +444,8 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
           assistantStartTime = stored.timestamp
         }
         assistantEndTime = stored.timestamp
+        // Track when the frontend received this event (for LiveTimer projection)
+        lastEventTimestamp = new Date(stored.timestamp).getTime()
         if ('toolCallId' in update) {
           // Extract _meta.claudeCode.toolName (most reliable tool name source)
           const meta = update._meta as { claudeCode?: { toolName?: string } } | undefined
@@ -503,6 +515,8 @@ function groupUpdatesIntoMessages(updates: StoredSessionUpdate[]): Message[] {
       case 'tool_call_update':
         // Track time
         assistantEndTime = stored.timestamp
+        // Track when the frontend received this event (for LiveTimer projection)
+        lastEventTimestamp = new Date(stored.timestamp).getTime()
         if ('toolCallId' in update) {
           // Extract _meta.claudeCode.toolName
           const updateMeta = update._meta as { claudeCode?: { toolName?: string } } | undefined
@@ -697,6 +711,7 @@ function MessageBubble({
       isComplete={isComplete}
       startTime={message.startTime}
       endTime={message.endTime}
+      lastEventTimestamp={message.lastEventTimestamp}
       isProcessing={isLastMessage && isProcessing}
       modelName={modelName}
       agentName={agentName}
@@ -748,6 +763,7 @@ function CollapsibleAssistantMessage({
   isComplete,
   startTime,
   endTime,
+  lastEventTimestamp,
   isProcessing,
   modelName,
   agentName,
@@ -757,6 +773,7 @@ function CollapsibleAssistantMessage({
   isComplete: boolean
   startTime?: string
   endTime?: string
+  lastEventTimestamp?: number
   isProcessing?: boolean
   modelName?: string
   agentName?: string
@@ -791,6 +808,7 @@ function CollapsibleAssistantMessage({
           <MessageTimer
             startTime={startTime}
             endTime={endTime}
+            lastEventTimestamp={lastEventTimestamp}
             isProcessing={true}
             modelName={modelName}
             agentName={agentName}
