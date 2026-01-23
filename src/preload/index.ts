@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
 import type { ElectronAPI, OpenWithOptions } from '../shared/electron-api'
-import type { ListSessionsOptions, MulticaSession, SessionModeId, ModelId } from '../shared/types'
+import type {
+  ListSessionsOptions,
+  MulticaSession,
+  MulticaProject,
+  SessionModeId,
+  ModelId
+} from '../shared/types'
 import type { MessageContent } from '../shared/types/message'
 
 // Electron API exposed to renderer process
@@ -15,9 +21,30 @@ const electronAPI: ElectronAPI = {
 
   cancelRequest: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_CANCEL, sessionId),
 
+  // Project management
+  createProject: (workingDirectory: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CREATE, workingDirectory),
+
+  listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST),
+
+  listProjectsWithSessions: () => ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST_WITH_SESSIONS),
+
+  getProject: (projectId: string) => ipcRenderer.invoke(IPC_CHANNELS.PROJECT_GET, projectId),
+
+  updateProject: (projectId: string, updates: Partial<MulticaProject>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UPDATE, projectId, updates),
+
+  deleteProject: (projectId: string) => ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELETE, projectId),
+
+  toggleProjectExpanded: (projectId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_TOGGLE_EXPANDED, projectId),
+
+  reorderProjects: (projectIds: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_REORDER, projectIds),
+
   // Session management (agent starts when session is created)
-  createSession: (workingDirectory: string, agentId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE, workingDirectory, agentId),
+  createSession: (projectId: string, agentId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE, projectId, agentId),
 
   listSessions: (options?: ListSessionsOptions) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST, options),
@@ -32,6 +59,15 @@ const electronAPI: ElectronAPI = {
   resumeSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.SESSION_RESUME, sessionId),
 
   deleteSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.SESSION_DELETE, sessionId),
+
+  archiveSession: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_ARCHIVE, sessionId),
+
+  unarchiveSession: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_UNARCHIVE, sessionId),
+
+  listArchivedSessions: (projectId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST_ARCHIVED, projectId),
 
   updateSession: (sessionId: string, updates: Partial<MulticaSession>) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_UPDATE, sessionId, updates),

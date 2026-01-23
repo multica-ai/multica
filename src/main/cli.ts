@@ -132,14 +132,15 @@ async function cmdSessions(state: CLIState): Promise<void> {
           ? `${c.red}●${c.reset}`
           : `${c.dim}●${c.reset}`
 
-    const title = s.title || basename(s.workingDirectory)
+    const workingDir = s.workingDirectory ?? ''
+    const title = s.title || basename(workingDir) || 'Untitled'
     const agent = DEFAULT_AGENTS[s.agentId]?.name || s.agentId
     const shortId = s.id.slice(0, 8)
 
     print(
       `${marker} ${status} ${c.bold}${truncate(title, 30)}${c.reset}  ${c.dim}[${shortId}]${c.reset}`
     )
-    print(`    ${c.dim}Agent: ${agent} | Dir: ${truncate(s.workingDirectory, 40)}${c.reset}`)
+    print(`    ${c.dim}Agent: ${agent} | Dir: ${truncate(workingDir, 40)}${c.reset}`)
     print(`    ${c.dim}Updated: ${formatDate(s.updatedAt)} | Messages: ${s.messageCount}${c.reset}`)
   }
   print(`${'─'.repeat(80)}`)
