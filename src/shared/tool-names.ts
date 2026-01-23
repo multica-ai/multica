@@ -32,7 +32,12 @@ export const TOOL_NAMES = {
 
   // Agent tools
   TASK: 'Task',
-  TODO_WRITE: 'TodoWrite'
+  TODO_WRITE: 'TodoWrite',
+
+  // Plan tools
+  EXIT_PLAN_MODE: 'ExitPlanMode',
+  ENTER_PLAN_MODE: 'EnterPlanMode',
+  PLAN_EXIT: 'plan_exit' // OpenCode variant
 } as const
 
 // Type for tool names
@@ -55,5 +60,25 @@ export function isQuestionTool(toolName: string | undefined | null): boolean {
     normalized === 'askuserquestion' ||
     normalized === 'question' ||
     normalized === TOOL_NAMES.MCP_CONDUCTOR_ASK_USER_QUESTION
+  )
+}
+
+/**
+ * Check if a tool name/title represents a plan approval tool (ExitPlanMode)
+ * These tools require user approval before executing the plan
+ *
+ * @param toolName - The tool name or title to check
+ * @returns true if this is a plan approval tool
+ */
+export function isPlanApprovalTool(toolName: string | undefined | null): boolean {
+  if (!toolName) return false
+
+  const normalized = toolName.toLowerCase()
+  return (
+    toolName === TOOL_NAMES.EXIT_PLAN_MODE ||
+    toolName === TOOL_NAMES.PLAN_EXIT ||
+    normalized === 'exitplanmode' ||
+    normalized === 'plan_exit' ||
+    normalized.includes('ready to code') // Claude Code's display title
   )
 }

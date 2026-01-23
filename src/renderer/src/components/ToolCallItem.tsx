@@ -11,8 +11,10 @@ import {
   Globe,
   Bot,
   ListTodo,
-  Circle,
-  MessageSquare
+  Wrench,
+  MessageSquare,
+  ClipboardCheck,
+  NotebookPen
 } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
@@ -210,9 +212,25 @@ function getDisplayInfo(toolCall: ToolCall): {
         stats: isPending ? 'waiting...' : undefined
       }
     }
+    // Plan mode tools
+    case 'exitplanmode':
+    case 'plan_exit': {
+      return {
+        icon: <ClipboardCheck className={iconClass} />,
+        name: 'Ready to Code',
+        stats: isPending ? 'awaiting approval...' : undefined
+      }
+    }
+    case 'enterplanmode': {
+      return {
+        icon: <NotebookPen className={iconClass} />,
+        name: 'Enter Plan Mode',
+        stats: isPending ? 'planning...' : undefined
+      }
+    }
     default: {
       // fallback: use toolName or title or kind
-      return { icon: <Circle className={iconClass} />, name: toolName || title || kind || 'Tool' }
+      return { icon: <Wrench className={iconClass} />, name: toolName || title || kind || 'Tool' }
     }
   }
 }
