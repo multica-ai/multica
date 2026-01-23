@@ -12,25 +12,27 @@ type AppHandle = {
   deleteSession: (sessionId: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   getSessionUpdates: () => StoredSessionUpdate[]
+  getCurrentSession: () => MulticaSession | null
 }
 
 const AppHarness = React.forwardRef<AppHandle>((_, ref) => {
-  const { deleteSession, selectSession, sessionUpdates } = useApp()
+  const { deleteSession, selectSession, sessionUpdates, currentSession } = useApp()
   useImperativeHandle(
     ref,
     () => ({
       deleteSession,
       selectSession,
-      getSessionUpdates: () => sessionUpdates
+      getSessionUpdates: () => sessionUpdates,
+      getCurrentSession: () => currentSession
     }),
-    [deleteSession, selectSession, sessionUpdates]
+    [deleteSession, selectSession, sessionUpdates, currentSession]
   )
   return null
 })
 
 AppHarness.displayName = 'AppHarness'
 
-describe('useApp deleteSession', () => {
+describe('useApp', () => {
   let container: HTMLDivElement
   let root: Root
 
@@ -299,6 +301,83 @@ describe('useApp deleteSession', () => {
       .map((update) => update.sequenceNumber)
       .filter((seq): seq is number => seq !== undefined)
     expect(sequenceNumbers).toEqual([1, 2])
+  })
+
+  it('refreshes git branch when git HEAD changes for current session', async () => {
+    let fileChangeHandler:
+      | ((event: {
+          directory: string
+          eventType: 'change' | 'rename'
+          path: string
+          sessionIds: string[]
+        }) => void)
+      | undefined
+
+    const session: MulticaSession = {
+      id: 'session-a',
+      agentSessionId: 'agent-1',
+      agentId: 'codex',
+      workingDirectory: '/repo',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      status: 'active',
+      messageCount: 0,
+      gitBranch: 'main'
+    }
+
+    const refreshedSession: MulticaSession = {
+      ...session,
+      gitBranch: 'feature/new-branch'
+    }
+
+    const electronAPI = createElectronApiMock()
+    electronAPI.onFileChanged.mockImplementation((cb) => {
+      fileChangeHandler = cb
+      return () => {}
+    })
+    electronAPI.loadSession.mockResolvedValueOnce(session).mockResolvedValueOnce(refreshedSession)
+    electronAPI.getSession.mockResolvedValue({ session, updates: [] })
+    electronAPI.getAgentStatus.mockResolvedValue({
+      runningSessions: 1,
+      sessionIds: ['session-a'],
+      processingSessionIds: []
+    })
+    electronAPI.getSessionModes.mockResolvedValue(null)
+    electronAPI.getSessionModels.mockResolvedValue(null)
+    electronAPI.getSessionCommands.mockResolvedValue([])
+    electronAPI.listSessions
+      .mockResolvedValueOnce([session])
+      .mockResolvedValueOnce([refreshedSession])
+    ;(window as unknown as { electronAPI: typeof electronAPI }).electronAPI = electronAPI
+
+    const ref = React.createRef<AppHandle>()
+
+    await act(async () => {
+      root.render(<AppHarness ref={ref} />)
+    })
+
+    await act(async () => {
+      await ref.current?.selectSession('session-a')
+    })
+
+    expect(fileChangeHandler).toBeDefined()
+
+    await act(async () => {
+      vi.useFakeTimers()
+      fileChangeHandler?.({
+        directory: '/repo',
+        eventType: 'change',
+        path: '/repo/.git/HEAD',
+        sessionIds: ['session-a']
+      })
+      vi.advanceTimersByTime(150)
+      vi.useRealTimers()
+      await Promise.resolve()
+    })
+
+    expect(electronAPI.loadSession).toHaveBeenCalledTimes(2)
+    expect(electronAPI.listSessions).toHaveBeenCalledTimes(2)
+    expect(ref.current?.getCurrentSession()?.gitBranch).toBe('feature/new-branch')
   })
 })
 

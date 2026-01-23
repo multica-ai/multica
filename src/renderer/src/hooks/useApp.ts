@@ -38,6 +38,11 @@ function isAuthError(errorMessage: string): boolean {
   return authKeywords.some((keyword) => lowerMessage.includes(keyword))
 }
 
+function isGitHeadPath(filePath: string): boolean {
+  const normalizedPath = filePath.replace(/\\/g, '/')
+  return normalizedPath.includes('/.git/') && normalizedPath.endsWith('/HEAD')
+}
+
 export interface AppState {
   // Sessions
   sessions: MulticaSession[]
@@ -181,13 +186,25 @@ export function useApp(): AppState & AppActions {
     ? runningSessionsStatus.processingSessionIds.includes(currentSession.id)
     : false
 
+  // Track previous isProcessing state to detect when processing completes
+  const prevIsProcessingRef = useRef(false)
+
+  // Debounce timer for git branch refresh
+  const gitBranchRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Note: File tree refresh is handled by file system watcher (see fs:file-changed handler below)
   // No need for periodic refresh - it causes performance issues
 
-  // Load sessions on mount
+  // Load sessions on mount and cleanup debounce timer on unmount
   useEffect(() => {
     loadSessions()
     loadRunningStatus()
+
+    return () => {
+      if (gitBranchRefreshTimerRef.current) {
+        clearTimeout(gitBranchRefreshTimerRef.current)
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only load on mount
   }, [])
 
@@ -221,22 +238,6 @@ export function useApp(): AppState & AppActions {
       unsubSessionMeta()
     }
   }, [currentSessionId, updateCurrentSession])
-
-  // Subscribe to file system change events (runs once on mount)
-  useEffect(() => {
-    const handleFileChange = useFileChangeStore.getState().handleFileChange
-
-    const unsubFileChange = window.electronAPI.onFileChanged((event) => {
-      // Notify the store of file changes for each affected session
-      for (const sessionId of event.sessionIds) {
-        handleFileChange(sessionId)
-      }
-    })
-
-    return () => {
-      unsubFileChange()
-    }
-  }, [])
 
   // Start/stop file watching when current session changes
   useEffect(() => {
@@ -351,6 +352,39 @@ export function useApp(): AppState & AppActions {
     }
   }, [])
 
+  const refreshGitBranchForSessions = useCallback(
+    (sessionIds: string[]) => {
+      if (sessionIds.length === 0) return
+
+      // Cancel any pending refresh to debounce rapid changes
+      if (gitBranchRefreshTimerRef.current) {
+        clearTimeout(gitBranchRefreshTimerRef.current)
+      }
+
+      gitBranchRefreshTimerRef.current = setTimeout(async () => {
+        gitBranchRefreshTimerRef.current = null
+
+        const activeSessionId = currentSessionIdRef.current
+        const shouldRefreshCurrent =
+          activeSessionId !== null && sessionIds.includes(activeSessionId)
+
+        if (shouldRefreshCurrent) {
+          try {
+            const session = await window.electronAPI.loadSession(activeSessionId)
+            if (currentSessionIdRef.current === activeSessionId) {
+              updateCurrentSession(session)
+            }
+          } catch (err) {
+            console.error('[useApp] Failed to refresh git branch:', err)
+          }
+        }
+
+        await loadSessions()
+      }, 100)
+    },
+    [loadSessions, updateCurrentSession]
+  )
+
   // Load mode/model state for current session (if agent supports it)
   const loadSessionModeModel = useCallback(async (sessionId: string) => {
     try {
@@ -370,6 +404,27 @@ export function useApp(): AppState & AppActions {
       useCommandStore.getState().clearCommands()
     }
   }, [])
+
+  // Subscribe to file system change events (runs once on mount)
+  useEffect(() => {
+    const handleFileChange = useFileChangeStore.getState().handleFileChange
+
+    const unsubFileChange = window.electronAPI.onFileChanged((event) => {
+      if (isGitHeadPath(event.path)) {
+        void refreshGitBranchForSessions(event.sessionIds)
+        return
+      }
+
+      // Notify the store of file changes for each affected session
+      for (const sessionId of event.sessionIds) {
+        handleFileChange(sessionId)
+      }
+    })
+
+    return () => {
+      unsubFileChange()
+    }
+  }, [refreshGitBranchForSessions])
 
   // Validate current session directory exists (called on app focus)
   const validateCurrentSessionDirectory = useCallback(async () => {
@@ -405,6 +460,22 @@ export function useApp(): AppState & AppActions {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only re-subscribe on session ID change
   }, [currentSession?.id, validateCurrentSessionDirectory])
+
+  useEffect(() => {
+    prevIsProcessingRef.current = false
+  }, [currentSessionId])
+
+  // Refresh git branch when agent processing completes
+  // This ensures the UI reflects any branch changes made by the agent (e.g., git checkout)
+  useEffect(() => {
+    const wasProcessing = prevIsProcessingRef.current
+    prevIsProcessingRef.current = isProcessing
+
+    // Only refresh when processing transitions from true to false
+    if (wasProcessing && !isProcessing && currentSessionId) {
+      void refreshGitBranchForSessions([currentSessionId])
+    }
+  }, [isProcessing, currentSessionId, refreshGitBranchForSessions])
 
   const createSession = useCallback(
     async (cwd: string, agentId: string) => {
