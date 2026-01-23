@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn, formatDuration, formatLocalizedDatetime } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { LiveTimer } from './LiveTimer'
 
 // Re-export Spinner from dedicated component file
 export { Spinner, type SpinnerProps } from './Spinner'
@@ -128,6 +129,8 @@ export interface MessageTimerProps {
   startTime?: string | number
   /** End time (ISO 8601 string or timestamp) - if provided, shows final duration */
   endTime?: string | number
+  /** Timestamp when the last event was received (Date.now() value, for LiveTimer projection) */
+  lastEventTimestamp?: number
   /** Whether the message is still processing */
   isProcessing?: boolean
   /** Label to show (overrides dynamic label) */
@@ -155,6 +158,7 @@ export interface MessageTimerProps {
 export function MessageTimer({
   startTime,
   endTime,
+  lastEventTimestamp,
   isProcessing = false,
   label,
   className,
@@ -224,14 +228,17 @@ export function MessageTimer({
 
   // Processing state: show spinner + time + label
   // Order: [Spinner] [time] [label] - uses smallest font (text-xs)
-  // Time only shown when endTime is available (elapsedMs > 0)
+  // Uses LiveTimer for smooth updates during long pauses (tool execution, permission waits)
   if (isProcessing) {
     return (
       <div className={cn('flex items-center gap-2 text-xs text-muted-foreground', className)}>
         <Spinner className="text-xs" />
-        {elapsedMs > 0 && (
-          <span className="text-muted-foreground/60">{formatDuration(elapsedMs)}</span>
-        )}
+        <LiveTimer
+          baseElapsedMs={elapsedMs}
+          isProcessing={true}
+          lastEventTimestamp={lastEventTimestamp}
+          className="text-muted-foreground/60"
+        />
         <span className="text-muted-foreground/80">{getStatusLabel()}</span>
       </div>
     )

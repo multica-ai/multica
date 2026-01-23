@@ -8,12 +8,12 @@ export function cn(...inputs: ClassValue[]): string {
 /**
  * Format duration in human-readable form
  * @param ms Duration in milliseconds
- * @returns "5.23s" for under a minute (with 2 decimal places), "1m 29s" for 1+ minutes
+ * @returns "5.2s" for under a minute (with 1 decimal place), "1m 29s" for 1+ minutes
  */
 export function formatDuration(ms: number): string {
   const totalSeconds = ms / 1000
   if (totalSeconds < 60) {
-    return `${totalSeconds.toFixed(2)}s`
+    return `${totalSeconds.toFixed(1)}s`
   }
   const minutes = Math.floor(totalSeconds / 60)
   const remainingSeconds = Math.floor(totalSeconds % 60)
