@@ -27,6 +27,9 @@ export const IPC_CHANNELS = {
   SESSION_START_AGENT: 'session:start-agent', // Start agent for a session
   SESSION_RESUME: 'session:resume',
   SESSION_DELETE: 'session:delete',
+  SESSION_ARCHIVE: 'session:archive',
+  SESSION_UNARCHIVE: 'session:unarchive',
+  SESSION_LIST_ARCHIVED: 'session:list-archived',
   SESSION_UPDATE: 'session:update',
   SESSION_SWITCH_AGENT: 'session:switch-agent',
   SESSION_META_UPDATED: 'session:meta-updated', // Push event when session metadata changes (e.g., agentSessionId)

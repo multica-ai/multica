@@ -81,6 +81,8 @@ export interface AppActions {
   createSession: (projectId: string, agentId: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
+  archiveSession: (sessionId: string) => Promise<void>
+  unarchiveSession: (sessionId: string) => Promise<void>
   clearCurrentSession: () => void
 
   // Agent actions (per-session)
@@ -669,6 +671,38 @@ export function useApp(): AppState & AppActions {
     [currentSession, loadProjectsAndSessions, loadRunningStatus, updateCurrentSession]
   )
 
+  const archiveSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await window.electronAPI.archiveSession(sessionId)
+        useDraftStore.getState().clearDraft(sessionId)
+        if (currentSession?.id === sessionId) {
+          updateCurrentSession(null)
+          setSessionUpdates([])
+        }
+        await loadProjectsAndSessions()
+        await loadRunningStatus()
+        toast.success('Session archived')
+      } catch (err) {
+        toast.error(`Failed to archive session: ${getErrorMessage(err)}`)
+      }
+    },
+    [currentSession, loadProjectsAndSessions, loadRunningStatus, updateCurrentSession]
+  )
+
+  const unarchiveSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await window.electronAPI.unarchiveSession(sessionId)
+        await loadProjectsAndSessions()
+        toast.success('Session restored')
+      } catch (err) {
+        toast.error(`Failed to restore session: ${getErrorMessage(err)}`)
+      }
+    },
+    [loadProjectsAndSessions]
+  )
+
   const clearCurrentSession = useCallback(() => {
     updateCurrentSession(null)
     setSessionUpdates([])
@@ -834,6 +868,8 @@ export function useApp(): AppState & AppActions {
     createSession,
     selectSession,
     deleteSession,
+    archiveSession,
+    unarchiveSession,
     clearCurrentSession,
     sendPrompt,
     cancelRequest,

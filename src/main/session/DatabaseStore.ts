@@ -87,6 +87,13 @@ export class DatabaseStore implements ISessionStore {
       // Column already exists, ignore
     }
 
+    // Migration: add is_archived column to sessions if it doesn't exist
+    try {
+      this.db.run('ALTER TABLE sessions ADD COLUMN is_archived INTEGER DEFAULT 0')
+    } catch {
+      // Column already exists, ignore
+    }
+
     // Create sessions table
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -97,6 +104,7 @@ export class DatabaseStore implements ISessionStore {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
+        is_archived INTEGER DEFAULT 0,
         title TEXT,
         message_count INTEGER DEFAULT 0,
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -124,6 +132,9 @@ export class DatabaseStore implements ISessionStore {
     )
     this.db.run(
       `CREATE INDEX IF NOT EXISTS idx_session_updates_sequence ON session_updates(session_id, sequence_number)`
+    )
+    this.db.run(
+      `CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(project_id, is_archived)`
     )
 
     // Enable foreign keys (must be done per connection in SQLite)
@@ -384,6 +395,7 @@ export class DatabaseStore implements ISessionStore {
       createdAt: now,
       updatedAt: now,
       status: 'active',
+      isArchived: false,
       messageCount: 0,
       workingDirectory: project?.workingDirectory
     }
@@ -421,9 +433,13 @@ export class DatabaseStore implements ISessionStore {
       conditions.push('s.status = ?')
       params.push(options.status)
     }
+    // By default, exclude archived sessions unless explicitly requested
+    if (!options?.includeArchived) {
+      conditions.push('s.is_archived = 0')
+    }
 
     let sql = `
-      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, p.working_directory
+      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, s.is_archived, p.working_directory
       FROM sessions s
       JOIN projects p ON s.project_id = p.id
     `
@@ -512,6 +528,66 @@ export class DatabaseStore implements ISessionStore {
   }
 
   /**
+   * Archive a session
+   */
+  async archiveSession(sessionId: string): Promise<void> {
+    const db = this.ensureDb()
+    const session = this.getSessionSync(sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    db.run('UPDATE sessions SET is_archived = 1, updated_at = ? WHERE id = ?', [
+      new Date().toISOString(),
+      sessionId
+    ])
+
+    this.saveToFile()
+  }
+
+  /**
+   * Unarchive a session (restore from archive)
+   */
+  async unarchiveSession(sessionId: string): Promise<void> {
+    const db = this.ensureDb()
+    const session = this.getSessionSync(sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    db.run('UPDATE sessions SET is_archived = 0, updated_at = ? WHERE id = ?', [
+      new Date().toISOString(),
+      sessionId
+    ])
+
+    this.saveToFile()
+  }
+
+  /**
+   * List archived sessions for a project
+   */
+  async listArchivedSessions(projectId: string): Promise<MulticaSession[]> {
+    const db = this.ensureDb()
+    const stmt = db.prepare(`
+      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, s.is_archived, p.working_directory
+      FROM sessions s
+      JOIN projects p ON s.project_id = p.id
+      WHERE s.project_id = ? AND s.is_archived = 1
+      ORDER BY s.updated_at DESC
+    `)
+    stmt.bind([projectId])
+
+    const sessions: MulticaSession[] = []
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as SessionRowWithWorkingDir
+      sessions.push(this.rowToSession(row))
+    }
+    stmt.free()
+
+    return sessions
+  }
+
+  /**
    * Append a session update
    */
   async appendUpdate(sessionId: string, update: SessionNotification): Promise<StoredSessionUpdate> {
@@ -564,7 +640,7 @@ export class DatabaseStore implements ISessionStore {
   getByAgentSessionId(agentSessionId: string): MulticaSession | null {
     const db = this.ensureDb()
     const stmt = db.prepare(`
-      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, p.working_directory
+      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, s.is_archived, p.working_directory
       FROM sessions s
       JOIN projects p ON s.project_id = p.id
       WHERE s.agent_session_id = ?
@@ -631,7 +707,7 @@ export class DatabaseStore implements ISessionStore {
   private getSessionSync(sessionId: string): MulticaSession | null {
     const db = this.ensureDb()
     const stmt = db.prepare(`
-      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, p.working_directory
+      SELECT s.id, s.project_id, s.agent_session_id, s.agent_id, s.created_at, s.updated_at, s.status, s.title, s.message_count, s.is_archived, p.working_directory
       FROM sessions s
       JOIN projects p ON s.project_id = p.id
       WHERE s.id = ?
@@ -722,6 +798,7 @@ export class DatabaseStore implements ISessionStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       status: row.status as 'active' | 'completed' | 'error',
+      isArchived: row.is_archived === 1,
       title: row.title ?? undefined,
       messageCount: row.message_count,
       workingDirectory: row.working_directory
@@ -751,6 +828,7 @@ interface SessionRowWithWorkingDir {
   title: string | null
   message_count: number
   working_directory: string
+  is_archived: number
 }
 
 interface SessionUpdateRow {

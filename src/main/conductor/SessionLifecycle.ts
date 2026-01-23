@@ -79,6 +79,7 @@ export class SessionLifecycle implements ISessionLifecycle {
         createdAt: now,
         updatedAt: now,
         status: 'active',
+        isArchived: false,
         messageCount: 0
       }
       this.inMemorySession = session

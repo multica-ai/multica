@@ -130,7 +130,10 @@ export function AppSidebar({
                     onNewSession={onNewSession}
                     onToggleExpanded={onToggleProjectExpanded}
                     onDeleteProject={(p): void => openModal('deleteProject', p)}
-                    onDeleteSession={(s): void => openModal('deleteSession', s)}
+                    onArchiveSession={(s): void => openModal('archiveSession', s)}
+                    onViewArchivedSessions={(p): void =>
+                      openModal('archivedSessions', { projectId: p.id, projectName: p.name })
+                    }
                   />
                 ))}
               </SidebarMenu>

@@ -254,6 +254,21 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
     return { success: true }
   })
 
+  ipcMain.handle(IPC_CHANNELS.SESSION_ARCHIVE, async (_event, sessionId: string) => {
+    await conductor.archiveSession(sessionId)
+    return { success: true }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_UNARCHIVE, async (_event, sessionId: string) => {
+    await conductor.unarchiveSession(sessionId)
+    return { success: true }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_LIST_ARCHIVED, async (_event, projectId: string) => {
+    const sessions = await conductor.listArchivedSessions(projectId)
+    return Promise.all(sessions.map(withRuntimeInfo))
+  })
+
   ipcMain.handle(
     IPC_CHANNELS.SESSION_UPDATE,
     async (_event, sessionId: string, updates: Partial<MulticaSession>) => {

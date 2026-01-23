@@ -5,7 +5,13 @@ import { create } from 'zustand'
 import type { MulticaSession, MulticaProject } from '../../../shared/types'
 
 // Modal types
-export type ModalType = 'settings' | 'newSession' | 'deleteSession' | 'deleteProject'
+export type ModalType =
+  | 'settings'
+  | 'newSession'
+  | 'archiveSession'
+  | 'deleteSession'
+  | 'deleteProject'
+  | 'archivedSessions'
 
 // Modal data types
 export interface SettingsModalData {
@@ -13,11 +19,18 @@ export interface SettingsModalData {
   pendingFolder?: string // Folder path waiting to create session after agent install
 }
 
+export interface ArchivedSessionsModalData {
+  projectId: string
+  projectName: string
+}
+
 interface ModalDataMap {
   settings: SettingsModalData | undefined
   newSession: undefined
+  archiveSession: MulticaSession
   deleteSession: MulticaSession
   deleteProject: MulticaProject
+  archivedSessions: ArchivedSessionsModalData
 }
 
 interface ModalState<T extends ModalType> {
@@ -37,8 +50,10 @@ export const useModalStore = create<ModalStore>((set) => ({
   modals: {
     settings: { isOpen: false },
     newSession: { isOpen: false },
+    archiveSession: { isOpen: false },
     deleteSession: { isOpen: false },
-    deleteProject: { isOpen: false }
+    deleteProject: { isOpen: false },
+    archivedSessions: { isOpen: false }
   },
   openModal: (type, data) =>
     set((state) => ({

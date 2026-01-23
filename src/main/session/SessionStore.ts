@@ -89,6 +89,7 @@ export class SessionStore {
       createdAt: now,
       updatedAt: now,
       status: 'active',
+      isArchived: false,
       messageCount: 0
     }
 

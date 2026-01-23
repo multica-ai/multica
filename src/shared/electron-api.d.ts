@@ -205,6 +205,9 @@ export interface ElectronAPI {
   startSessionAgent(sessionId: string): Promise<MulticaSession> // Start agent for a session
   resumeSession(sessionId: string): Promise<MulticaSession>
   deleteSession(sessionId: string): Promise<{ success: boolean }>
+  archiveSession(sessionId: string): Promise<{ success: boolean }>
+  unarchiveSession(sessionId: string): Promise<{ success: boolean }>
+  listArchivedSessions(projectId: string): Promise<MulticaSession[]>
   updateSession(sessionId: string, updates: Partial<MulticaSession>): Promise<MulticaSession>
   switchSessionAgent(sessionId: string, newAgentId: string): Promise<MulticaSession>
 

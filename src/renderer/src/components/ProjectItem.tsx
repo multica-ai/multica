@@ -13,14 +13,23 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
+  Archive,
   ChevronDown,
   ChevronRight,
   CirclePause,
   Folder,
   Loader2,
+  MoreHorizontal,
   Plus,
   Trash2
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -35,7 +44,8 @@ interface ProjectItemProps {
   onNewSession: (projectId: string) => void
   onToggleExpanded: (projectId: string) => void
   onDeleteProject: (project: MulticaProject) => void
-  onDeleteSession: (session: MulticaSession) => void
+  onArchiveSession: (session: MulticaSession) => void
+  onViewArchivedSessions: (project: MulticaProject) => void
 }
 
 function formatDate(iso: string): string {
@@ -67,7 +77,7 @@ interface SessionItemProps {
   isProcessing: boolean
   needsPermission: boolean
   onSelect: () => void
-  onDelete: () => void
+  onArchive: () => void
 }
 
 function SessionItem({
@@ -76,7 +86,7 @@ function SessionItem({
   isProcessing,
   needsPermission,
   onSelect,
-  onDelete
+  onArchive
 }: SessionItemProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false)
 
@@ -117,19 +127,19 @@ function SessionItem({
           </span>
         </div>
 
-        {/* Delete button */}
+        {/* Archive button */}
         <div
           role="button"
           tabIndex={0}
           onClick={(e): void => {
             e.stopPropagation()
-            onDelete()
+            onArchive()
           }}
           onKeyDown={(e): void => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
               e.stopPropagation()
-              onDelete()
+              onArchive()
             }
           }}
           className={cn(
@@ -138,7 +148,7 @@ function SessionItem({
             isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
           )}
         >
-          <Trash2 className="h-3 w-3 text-muted-foreground" />
+          <Archive className="h-3 w-3 text-muted-foreground" />
         </div>
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -160,7 +170,8 @@ function ProjectItemInner({
   onNewSession,
   onToggleExpanded,
   onDeleteProject,
-  onDeleteSession,
+  onArchiveSession,
+  onViewArchivedSessions,
   dragProps,
   isDragging
 }: ProjectItemInnerProps): React.JSX.Element {
@@ -225,29 +236,45 @@ function ProjectItemInner({
                   <Plus className="h-4 w-4 text-primary" />
                 </div>
 
-                {/* Delete project button */}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e): void => {
-                    e.stopPropagation()
-                    onDeleteProject(project)
-                  }}
-                  onKeyDown={(e): void => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      onDeleteProject(project)
-                    }
-                  }}
-                  className={cn(
-                    'shrink-0 cursor-pointer rounded p-0.5 transition-opacity duration-150',
-                    'hover:bg-muted active:bg-muted',
-                    isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
-                  )}
-                >
-                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                </div>
+                {/* Project menu (... button) */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e): void => e.stopPropagation()}
+                      className={cn(
+                        'shrink-0 cursor-pointer rounded p-0.5 transition-opacity duration-150',
+                        'hover:bg-muted active:bg-muted',
+                        isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
+                      )}
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                    </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      onClick={(e): void => {
+                        e.stopPropagation()
+                        onViewArchivedSessions(project)
+                      }}
+                    >
+                      <Archive className="h-4 w-4 mr-2" />
+                      View Archived Sessions
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={(e): void => {
+                        e.stopPropagation()
+                        onDeleteProject(project)
+                      }}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Project
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </SidebarMenuButton>
             </CollapsibleTrigger>
           </TooltipTrigger>
@@ -275,7 +302,7 @@ function ProjectItemInner({
                     isProcessing={processingSessionIds.includes(session.id)}
                     needsPermission={session.id === permissionPendingSessionId}
                     onSelect={(): void => onSelectSession(session.id)}
-                    onDelete={(): void => onDeleteSession(session)}
+                    onArchive={(): void => onArchiveSession(session)}
                   />
                 ))}
               </SidebarMenu>

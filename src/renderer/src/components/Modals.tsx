@@ -2,7 +2,7 @@
  * Global modals registry
  * All app modals are rendered here and controlled via modalStore
  */
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useModalStore, useModal } from '../stores/modalStore'
 import { Settings } from './Settings'
 import type { MulticaSession, MulticaProject } from '../../../shared/types'
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Undo2 } from 'lucide-react'
 
 interface ModalsProps {
   // Settings props
@@ -25,6 +26,10 @@ interface ModalsProps {
   onCreateSession: (cwd: string) => Promise<void>
   // DeleteSession props
   onDeleteSession: (sessionId: string) => void
+  // ArchiveSession props
+  onArchiveSession: (sessionId: string) => Promise<void>
+  // UnarchiveSession props
+  onUnarchiveSession: (sessionId: string) => Promise<void>
   // DeleteProject props
   onDeleteProject: (projectId: string) => Promise<void>
 }
@@ -34,6 +39,8 @@ export function Modals({
   onSetDefaultAgent,
   onCreateSession,
   onDeleteSession,
+  onArchiveSession,
+  onUnarchiveSession,
   onDeleteProject
 }: ModalsProps): React.JSX.Element {
   const closeModal = useModalStore((s) => s.closeModal)
@@ -47,6 +54,10 @@ export function Modals({
         onClose={() => closeModal('settings')}
       />
       <NewSessionModal onCreateSession={onCreateSession} onClose={() => closeModal('newSession')} />
+      <ArchiveSessionModal
+        onArchiveSession={onArchiveSession}
+        onClose={() => closeModal('archiveSession')}
+      />
       <DeleteSessionModal
         onDeleteSession={onDeleteSession}
         onClose={() => closeModal('deleteSession')}
@@ -54,6 +65,10 @@ export function Modals({
       <DeleteProjectModal
         onDeleteProject={onDeleteProject}
         onClose={() => closeModal('deleteProject')}
+      />
+      <ArchivedSessionsModal
+        onUnarchiveSession={onUnarchiveSession}
+        onClose={() => closeModal('archivedSessions')}
       />
     </>
   )
@@ -256,6 +271,159 @@ function DeleteProjectModal({
           </Button>
           <Button variant="destructive" onClick={handleConfirm}>
             Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// Archive Session Modal
+interface ArchiveSessionModalProps {
+  onArchiveSession: (sessionId: string) => Promise<void>
+  onClose: () => void
+}
+
+function ArchiveSessionModal({
+  onArchiveSession,
+  onClose
+}: ArchiveSessionModalProps): React.JSX.Element {
+  const { isOpen, data: session } = useModal('archiveSession')
+
+  const handleConfirm = async (): Promise<void> => {
+    if (session) {
+      await onArchiveSession(session.id)
+      onClose()
+    }
+  }
+
+  const getSessionTitle = (s: MulticaSession): string => {
+    if (s.title) return s.title
+    const workingDir = s.workingDirectory ?? ''
+    const parts = workingDir.split('/')
+    return parts[parts.length - 1] || workingDir
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Archive Task</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to archive &quot;{session && getSessionTitle(session)}&quot;? You
+            can restore it later from the project menu.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleConfirm}>Archive</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// Archived Sessions Modal
+interface ArchivedSessionsModalProps {
+  onUnarchiveSession: (sessionId: string) => Promise<void>
+  onClose: () => void
+}
+
+function ArchivedSessionsModal({
+  onUnarchiveSession,
+  onClose
+}: ArchivedSessionsModalProps): React.JSX.Element {
+  const { isOpen, data } = useModal('archivedSessions')
+  const [archivedSessions, setArchivedSessions] = useState<MulticaSession[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Load archived sessions when modal opens
+  const loadArchivedSessions = useCallback(async (): Promise<void> => {
+    if (!data?.projectId) return
+    setIsLoading(true)
+    try {
+      const sessions = await window.electronAPI.listArchivedSessions(data.projectId)
+      setArchivedSessions(sessions)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [data?.projectId])
+
+  useEffect(() => {
+    if (isOpen && data?.projectId) {
+      loadArchivedSessions()
+    }
+  }, [isOpen, data?.projectId, loadArchivedSessions])
+
+  const handleUnarchive = async (sessionId: string): Promise<void> => {
+    await onUnarchiveSession(sessionId)
+    // Reload the list
+    await loadArchivedSessions()
+  }
+
+  const getSessionTitle = (s: MulticaSession): string => {
+    if (s.title) return s.title
+    return `Session · ${s.id.slice(0, 6)}`
+  }
+
+  const formatDate = (iso: string): string => {
+    const date = new Date(iso)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffDays < 1) return 'Today'
+    if (diffDays === 1) return 'Yesterday'
+    if (diffDays < 7) return `${diffDays} days ago`
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`
+    return date.toLocaleDateString()
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Archived Sessions</DialogTitle>
+          <DialogDescription>{data?.projectName}</DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-64 overflow-y-auto">
+          {isLoading ? (
+            <div className="py-8 text-center text-muted-foreground">Loading...</div>
+          ) : archivedSessions.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">No archived sessions</div>
+          ) : (
+            <div className="space-y-2">
+              {archivedSessions.map((session) => (
+                <div
+                  key={session.id}
+                  className="flex items-center justify-between rounded-md border p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{getSessionTitle(session)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Archived {formatDate(session.updatedAt)}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleUnarchive(session.id)}
+                    title="Restore session"
+                  >
+                    <Undo2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>

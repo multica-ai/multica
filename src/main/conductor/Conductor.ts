@@ -138,6 +138,40 @@ export class Conductor {
   }
 
   /**
+   * Archive a session (soft delete - stops agent if running)
+   */
+  async archiveSession(sessionId: string): Promise<void> {
+    // Stop agent if running
+    if (this.agentProcessManager.isRunning(sessionId)) {
+      await this.agentProcessManager.stop(sessionId)
+    }
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.archiveSession(sessionId)
+  }
+
+  /**
+   * Unarchive a session (restore from archive)
+   */
+  async unarchiveSession(sessionId: string): Promise<void> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.unarchiveSession(sessionId)
+  }
+
+  /**
+   * List archived sessions for a project
+   */
+  async listArchivedSessions(projectId: string): Promise<MulticaSession[]> {
+    if (!this.sessionStore) {
+      return []
+    }
+    return this.sessionStore.listArchivedSessions(projectId)
+  }
+
+  /**
    * Update session metadata
    */
   async updateSessionMeta(

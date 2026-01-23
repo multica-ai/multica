@@ -169,6 +169,15 @@ export interface ISessionStore {
   /** Delete a session */
   delete(sessionId: string): Promise<void>
 
+  /** Archive a session (soft delete) */
+  archiveSession(sessionId: string): Promise<void>
+
+  /** Unarchive a session (restore from archive) */
+  unarchiveSession(sessionId: string): Promise<void>
+
+  /** List archived sessions for a project */
+  listArchivedSessions(projectId: string): Promise<MulticaSession[]>
+
   /** Append an update to a session */
   appendUpdate(sessionId: string, update: SessionNotification): Promise<StoredSessionUpdate>
 

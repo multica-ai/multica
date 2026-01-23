@@ -41,6 +41,8 @@ function AppContent(): React.JSX.Element {
     createSession,
     selectSession,
     deleteSession,
+    archiveSession,
+    unarchiveSession,
     sendPrompt,
     cancelRequest,
     switchSessionAgent,
@@ -305,6 +307,8 @@ function AppContent(): React.JSX.Element {
         onSetDefaultAgent={handleSetDefaultAgent}
         onCreateSession={handleCreateSessionFromFolder}
         onDeleteSession={deleteSession}
+        onArchiveSession={archiveSession}
+        onUnarchiveSession={unarchiveSession}
         onDeleteProject={deleteProject}
       />
 

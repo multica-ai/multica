@@ -60,6 +60,15 @@ const electronAPI: ElectronAPI = {
 
   deleteSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.SESSION_DELETE, sessionId),
 
+  archiveSession: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_ARCHIVE, sessionId),
+
+  unarchiveSession: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_UNARCHIVE, sessionId),
+
+  listArchivedSessions: (projectId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST_ARCHIVED, projectId),
+
   updateSession: (sessionId: string, updates: Partial<MulticaSession>) =>
     ipcRenderer.invoke(IPC_CHANNELS.SESSION_UPDATE, sessionId, updates),
 

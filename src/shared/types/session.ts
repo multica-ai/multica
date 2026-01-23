@@ -21,6 +21,7 @@ export interface MulticaSession {
 
   // State
   status: 'active' | 'completed' | 'error'
+  isArchived: boolean // Whether this session has been archived
 
   // Metadata
   title?: string // User-defined or auto-generated title
@@ -88,6 +89,7 @@ export interface ListSessionsOptions {
   projectId?: string // Filter by project
   agentId?: string // Filter by agent
   status?: MulticaSession['status']
+  includeArchived?: boolean // Include archived sessions (default: false)
   limit?: number
   offset?: number
 }
