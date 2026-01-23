@@ -4,7 +4,7 @@
 
 시각적 인터페이스를 통해 코딩 에이전트의 기능을 모든 사람에게 제공하는 네이티브 데스크톱 클라이언트.
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | 한국어
+[English](./README.md) | [简体中文](./README.zh-Hans.md) | [繁體中文](./README.zh-Hant.md) | [日本語](./README.ja.md) | 한국어
 
 ## 왜 "Multica"인가?
 

@@ -4,7 +4,7 @@
 
 ビジュアルインターフェースを通じて、コーディングエージェントの能力をすべての人に届けるネイティブデスクトップクライアント。
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | 日本語 | [한국어](./README.ko.md)
+[English](./README.md) | [简体中文](./README.zh-Hans.md) | [繁體中文](./README.zh-Hant.md) | 日本語 | [한국어](./README.ko.md)
 
 ## なぜ "Multica" という名前なのか？
 
