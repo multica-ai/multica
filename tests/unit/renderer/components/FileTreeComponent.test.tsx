@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import * as React from 'react'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
