@@ -93,6 +93,9 @@ export interface AppActions {
   // Mode/Model actions
   setSessionMode: (modeId: SessionModeId) => Promise<void>
   setSessionModel: (modelId: ModelId) => Promise<void>
+
+  // Session metadata actions
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>
 }
 
 function mergeSessionUpdates(
@@ -197,6 +200,36 @@ export function useApp(): AppState & AppActions {
     currentSessionIdRef.current = session?.id ?? null // Sync update FIRST
     setCurrentSession(session)
   }, [])
+
+  const updateSessionInLists = useCallback((updatedSession: MulticaSession) => {
+    setProjectsWithSessions((prev) => {
+      let didUpdate = false
+      const next = prev.map((entry) => {
+        if (entry.project.id !== updatedSession.projectId) {
+          return entry
+        }
+        const nextSessions = entry.sessions.map((session) => {
+          if (session.id !== updatedSession.id) {
+            return session
+          }
+          didUpdate = true
+          return updatedSession
+        })
+        return didUpdate ? { ...entry, sessions: nextSessions } : entry
+      })
+      return didUpdate ? next : prev
+    })
+
+    setSessions((prev) => {
+      const index = prev.findIndex((session) => session.id === updatedSession.id)
+      if (index === -1) {
+        return prev
+      }
+      const next = [...prev]
+      next[index] = updatedSession
+      return next
+    })
+  }, [])
   const [runningSessionsStatus, setRunningSessionsStatus] = useState<RunningSessionsStatus>({
     runningSessions: 0,
     sessionIds: [],
@@ -248,6 +281,8 @@ export function useApp(): AppState & AppActions {
   // This is critical for receiving messages after app restart
   useEffect(() => {
     const unsubSessionMeta = window.electronAPI.onSessionMetaUpdated((updatedSession) => {
+      updateSessionInLists(updatedSession)
+
       // Only update if this is the current session
       if (currentSessionId && updatedSession.id === currentSessionId) {
         console.log(
@@ -263,7 +298,7 @@ export function useApp(): AppState & AppActions {
     return () => {
       unsubSessionMeta()
     }
-  }, [currentSessionId, updateCurrentSession])
+  }, [currentSessionId, updateCurrentSession, updateSessionInLists])
 
   // Start/stop file watching when current session changes
   useEffect(() => {
@@ -846,6 +881,21 @@ export function useApp(): AppState & AppActions {
     [currentSession]
   )
 
+  const updateSessionTitle = useCallback(
+    async (sessionId: string, title: string) => {
+      try {
+        const updatedSession = await window.electronAPI.updateSession(sessionId, { title })
+        updateSessionInLists(updatedSession)
+        if (currentSession?.id === sessionId) {
+          updateCurrentSession(updatedSession)
+        }
+      } catch (err) {
+        toast.error(`Failed to update title: ${getErrorMessage(err)}`)
+      }
+    },
+    [currentSession?.id, updateCurrentSession, updateSessionInLists]
+  )
+
   return {
     // State
     projects,
@@ -877,6 +927,7 @@ export function useApp(): AppState & AppActions {
     cancelRequest,
     switchSessionAgent,
     setSessionMode,
-    setSessionModel
+    setSessionModel,
+    updateSessionTitle
   }
 }

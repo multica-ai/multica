@@ -47,7 +47,8 @@ function AppContent(): React.JSX.Element {
     cancelRequest,
     switchSessionAgent,
     setSessionMode,
-    setSessionModel
+    setSessionModel,
+    updateSessionTitle
   } = useApp()
 
   // UI state
@@ -178,6 +179,7 @@ function AppContent(): React.JSX.Element {
           onNewSession={handleNewSessionInProject}
           onToggleProjectExpanded={toggleProjectExpanded}
           onReorderProjects={reorderProjects}
+          onUpdateSessionTitle={updateSessionTitle}
         />
 
         {/* Main area */}

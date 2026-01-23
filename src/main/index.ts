@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
   })
 
   // Register IPC handlers
-  registerIPCHandlers(conductor, fileWatcher)
+  registerIPCHandlers(conductor, fileWatcher, () => mainWindow)
 
   mainWindow = createWindow()
 

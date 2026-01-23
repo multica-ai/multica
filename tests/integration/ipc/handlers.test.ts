@@ -19,7 +19,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-// Mock child_process spawn
+// Mock child_process spawn and exec
 vi.mock('child_process', () => ({
   spawn: vi.fn().mockReturnValue({
     on: vi.fn((event, callback) => {
@@ -27,6 +27,12 @@ vi.mock('child_process', () => ({
         callback(0)
       }
     })
+  }),
+  exec: vi.fn((_cmd, _opts, callback) => {
+    if (callback) {
+      callback(null, { stdout: 'Mocked Title', stderr: '' })
+    }
+    return {}
   })
 }))
 
@@ -58,16 +64,31 @@ const createMockConductor = (workingDir?: string) => ({
     .mockResolvedValue({ id: 'project-1', workingDirectory: workingDir || '/test/dir' })
 })
 
+// Create mock file watcher
+const createMockFileWatcher = (): {
+  watch: ReturnType<typeof vi.fn>
+  unwatch: ReturnType<typeof vi.fn>
+  unwatchAll: ReturnType<typeof vi.fn>
+} => ({
+  watch: vi.fn(),
+  unwatch: vi.fn(),
+  unwatchAll: vi.fn()
+})
+
 describe('IPC Handlers', () => {
   let tempDir: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let handlers: Map<string, (...args: any[]) => any>
   let mockConductor: ReturnType<typeof createMockConductor>
+  let mockFileWatcher: ReturnType<typeof createMockFileWatcher>
+  let mockGetMainWindow: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
     handlers = new Map()
     mockConductor = createMockConductor()
+    mockFileWatcher = createMockFileWatcher()
+    mockGetMainWindow = vi.fn().mockReturnValue(null)
 
     // Capture all registered handlers
     vi.mocked(ipcMain.handle).mockImplementation(
@@ -77,9 +98,9 @@ describe('IPC Handlers', () => {
       }
     )
 
-    // Register handlers with mock conductor
+    // Register handlers with mock conductor, file watcher, and main window getter
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    registerIPCHandlers(mockConductor as any)
+    registerIPCHandlers(mockConductor as any, mockFileWatcher as any, mockGetMainWindow)
 
     // Create temp directory for file system tests
     tempDir = mkdtempSync(join(tmpdir(), 'ipc-test-'))
@@ -126,9 +147,10 @@ describe('IPC Handlers', () => {
   describe('agent handlers', () => {
     it('agent:prompt should call conductor.sendPrompt', async () => {
       const handler = handlers.get('agent:prompt')!
-      await handler({}, 'session-1', 'Hello')
+      const content = [{ type: 'text', text: 'Hello' }]
+      await handler({}, 'session-1', content)
 
-      expect(mockConductor.sendPrompt).toHaveBeenCalledWith('session-1', 'Hello')
+      expect(mockConductor.sendPrompt).toHaveBeenCalledWith('session-1', content)
     })
 
     it('agent:cancel should call conductor.cancelRequest', async () => {

@@ -12,6 +12,7 @@ export { SessionLifecycle } from './SessionLifecycle'
 export { AgentProcess } from './AgentProcess'
 export { createAcpClient } from './AcpClientFactory'
 export type { AcpClientCallbacks, AcpClientFactoryOptions } from './AcpClientFactory'
+export { generateSessionTitle } from './TitleGenerator'
 
 // Types
 export type {
