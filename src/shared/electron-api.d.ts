@@ -252,6 +252,9 @@ export interface ElectronAPI {
   // App lifecycle
   onAppFocus(callback: () => void): () => void
 
+  // App info
+  getAppVersion(): Promise<string>
+
   // Auto-update
   checkForUpdates(): Promise<void>
   downloadUpdate(): Promise<void>

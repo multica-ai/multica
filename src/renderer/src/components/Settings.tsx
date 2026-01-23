@@ -3,11 +3,22 @@
  * Using Linear-style design: minimal UI, direct interactions
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import type { AgentCheckResult, AgentVersionInfo } from '../../../shared/electron-api'
+import type { AgentCheckResult, AgentVersionInfo, UpdateStatus } from '../../../shared/electron-api'
 import { useTheme } from '../contexts/ThemeContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Sun, Moon, Monitor, ChevronRight, ChevronDown, Loader2, ArrowUp } from 'lucide-react'
+import {
+  Sun,
+  Moon,
+  Monitor,
+  ChevronRight,
+  ChevronDown,
+  Loader2,
+  ArrowUp,
+  Download,
+  RefreshCw,
+  CheckCircle
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // Agent icons
@@ -64,14 +75,26 @@ export function Settings({
     agentId: null,
     state: 'idle'
   })
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const { mode, setMode } = useTheme()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect((): void => {
     if (isOpen) {
       loadAgents()
+      // Fetch app version
+      window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error)
     }
   }, [isOpen])
+
+  // Listen for update status changes
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onUpdateStatus((status) => {
+      setUpdateStatus(status)
+    })
+    return () => unsubscribe()
+  }, [])
 
   // Cleanup polling on unmount or when dialog closes
   useEffect((): (() => void) => {
@@ -235,6 +258,75 @@ export function Settings({
               System
             </ToggleGroupItem>
           </ToggleGroup>
+        </div>
+
+        {/* Separator */}
+        <div className="border-t" />
+
+        {/* Software Update Section */}
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Software Update</h2>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Current Version:</span>
+              <span className="text-sm font-mono text-muted-foreground">{appVersion || '...'}</span>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              {updateStatus?.status === 'available' && updateStatus.info && (
+                <>
+                  <span className="text-xs text-amber-600 dark:text-amber-400">
+                    v{updateStatus.info.version} available
+                  </span>
+                  <button
+                    onClick={() => window.electronAPI.downloadUpdate()}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    <Download className="h-3 w-3" />
+                    Download
+                  </button>
+                </>
+              )}
+              {updateStatus?.status === 'downloading' && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Downloading...
+                  {updateStatus.progress && ` ${Math.round(updateStatus.progress.percent)}%`}
+                </span>
+              )}
+              {updateStatus?.status === 'downloaded' && (
+                <button
+                  onClick={() => window.electronAPI.installUpdate()}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 transition-colors"
+                >
+                  <CheckCircle className="h-3 w-3" />
+                  Restart to Update
+                </button>
+              )}
+              {updateStatus?.status === 'error' && (
+                <span className="text-xs text-destructive">Update failed</span>
+              )}
+              {(!updateStatus ||
+                updateStatus.status === 'not-available' ||
+                updateStatus.status === 'error') && (
+                <button
+                  onClick={() => window.electronAPI.checkForUpdates()}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Check for Updates
+                </button>
+              )}
+              {updateStatus?.status === 'checking' && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Checking...
+                </span>
+              )}
+              {updateStatus?.status === 'not-available' && (
+                <span className="text-xs text-green-600 dark:text-green-400">Up to date</span>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Separator */}
