@@ -3,8 +3,6 @@
  * Note: Scroll behavior is managed by parent (App.tsx) for unified scroll context
  */
 import { useState, useMemo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import type { StoredSessionUpdate } from '../../../shared/types'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ChevronDown, ChevronRight, CheckCircle2, Circle, Loader2, Folder } from 'lucide-react'
@@ -14,110 +12,7 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { cn } from '@/lib/utils'
 import { MessageTimer, StatusIndicator, Spinner, type CurrentAction } from './ui/LoadingIndicator'
 import { CompletedMessageFooter } from './ui/CompletedMessageFooter'
-
-// Hoisted ReactMarkdown components for better performance (avoids object recreation on each render)
-const TEXT_MARKDOWN_COMPONENTS = {
-  // Paragraphs: consistent spacing, tighter line height for readability
-  p: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <p className="mb-4 last:mb-0">{children}</p>
-  ),
-  // Headings: more space above (1.5x) than below (0.5x) for visual grouping
-  h1: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <h1 className="text-xl font-bold mt-6 mb-3 first:mt-0">{children}</h1>
-  ),
-  h2: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <h2 className="text-lg font-bold mt-5 mb-2.5 first:mt-0">{children}</h2>
-  ),
-  h3: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <h3 className="text-base font-semibold mt-4 mb-2 first:mt-0">{children}</h3>
-  ),
-  // Lists: consistent spacing with content
-  ul: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <ul className="list-disc pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ul>
-  ),
-  ol: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <ol className="list-decimal pl-5 mb-4 last:mb-0 space-y-1.5">{children}</ol>
-  ),
-  li: ({ children }: { children?: React.ReactNode }): React.JSX.Element => <li>{children}</li>,
-  // Code: pre handles container, code is transparent for blocks
-  code: ({
-    className,
-    children
-  }: {
-    className?: string
-    children?: React.ReactNode
-  }): React.JSX.Element => {
-    const isBlock = className?.includes('language-')
-    if (isBlock) {
-      // Block code inside pre - no extra styling, pre handles it
-      return <code>{children}</code>
-    }
-    // Inline code
-    return (
-      <code className="bg-muted/70 rounded px-1.5 py-0.5 text-[13px] font-mono">{children}</code>
-    )
-  },
-  pre: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <pre className="bg-muted rounded-lg px-4 py-3 mb-4 last:mb-0 overflow-x-auto text-[13px] font-mono leading-relaxed">
-      {children}
-    </pre>
-  ),
-  // Links
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }): React.JSX.Element => (
-    <a
-      href={href}
-      className="text-primary hover:underline"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {children}
-    </a>
-  ),
-  // Blockquote: subtle styling
-  blockquote: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <blockquote className="border-l-2 border-border pl-4 my-4 text-muted-foreground">
-      {children}
-    </blockquote>
-  ),
-  hr: (): React.JSX.Element => <hr className="border-border my-6" />,
-  strong: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <strong className="font-semibold">{children}</strong>
-  ),
-  em: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <em className="italic">{children}</em>
-  ),
-  // Table components for GFM table support
-  table: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <div className="overflow-x-auto mb-4 last:mb-0">
-      <table className="min-w-full border-collapse border border-border text-sm">{children}</table>
-    </div>
-  ),
-  thead: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <thead className="bg-muted/50">{children}</thead>
-  ),
-  tbody: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <tbody>{children}</tbody>
-  ),
-  tr: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <tr className="border-b border-border">{children}</tr>
-  ),
-  th: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>
-  ),
-  td: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <td className="border border-border px-3 py-2">{children}</td>
-  )
-}
-
-// Simpler markdown components for thought blocks
-const THOUGHT_MARKDOWN_COMPONENTS = {
-  p: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <p className="mb-2 last:mb-0">{children}</p>
-  ),
-  code: ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
-    <code className="bg-background rounded px-1 py-0.5 text-xs font-mono">{children}</code>
-  )
-}
+import { Markdown, StreamingMarkdown } from './markdown'
 
 interface ChatViewProps {
   updates: StoredSessionUpdate[]
@@ -669,7 +564,7 @@ function MessageBubble({
 
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] dark:bg-muted px-4 py-3 text-[15px] break-words overflow-hidden">
+        <div className="max-w-[85%] rounded-lg bg-[#f9f7f5] dark:bg-muted px-4 py-3 text-sm break-words overflow-hidden">
           {/* Render images first */}
           {imageBlocks.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -706,14 +601,20 @@ function MessageBubble({
 }
 
 // Render a single content block
-function renderContentBlock(block: ContentBlock, idx: number): React.JSX.Element | null {
+function renderContentBlock(
+  block: ContentBlock,
+  idx: number,
+  isStreaming: boolean = false
+): React.JSX.Element | null {
   switch (block.type) {
     case 'thought':
       return <ThoughtBlockView key={`thought-${idx}`} text={block.content} />
     case 'tool_call':
       return <ToolCallItem key={block.toolCall.id} toolCall={block.toolCall} />
     case 'text':
-      return <TextContentBlock key={`text-${idx}`} content={block.content} />
+      return (
+        <TextContentBlock key={`text-${idx}`} content={block.content} isStreaming={isStreaming} />
+      )
     case 'image':
       return (
         <img
@@ -781,11 +682,19 @@ function CollapsibleAssistantMessage({
     .map((b) => b.content)
     .join('\n\n')
 
+  // Streaming state: only the last text block is streaming when message is not complete
+  const isStreaming = !isComplete
+
   // Not collapsible - render all blocks normally
   if (!shouldCollapse) {
     return (
       <div className="space-y-3">
-        {blocks.map((block, idx) => renderContentBlock(block, idx))}
+        {blocks.map((block, idx) => {
+          // Only the last text block gets streaming optimization
+          const isLastTextBlock =
+            block.type === 'text' && blocks.slice(idx + 1).every((b) => b.type !== 'text')
+          return renderContentBlock(block, idx, isStreaming && isLastTextBlock)
+        })}
         {/* Processing: show spinner + time + label */}
         {isProcessing && (
           <MessageTimer
@@ -891,14 +800,22 @@ function CollapsibleAssistantMessage({
 }
 
 // Text content block with markdown rendering
-function TextContentBlock({ content }: { content: string }): React.JSX.Element | null {
+function TextContentBlock({
+  content,
+  isStreaming = false
+}: {
+  content: string
+  isStreaming?: boolean
+}): React.JSX.Element | null {
   if (!content) return null
 
   return (
-    <div className="prose prose-invert max-w-none text-[15px] leading-[1.7] break-words overflow-hidden [&_*]:break-words">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={TEXT_MARKDOWN_COMPONENTS}>
-        {content}
-      </ReactMarkdown>
+    <div className="max-w-none leading-[1.7] break-words overflow-hidden [&_*]:break-words">
+      {isStreaming ? (
+        <StreamingMarkdown content={content} isStreaming={true} mode="minimal" />
+      ) : (
+        <Markdown mode="minimal">{content}</Markdown>
+      )}
     </div>
   )
 }
@@ -927,21 +844,21 @@ function ThoughtBlockView({ text }: { text: string }): React.JSX.Element | null 
 
         <CollapsibleContent>
           <div className="mt-2 text-sm text-muted-foreground">
-            <ReactMarkdown components={THOUGHT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
+            <Markdown mode="terminal">{text}</Markdown>
           </div>
         </CollapsibleContent>
 
         {/* Preview when collapsed */}
         {!isExpanded && isLong && (
           <div className="mt-2 text-sm text-muted-foreground line-clamp-3">
-            <ReactMarkdown components={THOUGHT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
+            <Markdown mode="terminal">{text}</Markdown>
           </div>
         )}
 
         {/* Show full content when not long */}
         {!isLong && (
           <div className="mt-2 text-sm text-muted-foreground">
-            <ReactMarkdown components={THOUGHT_MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
+            <Markdown mode="terminal">{text}</Markdown>
           </div>
         )}
       </div>
