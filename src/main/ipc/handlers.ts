@@ -2,11 +2,12 @@
  * IPC handlers for main process
  * Registers all IPC handlers for communication with renderer process
  */
-import { ipcMain, dialog, clipboard, shell } from 'electron'
+import { ipcMain, dialog, clipboard, shell, type BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
 import { checkAgents, checkAgent, checkAgentVersions } from '../utils/agent-check'
 import { installAgent, updateCommand } from '../utils/agent-install'
+import { generateSessionTitle } from '../conductor/TitleGenerator'
 import type { Conductor } from '../conductor/Conductor'
 import type { FileWatcher } from '../watcher'
 import type {
@@ -91,13 +92,90 @@ function extractErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatcher): void {
+/**
+ * Generate session title on first user message (fire-and-forget)
+ * Only triggers once per session - when session has no title yet
+ */
+const titleGenerationInFlight = new Set<string>()
+
+function maybeGenerateSessionTitle(
+  sessionId: string,
+  content: MessageContent,
+  conductor: Conductor,
+  getMainWindow: () => BrowserWindow | null
+): void {
+  // Extract text from message content
+  const textItem = content.find((c): c is { type: 'text'; text: string } => c.type === 'text')
+  if (!textItem) {
+    return
+  }
+
+  if (titleGenerationInFlight.has(sessionId)) {
+    return
+  }
+
+  titleGenerationInFlight.add(sessionId)
+
+  // Run asynchronously (fire-and-forget)
+  ;(async () => {
+    try {
+      // Check if session already has a title
+      const sessionData = await conductor.getSessionData(sessionId)
+      if (!sessionData || sessionData.session.title) {
+        return // Already has a title or session not found
+      }
+
+      const agentId = sessionData.session.agentId
+      console.log(`[IPC] Session ${sessionId} needs a title, generating with ${agentId}...`)
+
+      // Generate title using the same agent CLI
+      const title = await generateSessionTitle(agentId, textItem.text)
+
+      // If title generation failed, don't update (keep title unchanged)
+      if (!title) {
+        console.log(`[IPC] Session ${sessionId} title generation failed, keeping unchanged`)
+        return
+      }
+
+      const latestSessionData = await conductor.getSessionData(sessionId)
+      if (!latestSessionData || latestSessionData.session.title) {
+        console.log(`[IPC] Session ${sessionId} already has a title, skipping update`)
+        return
+      }
+
+      // Update session metadata
+      const updatedSession = await conductor.updateSessionMeta(sessionId, { title })
+
+      console.log(`[IPC] Session ${sessionId} title updated to: "${title}"`)
+
+      // Notify frontend about the title update
+      const mainWindow = getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.SESSION_META_UPDATED, updatedSession)
+      }
+    } catch (error) {
+      // Log error but don't fail - title generation is best-effort
+      console.error(`[IPC] Failed to generate title for session ${sessionId}:`, error)
+    } finally {
+      titleGenerationInFlight.delete(sessionId)
+    }
+  })()
+}
+
+export function registerIPCHandlers(
+  conductor: Conductor,
+  fileWatcher: FileWatcher,
+  getMainWindow: () => BrowserWindow | null
+): void {
   // --- Agent handlers (per-session) ---
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_PROMPT,
     async (_event, sessionId: string, content: MessageContent) => {
       try {
+        // Trigger title generation on first user message (fire-and-forget)
+        maybeGenerateSessionTitle(sessionId, content, conductor, getMainWindow)
+
         const stopReason = await conductor.sendPrompt(sessionId, content)
         return { stopReason }
       } catch (err) {

@@ -11,21 +11,32 @@ import type { StoredSessionUpdate, MulticaSession } from '../../../../src/shared
 type AppHandle = {
   deleteSession: (sessionId: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   getSessionUpdates: () => StoredSessionUpdate[]
   getCurrentSession: () => MulticaSession | null
+  getSessions: () => MulticaSession[]
 }
 
 const AppHarness = React.forwardRef<AppHandle>((_, ref) => {
-  const { deleteSession, selectSession, sessionUpdates, currentSession } = useApp()
+  const {
+    deleteSession,
+    selectSession,
+    updateSessionTitle,
+    sessionUpdates,
+    currentSession,
+    sessions
+  } = useApp()
   useImperativeHandle(
     ref,
     () => ({
       deleteSession,
       selectSession,
+      updateSessionTitle,
       getSessionUpdates: () => sessionUpdates,
-      getCurrentSession: () => currentSession
+      getCurrentSession: () => currentSession,
+      getSessions: () => sessions
     }),
-    [deleteSession, selectSession, sessionUpdates, currentSession]
+    [deleteSession, selectSession, updateSessionTitle, sessionUpdates, currentSession, sessions]
   )
   return null
 })
@@ -59,7 +70,8 @@ describe('useApp', () => {
     getSessionCommands: vi.fn().mockResolvedValue([]),
     startFileWatch: vi.fn().mockResolvedValue(undefined),
     stopFileWatch: vi.fn().mockResolvedValue(undefined),
-    deleteSession: vi.fn().mockResolvedValue(undefined)
+    deleteSession: vi.fn().mockResolvedValue(undefined),
+    updateSession: vi.fn().mockResolvedValue(undefined)
   })
 
   beforeEach(() => {
@@ -306,6 +318,64 @@ describe('useApp', () => {
     expect(sequenceNumbers).toEqual([1, 2])
   })
 
+  it('updates sessions list when session metadata changes', async () => {
+    let sessionMetaHandler: ((session: MulticaSession) => void) | undefined
+
+    const project = {
+      id: 'project-1',
+      name: 'Project',
+      workingDirectory: '/tmp',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      isExpanded: true,
+      isArchived: false,
+      sortOrder: 0
+    }
+
+    const session: MulticaSession = {
+      id: 'session-a',
+      agentSessionId: 'agent-1',
+      projectId: 'project-1',
+      agentId: 'codex',
+      workingDirectory: '/tmp',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      status: 'active',
+      messageCount: 0
+    }
+
+    const updatedSession: MulticaSession = {
+      ...session,
+      title: '更新后的标题'
+    }
+
+    const electronAPI = createElectronApiMock()
+    electronAPI.onSessionMetaUpdated.mockImplementation((cb) => {
+      sessionMetaHandler = cb
+      return () => {}
+    })
+    electronAPI.listProjectsWithSessions.mockResolvedValue([{ project, sessions: [session] }])
+    ;(window as unknown as { electronAPI: typeof electronAPI }).electronAPI = electronAPI
+
+    const ref = React.createRef<AppHandle>()
+
+    await act(async () => {
+      root.render(<AppHarness ref={ref} />)
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(ref.current?.getSessions()).toEqual([session])
+
+    await act(async () => {
+      sessionMetaHandler?.(updatedSession)
+    })
+
+    expect(ref.current?.getSessions()).toEqual([updatedSession])
+  })
+
   it('refreshes git branch when git HEAD changes for current session', async () => {
     let fileChangeHandler:
       | ((event: {
@@ -392,6 +462,62 @@ describe('useApp', () => {
     expect(electronAPI.loadSession).toHaveBeenCalledTimes(2)
     expect(electronAPI.listProjectsWithSessions).toHaveBeenCalledTimes(2)
     expect(ref.current?.getCurrentSession()?.gitBranch).toBe('feature/new-branch')
+  })
+
+  it('updates session title and refreshes sessions list', async () => {
+    const project = {
+      id: 'project-1',
+      name: 'Project',
+      workingDirectory: '/tmp',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      isExpanded: true,
+      isArchived: false,
+      sortOrder: 0
+    }
+
+    const session: MulticaSession = {
+      id: 'session-a',
+      agentSessionId: 'agent-1',
+      projectId: 'project-1',
+      agentId: 'codex',
+      workingDirectory: '/tmp',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      status: 'active',
+      messageCount: 0,
+      title: 'Original Title'
+    }
+
+    const updatedSession: MulticaSession = {
+      ...session,
+      title: 'New Title'
+    }
+
+    const electronAPI = createElectronApiMock()
+    electronAPI.listProjectsWithSessions.mockResolvedValue([{ project, sessions: [session] }])
+    electronAPI.updateSession.mockResolvedValue(updatedSession)
+    ;(window as unknown as { electronAPI: typeof electronAPI }).electronAPI = electronAPI
+
+    const ref = React.createRef<AppHandle>()
+
+    await act(async () => {
+      root.render(<AppHarness ref={ref} />)
+    })
+
+    // Wait for initial load
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(ref.current?.getSessions()[0]?.title).toBe('Original Title')
+
+    await act(async () => {
+      await ref.current?.updateSessionTitle('session-a', 'New Title')
+    })
+
+    expect(electronAPI.updateSession).toHaveBeenCalledWith('session-a', { title: 'New Title' })
+    expect(ref.current?.getSessions()[0]?.title).toBe('New Title')
   })
 })
 

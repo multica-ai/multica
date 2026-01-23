@@ -40,6 +40,7 @@ interface AppSidebarProps {
   onNewSession: (projectId: string) => void
   onToggleProjectExpanded: (projectId: string) => void
   onReorderProjects: (projectIds: string[]) => void
+  onUpdateSessionTitle: (sessionId: string, title: string) => void
 }
 
 export function AppSidebar({
@@ -52,7 +53,8 @@ export function AppSidebar({
   onNewProject,
   onNewSession,
   onToggleProjectExpanded,
-  onReorderProjects
+  onReorderProjects,
+  onUpdateSessionTitle
 }: AppSidebarProps): React.JSX.Element {
   const openModal = useModalStore((s) => s.openModal)
 
@@ -134,6 +136,7 @@ export function AppSidebar({
                     onViewArchivedSessions={(p): void =>
                       openModal('archivedSessions', { projectId: p.id, projectName: p.name })
                     }
+                    onUpdateSessionTitle={onUpdateSessionTitle}
                   />
                 ))}
               </SidebarMenu>

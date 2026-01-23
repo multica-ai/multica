@@ -1,7 +1,7 @@
 /**
  * ProjectItem component - renders a project with its sessions in sidebar
  */
-import { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import type { MulticaProject, MulticaSession } from '../../../shared/types'
 import {
   SidebarMenu,
@@ -46,6 +46,7 @@ interface ProjectItemProps {
   onDeleteProject: (project: MulticaProject) => void
   onArchiveSession: (session: MulticaSession) => void
   onViewArchivedSessions: (project: MulticaProject) => void
+  onUpdateSessionTitle: (sessionId: string, title: string) => void
 }
 
 function formatDate(iso: string): string {
@@ -78,17 +79,69 @@ interface SessionItemProps {
   needsPermission: boolean
   onSelect: () => void
   onArchive: () => void
+  onUpdateTitle: (title: string) => void
 }
 
-function SessionItem({
+export function SessionItem({
   session,
   isActive,
   isProcessing,
   needsPermission,
   onSelect,
-  onArchive
+  onArchive,
+  onUpdateTitle
 }: SessionItemProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const cancelEditRef = useRef(false)
+
+  const handleDoubleClick = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    setEditValue(getSessionTitle(session))
+    setIsEditing(true)
+  }
+
+  const handleSave = (): void => {
+    const trimmed = editValue.trim()
+    if (trimmed && trimmed !== getSessionTitle(session)) {
+      onUpdateTitle(trimmed)
+    }
+    setIsEditing(false)
+  }
+
+  const handleBlur = (): void => {
+    if (cancelEditRef.current) {
+      cancelEditRef.current = false
+      setIsEditing(false)
+      return
+    }
+    handleSave()
+  }
+
+  const handleCancel = (): void => {
+    cancelEditRef.current = true
+    setIsEditing(false)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleSave()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      handleCancel()
+    }
+  }
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [isEditing])
 
   return (
     <SidebarMenuItem
@@ -97,7 +150,7 @@ function SessionItem({
     >
       <SidebarMenuButton
         isActive={isActive}
-        onClick={onSelect}
+        onClick={isEditing ? undefined : onSelect}
         className={cn(
           'h-auto py-1 pl-10 transition-colors duration-150',
           'hover:bg-sidebar-accent/50',
@@ -107,49 +160,72 @@ function SessionItem({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {/* Title + Status */}
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm">{getSessionTitle(session)}</span>
-            {needsPermission ? (
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                type="text"
+                value={editValue}
+                onChange={(e): void => setEditValue(e.target.value)}
+                onBlur={handleBlur}
+                onKeyDown={handleKeyDown}
+                onClick={(e): void => e.stopPropagation()}
+                className={cn(
+                  'w-full text-sm px-1.5 py-0.5 rounded',
+                  'bg-background border border-input',
+                  'outline-none ring-2 ring-primary/30'
+                )}
+              />
+            ) : (
+              <span className="truncate text-sm" onDoubleClick={handleDoubleClick}>
+                {getSessionTitle(session)}
+              </span>
+            )}
+            {!isEditing && needsPermission ? (
               <CirclePause className="h-3 w-3 shrink-0 text-amber-500" />
-            ) : isProcessing ? (
+            ) : !isEditing && isProcessing ? (
               <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
             ) : null}
           </div>
 
-          {/* Git branch + Timestamp */}
-          <span className="text-xs text-muted-foreground/60">
-            {session.gitBranch && (
-              <>
-                <span className="font-medium">{session.gitBranch}</span>
-                <span className="mx-1">·</span>
-              </>
-            )}
-            {formatDate(session.updatedAt)}
-          </span>
+          {/* Git branch + Timestamp - hide when editing */}
+          {!isEditing && (
+            <span className="text-xs text-muted-foreground/60">
+              {session.gitBranch && (
+                <>
+                  <span className="font-medium">{session.gitBranch}</span>
+                  <span className="mx-1">·</span>
+                </>
+              )}
+              {formatDate(session.updatedAt)}
+            </span>
+          )}
         </div>
 
         {/* Archive button */}
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={(e): void => {
-            e.stopPropagation()
-            onArchive()
-          }}
-          onKeyDown={(e): void => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
+        {!isEditing && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e): void => {
               e.stopPropagation()
               onArchive()
-            }
-          }}
-          className={cn(
-            'shrink-0 cursor-pointer rounded p-0.5 transition-opacity duration-150',
-            'hover:bg-muted active:bg-muted',
-            isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
-          )}
-        >
-          <Archive className="h-3 w-3 text-muted-foreground" />
-        </div>
+            }}
+            onKeyDown={(e): void => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                onArchive()
+              }
+            }}
+            className={cn(
+              'shrink-0 cursor-pointer rounded p-0.5 transition-opacity duration-150',
+              'hover:bg-muted active:bg-muted',
+              isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
+            )}
+          >
+            <Archive className="h-3 w-3 text-muted-foreground" />
+          </div>
+        )}
       </SidebarMenuButton>
     </SidebarMenuItem>
   )
@@ -172,6 +248,7 @@ function ProjectItemInner({
   onDeleteProject,
   onArchiveSession,
   onViewArchivedSessions,
+  onUpdateSessionTitle,
   dragProps,
   isDragging
 }: ProjectItemInnerProps): React.JSX.Element {
@@ -303,6 +380,7 @@ function ProjectItemInner({
                     needsPermission={session.id === permissionPendingSessionId}
                     onSelect={(): void => onSelectSession(session.id)}
                     onArchive={(): void => onArchiveSession(session)}
+                    onUpdateTitle={(title): void => onUpdateSessionTitle(session.id, title)}
                   />
                 ))}
               </SidebarMenu>
