@@ -205,6 +205,11 @@ export class PromptHandler implements IPromptHandler {
       // Parse ACP error to user-friendly message
       const message = this.parseAcpError(error)
 
+      // Clean up the broken agent process so the next request will start fresh.
+      // Without this, the session stays mapped to a dead/stuck connection and
+      // every subsequent prompt repeats the same error until the app is restarted.
+      await this.agentProcessManager.stop(sessionId)
+
       // DESIGN DECISION: Event-driven error handling instead of throwing
       //
       // Why not throw?
@@ -269,7 +274,23 @@ export class PromptHandler implements IPromptHandler {
    * Parse ACP error and return user-friendly message
    */
   private parseAcpError(error: unknown): string {
-    const errorStr = String(error)
+    // Properly extract error string from various error types
+    let errorStr: string
+    if (error instanceof Error) {
+      errorStr = error.message
+    } else if (error && typeof error === 'object') {
+      if ('message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+        errorStr = (error as Record<string, unknown>).message as string
+      } else {
+        try {
+          errorStr = JSON.stringify(error)
+        } catch {
+          errorStr = String(error)
+        }
+      }
+    } else {
+      errorStr = String(error)
+    }
 
     // MCP server missing environment variables
     if (errorStr.includes('Missing environment variables')) {
