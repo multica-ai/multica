@@ -5,7 +5,14 @@
 import { useState, useMemo } from 'react'
 import type { StoredSessionUpdate } from '../../../shared/types'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown, ChevronRight, CheckCircle2, Circle, Loader2, Folder } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  CheckCircle2,
+  CircleDashed,
+  Loader2,
+  Folder
+} from 'lucide-react'
 import { ToolCallItem, type ToolCall, type AnsweredResponse } from './ToolCallItem'
 import { PermissionRequestItem } from './permission'
 import { usePermissionStore } from '../stores/permissionStore'
@@ -914,7 +921,7 @@ function PlanBlockView({ entries }: { entries: PlanEntry[] }): React.JSX.Element
         ) : completedCount === totalCount ? (
           <CheckCircle2 className="h-3.5 w-3.5 text-[var(--tool-success)]" />
         ) : (
-          <Circle className="h-3.5 w-3.5" />
+          <CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
         )}
 
         {/* Title with progress */}
@@ -946,7 +953,7 @@ function PlanBlockView({ entries }: { entries: PlanEntry[] }): React.JSX.Element
               ) : entry.status === 'in_progress' ? (
                 <Loader2 className="h-3 w-3 text-[var(--tool-running)] flex-shrink-0 mt-0.5 animate-spin" />
               ) : (
-                <Circle className="h-3 w-3 text-muted-foreground/50 flex-shrink-0 mt-0.5" />
+                <CircleDashed className="h-3 w-3 text-muted-foreground/50 flex-shrink-0 mt-0.5" />
               )}
               {/* Content - smaller text */}
               <span
