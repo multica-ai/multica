@@ -2,10 +2,10 @@
  * Global modal state management using Zustand
  */
 import { create } from 'zustand'
-import type { MulticaSession } from '../../../shared/types'
+import type { MulticaSession, MulticaProject } from '../../../shared/types'
 
 // Modal types
-export type ModalType = 'settings' | 'newSession' | 'deleteSession'
+export type ModalType = 'settings' | 'newSession' | 'deleteSession' | 'deleteProject'
 
 // Modal data types
 export interface SettingsModalData {
@@ -17,6 +17,7 @@ interface ModalDataMap {
   settings: SettingsModalData | undefined
   newSession: undefined
   deleteSession: MulticaSession
+  deleteProject: MulticaProject
 }
 
 interface ModalState<T extends ModalType> {
@@ -36,7 +37,8 @@ export const useModalStore = create<ModalStore>((set) => ({
   modals: {
     settings: { isOpen: false },
     newSession: { isOpen: false },
-    deleteSession: { isOpen: false }
+    deleteSession: { isOpen: false },
+    deleteProject: { isOpen: false }
   },
   openModal: (type, data) =>
     set((state) => ({

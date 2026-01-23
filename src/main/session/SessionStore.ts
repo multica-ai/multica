@@ -84,8 +84,8 @@ export class SessionStore {
     const session: MulticaSession = {
       id: randomUUID(),
       agentSessionId: params.agentSessionId,
+      projectId: params.projectId,
       agentId: params.agentId,
-      workingDirectory: params.workingDirectory,
       createdAt: now,
       updatedAt: now,
       status: 'active',

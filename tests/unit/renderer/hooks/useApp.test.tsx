@@ -45,6 +45,7 @@ describe('useApp', () => {
     onPermissionRequest: vi.fn(() => () => {}),
     onAppFocus: vi.fn(() => () => {}),
     listSessions: vi.fn().mockResolvedValue([]),
+    listProjectsWithSessions: vi.fn().mockResolvedValue([]),
     getAgentStatus: vi.fn().mockResolvedValue({
       runningSessions: 0,
       sessionIds: [],
@@ -113,6 +114,7 @@ describe('useApp', () => {
     const session: MulticaSession = {
       id: 'session-a',
       agentSessionId: 'agent-1',
+      projectId: 'project-1',
       agentId: 'codex',
       workingDirectory: '/tmp',
       createdAt: '2024-01-01T00:00:00.000Z',
@@ -221,6 +223,7 @@ describe('useApp', () => {
     const session: MulticaSession = {
       id: 'session-a',
       agentSessionId: 'agent-1',
+      projectId: 'project-1',
       agentId: 'codex',
       workingDirectory: '/tmp',
       createdAt: '2024-01-01T00:00:00.000Z',
@@ -315,6 +318,7 @@ describe('useApp', () => {
 
     const session: MulticaSession = {
       id: 'session-a',
+      projectId: 'project-1',
       agentSessionId: 'agent-1',
       agentId: 'codex',
       workingDirectory: '/repo',
@@ -328,6 +332,16 @@ describe('useApp', () => {
     const refreshedSession: MulticaSession = {
       ...session,
       gitBranch: 'feature/new-branch'
+    }
+
+    const project = {
+      id: 'project-1',
+      name: 'repo',
+      workingDirectory: '/repo',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      isExpanded: true,
+      sortOrder: 0
     }
 
     const electronAPI = createElectronApiMock()
@@ -345,9 +359,9 @@ describe('useApp', () => {
     electronAPI.getSessionModes.mockResolvedValue(null)
     electronAPI.getSessionModels.mockResolvedValue(null)
     electronAPI.getSessionCommands.mockResolvedValue([])
-    electronAPI.listSessions
-      .mockResolvedValueOnce([session])
-      .mockResolvedValueOnce([refreshedSession])
+    electronAPI.listProjectsWithSessions
+      .mockResolvedValueOnce([{ project, sessions: [session] }])
+      .mockResolvedValueOnce([{ project, sessions: [refreshedSession] }])
     ;(window as unknown as { electronAPI: typeof electronAPI }).electronAPI = electronAPI
 
     const ref = React.createRef<AppHandle>()
@@ -376,7 +390,7 @@ describe('useApp', () => {
     })
 
     expect(electronAPI.loadSession).toHaveBeenCalledTimes(2)
-    expect(electronAPI.listSessions).toHaveBeenCalledTimes(2)
+    expect(electronAPI.listProjectsWithSessions).toHaveBeenCalledTimes(2)
     expect(ref.current?.getCurrentSession()?.gitBranch).toBe('feature/new-branch')
   })
 })

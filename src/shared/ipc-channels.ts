@@ -9,6 +9,16 @@ export const IPC_CHANNELS = {
   AGENT_ERROR: 'agent:error',
   AGENT_STATUS: 'agent:status', // Returns status of all running sessions
 
+  // Project management
+  PROJECT_CREATE: 'project:create',
+  PROJECT_LIST: 'project:list',
+  PROJECT_LIST_WITH_SESSIONS: 'project:list-with-sessions',
+  PROJECT_GET: 'project:get',
+  PROJECT_UPDATE: 'project:update',
+  PROJECT_DELETE: 'project:delete',
+  PROJECT_TOGGLE_EXPANDED: 'project:toggle-expanded',
+  PROJECT_REORDER: 'project:reorder',
+
   // Session management
   SESSION_CREATE: 'session:create',
   SESSION_LIST: 'session:list',

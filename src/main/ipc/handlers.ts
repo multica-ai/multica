@@ -12,6 +12,7 @@ import type { FileWatcher } from '../watcher'
 import type {
   ListSessionsOptions,
   MulticaSession,
+  MulticaProject,
   SessionModeId,
   ModelId
 } from '../../shared/types'
@@ -46,12 +47,26 @@ function spawnAsync(command: string, args: string[]): Promise<void> {
 async function withRuntimeInfo<T extends MulticaSession>(
   session: T
 ): Promise<T & { directoryExists: boolean; gitBranch?: string }> {
-  const directoryExists = fs.existsSync(session.workingDirectory)
-  const gitBranch = directoryExists ? await getGitBranch(session.workingDirectory) : undefined
+  const workingDir = session.workingDirectory ?? ''
+  const directoryExists = workingDir ? fs.existsSync(workingDir) : false
+  const gitBranch = directoryExists ? await getGitBranch(workingDir) : undefined
   return {
     ...session,
     directoryExists,
     gitBranch
+  }
+}
+
+/**
+ * Adds directoryExists field to a project
+ */
+function withProjectRuntimeInfo<T extends MulticaProject>(
+  project: T
+): T & { directoryExists: boolean } {
+  const directoryExists = fs.existsSync(project.workingDirectory)
+  return {
+    ...project,
+    directoryExists
   }
 }
 
@@ -111,17 +126,97 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
     }
   })
 
+  // --- Project handlers ---
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_CREATE, async (_event, workingDirectory: string) => {
+    try {
+      if (!fs.existsSync(workingDirectory)) {
+        throw new Error('Directory does not exist')
+      }
+      const project = await conductor.createProject({ workingDirectory })
+      return withProjectRuntimeInfo(project)
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_LIST, async () => {
+    const projects = await conductor.listProjects()
+    return projects.map(withProjectRuntimeInfo)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_LIST_WITH_SESSIONS, async () => {
+    const projectsWithSessions = await conductor.listProjectsWithSessions()
+    // Add runtime info to projects and sessions
+    const result = await Promise.all(
+      projectsWithSessions.map(async ({ project, sessions }) => ({
+        project: withProjectRuntimeInfo(project),
+        sessions: await Promise.all(sessions.map(withRuntimeInfo))
+      }))
+    )
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_GET, async (_event, projectId: string) => {
+    const project = await conductor.getProject(projectId)
+    return project ? withProjectRuntimeInfo(project) : null
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECT_UPDATE,
+    async (_event, projectId: string, updates: Partial<MulticaProject>) => {
+      try {
+        const project = await conductor.updateProject(projectId, updates)
+        return withProjectRuntimeInfo(project)
+      } catch (err) {
+        throw new Error(extractErrorMessage(err))
+      }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_DELETE, async (_event, projectId: string) => {
+    try {
+      await conductor.deleteProject(projectId)
+      return { success: true }
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_TOGGLE_EXPANDED, async (_event, projectId: string) => {
+    try {
+      const project = await conductor.toggleProjectExpanded(projectId)
+      return withProjectRuntimeInfo(project)
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_REORDER, async (_event, projectIds: string[]) => {
+    try {
+      await conductor.reorderProjects(projectIds)
+      return { success: true }
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
   // --- Session handlers ---
 
   ipcMain.handle(
     IPC_CHANNELS.SESSION_CREATE,
-    async (_event, workingDirectory: string, agentId: string) => {
+    async (_event, projectId: string, agentId: string) => {
       try {
         const config = DEFAULT_AGENTS[agentId]
         if (!config) {
           throw new Error(`Unknown agent: ${agentId}`)
         }
-        const session = await conductor.createSession(workingDirectory, config)
+        // Get project to get working directory
+        const project = await conductor.getProject(projectId)
+        if (!project) {
+          throw new Error(`Project not found: ${projectId}`)
+        }
+        const session = await conductor.createSession(project.workingDirectory, config)
         return withRuntimeInfo(session)
       } catch (err) {
         throw new Error(extractErrorMessage(err))

@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { useModalStore, useModal } from '../stores/modalStore'
 import { Settings } from './Settings'
-import type { MulticaSession } from '../../../shared/types'
+import type { MulticaSession, MulticaProject } from '../../../shared/types'
 import {
   Dialog,
   DialogContent,
@@ -25,13 +25,16 @@ interface ModalsProps {
   onCreateSession: (cwd: string) => Promise<void>
   // DeleteSession props
   onDeleteSession: (sessionId: string) => void
+  // DeleteProject props
+  onDeleteProject: (projectId: string) => Promise<void>
 }
 
 export function Modals({
   defaultAgentId,
   onSetDefaultAgent,
   onCreateSession,
-  onDeleteSession
+  onDeleteSession,
+  onDeleteProject
 }: ModalsProps): React.JSX.Element {
   const closeModal = useModalStore((s) => s.closeModal)
 
@@ -47,6 +50,10 @@ export function Modals({
       <DeleteSessionModal
         onDeleteSession={onDeleteSession}
         onClose={() => closeModal('deleteSession')}
+      />
+      <DeleteProjectModal
+        onDeleteProject={onDeleteProject}
+        onClose={() => closeModal('deleteProject')}
       />
     </>
   )
@@ -182,8 +189,9 @@ function DeleteSessionModal({
 
   const getSessionTitle = (s: MulticaSession): string => {
     if (s.title) return s.title
-    const parts = s.workingDirectory.split('/')
-    return parts[parts.length - 1] || s.workingDirectory
+    const workingDir = s.workingDirectory ?? ''
+    const parts = workingDir.split('/')
+    return parts[parts.length - 1] || workingDir
   }
 
   return (
@@ -194,6 +202,52 @@ function DeleteSessionModal({
           <DialogDescription>
             Are you sure you want to delete &quot;{session && getSessionTitle(session)}&quot;? This
             action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={handleConfirm}>
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// Delete Project Modal
+interface DeleteProjectModalProps {
+  onDeleteProject: (projectId: string) => Promise<void>
+  onClose: () => void
+}
+
+function DeleteProjectModal({
+  onDeleteProject,
+  onClose
+}: DeleteProjectModalProps): React.JSX.Element {
+  const { isOpen, data: project } = useModal('deleteProject')
+
+  const handleConfirm = async (): Promise<void> => {
+    if (project) {
+      await onDeleteProject(project.id)
+      onClose()
+    }
+  }
+
+  const getProjectName = (p: MulticaProject): string => {
+    return p.name || p.workingDirectory.split('/').pop() || p.workingDirectory
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Delete Project</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete &quot;{project && getProjectName(project)}&quot;? This
+            will also delete all sessions in this project. This action cannot be undone.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

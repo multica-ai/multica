@@ -9,13 +9,17 @@
  *
  * The public API remains unchanged for backward compatibility with callers.
  */
-import { SessionStore } from '../session/SessionStore'
+import { DatabaseStore } from '../session/DatabaseStore'
 import type {
   AgentConfig,
   MulticaSession,
   SessionData,
   ListSessionsOptions,
-  AskUserQuestionResponseData
+  AskUserQuestionResponseData,
+  MulticaProject,
+  CreateProjectParams,
+  ListProjectsOptions,
+  ProjectWithSessions
 } from '../../shared/types'
 import type { MessageContent } from '../../shared/types/message'
 
@@ -51,9 +55,9 @@ export class Conductor {
     this.events = options.events ?? {}
     this.skipPersistence = options.skipPersistence ?? false
 
-    // Initialize session store
+    // Initialize session store (using DatabaseStore for SQLite-based storage)
     if (!this.skipPersistence) {
-      this.sessionStore = new SessionStore(options.storagePath) as unknown as ISessionStore
+      this.sessionStore = new DatabaseStore(options.storagePath)
     }
 
     // Initialize modules with dependencies
@@ -162,6 +166,110 @@ export class Conductor {
    */
   async getSessionData(sessionId: string): Promise<SessionData | null> {
     return this.sessionLifecycle.getData(sessionId)
+  }
+
+  // ==========================================================================
+  // Project Management (delegated to SessionStore)
+  // ==========================================================================
+
+  /**
+   * Create a new project
+   */
+  async createProject(params: CreateProjectParams): Promise<MulticaProject> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.createProject(params)
+  }
+
+  /**
+   * Get or create a project by working directory
+   */
+  async getOrCreateProject(workingDirectory: string): Promise<MulticaProject> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.getOrCreateProject(workingDirectory)
+  }
+
+  /**
+   * Get a project by ID
+   */
+  async getProject(projectId: string): Promise<MulticaProject | null> {
+    if (!this.sessionStore) {
+      return null
+    }
+    return this.sessionStore.getProject(projectId)
+  }
+
+  /**
+   * List all projects
+   */
+  async listProjects(options?: ListProjectsOptions): Promise<MulticaProject[]> {
+    if (!this.sessionStore) {
+      return []
+    }
+    return this.sessionStore.listProjects(options)
+  }
+
+  /**
+   * List all projects with their sessions
+   */
+  async listProjectsWithSessions(): Promise<ProjectWithSessions[]> {
+    if (!this.sessionStore) {
+      return []
+    }
+    return this.sessionStore.listProjectsWithSessions()
+  }
+
+  /**
+   * Update a project
+   */
+  async updateProject(
+    projectId: string,
+    updates: Partial<Pick<MulticaProject, 'name' | 'isExpanded'>>
+  ): Promise<MulticaProject> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.updateProject(projectId, updates)
+  }
+
+  /**
+   * Toggle project expanded state
+   */
+  async toggleProjectExpanded(projectId: string): Promise<MulticaProject> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.toggleProjectExpanded(projectId)
+  }
+
+  /**
+   * Reorder projects by setting sort_order based on the provided order
+   */
+  async reorderProjects(projectIds: string[]): Promise<void> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    return this.sessionStore.reorderProjects(projectIds)
+  }
+
+  /**
+   * Delete a project (cascades to sessions)
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    if (!this.sessionStore) {
+      throw new Error('Session store not initialized')
+    }
+    // Stop all running agents for sessions in this project
+    const sessions = await this.sessionStore.list({ projectId })
+    for (const session of sessions) {
+      if (this.agentProcessManager.isRunning(session.id)) {
+        await this.agentProcessManager.stop(session.id)
+      }
+    }
+    return this.sessionStore.deleteProject(projectId)
   }
 
   // ==========================================================================

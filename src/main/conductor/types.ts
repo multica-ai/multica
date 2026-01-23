@@ -21,7 +21,11 @@ import type {
   StoredSessionUpdate,
   ListSessionsOptions,
   CreateSessionParams,
-  AskUserQuestionResponseData
+  AskUserQuestionResponseData,
+  MulticaProject,
+  CreateProjectParams,
+  ListProjectsOptions,
+  ProjectWithSessions
 } from '../../shared/types'
 import type { MessageContent } from '../../shared/types/message'
 
@@ -115,6 +119,40 @@ export interface ConductorOptions {
 export interface ISessionStore {
   /** Initialize the storage (create directories, load index) */
   initialize(): Promise<void>
+
+  // ========== Project Operations ==========
+
+  /** Create a new project */
+  createProject(params: CreateProjectParams): Promise<MulticaProject>
+
+  /** Get or create a project by working directory */
+  getOrCreateProject(workingDirectory: string): Promise<MulticaProject>
+
+  /** Get a project by ID */
+  getProject(projectId: string): Promise<MulticaProject | null>
+
+  /** List all projects */
+  listProjects(options?: ListProjectsOptions): Promise<MulticaProject[]>
+
+  /** List all projects with their sessions */
+  listProjectsWithSessions(): Promise<ProjectWithSessions[]>
+
+  /** Update a project */
+  updateProject(
+    projectId: string,
+    updates: Partial<Pick<MulticaProject, 'name' | 'isExpanded'>>
+  ): Promise<MulticaProject>
+
+  /** Toggle project expanded state */
+  toggleProjectExpanded(projectId: string): Promise<MulticaProject>
+
+  /** Reorder projects by setting sort_order based on the provided order */
+  reorderProjects(projectIds: string[]): Promise<void>
+
+  /** Delete a project (cascades to sessions) */
+  deleteProject(projectId: string): Promise<void>
+
+  // ========== Session Operations ==========
 
   /** Create a new session */
   create(params: CreateSessionParams): Promise<MulticaSession>

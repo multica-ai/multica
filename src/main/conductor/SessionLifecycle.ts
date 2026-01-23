@@ -57,11 +57,14 @@ export class SessionLifecycle implements ISessionLifecycle {
     let session: MulticaSession
 
     if (this.sessionStore) {
-      // Create session record
+      // Get or create project for this working directory
+      const project = await this.sessionStore.getOrCreateProject(cwd)
+
+      // Create session record with project association
       session = await this.sessionStore.create({
+        projectId: project.id,
         agentSessionId: '', // Will be filled after agent start
-        agentId: agentConfig.id,
-        workingDirectory: cwd
+        agentId: agentConfig.id
       })
     } else {
       // CLI mode: in-memory session
@@ -70,6 +73,7 @@ export class SessionLifecycle implements ISessionLifecycle {
       session = {
         id: randomUUID(),
         agentSessionId: '',
+        projectId: '', // No project in CLI mode
         agentId: agentConfig.id,
         workingDirectory: cwd,
         createdAt: now,
@@ -146,10 +150,14 @@ export class SessionLifecycle implements ISessionLifecycle {
     }
 
     // Start a new agent process for this session (isResumed = true)
+    const cwd = data.session.workingDirectory
+    if (!cwd) {
+      throw new Error(`Session ${sessionId} has no working directory`)
+    }
     const { agentSessionId } = await this.agentProcessManager.start(
       sessionId,
       agentConfig,
-      data.session.workingDirectory,
+      cwd,
       true // Resumed session needs history replay
     )
 
@@ -222,10 +230,14 @@ export class SessionLifecycle implements ISessionLifecycle {
     console.log(`[SessionLifecycle] Starting agent for session ${sessionId}`)
 
     // Start agent (isResumed = true for history replay)
+    const cwd = data.session.workingDirectory
+    if (!cwd) {
+      throw new Error(`Session ${sessionId} has no working directory`)
+    }
     const { agentSessionId } = await this.agentProcessManager.start(
       sessionId,
       agentConfig,
-      data.session.workingDirectory,
+      cwd,
       true
     )
 
@@ -279,10 +291,14 @@ export class SessionLifecycle implements ISessionLifecycle {
     })
 
     // Start new agent (isResumed = true to replay history)
+    const cwd = data.session.workingDirectory
+    if (!cwd) {
+      throw new Error(`Session ${sessionId} has no working directory`)
+    }
     const { agentSessionId } = await this.agentProcessManager.start(
       sessionId,
       newAgentConfig,
-      data.session.workingDirectory,
+      cwd,
       true
     )
 
@@ -375,10 +391,14 @@ export class SessionLifecycle implements ISessionLifecycle {
     console.log(`[SessionLifecycle] Lazy-starting agent for session ${sessionId}`)
 
     // Start agent (isResumed = true for lazy start of existing session)
+    const cwd = data.session.workingDirectory
+    if (!cwd) {
+      throw new Error(`Session ${sessionId} has no working directory`)
+    }
     const { agentSessionId } = await this.agentProcessManager.start(
       sessionId,
       agentConfig,
-      data.session.workingDirectory,
+      cwd,
       true // Existing session needs history replay
     )
 

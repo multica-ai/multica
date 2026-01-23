@@ -4,6 +4,8 @@
 import type {
   AppConfig,
   MulticaSession,
+  MulticaProject,
+  ProjectWithSessions,
   SessionData,
   ListSessionsOptions,
   SessionModeState,
@@ -185,8 +187,18 @@ export interface ElectronAPI {
   sendPrompt(sessionId: string, content: MessageContent): Promise<{ stopReason: string }>
   cancelRequest(sessionId: string): Promise<{ success: boolean }>
 
+  // Project management
+  createProject(workingDirectory: string): Promise<MulticaProject>
+  listProjects(): Promise<MulticaProject[]>
+  listProjectsWithSessions(): Promise<ProjectWithSessions[]>
+  getProject(projectId: string): Promise<MulticaProject | null>
+  updateProject(projectId: string, updates: Partial<MulticaProject>): Promise<MulticaProject>
+  deleteProject(projectId: string): Promise<{ success: boolean }>
+  toggleProjectExpanded(projectId: string): Promise<MulticaProject>
+  reorderProjects(projectIds: string[]): Promise<{ success: boolean }>
+
   // Session management (agent starts when session is created)
-  createSession(workingDirectory: string, agentId: string): Promise<MulticaSession>
+  createSession(projectId: string, agentId: string): Promise<MulticaSession>
   listSessions(options?: ListSessionsOptions): Promise<MulticaSession[]>
   getSession(sessionId: string): Promise<SessionData | null>
   loadSession(sessionId: string): Promise<MulticaSession> // Load without starting agent
