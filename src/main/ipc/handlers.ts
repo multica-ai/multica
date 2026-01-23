@@ -21,6 +21,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { spawn } from 'child_process'
 import { getGitBranch } from '../utils/git'
+import { isValidPath } from '../utils/pathValidation'
 
 /**
  * Promisified spawn that waits for the process to complete
@@ -37,21 +38,6 @@ function spawnAsync(command: string, args: string[]): Promise<void> {
     })
     proc.on('error', reject)
   })
-}
-
-/**
- * Validates a file path for safety:
- * - Must be absolute
- * - Must be normalized (no .. traversal tricks)
- */
-function isValidPath(inputPath: string): boolean {
-  // Must be absolute
-  if (!path.isAbsolute(inputPath)) {
-    return false
-  }
-  // Resolved path must equal input (catches .. in the middle)
-  const resolved = path.resolve(inputPath)
-  return resolved === inputPath
 }
 
 /**
@@ -389,6 +375,7 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
     const appChecks = [
       { id: 'cursor', name: 'Cursor', appName: 'Cursor.app' },
       { id: 'vscode', name: 'VS Code', appName: 'Visual Studio Code.app' },
+      { id: 'zed', name: 'Zed', appName: 'Zed.app' },
       { id: 'xcode', name: 'Xcode', appName: 'Xcode.app' },
       { id: 'ghostty', name: 'Ghostty', appName: 'Ghostty.app' },
       { id: 'iterm', name: 'iTerm', appName: 'iTerm.app' }
@@ -437,6 +424,9 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
             break
           case 'vscode':
             await spawnAsync('open', ['-a', 'Visual Studio Code', filePath])
+            break
+          case 'zed':
+            await spawnAsync('open', ['-a', 'Zed', filePath])
             break
           case 'xcode':
             await spawnAsync('open', ['-a', 'Xcode', filePath])

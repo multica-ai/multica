@@ -17,6 +17,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { useChatScroll } from './hooks/useChatScroll'
 import { ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getBaseName } from './utils/path'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -228,11 +229,13 @@ function AppContent(): React.JSX.Element {
         {/* Right panel - file tree */}
         <RightPanel>
           <RightPanelHeader className="justify-between">
-            <span className="text-sm font-medium">All files</span>
+            <span className="text-sm font-medium truncate" title={currentSession?.workingDirectory}>
+              {currentSession ? getBaseName(currentSession.workingDirectory) : 'All files'}
+            </span>
             <button
               onClick={toggleShowHiddenFiles}
               className={cn(
-                'p-1 rounded hover:bg-accent transition-colors',
+                'p-1 rounded hover:bg-accent transition-colors flex-shrink-0',
                 showHiddenFiles ? 'text-foreground' : 'text-muted-foreground'
               )}
               title={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
