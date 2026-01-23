@@ -2,7 +2,8 @@
  * DatabaseStore - SQLite-based storage for projects and sessions
  *
  * Uses sql.js (pure JavaScript SQLite) for compatibility with all Electron versions.
- * Storage location: ~/.multica/multica.db (or Electron userData)
+ * Storage location: ~/Library/Application Support/Multica/multica.db (Electron userData)
+ * Fallback for tests: ~/.multica/multica.db
  */
 import { join } from 'path'
 import { homedir } from 'os'
