@@ -6,10 +6,12 @@ import type { AvailableCommand } from '../../../shared/types'
 /**
  * Parse slash command from input text
  * Returns the command name and optional argument if input starts with "/"
+ * Supports multiline input: the first line contains the command, and any
+ * remaining content (after the command name and optional space) is the argument.
  */
 export function parseSlashCommand(text: string): { command?: string; argument?: string } | null {
   if (!text.startsWith('/')) return null
-  const match = text.match(/^\/(\S*)(?:\s+(.*))?$/)
+  const match = text.match(/^\/(\S*)(?:\s+([\s\S]*))?$/)
   if (!match) return null
   return { command: match[1], argument: match[2] }
 }
