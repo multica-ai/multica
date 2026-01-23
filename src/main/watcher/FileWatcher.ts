@@ -21,6 +21,7 @@ import { watch, existsSync, type FSWatcher } from 'fs'
 import path from 'path'
 import type { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
+import { getGitHeadPath } from '../utils/git'
 
 interface FileWatcherOptions {
   debounceMs?: number
@@ -57,6 +58,9 @@ export class FileWatcher {
   private watchers: Map<string, FSWatcher> = new Map() // directory -> FSWatcher
   private sessionToDirectory: Map<string, string> = new Map() // sessionId -> directory
   private directoryToSessions: Map<string, Set<string>> = new Map() // directory -> sessionIds
+  private gitHeadWatchers: Map<string, FSWatcher> = new Map() // git HEAD path -> FSWatcher
+  private sessionToGitHead: Map<string, string> = new Map() // sessionId -> git HEAD path
+  private gitHeadToSessions: Map<string, Set<string>> = new Map() // git HEAD path -> sessionIds
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map() // debounceKey -> timer
   private debounceMs: number
   private getMainWindow: () => BrowserWindow | null
@@ -133,6 +137,7 @@ export class FileWatcher {
     // Check if we already have a watcher for this directory
     if (this.watchers.has(normalizedDir)) {
       console.log(`[FileWatcher] Session ${sessionId} joined existing watcher for ${normalizedDir}`)
+      this.watchGitHead(sessionId, normalizedDir)
       return
     }
 
@@ -185,6 +190,8 @@ export class FileWatcher {
     } catch (error) {
       console.error(`[FileWatcher] Failed to create watcher for ${normalizedDir}:`, error)
     }
+
+    this.watchGitHead(sessionId, normalizedDir)
   }
 
   /**
@@ -220,6 +227,8 @@ export class FileWatcher {
         }
       }
     }
+
+    this.unwatchGitHead(sessionId)
   }
 
   /**
@@ -240,6 +249,14 @@ export class FileWatcher {
     this.watchers.clear()
     this.sessionToDirectory.clear()
     this.directoryToSessions.clear()
+
+    for (const [headPath, watcher] of this.gitHeadWatchers) {
+      console.log(`[FileWatcher] Closing git HEAD watcher for ${headPath}`)
+      watcher.close()
+    }
+    this.gitHeadWatchers.clear()
+    this.sessionToGitHead.clear()
+    this.gitHeadToSessions.clear()
   }
 
   /**
@@ -261,6 +278,101 @@ export class FileWatcher {
       directory,
       eventType: normalizedEventType,
       path: filePath,
+      sessionIds: Array.from(sessions)
+    })
+  }
+
+  private watchGitHead(sessionId: string, directory: string): void {
+    const headPath = getGitHeadPath(directory)
+    if (!headPath) return
+
+    this.sessionToGitHead.set(sessionId, headPath)
+
+    let sessions = this.gitHeadToSessions.get(headPath)
+    if (!sessions) {
+      sessions = new Set()
+      this.gitHeadToSessions.set(headPath, sessions)
+    }
+    sessions.add(sessionId)
+
+    if (this.gitHeadWatchers.has(headPath)) {
+      return
+    }
+
+    console.log(`[FileWatcher] Creating git HEAD watcher for ${headPath}`)
+
+    try {
+      const watcher = watch(headPath, (eventType) => {
+        const normalizedEventType = eventType === 'rename' ? 'change' : eventType
+        const debounceKey = `githead:${headPath}`
+        this.debounce(debounceKey, () => {
+          this.notifyGitHeadChange(headPath, normalizedEventType)
+        })
+      })
+
+      watcher.on('error', (error) => {
+        const errCode = (error as NodeJS.ErrnoException).code
+        console.error(`[FileWatcher] Error watching git HEAD ${headPath}:`, error)
+
+        if (errCode === 'EMFILE') {
+          console.warn(`[FileWatcher] EMFILE error, closing git HEAD watcher for ${headPath}`)
+          const debounceKey = `githead:${headPath}`
+          const timer = this.debounceTimers.get(debounceKey)
+          if (timer) {
+            clearTimeout(timer)
+            this.debounceTimers.delete(debounceKey)
+          }
+          watcher.close()
+          this.gitHeadWatchers.delete(headPath)
+        }
+      })
+
+      this.gitHeadWatchers.set(headPath, watcher)
+    } catch (error) {
+      console.error(`[FileWatcher] Failed to watch git HEAD ${headPath}:`, error)
+    }
+  }
+
+  private unwatchGitHead(sessionId: string): void {
+    const headPath = this.sessionToGitHead.get(sessionId)
+    if (!headPath) return
+
+    this.sessionToGitHead.delete(sessionId)
+
+    const sessions = this.gitHeadToSessions.get(headPath)
+    if (sessions) {
+      sessions.delete(sessionId)
+
+      if (sessions.size === 0) {
+        this.gitHeadToSessions.delete(headPath)
+        const debounceKey = `githead:${headPath}`
+        const timer = this.debounceTimers.get(debounceKey)
+        if (timer) {
+          clearTimeout(timer)
+          this.debounceTimers.delete(debounceKey)
+        }
+
+        const watcher = this.gitHeadWatchers.get(headPath)
+        if (watcher) {
+          console.log(`[FileWatcher] Closing git HEAD watcher for ${headPath}`)
+          watcher.close()
+          this.gitHeadWatchers.delete(headPath)
+        }
+      }
+    }
+  }
+
+  private notifyGitHeadChange(headPath: string, eventType: string): void {
+    const mainWindow = this.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) return
+
+    const sessions = this.gitHeadToSessions.get(headPath)
+    if (!sessions || sessions.size === 0) return
+
+    mainWindow.webContents.send(IPC_CHANNELS.FS_FILE_CHANGED, {
+      directory: path.dirname(headPath),
+      eventType: eventType === 'rename' ? 'change' : eventType,
+      path: headPath,
       sessionIds: Array.from(sessions)
     })
   }
