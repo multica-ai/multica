@@ -189,13 +189,22 @@ export function useApp(): AppState & AppActions {
   // Track previous isProcessing state to detect when processing completes
   const prevIsProcessingRef = useRef(false)
 
+  // Debounce timer for git branch refresh
+  const gitBranchRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Note: File tree refresh is handled by file system watcher (see fs:file-changed handler below)
   // No need for periodic refresh - it causes performance issues
 
-  // Load sessions on mount
+  // Load sessions on mount and cleanup debounce timer on unmount
   useEffect(() => {
     loadSessions()
     loadRunningStatus()
+
+    return () => {
+      if (gitBranchRefreshTimerRef.current) {
+        clearTimeout(gitBranchRefreshTimerRef.current)
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only load on mount
   }, [])
 
@@ -344,24 +353,34 @@ export function useApp(): AppState & AppActions {
   }, [])
 
   const refreshGitBranchForSessions = useCallback(
-    async (sessionIds: string[]) => {
+    (sessionIds: string[]) => {
       if (sessionIds.length === 0) return
 
-      const activeSessionId = currentSessionIdRef.current
-      const shouldRefreshCurrent = activeSessionId !== null && sessionIds.includes(activeSessionId)
-
-      if (shouldRefreshCurrent) {
-        try {
-          const session = await window.electronAPI.loadSession(activeSessionId)
-          if (currentSessionIdRef.current === activeSessionId) {
-            updateCurrentSession(session)
-          }
-        } catch (err) {
-          console.error('[useApp] Failed to refresh git branch:', err)
-        }
+      // Cancel any pending refresh to debounce rapid changes
+      if (gitBranchRefreshTimerRef.current) {
+        clearTimeout(gitBranchRefreshTimerRef.current)
       }
 
-      await loadSessions()
+      gitBranchRefreshTimerRef.current = setTimeout(async () => {
+        gitBranchRefreshTimerRef.current = null
+
+        const activeSessionId = currentSessionIdRef.current
+        const shouldRefreshCurrent =
+          activeSessionId !== null && sessionIds.includes(activeSessionId)
+
+        if (shouldRefreshCurrent) {
+          try {
+            const session = await window.electronAPI.loadSession(activeSessionId)
+            if (currentSessionIdRef.current === activeSessionId) {
+              updateCurrentSession(session)
+            }
+          } catch (err) {
+            console.error('[useApp] Failed to refresh git branch:', err)
+          }
+        }
+
+        await loadSessions()
+      }, 100)
     },
     [loadSessions, updateCurrentSession]
   )

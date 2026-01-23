@@ -371,7 +371,7 @@ export class FileWatcher {
 
     mainWindow.webContents.send(IPC_CHANNELS.FS_FILE_CHANGED, {
       directory: path.dirname(headPath),
-      eventType: eventType === 'rename' ? 'change' : eventType,
+      eventType,
       path: headPath,
       sessionIds: Array.from(sessions)
     })

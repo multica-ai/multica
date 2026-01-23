@@ -363,12 +363,15 @@ describe('useApp', () => {
     expect(fileChangeHandler).toBeDefined()
 
     await act(async () => {
+      vi.useFakeTimers()
       fileChangeHandler?.({
         directory: '/repo',
         eventType: 'change',
         path: '/repo/.git/HEAD',
         sessionIds: ['session-a']
       })
+      vi.advanceTimersByTime(150)
+      vi.useRealTimers()
       await Promise.resolve()
     })
 
