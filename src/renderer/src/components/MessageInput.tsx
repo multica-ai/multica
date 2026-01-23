@@ -109,6 +109,7 @@ export function MessageInput({
   const [images, setImages] = useState<ImageContentItem[]>([])
   const [menuDismissed, setMenuDismissed] = useState(false)
   const [commandMenuIndex, setCommandMenuIndex] = useState(0)
+  const [cursorPosition, setCursorPosition] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
@@ -118,16 +119,23 @@ export function MessageInput({
   // Get available commands from store
   const availableCommands = useCommandStore((state) => state.availableCommands)
 
-  // Parse current slash command state
-  const parsedCommand = useMemo(() => parseSlashCommand(value), [value])
+  // Extract current line at cursor position for slash command detection
+  const currentLineAtCursor = useMemo(() => {
+    const textBeforeCursor = value.slice(0, cursorPosition)
+    const lastNewline = textBeforeCursor.lastIndexOf('\n')
+    return textBeforeCursor.slice(lastNewline + 1)
+  }, [value, cursorPosition])
+
+  // Parse current slash command state based on the current line at cursor
+  const parsedCommand = useMemo(() => parseSlashCommand(currentLineAtCursor), [currentLineAtCursor])
   const commandFilter = parsedCommand?.command || ''
   const isInCommandMode = parsedCommand !== null && parsedCommand.argument === undefined
   const showCommandMenu = isInCommandMode && availableCommands.length > 0 && !menuDismissed
   const commandError = useMemo(() => {
     if (!parsedCommand || !parsedCommand.command) return null
     if (availableCommands.length === 0 || isInCommandMode) return null
-    return validateCommand(value, availableCommands)
-  }, [parsedCommand, availableCommands, isInCommandMode, value])
+    return validateCommand(currentLineAtCursor, availableCommands)
+  }, [parsedCommand, availableCommands, isInCommandMode, currentLineAtCursor])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -278,14 +286,38 @@ export function MessageInput({
   }, [])
 
   // Handle slash command selection from menu
-  const handleCommandSelect = useCallback((command: AvailableCommand) => {
-    // Replace the current "/" text with the selected command
-    const hasInput = command.input
-    setValue(`/${command.name}${hasInput ? ' ' : ''}`)
-    setMenuDismissed(true)
-    // Focus back on textarea
-    textareaRef.current?.focus()
-  }, [])
+  const handleCommandSelect = useCallback(
+    (command: AvailableCommand) => {
+      // Replace the current line's slash command text with the selected command
+      const hasInput = command.input
+      const commandText = `/${command.name}${hasInput ? ' ' : ''}`
+
+      const textBeforeCursor = value.slice(0, cursorPosition)
+      const lastNewline = textBeforeCursor.lastIndexOf('\n')
+      const lineStart = lastNewline + 1
+      const textAfterCursor = value.slice(cursorPosition)
+
+      // Build new value: text before current line + command + text after cursor
+      const newValue = value.slice(0, lineStart) + commandText + textAfterCursor
+      const newCursor = lineStart + commandText.length
+
+      setValue(newValue)
+      setCursorPosition(newCursor)
+      setMenuDismissed(true)
+
+      // Focus back on textarea and set cursor position
+      const textarea = textareaRef.current
+      if (textarea) {
+        textarea.focus()
+        // Use requestAnimationFrame to ensure React has updated the value
+        requestAnimationFrame(() => {
+          textarea.selectionStart = newCursor
+          textarea.selectionEnd = newCursor
+        })
+      }
+    },
+    [value, cursorPosition]
+  )
 
   // Focus textarea after selector completion (model/agent/mode selection)
   const handleSelectorComplete = useCallback(() => {
@@ -394,17 +426,27 @@ export function MessageInput({
             value={value}
             onChange={(e) => {
               const nextValue = e.target.value
+              const nextCursor = e.target.selectionStart ?? 0
               if (menuDismissed) {
                 setMenuDismissed(false)
               }
-              const nextParsed = parseSlashCommand(nextValue)
+              // Extract current line at cursor for command detection
+              const textBeforeCursor = nextValue.slice(0, nextCursor)
+              const lastNewline = textBeforeCursor.lastIndexOf('\n')
+              const currentLine = textBeforeCursor.slice(lastNewline + 1)
+              const nextParsed = parseSlashCommand(currentLine)
               const nextIsCommandMode = nextParsed !== null && nextParsed.argument === undefined
               if (nextIsCommandMode && availableCommands.length > 0) {
                 setCommandMenuIndex(0)
               }
+              setCursorPosition(nextCursor)
               setValue(nextValue)
             }}
             onKeyDown={handleKeyDown}
+            onSelect={(e) => {
+              const pos = (e.target as HTMLTextAreaElement).selectionStart ?? 0
+              setCursorPosition(pos)
+            }}
             onPaste={handlePaste}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
