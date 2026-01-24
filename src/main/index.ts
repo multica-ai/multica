@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
   })
 
   // Register IPC handlers
-  registerIPCHandlers(conductor, fileWatcher)
+  registerIPCHandlers(conductor, fileWatcher, () => mainWindow)
 
   mainWindow = createWindow()
 
@@ -162,6 +162,11 @@ app.whenReady().then(async () => {
       updater.checkForUpdates()
     })
   }
+
+  // App info
+  ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, () => {
+    return app.getVersion()
+  })
 
   // Register update IPC handlers
   ipcMain.handle(IPC_CHANNELS.UPDATE_CHECK, async () => {

@@ -39,14 +39,14 @@ describe('SessionStore', () => {
       const session = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test/project'
+        projectId: 'project-123'
       })
 
       expect(session).toMatchObject({
         id: expect.any(String),
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test/project',
+        projectId: 'project-123',
         status: 'active',
         messageCount: 0
       })
@@ -58,7 +58,7 @@ describe('SessionStore', () => {
       const session = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test/project'
+        projectId: 'project-123'
       })
 
       // Check index file exists
@@ -74,12 +74,12 @@ describe('SessionStore', () => {
       const session1 = await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
       const session2 = await store.create({
         agentSessionId: 'agent-2',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       expect(session1.id).not.toBe(session2.id)
@@ -92,7 +92,7 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       // Small delay to ensure different timestamps
@@ -102,7 +102,7 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-2',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       const sessions = await store.list()
@@ -116,12 +116,12 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
       await store.create({
         agentSessionId: 'agent-2',
         agentId: 'gemini',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       const sessions = await store.list({ agentId: 'opencode' })
@@ -133,12 +133,12 @@ describe('SessionStore', () => {
       const session1 = await store.create({
         agentSessionId: 'agent-1',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
       await store.create({
         agentSessionId: 'agent-2',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       await store.updateMeta(session1.id, { status: 'completed' })
@@ -155,7 +155,7 @@ describe('SessionStore', () => {
         await store.create({
           agentSessionId: `agent-${i}`,
           agentId: 'opencode',
-          workingDirectory: '/test'
+          projectId: 'project-123'
         })
       }
 
@@ -175,7 +175,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       const sessionData = await store.get(created.id)
@@ -193,7 +193,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       // First get loads from disk
@@ -210,7 +210,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       const updated = await store.updateMeta(created.id, {
@@ -235,7 +235,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/original/path'
+        projectId: 'project-123'
       })
 
       const updated = await store.updateMeta(created.id, {
@@ -257,7 +257,7 @@ describe('SessionStore', () => {
       const session = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       const dataPath = join(tempDir, 'data', `${session.id}.json`)
@@ -279,7 +279,7 @@ describe('SessionStore', () => {
       await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
 
       const found = store.getByAgentSessionId('agent-123')
@@ -299,7 +299,7 @@ describe('SessionStore', () => {
       const created = await store.create({
         agentSessionId: 'agent-123',
         agentId: 'opencode',
-        workingDirectory: '/test'
+        projectId: 'project-123'
       })
       await store.updateMeta(created.id, { title: 'Persistent Session' })
 

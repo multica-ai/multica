@@ -1,22 +1,15 @@
 /**
- * Status bar component - shows session info and running status
+ * Status bar component - top bar with session name and sidebar toggles
  */
-import type { MulticaSession } from '../../../shared/types'
 import { useSidebar } from '@/components/ui/sidebar'
 import { SidebarTrigger, RightPanelTrigger } from './layout'
 import { cn } from '@/lib/utils'
 
 interface StatusBarProps {
-  runningSessionsCount: number
-  currentSession: MulticaSession | null
-  isCurrentSessionRunning: boolean
+  sessionTitle?: string
 }
 
-export function StatusBar({
-  runningSessionsCount,
-  currentSession,
-  isCurrentSessionRunning
-}: StatusBarProps): React.JSX.Element {
+export function StatusBar({ sessionTitle }: StatusBarProps): React.JSX.Element {
   const { state, isMobile } = useSidebar()
 
   // Need left padding for traffic lights when sidebar is not visible
@@ -29,53 +22,22 @@ export function StatusBar({
         needsTrafficLightPadding && 'pl-24'
       )}
     >
-      {/* Left: Sidebar trigger + Session info */}
-      <div className="titlebar-no-drag flex items-center gap-3">
+      {/* Left: Sidebar trigger */}
+      <div className="titlebar-no-drag">
         <SidebarTrigger className="-ml-1" />
-        {currentSession ? (
-          <>
-            <span className="text-sm font-medium">
-              {currentSession.title || currentSession.workingDirectory.split('/').pop()}
-            </span>
-            <span className="text-xs text-muted-foreground">{currentSession.workingDirectory}</span>
-          </>
-        ) : (
-          <span className="text-sm text-muted-foreground">No session selected</span>
-        )}
       </div>
 
-      {/* Right: Status + Right panel trigger */}
-      <div className="titlebar-no-drag flex items-center gap-3">
-        <SessionStatusBadge
-          isRunning={isCurrentSessionRunning}
-          runningCount={runningSessionsCount}
-        />
+      {/* Center: Session title */}
+      {sessionTitle && (
+        <span className="text-sm font-medium text-muted-foreground truncate max-w-[200px]">
+          {sessionTitle}
+        </span>
+      )}
+
+      {/* Right: Right panel trigger */}
+      <div className="titlebar-no-drag">
         <RightPanelTrigger />
       </div>
-    </div>
-  )
-}
-
-interface SessionStatusBadgeProps {
-  isRunning: boolean
-  runningCount: number
-}
-
-function SessionStatusBadge({
-  isRunning,
-  runningCount
-}: SessionStatusBadgeProps): React.JSX.Element {
-  const dotColor = isRunning ? 'bg-green-500' : 'bg-gray-500'
-  const text = isRunning
-    ? `Running (${runningCount} session${runningCount !== 1 ? 's' : ''})`
-    : runningCount > 0
-      ? `${runningCount} running`
-      : 'No sessions'
-
-  return (
-    <div className="flex items-center gap-2">
-      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-      <span className="text-xs text-muted-foreground">{text}</span>
     </div>
   )
 }

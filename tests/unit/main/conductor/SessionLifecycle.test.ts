@@ -22,9 +22,19 @@ describe('SessionLifecycle', () => {
     enabled: true
   }
 
+  const mockProject = {
+    id: 'project-123',
+    name: 'Test Project',
+    workingDirectory: '/test/project',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+    isExpanded: true
+  }
+
   const mockSession: MulticaSession = {
     id: 'session-123',
     agentSessionId: 'acp-123',
+    projectId: 'project-123',
     agentId: 'opencode',
     workingDirectory: '/test/project',
     createdAt: '2024-01-01T00:00:00Z',
@@ -52,7 +62,8 @@ describe('SessionLifecycle', () => {
       updateMeta: vi.fn().mockResolvedValue(mockSession),
       delete: vi.fn().mockResolvedValue(undefined),
       appendUpdate: vi.fn().mockResolvedValue({ timestamp: new Date().toISOString() }),
-      getByAgentSessionId: vi.fn().mockReturnValue(mockSession)
+      getByAgentSessionId: vi.fn().mockReturnValue(mockSession),
+      getOrCreateProject: vi.fn().mockResolvedValue(mockProject)
     }
 
     mockAgentProcessManager = {
@@ -101,10 +112,11 @@ describe('SessionLifecycle', () => {
     it('should create session with persistence', async () => {
       const session = await lifecycle.create('/test/project', mockAgentConfig)
 
+      expect(mockSessionStore.getOrCreateProject).toHaveBeenCalledWith('/test/project')
       expect(mockSessionStore.create).toHaveBeenCalledWith({
+        projectId: 'project-123',
         agentSessionId: '',
-        agentId: 'opencode',
-        workingDirectory: '/test/project'
+        agentId: 'opencode'
       })
       expect(session).toEqual(mockSession)
     })

@@ -1,9 +1,11 @@
 /**
  * Main application state hook
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type {
   MulticaSession,
+  MulticaProject,
+  ProjectWithSessions,
   StoredSessionUpdate,
   SessionModeState,
   SessionModelState,
@@ -38,7 +40,16 @@ function isAuthError(errorMessage: string): boolean {
   return authKeywords.some((keyword) => lowerMessage.includes(keyword))
 }
 
+function isGitHeadPath(filePath: string): boolean {
+  const normalizedPath = filePath.replace(/\\/g, '/')
+  return normalizedPath.includes('/.git/') && normalizedPath.endsWith('/HEAD')
+}
+
 export interface AppState {
+  // Projects
+  projects: MulticaProject[]
+  sessionsByProject: Map<string, MulticaSession[]>
+
   // Sessions
   sessions: MulticaSession[]
   currentSession: MulticaSession | null
@@ -58,11 +69,20 @@ export interface AppState {
 }
 
 export interface AppActions {
+  // Project actions
+  loadProjectsAndSessions: () => Promise<void>
+  createProject: (workingDirectory: string) => Promise<MulticaProject | null>
+  toggleProjectExpanded: (projectId: string) => Promise<void>
+  reorderProjects: (projectIds: string[]) => Promise<void>
+  deleteProject: (projectId: string) => Promise<void>
+
   // Session actions
   loadSessions: () => Promise<void>
-  createSession: (cwd: string, agentId: string) => Promise<void>
+  createSession: (projectId: string, agentId: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
+  archiveSession: (sessionId: string) => Promise<void>
+  unarchiveSession: (sessionId: string) => Promise<void>
   clearCurrentSession: () => void
 
   // Agent actions (per-session)
@@ -73,6 +93,9 @@ export interface AppActions {
   // Mode/Model actions
   setSessionMode: (modeId: SessionModeId) => Promise<void>
   setSessionModel: (modelId: ModelId) => Promise<void>
+
+  // Session metadata actions
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>
 }
 
 function mergeSessionUpdates(
@@ -155,9 +178,20 @@ export function useApp(): AppState & AppActions {
   const currentSessionIdRef = useRef<string | null>(null)
 
   // State
+  const [projectsWithSessions, setProjectsWithSessions] = useState<ProjectWithSessions[]>([])
   const [sessions, setSessions] = useState<MulticaSession[]>([])
   const [currentSession, setCurrentSession] = useState<MulticaSession | null>(null)
   const [sessionUpdates, setSessionUpdates] = useState<StoredSessionUpdate[]>([])
+
+  // Derive projects and sessionsByProject from projectsWithSessions
+  const projects = useMemo(() => projectsWithSessions.map((p) => p.project), [projectsWithSessions])
+  const sessionsByProject = useMemo(() => {
+    const map = new Map<string, MulticaSession[]>()
+    for (const { project, sessions } of projectsWithSessions) {
+      map.set(project.id, sessions)
+    }
+    return map
+  }, [projectsWithSessions])
 
   // Helper to update current session with synchronous ref update
   // This ensures currentSessionIdRef is always up-to-date before any async operations
@@ -165,6 +199,36 @@ export function useApp(): AppState & AppActions {
   const updateCurrentSession = useCallback((session: MulticaSession | null) => {
     currentSessionIdRef.current = session?.id ?? null // Sync update FIRST
     setCurrentSession(session)
+  }, [])
+
+  const updateSessionInLists = useCallback((updatedSession: MulticaSession) => {
+    setProjectsWithSessions((prev) => {
+      let didUpdate = false
+      const next = prev.map((entry) => {
+        if (entry.project.id !== updatedSession.projectId) {
+          return entry
+        }
+        const nextSessions = entry.sessions.map((session) => {
+          if (session.id !== updatedSession.id) {
+            return session
+          }
+          didUpdate = true
+          return updatedSession
+        })
+        return didUpdate ? { ...entry, sessions: nextSessions } : entry
+      })
+      return didUpdate ? next : prev
+    })
+
+    setSessions((prev) => {
+      const index = prev.findIndex((session) => session.id === updatedSession.id)
+      if (index === -1) {
+        return prev
+      }
+      const next = [...prev]
+      next[index] = updatedSession
+      return next
+    })
   }, [])
   const [runningSessionsStatus, setRunningSessionsStatus] = useState<RunningSessionsStatus>({
     runningSessions: 0,
@@ -181,13 +245,25 @@ export function useApp(): AppState & AppActions {
     ? runningSessionsStatus.processingSessionIds.includes(currentSession.id)
     : false
 
+  // Track previous isProcessing state to detect when processing completes
+  const prevIsProcessingRef = useRef(false)
+
+  // Debounce timer for git branch refresh
+  const gitBranchRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Note: File tree refresh is handled by file system watcher (see fs:file-changed handler below)
   // No need for periodic refresh - it causes performance issues
 
-  // Load sessions on mount
+  // Load projects and sessions on mount
   useEffect(() => {
-    loadSessions()
+    loadProjectsAndSessions()
     loadRunningStatus()
+
+    return () => {
+      if (gitBranchRefreshTimerRef.current) {
+        clearTimeout(gitBranchRefreshTimerRef.current)
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only load on mount
   }, [])
 
@@ -205,6 +281,8 @@ export function useApp(): AppState & AppActions {
   // This is critical for receiving messages after app restart
   useEffect(() => {
     const unsubSessionMeta = window.electronAPI.onSessionMetaUpdated((updatedSession) => {
+      updateSessionInLists(updatedSession)
+
       // Only update if this is the current session
       if (currentSessionId && updatedSession.id === currentSessionId) {
         console.log(
@@ -220,29 +298,13 @@ export function useApp(): AppState & AppActions {
     return () => {
       unsubSessionMeta()
     }
-  }, [currentSessionId, updateCurrentSession])
-
-  // Subscribe to file system change events (runs once on mount)
-  useEffect(() => {
-    const handleFileChange = useFileChangeStore.getState().handleFileChange
-
-    const unsubFileChange = window.electronAPI.onFileChanged((event) => {
-      // Notify the store of file changes for each affected session
-      for (const sessionId of event.sessionIds) {
-        handleFileChange(sessionId)
-      }
-    })
-
-    return () => {
-      unsubFileChange()
-    }
-  }, [])
+  }, [currentSessionId, updateCurrentSession, updateSessionInLists])
 
   // Start/stop file watching when current session changes
   useEffect(() => {
     const setWatchedSession = useFileChangeStore.getState().setWatchedSession
 
-    if (currentSession) {
+    if (currentSession && currentSession.workingDirectory) {
       // Start watching the session's working directory
       setWatchedSession(currentSession.id)
       window.electronAPI
@@ -250,7 +312,7 @@ export function useApp(): AppState & AppActions {
         .catch((err) => {
           console.error('[useApp] Failed to start file watch:', err)
         })
-    } else {
+    } else if (!currentSession) {
       setWatchedSession(null)
     }
 
@@ -296,9 +358,11 @@ export function useApp(): AppState & AppActions {
       // Pass through original update without any accumulation
       // ChatView is responsible for accumulating chunks into complete messages
       // Include sequence number for proper ordering of concurrent updates
+      const frontendTimestamp = new Date().toISOString()
+
       setSessionUpdates((prev) => {
         const newUpdate = {
-          timestamp: new Date().toISOString(),
+          timestamp: frontendTimestamp,
           sequenceNumber: message.sequenceNumber,
           update: {
             sessionId: message.sessionId,
@@ -333,14 +397,22 @@ export function useApp(): AppState & AppActions {
   }, [])
 
   // Actions
-  const loadSessions = useCallback(async () => {
+  const loadProjectsAndSessions = useCallback(async () => {
     try {
-      const list = await window.electronAPI.listSessions()
-      setSessions(list)
+      const list = await window.electronAPI.listProjectsWithSessions()
+      setProjectsWithSessions(list)
+      // Also update flat sessions list for backward compatibility
+      const allSessions = list.flatMap((p) => p.sessions)
+      setSessions(allSessions)
     } catch (err) {
-      toast.error(`Failed to load sessions: ${getErrorMessage(err)}`)
+      toast.error(`Failed to load projects: ${getErrorMessage(err)}`)
     }
   }, [])
+
+  const loadSessions = useCallback(async () => {
+    // Delegate to loadProjectsAndSessions to keep both in sync
+    await loadProjectsAndSessions()
+  }, [loadProjectsAndSessions])
 
   const loadRunningStatus = useCallback(async () => {
     try {
@@ -350,6 +422,39 @@ export function useApp(): AppState & AppActions {
       console.error('Failed to get running status:', err)
     }
   }, [])
+
+  const refreshGitBranchForSessions = useCallback(
+    (sessionIds: string[]) => {
+      if (sessionIds.length === 0) return
+
+      // Cancel any pending refresh to debounce rapid changes
+      if (gitBranchRefreshTimerRef.current) {
+        clearTimeout(gitBranchRefreshTimerRef.current)
+      }
+
+      gitBranchRefreshTimerRef.current = setTimeout(async () => {
+        gitBranchRefreshTimerRef.current = null
+
+        const activeSessionId = currentSessionIdRef.current
+        const shouldRefreshCurrent =
+          activeSessionId !== null && sessionIds.includes(activeSessionId)
+
+        if (shouldRefreshCurrent) {
+          try {
+            const session = await window.electronAPI.loadSession(activeSessionId)
+            if (currentSessionIdRef.current === activeSessionId) {
+              updateCurrentSession(session)
+            }
+          } catch (err) {
+            console.error('[useApp] Failed to refresh git branch:', err)
+          }
+        }
+
+        await loadSessions()
+      }, 100)
+    },
+    [loadSessions, updateCurrentSession]
+  )
 
   // Load mode/model state for current session (if agent supports it)
   const loadSessionModeModel = useCallback(async (sessionId: string) => {
@@ -371,6 +476,27 @@ export function useApp(): AppState & AppActions {
     }
   }, [])
 
+  // Subscribe to file system change events (runs once on mount)
+  useEffect(() => {
+    const handleFileChange = useFileChangeStore.getState().handleFileChange
+
+    const unsubFileChange = window.electronAPI.onFileChanged((event) => {
+      if (isGitHeadPath(event.path)) {
+        void refreshGitBranchForSessions(event.sessionIds)
+        return
+      }
+
+      // Notify the store of file changes for each affected session
+      for (const sessionId of event.sessionIds) {
+        handleFileChange(sessionId)
+      }
+    })
+
+    return () => {
+      unsubFileChange()
+    }
+  }, [refreshGitBranchForSessions])
+
   // Validate current session directory exists (called on app focus)
   const validateCurrentSessionDirectory = useCallback(async () => {
     if (!currentSession) return
@@ -383,13 +509,12 @@ export function useApp(): AppState & AppActions {
       if (session.directoryExists !== currentSession.directoryExists) {
         updateCurrentSession(session)
         // Also refresh sidebar list to update directory status indicators
-        const list = await window.electronAPI.listSessions()
-        setSessions(list)
+        await loadProjectsAndSessions()
       }
     } catch (err) {
       console.error('Failed to validate session directory:', err)
     }
-  }, [currentSession, updateCurrentSession])
+  }, [currentSession, loadProjectsAndSessions, updateCurrentSession])
 
   // Subscribe to app focus event to validate directory existence
   useEffect(() => {
@@ -406,14 +531,94 @@ export function useApp(): AppState & AppActions {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only re-subscribe on session ID change
   }, [currentSession?.id, validateCurrentSessionDirectory])
 
+  useEffect(() => {
+    prevIsProcessingRef.current = false
+  }, [currentSessionId])
+
+  // Refresh git branch when agent processing completes
+  // This ensures the UI reflects any branch changes made by the agent (e.g., git checkout)
+  useEffect(() => {
+    const wasProcessing = prevIsProcessingRef.current
+    prevIsProcessingRef.current = isProcessing
+
+    // Only refresh when processing transitions from true to false
+    if (wasProcessing && !isProcessing && currentSessionId) {
+      void refreshGitBranchForSessions([currentSessionId])
+    }
+  }, [isProcessing, currentSessionId, refreshGitBranchForSessions])
+
+  const createProject = useCallback(
+    async (workingDirectory: string): Promise<MulticaProject | null> => {
+      try {
+        const project = await window.electronAPI.createProject(workingDirectory)
+        await loadProjectsAndSessions()
+        return project
+      } catch (err) {
+        toast.error(`Failed to create project: ${getErrorMessage(err)}`)
+        return null
+      }
+    },
+    [loadProjectsAndSessions]
+  )
+
+  const toggleProjectExpanded = useCallback(
+    async (projectId: string) => {
+      try {
+        await window.electronAPI.toggleProjectExpanded(projectId)
+        await loadProjectsAndSessions()
+      } catch (err) {
+        toast.error(`Failed to toggle project: ${getErrorMessage(err)}`)
+      }
+    },
+    [loadProjectsAndSessions]
+  )
+
+  const reorderProjects = useCallback(
+    async (projectIds: string[]) => {
+      try {
+        // Optimistic update: immediately reorder the local state
+        setProjectsWithSessions((prev) => {
+          const projectMap = new Map(prev.map((p) => [p.project.id, p]))
+          return projectIds.map((id) => projectMap.get(id)!).filter(Boolean)
+        })
+
+        // Persist to backend
+        await window.electronAPI.reorderProjects(projectIds)
+      } catch (err) {
+        toast.error(`Failed to reorder projects: ${getErrorMessage(err)}`)
+        // Reload to restore correct order on error
+        await loadProjectsAndSessions()
+      }
+    },
+    [loadProjectsAndSessions]
+  )
+
+  const deleteProject = useCallback(
+    async (projectId: string) => {
+      try {
+        // Check if current session belongs to this project
+        if (currentSession?.projectId === projectId) {
+          updateCurrentSession(null)
+          setSessionUpdates([])
+        }
+        await window.electronAPI.deleteProject(projectId)
+        await loadProjectsAndSessions()
+        await loadRunningStatus()
+      } catch (err) {
+        toast.error(`Failed to delete project: ${getErrorMessage(err)}`)
+      }
+    },
+    [currentSession?.projectId, loadProjectsAndSessions, loadRunningStatus, updateCurrentSession]
+  )
+
   const createSession = useCallback(
-    async (cwd: string, agentId: string) => {
+    async (projectId: string, agentId: string) => {
       try {
         setIsInitializing(true)
-        const session = await window.electronAPI.createSession(cwd, agentId)
+        const session = await window.electronAPI.createSession(projectId, agentId)
         updateCurrentSession(session)
         setSessionUpdates([])
-        await loadSessions()
+        await loadProjectsAndSessions()
         await loadRunningStatus()
         // Agent starts immediately now, load mode/model state
         await loadSessionModeModel(session.id)
@@ -423,7 +628,7 @@ export function useApp(): AppState & AppActions {
         setIsInitializing(false)
       }
     },
-    [loadSessions, loadRunningStatus, loadSessionModeModel, updateCurrentSession]
+    [loadProjectsAndSessions, loadRunningStatus, loadSessionModeModel, updateCurrentSession]
   )
 
   const selectSession = useCallback(
@@ -494,13 +699,45 @@ export function useApp(): AppState & AppActions {
           updateCurrentSession(null)
           setSessionUpdates([])
         }
-        await loadSessions()
+        await loadProjectsAndSessions()
         await loadRunningStatus()
       } catch (err) {
         toast.error(`Failed to delete session: ${getErrorMessage(err)}`)
       }
     },
-    [currentSession, loadSessions, loadRunningStatus, updateCurrentSession]
+    [currentSession, loadProjectsAndSessions, loadRunningStatus, updateCurrentSession]
+  )
+
+  const archiveSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await window.electronAPI.archiveSession(sessionId)
+        useDraftStore.getState().clearDraft(sessionId)
+        if (currentSession?.id === sessionId) {
+          updateCurrentSession(null)
+          setSessionUpdates([])
+        }
+        await loadProjectsAndSessions()
+        await loadRunningStatus()
+        toast.success('Session archived')
+      } catch (err) {
+        toast.error(`Failed to archive session: ${getErrorMessage(err)}`)
+      }
+    },
+    [currentSession, loadProjectsAndSessions, loadRunningStatus, updateCurrentSession]
+  )
+
+  const unarchiveSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await window.electronAPI.unarchiveSession(sessionId)
+        await loadProjectsAndSessions()
+        toast.success('Session restored')
+      } catch (err) {
+        toast.error(`Failed to restore session: ${getErrorMessage(err)}`)
+      }
+    },
+    [loadProjectsAndSessions]
   )
 
   const clearCurrentSession = useCallback(() => {
@@ -644,8 +881,25 @@ export function useApp(): AppState & AppActions {
     [currentSession]
   )
 
+  const updateSessionTitle = useCallback(
+    async (sessionId: string, title: string) => {
+      try {
+        const updatedSession = await window.electronAPI.updateSession(sessionId, { title })
+        updateSessionInLists(updatedSession)
+        if (currentSession?.id === sessionId) {
+          updateCurrentSession(updatedSession)
+        }
+      } catch (err) {
+        toast.error(`Failed to update title: ${getErrorMessage(err)}`)
+      }
+    },
+    [currentSession?.id, updateCurrentSession, updateSessionInLists]
+  )
+
   return {
     // State
+    projects,
+    sessionsByProject,
     sessions,
     currentSession,
     sessionUpdates,
@@ -657,15 +911,23 @@ export function useApp(): AppState & AppActions {
     isSwitchingAgent,
 
     // Actions
+    loadProjectsAndSessions,
+    createProject,
+    toggleProjectExpanded,
+    reorderProjects,
+    deleteProject,
     loadSessions,
     createSession,
     selectSession,
     deleteSession,
+    archiveSession,
+    unarchiveSession,
     clearCurrentSession,
     sendPrompt,
     cancelRequest,
     switchSessionAgent,
     setSessionMode,
-    setSessionModel
+    setSessionModel,
+    updateSessionTitle
   }
 }

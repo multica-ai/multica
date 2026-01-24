@@ -4,7 +4,7 @@
 
 A native desktop client that brings coding agent capabilities to everyone through a visual interface.
 
-English | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+English | [简体中文](./README.zh-Hans.md) | [繁體中文](./README.zh-Hant.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 [**Download the latest release**](https://github.com/multica-ai/multica/releases)
 

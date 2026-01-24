@@ -19,7 +19,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-// Mock child_process spawn
+// Mock child_process spawn and exec
 vi.mock('child_process', () => ({
   spawn: vi.fn().mockReturnValue({
     on: vi.fn((event, callback) => {
@@ -27,6 +27,12 @@ vi.mock('child_process', () => ({
         callback(0)
       }
     })
+  }),
+  exec: vi.fn((_cmd, _opts, callback) => {
+    if (callback) {
+      callback(null, { stdout: 'Mocked Title', stderr: '' })
+    }
+    return {}
   })
 }))
 
@@ -40,19 +46,33 @@ import { registerIPCHandlers } from '../../../src/main/ipc/handlers'
 
 // Create mock conductor
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-const createMockConductor = () => ({
+const createMockConductor = (workingDir?: string) => ({
   sendPrompt: vi.fn().mockResolvedValue('end_turn'),
   cancelRequest: vi.fn().mockResolvedValue(undefined),
   getRunningSessionIds: vi.fn().mockReturnValue(['session-1']),
   getProcessingSessionIds: vi.fn().mockReturnValue([]),
-  createSession: vi.fn().mockResolvedValue({ id: 'new-session' }),
+  createSession: vi.fn().mockResolvedValue({ id: 'new-session', workingDirectory: workingDir }),
   listSessions: vi.fn().mockResolvedValue([]),
   getSessionData: vi.fn().mockResolvedValue(null),
   loadSession: vi.fn().mockResolvedValue({ id: 'loaded-session' }),
   resumeSession: vi.fn().mockResolvedValue({ id: 'resumed-session' }),
   deleteSession: vi.fn().mockResolvedValue(undefined),
   updateSessionMeta: vi.fn().mockResolvedValue({ id: 'updated-session' }),
-  switchSessionAgent: vi.fn().mockResolvedValue({ id: 'switched-session' })
+  switchSessionAgent: vi.fn().mockResolvedValue({ id: 'switched-session' }),
+  getProject: vi
+    .fn()
+    .mockResolvedValue({ id: 'project-1', workingDirectory: workingDir || '/test/dir' })
+})
+
+// Create mock file watcher
+const createMockFileWatcher = (): {
+  watch: ReturnType<typeof vi.fn>
+  unwatch: ReturnType<typeof vi.fn>
+  unwatchAll: ReturnType<typeof vi.fn>
+} => ({
+  watch: vi.fn(),
+  unwatch: vi.fn(),
+  unwatchAll: vi.fn()
 })
 
 describe('IPC Handlers', () => {
@@ -60,11 +80,15 @@ describe('IPC Handlers', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let handlers: Map<string, (...args: any[]) => any>
   let mockConductor: ReturnType<typeof createMockConductor>
+  let mockFileWatcher: ReturnType<typeof createMockFileWatcher>
+  let mockGetMainWindow: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
     handlers = new Map()
     mockConductor = createMockConductor()
+    mockFileWatcher = createMockFileWatcher()
+    mockGetMainWindow = vi.fn().mockReturnValue(null)
 
     // Capture all registered handlers
     vi.mocked(ipcMain.handle).mockImplementation(
@@ -74,9 +98,9 @@ describe('IPC Handlers', () => {
       }
     )
 
-    // Register handlers with mock conductor
+    // Register handlers with mock conductor, file watcher, and main window getter
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    registerIPCHandlers(mockConductor as any)
+    registerIPCHandlers(mockConductor as any, mockFileWatcher as any, mockGetMainWindow)
 
     // Create temp directory for file system tests
     tempDir = mkdtempSync(join(tmpdir(), 'ipc-test-'))
@@ -123,9 +147,10 @@ describe('IPC Handlers', () => {
   describe('agent handlers', () => {
     it('agent:prompt should call conductor.sendPrompt', async () => {
       const handler = handlers.get('agent:prompt')!
-      await handler({}, 'session-1', 'Hello')
+      const content = [{ type: 'text', text: 'Hello' }]
+      await handler({}, 'session-1', content)
 
-      expect(mockConductor.sendPrompt).toHaveBeenCalledWith('session-1', 'Hello')
+      expect(mockConductor.sendPrompt).toHaveBeenCalledWith('session-1', content)
     })
 
     it('agent:cancel should call conductor.cancelRequest', async () => {
@@ -150,31 +175,40 @@ describe('IPC Handlers', () => {
   describe('session handlers', () => {
     it('session:create should create a session with valid agent', async () => {
       const handler = handlers.get('session:create')!
-      await handler({}, '/test/dir', 'opencode')
+      await handler({}, 'project-1', 'opencode')
 
+      expect(mockConductor.getProject).toHaveBeenCalledWith('project-1')
       expect(mockConductor.createSession).toHaveBeenCalled()
     })
 
     it('session:create should add directoryExists to session', async () => {
+      mockConductor.getProject.mockResolvedValue({
+        id: 'project-1',
+        workingDirectory: tempDir
+      })
       mockConductor.createSession.mockResolvedValue({
         id: 'new-session',
         workingDirectory: tempDir
       })
 
       const handler = handlers.get('session:create')!
-      const result = await handler({}, tempDir, 'opencode')
+      const result = await handler({}, 'project-1', 'opencode')
 
       expect(result.directoryExists).toBe(true)
     })
 
     it('session:create should return directoryExists false for non-existent directory', async () => {
+      mockConductor.getProject.mockResolvedValue({
+        id: 'project-1',
+        workingDirectory: '/nonexistent/directory/path'
+      })
       mockConductor.createSession.mockResolvedValue({
         id: 'new-session',
         workingDirectory: '/nonexistent/directory/path'
       })
 
       const handler = handlers.get('session:create')!
-      const result = await handler({}, '/nonexistent/directory/path', 'opencode')
+      const result = await handler({}, 'project-1', 'opencode')
 
       expect(result.directoryExists).toBe(false)
     })
@@ -182,7 +216,7 @@ describe('IPC Handlers', () => {
     it('session:create should throw for unknown agent', async () => {
       const handler = handlers.get('session:create')!
 
-      await expect(handler({}, '/test/dir', 'unknown-agent')).rejects.toThrow('Unknown agent')
+      await expect(handler({}, 'project-1', 'unknown-agent')).rejects.toThrow('Unknown agent')
     })
 
     it('session:list should call conductor.listSessions', async () => {

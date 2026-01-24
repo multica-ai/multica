@@ -2,16 +2,18 @@
  * IPC handlers for main process
  * Registers all IPC handlers for communication with renderer process
  */
-import { ipcMain, dialog, clipboard, shell } from 'electron'
+import { ipcMain, dialog, clipboard, shell, type BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-channels'
 import { DEFAULT_AGENTS } from '../config/defaults'
-import { checkAgents, checkAgent } from '../utils/agent-check'
-import { installAgent } from '../utils/agent-install'
+import { checkAgents, checkAgent, checkAgentVersions } from '../utils/agent-check'
+import { installAgent, updateCommand } from '../utils/agent-install'
+import { generateSessionTitle } from '../conductor/TitleGenerator'
 import type { Conductor } from '../conductor/Conductor'
 import type { FileWatcher } from '../watcher'
 import type {
   ListSessionsOptions,
   MulticaSession,
+  MulticaProject,
   SessionModeId,
   ModelId
 } from '../../shared/types'
@@ -21,6 +23,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { spawn } from 'child_process'
 import { getGitBranch } from '../utils/git'
+import { isValidPath } from '../utils/pathValidation'
 
 /**
  * Promisified spawn that waits for the process to complete
@@ -40,32 +43,31 @@ function spawnAsync(command: string, args: string[]): Promise<void> {
 }
 
 /**
- * Validates a file path for safety:
- * - Must be absolute
- * - Must be normalized (no .. traversal tricks)
- */
-function isValidPath(inputPath: string): boolean {
-  // Must be absolute
-  if (!path.isAbsolute(inputPath)) {
-    return false
-  }
-  // Resolved path must equal input (catches .. in the middle)
-  const resolved = path.resolve(inputPath)
-  return resolved === inputPath
-}
-
-/**
  * Adds directoryExists and gitBranch fields to a session
  */
 async function withRuntimeInfo<T extends MulticaSession>(
   session: T
 ): Promise<T & { directoryExists: boolean; gitBranch?: string }> {
-  const directoryExists = fs.existsSync(session.workingDirectory)
-  const gitBranch = directoryExists ? await getGitBranch(session.workingDirectory) : undefined
+  const workingDir = session.workingDirectory ?? ''
+  const directoryExists = workingDir ? fs.existsSync(workingDir) : false
+  const gitBranch = directoryExists ? await getGitBranch(workingDir) : undefined
   return {
     ...session,
     directoryExists,
     gitBranch
+  }
+}
+
+/**
+ * Adds directoryExists field to a project
+ */
+function withProjectRuntimeInfo<T extends MulticaProject>(
+  project: T
+): T & { directoryExists: boolean } {
+  const directoryExists = fs.existsSync(project.workingDirectory)
+  return {
+    ...project,
+    directoryExists
   }
 }
 
@@ -90,13 +92,90 @@ function extractErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatcher): void {
+/**
+ * Generate session title on first user message (fire-and-forget)
+ * Only triggers once per session - when session has no title yet
+ */
+const titleGenerationInFlight = new Set<string>()
+
+function maybeGenerateSessionTitle(
+  sessionId: string,
+  content: MessageContent,
+  conductor: Conductor,
+  getMainWindow: () => BrowserWindow | null
+): void {
+  // Extract text from message content
+  const textItem = content.find((c): c is { type: 'text'; text: string } => c.type === 'text')
+  if (!textItem) {
+    return
+  }
+
+  if (titleGenerationInFlight.has(sessionId)) {
+    return
+  }
+
+  titleGenerationInFlight.add(sessionId)
+
+  // Run asynchronously (fire-and-forget)
+  ;(async () => {
+    try {
+      // Check if session already has a title
+      const sessionData = await conductor.getSessionData(sessionId)
+      if (!sessionData || sessionData.session.title) {
+        return // Already has a title or session not found
+      }
+
+      const agentId = sessionData.session.agentId
+      console.log(`[IPC] Session ${sessionId} needs a title, generating with ${agentId}...`)
+
+      // Generate title using the same agent CLI
+      const title = await generateSessionTitle(agentId, textItem.text)
+
+      // If title generation failed, don't update (keep title unchanged)
+      if (!title) {
+        console.log(`[IPC] Session ${sessionId} title generation failed, keeping unchanged`)
+        return
+      }
+
+      const latestSessionData = await conductor.getSessionData(sessionId)
+      if (!latestSessionData || latestSessionData.session.title) {
+        console.log(`[IPC] Session ${sessionId} already has a title, skipping update`)
+        return
+      }
+
+      // Update session metadata
+      const updatedSession = await conductor.updateSessionMeta(sessionId, { title })
+
+      console.log(`[IPC] Session ${sessionId} title updated to: "${title}"`)
+
+      // Notify frontend about the title update
+      const mainWindow = getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.SESSION_META_UPDATED, updatedSession)
+      }
+    } catch (error) {
+      // Log error but don't fail - title generation is best-effort
+      console.error(`[IPC] Failed to generate title for session ${sessionId}:`, error)
+    } finally {
+      titleGenerationInFlight.delete(sessionId)
+    }
+  })()
+}
+
+export function registerIPCHandlers(
+  conductor: Conductor,
+  fileWatcher: FileWatcher,
+  getMainWindow: () => BrowserWindow | null
+): void {
   // --- Agent handlers (per-session) ---
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_PROMPT,
     async (_event, sessionId: string, content: MessageContent) => {
       try {
+        // Trigger title generation on first user message (fire-and-forget)
+        maybeGenerateSessionTitle(sessionId, content, conductor, getMainWindow)
+
         const stopReason = await conductor.sendPrompt(sessionId, content)
         return { stopReason }
       } catch (err) {
@@ -125,17 +204,97 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
     }
   })
 
+  // --- Project handlers ---
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_CREATE, async (_event, workingDirectory: string) => {
+    try {
+      if (!fs.existsSync(workingDirectory)) {
+        throw new Error('Directory does not exist')
+      }
+      const project = await conductor.createProject({ workingDirectory })
+      return withProjectRuntimeInfo(project)
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_LIST, async () => {
+    const projects = await conductor.listProjects()
+    return projects.map(withProjectRuntimeInfo)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_LIST_WITH_SESSIONS, async () => {
+    const projectsWithSessions = await conductor.listProjectsWithSessions()
+    // Add runtime info to projects and sessions
+    const result = await Promise.all(
+      projectsWithSessions.map(async ({ project, sessions }) => ({
+        project: withProjectRuntimeInfo(project),
+        sessions: await Promise.all(sessions.map(withRuntimeInfo))
+      }))
+    )
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_GET, async (_event, projectId: string) => {
+    const project = await conductor.getProject(projectId)
+    return project ? withProjectRuntimeInfo(project) : null
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECT_UPDATE,
+    async (_event, projectId: string, updates: Partial<MulticaProject>) => {
+      try {
+        const project = await conductor.updateProject(projectId, updates)
+        return withProjectRuntimeInfo(project)
+      } catch (err) {
+        throw new Error(extractErrorMessage(err))
+      }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_DELETE, async (_event, projectId: string) => {
+    try {
+      await conductor.deleteProject(projectId)
+      return { success: true }
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_TOGGLE_EXPANDED, async (_event, projectId: string) => {
+    try {
+      const project = await conductor.toggleProjectExpanded(projectId)
+      return withProjectRuntimeInfo(project)
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_REORDER, async (_event, projectIds: string[]) => {
+    try {
+      await conductor.reorderProjects(projectIds)
+      return { success: true }
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
   // --- Session handlers ---
 
   ipcMain.handle(
     IPC_CHANNELS.SESSION_CREATE,
-    async (_event, workingDirectory: string, agentId: string) => {
+    async (_event, projectId: string, agentId: string) => {
       try {
         const config = DEFAULT_AGENTS[agentId]
         if (!config) {
           throw new Error(`Unknown agent: ${agentId}`)
         }
-        const session = await conductor.createSession(workingDirectory, config)
+        // Get project to get working directory
+        const project = await conductor.getProject(projectId)
+        if (!project) {
+          throw new Error(`Project not found: ${projectId}`)
+        }
+        const session = await conductor.createSession(project.workingDirectory, config)
         return withRuntimeInfo(session)
       } catch (err) {
         throw new Error(extractErrorMessage(err))
@@ -171,6 +330,21 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
   ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, async (_event, sessionId: string) => {
     await conductor.deleteSession(sessionId)
     return { success: true }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_ARCHIVE, async (_event, sessionId: string) => {
+    await conductor.archiveSession(sessionId)
+    return { success: true }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_UNARCHIVE, async (_event, sessionId: string) => {
+    await conductor.unarchiveSession(sessionId)
+    return { success: true }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_LIST_ARCHIVED, async (_event, projectId: string) => {
+    const sessions = await conductor.listArchivedSessions(projectId)
+    return Promise.all(sessions.map(withRuntimeInfo))
   })
 
   ipcMain.handle(
@@ -323,6 +497,27 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
     }
   })
 
+  // --- Agent version checking handler ---
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_CHECK_LATEST_VERSIONS,
+    async (_event, agentId: string, commands: string[]) => {
+      const versionInfos = await checkAgentVersions(agentId, commands)
+      return {
+        agentId,
+        commands: versionInfos
+      }
+    }
+  )
+
+  // --- Agent/command update handler ---
+  ipcMain.handle(IPC_CHANNELS.AGENT_UPDATE_COMMAND, async (_event, commandName: string) => {
+    try {
+      return await updateCommand(commandName)
+    } catch (err) {
+      throw new Error(extractErrorMessage(err))
+    }
+  })
+
   // --- File tree handlers ---
 
   ipcMain.handle(IPC_CHANNELS.FS_LIST_DIRECTORY, async (_event, dirPath: string) => {
@@ -368,6 +563,7 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
     const appChecks = [
       { id: 'cursor', name: 'Cursor', appName: 'Cursor.app' },
       { id: 'vscode', name: 'VS Code', appName: 'Visual Studio Code.app' },
+      { id: 'zed', name: 'Zed', appName: 'Zed.app' },
       { id: 'xcode', name: 'Xcode', appName: 'Xcode.app' },
       { id: 'ghostty', name: 'Ghostty', appName: 'Ghostty.app' },
       { id: 'iterm', name: 'iTerm', appName: 'iTerm.app' }
@@ -416,6 +612,9 @@ export function registerIPCHandlers(conductor: Conductor, fileWatcher: FileWatch
             break
           case 'vscode':
             await spawnAsync('open', ['-a', 'Visual Studio Code', filePath])
+            break
+          case 'zed':
+            await spawnAsync('open', ['-a', 'Zed', filePath])
             break
           case 'xcode':
             await spawnAsync('open', ['-a', 'Xcode', filePath])

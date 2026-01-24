@@ -4,6 +4,8 @@
 import type {
   AppConfig,
   MulticaSession,
+  MulticaProject,
+  ProjectWithSessions,
   SessionData,
   ListSessionsOptions,
   SessionModeState,
@@ -35,6 +37,7 @@ export interface AgentMessage {
 export interface CommandInfo {
   command: string
   path?: string
+  version?: string
 }
 
 export interface AgentCheckResult {
@@ -163,6 +166,19 @@ export interface UpdateStatus {
   error?: string
 }
 
+// Agent version checking
+export interface CommandVersionInfo {
+  command: string
+  installedVersion?: string
+  latestVersion?: string
+  hasUpdate: boolean
+}
+
+export interface AgentVersionInfo {
+  agentId: string
+  commands: CommandVersionInfo[]
+}
+
 export interface ElectronAPI {
   // Agent status (per-session agents)
   getAgentStatus(): Promise<RunningSessionsStatus>
@@ -171,14 +187,27 @@ export interface ElectronAPI {
   sendPrompt(sessionId: string, content: MessageContent): Promise<{ stopReason: string }>
   cancelRequest(sessionId: string): Promise<{ success: boolean }>
 
+  // Project management
+  createProject(workingDirectory: string): Promise<MulticaProject>
+  listProjects(): Promise<MulticaProject[]>
+  listProjectsWithSessions(): Promise<ProjectWithSessions[]>
+  getProject(projectId: string): Promise<MulticaProject | null>
+  updateProject(projectId: string, updates: Partial<MulticaProject>): Promise<MulticaProject>
+  deleteProject(projectId: string): Promise<{ success: boolean }>
+  toggleProjectExpanded(projectId: string): Promise<MulticaProject>
+  reorderProjects(projectIds: string[]): Promise<{ success: boolean }>
+
   // Session management (agent starts when session is created)
-  createSession(workingDirectory: string, agentId: string): Promise<MulticaSession>
+  createSession(projectId: string, agentId: string): Promise<MulticaSession>
   listSessions(options?: ListSessionsOptions): Promise<MulticaSession[]>
   getSession(sessionId: string): Promise<SessionData | null>
   loadSession(sessionId: string): Promise<MulticaSession> // Load without starting agent
   startSessionAgent(sessionId: string): Promise<MulticaSession> // Start agent for a session
   resumeSession(sessionId: string): Promise<MulticaSession>
   deleteSession(sessionId: string): Promise<{ success: boolean }>
+  archiveSession(sessionId: string): Promise<{ success: boolean }>
+  unarchiveSession(sessionId: string): Promise<{ success: boolean }>
+  listArchivedSessions(projectId: string): Promise<MulticaSession[]>
   updateSession(sessionId: string, updates: Partial<MulticaSession>): Promise<MulticaSession>
   switchSessionAgent(sessionId: string, newAgentId: string): Promise<MulticaSession>
 
@@ -206,6 +235,12 @@ export interface ElectronAPI {
   installAgent(agentId: string): Promise<InstallResult>
   onInstallProgress(callback: (event: InstallProgressEvent) => void): () => void
 
+  // Agent version checking
+  checkAgentLatestVersions(agentId: string, commands: string[]): Promise<AgentVersionInfo>
+
+  // Agent/command update
+  updateCommand(commandName: string): Promise<InstallResult>
+
   // File tree
   listDirectory(path: string): Promise<FileTreeNode[]>
   detectApps(): Promise<DetectedApp[]>
@@ -231,6 +266,9 @@ export interface ElectronAPI {
 
   // App lifecycle
   onAppFocus(callback: () => void): () => void
+
+  // App info
+  getAppVersion(): Promise<string>
 
   // Auto-update
   checkForUpdates(): Promise<void>

@@ -208,6 +208,20 @@ describe('PromptHandler', () => {
 
       expect(handler.isProcessing('session-1')).toBe(false)
     })
+
+    it('should stop agent process on error to allow recovery', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue({
+        code: -32603,
+        message: 'Internal error: only prompt commands are supported in streaming mode'
+      })
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      // Should stop the agent so next request starts a fresh process
+      expect(mockAgentProcessManager.stop).toHaveBeenCalledWith('session-1')
+    })
   })
 
   describe('cancel', () => {
@@ -416,7 +430,7 @@ describe('PromptHandler', () => {
       )
     })
 
-    it('should show error message in fallback for unknown errors', async () => {
+    it('should show error message in fallback for unknown Error instances', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mockConnection = mockSessionAgent.connection as any
       mockConnection.prompt.mockRejectedValue(new Error('Some completely unknown error'))
@@ -427,12 +441,57 @@ describe('PromptHandler', () => {
         expect.objectContaining({
           update: expect.objectContaining({
             content: expect.objectContaining({
-              text: expect.stringContaining('Agent error: Error: Some completely unknown error')
+              text: expect.stringContaining('Agent error: Some completely unknown error')
             })
           })
         }),
         'session-1' // multicaSessionId
       )
+    })
+
+    it('should extract message from plain object errors (ACP errors)', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue({
+        code: -32603,
+        message: 'Internal error: only prompt commands are supported in streaming mode'
+      })
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      const callArgs = mockEvents.onSessionUpdate.mock.calls[0][0]
+      const errorText = callArgs.update.content.text
+      // Should NOT contain [object Object]
+      expect(errorText).not.toContain('[object Object]')
+      // Should contain the actual error message
+      expect(errorText).toContain('only prompt commands are supported in streaming mode')
+    })
+
+    it('should JSON-stringify object errors without message property', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue({ code: -32603, data: { details: 'something' } })
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      const callArgs = mockEvents.onSessionUpdate.mock.calls[0][0]
+      const errorText = callArgs.update.content.text
+      // Should NOT contain [object Object]
+      expect(errorText).not.toContain('[object Object]')
+      // Should contain stringified JSON
+      expect(errorText).toContain('-32603')
+    })
+
+    it('should handle string errors', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockConnection = mockSessionAgent.connection as any
+      mockConnection.prompt.mockRejectedValue('Raw string error')
+
+      await handler.send('session-1', [{ type: 'text', text: 'Hello' }])
+
+      const callArgs = mockEvents.onSessionUpdate.mock.calls[0][0]
+      const errorText = callArgs.update.content.text
+      expect(errorText).toContain('Raw string error')
     })
 
     it('should truncate long error messages', async () => {
@@ -448,7 +507,7 @@ describe('PromptHandler', () => {
           update: expect.objectContaining({
             content: expect.objectContaining({
               // Error message should be truncated and end with "..."
-              text: expect.stringMatching(/Agent error: Error: A+\.\.\./)
+              text: expect.stringMatching(/Agent error: A+\.\.\./)
             })
           })
         }),
@@ -456,7 +515,6 @@ describe('PromptHandler', () => {
       )
 
       // Verify the error text doesn't exceed expected length
-      // Format: "\n\n**Error:** Agent error: " + truncated (max 153) + "...\n"
       const callArgs = mockEvents.onSessionUpdate.mock.calls[0][0]
       const errorText = callArgs.update.content.text
       expect(errorText.length).toBeLessThanOrEqual(200)

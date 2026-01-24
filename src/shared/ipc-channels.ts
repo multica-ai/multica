@@ -9,6 +9,16 @@ export const IPC_CHANNELS = {
   AGENT_ERROR: 'agent:error',
   AGENT_STATUS: 'agent:status', // Returns status of all running sessions
 
+  // Project management
+  PROJECT_CREATE: 'project:create',
+  PROJECT_LIST: 'project:list',
+  PROJECT_LIST_WITH_SESSIONS: 'project:list-with-sessions',
+  PROJECT_GET: 'project:get',
+  PROJECT_UPDATE: 'project:update',
+  PROJECT_DELETE: 'project:delete',
+  PROJECT_TOGGLE_EXPANDED: 'project:toggle-expanded',
+  PROJECT_REORDER: 'project:reorder',
+
   // Session management
   SESSION_CREATE: 'session:create',
   SESSION_LIST: 'session:list',
@@ -17,6 +27,9 @@ export const IPC_CHANNELS = {
   SESSION_START_AGENT: 'session:start-agent', // Start agent for a session
   SESSION_RESUME: 'session:resume',
   SESSION_DELETE: 'session:delete',
+  SESSION_ARCHIVE: 'session:archive',
+  SESSION_UNARCHIVE: 'session:unarchive',
+  SESSION_LIST_ARCHIVED: 'session:list-archived',
   SESSION_UPDATE: 'session:update',
   SESSION_SWITCH_AGENT: 'session:switch-agent',
   SESSION_META_UPDATED: 'session:meta-updated', // Push event when session metadata changes (e.g., agentSessionId)
@@ -41,6 +54,12 @@ export const IPC_CHANNELS = {
   AGENT_INSTALL: 'agent:install',
   AGENT_INSTALL_PROGRESS: 'agent:install-progress',
 
+  // Agent version checking
+  AGENT_CHECK_LATEST_VERSIONS: 'agent:check-latest-versions',
+
+  // Agent/command update
+  AGENT_UPDATE_COMMAND: 'agent:update-command',
+
   // File system (V2)
   FILE_APPROVAL_REQUEST: 'file:approval-request',
   FILE_APPROVAL_RESPONSE: 'file:approval-response',
@@ -64,6 +83,9 @@ export const IPC_CHANNELS = {
 
   // App lifecycle
   APP_FOCUS: 'app:focus',
+
+  // App info
+  APP_GET_VERSION: 'app:get-version',
 
   // Auto-update
   UPDATE_CHECK: 'update:check',

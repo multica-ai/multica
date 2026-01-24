@@ -12,8 +12,8 @@ export interface MulticaSession {
   agentSessionId: string // Agent-returned session ID
 
   // Association
+  projectId: string // Project this session belongs to
   agentId: string // Agent used (opencode/codex/gemini)
-  workingDirectory: string
 
   // Timestamps
   createdAt: string // ISO 8601
@@ -21,12 +21,14 @@ export interface MulticaSession {
 
   // State
   status: 'active' | 'completed' | 'error'
+  isArchived: boolean // Whether this session has been archived
 
   // Metadata
   title?: string // User-defined or auto-generated title
   messageCount: number // Message count for list display
 
-  // Runtime state (not persisted)
+  // Runtime state (not persisted, computed from project)
+  workingDirectory?: string // Computed from parent project
   directoryExists?: boolean // true = exists, false = deleted/moved, undefined = not checked
   gitBranch?: string // Current git branch name (runtime only, refreshed on load)
 }
@@ -75,17 +77,19 @@ export interface SessionData {
  * Parameters for creating a new session
  */
 export interface CreateSessionParams {
+  projectId: string // Project to create session under
   agentSessionId: string
   agentId: string
-  workingDirectory: string
 }
 
 /**
  * Options for listing sessions
  */
 export interface ListSessionsOptions {
+  projectId?: string // Filter by project
   agentId?: string // Filter by agent
   status?: MulticaSession['status']
+  includeArchived?: boolean // Include archived sessions (default: false)
   limit?: number
   offset?: number
 }

@@ -4,7 +4,7 @@
 
 一个原生桌面客户端，通过可视化界面将编程智能体的能力带给每一个人。
 
-[English](./README.md) | 简体中文 | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+[English](./README.md) | 简体中文 | [繁體中文](./README.zh-Hant.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 ## 为什么叫 "Multica"？
 

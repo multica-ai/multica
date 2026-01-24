@@ -43,6 +43,7 @@ import type { FileTreeNode, DetectedApp } from '../../../shared/electron-api'
 import { useFileChangeStore } from '../stores/fileChangeStore'
 import { useUIStore } from '../stores/uiStore'
 import { excludeHiddenFiles } from '../utils/fileTree'
+import { getBaseName } from '../utils/path'
 
 interface FileTreeProps {
   rootPath: string
@@ -173,7 +174,9 @@ function TreeItem({
 
   // Separate apps into categories
   const finderApp = availableApps.find((app) => app.id === 'finder')
-  const editorApps = availableApps.filter((app) => ['cursor', 'vscode', 'xcode'].includes(app.id))
+  const editorApps = availableApps.filter((app) =>
+    ['cursor', 'vscode', 'zed', 'xcode'].includes(app.id)
+  )
   const terminalApps = availableApps.filter((app) =>
     ['ghostty', 'iterm', 'terminal'].includes(app.id)
   )
@@ -364,6 +367,8 @@ export function FileTree({
   const [availableApps, setAvailableApps] = useState<DetectedApp[]>([])
   // Initialize loading state based on directoryExists
   const [isLoading, setIsLoading] = useState(directoryExists)
+  // Root folder expansion state (for Zed-like UI)
+  const [isRootExpanded, setIsRootExpanded] = useState(true)
 
   // Subscribe to file change events for auto-refresh
   const refreshCounter = useFileChangeStore((s) => s.refreshCounter)
@@ -410,26 +415,16 @@ export function FileTree({
     // Skip if directory doesn't exist
     if (!directoryExists) return
 
-    console.log('[FileTree] Refresh triggered, counter:', refreshCounter)
-
     // Refresh: clear cache and re-fetch root + expanded directories
     async function refresh(): Promise<void> {
       try {
         // Re-fetch root directory
-        console.log('[FileTree] Fetching root directory:', rootPath)
         const children = await window.electronAPI.listDirectory(rootPath)
-        console.log(
-          '[FileTree] Root directory result:',
-          children.length,
-          'items',
-          children.map((c) => c.name)
-        )
         setRawRootChildren(children)
 
         // Re-fetch all expanded directories to update them
         const currentExpanded = Array.from(expandedPathsRef.current)
         if (currentExpanded.length > 0) {
-          console.log('[FileTree] Refreshing expanded dirs:', currentExpanded)
           const newCache = new Map<string, FileTreeNode[]>()
           const results = await Promise.all(
             currentExpanded.map(async (path) => {
@@ -477,6 +472,21 @@ export function FileTree({
     })
   }, [])
 
+  // Context menu handler for root folder (must be before conditional returns)
+  const handleRootOpenWith = useCallback(
+    async (appId: string) => {
+      try {
+        await window.electronAPI.openWith({ path: rootPath, appId })
+        if (appId === 'copy-path') {
+          toast.success('Path copied to clipboard')
+        }
+      } catch (error) {
+        console.error('Failed to open with app:', error)
+      }
+    },
+    [rootPath]
+  )
+
   // If directory doesn't exist, show the not found UI
   if (directoryExists === false) {
     return <DirectoryNotFound />
@@ -490,29 +500,135 @@ export function FileTree({
     )
   }
 
-  if (rootChildren.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-32 text-muted-foreground">
-        <span className="text-sm">Empty directory</span>
-      </div>
-    )
-  }
+  // Root folder name
+  const rootFolderName = getBaseName(rootPath)
+
+  // Categorize apps for root context menu
+  const finderApp = availableApps.find((app) => app.id === 'finder')
+  const editorApps = availableApps.filter((app) =>
+    ['cursor', 'vscode', 'zed', 'xcode'].includes(app.id)
+  )
+  const terminalApps = availableApps.filter((app) =>
+    ['ghostty', 'iterm', 'terminal'].includes(app.id)
+  )
+  const copyPathApp = availableApps.find((app) => app.id === 'copy-path')
 
   return (
     <div className="py-1">
-      {rootChildren.map((node) => (
-        <TreeItem
-          key={node.path}
-          node={node}
-          level={0}
-          expandedPaths={expandedPaths}
-          onToggle={handleToggle}
-          getChildren={getFilteredChildren}
-          loadChildren={loadChildren}
-          availableApps={availableApps}
-          onCreateSession={onCreateSession}
-        />
-      ))}
+      {/* Root folder row - like Zed */}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn(
+              'flex items-center gap-1 py-0.5 px-1 rounded-sm cursor-pointer',
+              'hover:bg-accent'
+            )}
+            style={{ paddingLeft: '4px' }}
+            onClick={() => setIsRootExpanded(!isRootExpanded)}
+          >
+            <ChevronRightIcon
+              className={cn(
+                'h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform',
+                isRootExpanded && 'rotate-90'
+              )}
+            />
+            <FolderIcon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">{rootFolderName}</span>
+          </div>
+        </ContextMenuTrigger>
+
+        <ContextMenuContent className="w-48">
+          {/* Finder */}
+          {finderApp && (
+            <ContextMenuItem onClick={() => handleRootOpenWith('finder')}>
+              <span className="flex items-center gap-2">
+                <FolderOpenIcon className="h-4 w-4" />
+                <span>Finder</span>
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">⌘O</span>
+            </ContextMenuItem>
+          )}
+
+          {/* Apps (Multica + Editors) */}
+          {onCreateSession || editorApps.length > 0 ? (
+            <>
+              <ContextMenuSeparator />
+              {/* Multica - for root directory */}
+              {onCreateSession && (
+                <ContextMenuItem onClick={() => onCreateSession(rootPath)}>
+                  <span className="flex items-center gap-2">
+                    <AppWindowMac className="h-4 w-4" />
+                    <span>Multica</span>
+                  </span>
+                </ContextMenuItem>
+              )}
+              {/* Editors */}
+              {editorApps.map((app) => (
+                <ContextMenuItem key={app.id} onClick={() => handleRootOpenWith(app.id)}>
+                  <span className="flex items-center gap-2">
+                    {app.id === 'xcode' ? (
+                      <Hammer className="h-4 w-4" />
+                    ) : (
+                      <Code2 className="h-4 w-4" />
+                    )}
+                    <span>{app.name}</span>
+                  </span>
+                </ContextMenuItem>
+              ))}
+            </>
+          ) : null}
+
+          {/* Terminals */}
+          {terminalApps.length > 0 && (
+            <>
+              <ContextMenuSeparator />
+              {terminalApps.map((app) => (
+                <ContextMenuItem key={app.id} onClick={() => handleRootOpenWith(app.id)}>
+                  <span className="flex items-center gap-2">
+                    <Terminal className="h-4 w-4" />
+                    <span>{app.name}</span>
+                  </span>
+                </ContextMenuItem>
+              ))}
+            </>
+          )}
+
+          {/* Copy path */}
+          {copyPathApp && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => handleRootOpenWith('copy-path')}>
+                <span className="flex items-center gap-2">
+                  <Copy className="h-4 w-4" />
+                  <span>Copy path</span>
+                </span>
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+
+      {/* Children - only show when root is expanded */}
+      {isRootExpanded &&
+        (rootChildren.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-0.5" style={{ paddingLeft: '40px' }}>
+            (empty)
+          </div>
+        ) : (
+          rootChildren.map((node) => (
+            <TreeItem
+              key={node.path}
+              node={node}
+              level={1}
+              expandedPaths={expandedPaths}
+              onToggle={handleToggle}
+              getChildren={getFilteredChildren}
+              loadChildren={loadChildren}
+              availableApps={availableApps}
+              onCreateSession={onCreateSession}
+            />
+          ))
+        ))}
     </div>
   )
 }

@@ -3,11 +3,22 @@
  * Using Linear-style design: minimal UI, direct interactions
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import type { AgentCheckResult } from '../../../shared/electron-api'
+import type { AgentCheckResult, AgentVersionInfo, UpdateStatus } from '../../../shared/electron-api'
 import { useTheme } from '../contexts/ThemeContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Sun, Moon, Monitor, ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
+import {
+  Sun,
+  Moon,
+  Monitor,
+  ChevronRight,
+  ChevronDown,
+  Loader2,
+  ArrowUp,
+  Download,
+  RefreshCw,
+  CheckCircle
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // Agent icons
@@ -58,19 +69,32 @@ export function Settings({
   highlightAgent
 }: SettingsProps): React.ReactElement {
   const [agentResults, setAgentResults] = useState<Map<string, AgentCheckResult>>(new Map())
+  const [agentVersions, setAgentVersions] = useState<Map<string, AgentVersionInfo>>(new Map())
   const [checkingAgents, setCheckingAgents] = useState<Set<string>>(new Set())
   const [installStatus, setInstallStatus] = useState<InstallStatus>({
     agentId: null,
     state: 'idle'
   })
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const { mode, setMode } = useTheme()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect((): void => {
     if (isOpen) {
       loadAgents()
+      // Fetch app version
+      window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error)
     }
   }, [isOpen])
+
+  // Listen for update status changes
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onUpdateStatus((status) => {
+      setUpdateStatus(status)
+    })
+    return () => unsubscribe()
+  }, [])
 
   // Cleanup polling on unmount or when dialog closes
   useEffect((): (() => void) => {
@@ -139,6 +163,19 @@ export function Settings({
           const result = await window.electronAPI.checkAgent(id)
           if (result) {
             setAgentResults((prev): Map<string, AgentCheckResult> => new Map(prev).set(id, result))
+
+            // If installed, check for latest versions asynchronously (don't block UI)
+            if (result.installed && result.commands) {
+              const commands = result.commands.map((c) => c.command)
+              window.electronAPI
+                .checkAgentLatestVersions(id, commands)
+                .then((versionInfo) => {
+                  setAgentVersions((prev) => new Map(prev).set(id, versionInfo))
+                })
+                .catch((err) => {
+                  console.error(`Failed to check versions for ${id}:`, err)
+                })
+            }
           }
         } catch (err) {
           console.error(`Failed to check agent ${id}:`, err)
@@ -226,6 +263,75 @@ export function Settings({
         {/* Separator */}
         <div className="border-t" />
 
+        {/* Software Update Section */}
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Software Update</h2>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Current Version:</span>
+              <span className="text-sm font-mono text-muted-foreground">{appVersion || '...'}</span>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              {updateStatus?.status === 'available' && updateStatus.info && (
+                <>
+                  <span className="text-xs text-amber-600 dark:text-amber-400">
+                    v{updateStatus.info.version} available
+                  </span>
+                  <button
+                    onClick={() => window.electronAPI.downloadUpdate()}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    <Download className="h-3 w-3" />
+                    Download
+                  </button>
+                </>
+              )}
+              {updateStatus?.status === 'downloading' && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Downloading...
+                  {updateStatus.progress && ` ${Math.round(updateStatus.progress.percent)}%`}
+                </span>
+              )}
+              {updateStatus?.status === 'downloaded' && (
+                <button
+                  onClick={() => window.electronAPI.installUpdate()}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 transition-colors"
+                >
+                  <CheckCircle className="h-3 w-3" />
+                  Restart to Update
+                </button>
+              )}
+              {updateStatus?.status === 'error' && (
+                <span className="text-xs text-destructive">Update failed</span>
+              )}
+              {(!updateStatus ||
+                updateStatus.status === 'not-available' ||
+                updateStatus.status === 'error') && (
+                <button
+                  onClick={() => window.electronAPI.checkForUpdates()}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Check for Updates
+                </button>
+              )}
+              {updateStatus?.status === 'checking' && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Checking...
+                </span>
+              )}
+              {updateStatus?.status === 'not-available' && (
+                <span className="text-xs text-green-600 dark:text-green-400">Up to date</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Separator */}
+        <div className="border-t" />
+
         {/* Agent Section */}
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-muted-foreground">AI Agent</h2>
@@ -240,6 +346,7 @@ export function Settings({
           <div className="space-y-1">
             {AGENT_LIST.map(({ id, name }): React.ReactElement => {
               const agent = agentResults.get(id)
+              const versionInfo = agentVersions.get(id)
               const isChecking = checkingAgents.has(id)
               return (
                 <AgentItem
@@ -247,6 +354,7 @@ export function Settings({
                   agentId={id}
                   agentName={name}
                   agent={agent}
+                  versionInfo={versionInfo}
                   isChecking={isChecking}
                   isSelected={id === defaultAgentId}
                   onSelect={handleSelectAgent}
@@ -268,6 +376,7 @@ interface AgentItemProps {
   agentId: string
   agentName: string
   agent?: AgentCheckResult
+  versionInfo?: AgentVersionInfo
   isChecking: boolean
   isSelected: boolean
   onSelect: (agentId: string) => void
@@ -281,6 +390,7 @@ function AgentItem({
   agentId,
   agentName,
   agent,
+  versionInfo,
   isChecking,
   isSelected,
   onSelect,
@@ -438,14 +548,36 @@ function AgentItem({
               <p className="text-xs">{getAgentDescription(agentId)}</p>
               {agent?.commands && agent.commands.length > 0 && (
                 <div className="mt-2 space-y-0.5">
-                  {agent.commands.map(
-                    (cmd): React.ReactElement => (
+                  {agent.commands.map((cmd): React.ReactElement => {
+                    // Find version info for this command
+                    const cmdVersion = versionInfo?.commands.find((v) => v.command === cmd.command)
+                    const version = cmd.version || cmdVersion?.installedVersion
+                    const latestVersion = cmdVersion?.latestVersion
+                    const hasUpdate = cmdVersion?.hasUpdate || false
+
+                    return (
                       <div key={cmd.command} className="text-xs font-mono text-muted-foreground/70">
                         <span className="text-muted-foreground">{cmd.command}:</span>{' '}
                         {cmd.path || <span className="italic">not installed</span>}
+                        {version && <span className="text-muted-foreground/50"> ({version})</span>}
+                        {hasUpdate && latestVersion && (
+                          <button
+                            onClick={(e: React.MouseEvent): void => {
+                              e.stopPropagation()
+                              window.electronAPI.updateCommand(cmd.command).catch((err) => {
+                                console.error(`Failed to update ${cmd.command}:`, err)
+                              })
+                            }}
+                            className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 ml-1 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+                            title={`Update to ${latestVersion}`}
+                          >
+                            <ArrowUp className="h-3 w-3" />
+                            <span>{latestVersion}</span>
+                          </button>
+                        )}
                       </div>
                     )
-                  )}
+                  })}
                 </div>
               )}
             </div>

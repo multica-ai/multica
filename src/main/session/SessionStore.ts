@@ -84,11 +84,12 @@ export class SessionStore {
     const session: MulticaSession = {
       id: randomUUID(),
       agentSessionId: params.agentSessionId,
+      projectId: params.projectId,
       agentId: params.agentId,
-      workingDirectory: params.workingDirectory,
       createdAt: now,
       updatedAt: now,
       status: 'active',
+      isArchived: false,
       messageCount: 0
     }
 
@@ -252,9 +253,16 @@ export class SessionStore {
     // Update index
     this.sessionsIndex.set(sessionId, sessionData.session)
 
+    // Ensure session data is in loadedSessions cache for saveSessionData
+    this.loadedSessions.set(sessionId, sessionData)
+
     // Persist
     await this.saveSessionData(sessionId)
     await this.saveIndex()
+
+    console.log(
+      `[SessionStore] Updated session meta: ${sessionId}, title: ${sessionData.session.title}`
+    )
 
     return sessionData.session
   }

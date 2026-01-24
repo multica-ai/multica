@@ -5,12 +5,12 @@ import { describe, expect, it } from 'vitest'
 import { formatDuration, formatLocalizedDatetime } from '../../../../src/renderer/src/lib/utils'
 
 describe('formatDuration', () => {
-  it('returns seconds with 2 decimal places for durations under 1 minute', () => {
-    expect(formatDuration(0)).toBe('0.00s')
-    expect(formatDuration(1000)).toBe('1.00s')
-    expect(formatDuration(1230)).toBe('1.23s')
-    expect(formatDuration(45000)).toBe('45.00s')
-    expect(formatDuration(59500)).toBe('59.50s')
+  it('returns seconds with 1 decimal place for durations under 1 minute', () => {
+    expect(formatDuration(0)).toBe('0.0s')
+    expect(formatDuration(1000)).toBe('1.0s')
+    expect(formatDuration(1230)).toBe('1.2s')
+    expect(formatDuration(45000)).toBe('45.0s')
+    expect(formatDuration(59500)).toBe('59.5s')
   })
 
   it('returns minutes only when seconds is zero', () => {

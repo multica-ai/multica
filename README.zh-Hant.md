@@ -4,7 +4,7 @@
 
 一個原生桌面客戶端，透過視覺化介面將程式智能體的能力帶給每一個人。
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | 繁體中文 | [日本語](./README.ja.md) | [한국어](./README.ko.md)
+[English](./README.md) | [简体中文](./README.zh-Hans.md) | 繁體中文 | [日本語](./README.ja.md) | [한국어](./README.ko.md)
 
 ## 為什麼叫 "Multica"？
 

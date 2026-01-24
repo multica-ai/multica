@@ -17,11 +17,13 @@ import { Toaster } from '@/components/ui/sonner'
 import { useChatScroll } from './hooks/useChatScroll'
 import { ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getBaseName } from './utils/path'
 
 function AppContent(): React.JSX.Element {
   const {
     // State
-    sessions,
+    projects,
+    sessionsByProject,
     currentSession,
     sessionUpdates,
     runningSessionsStatus,
@@ -32,15 +34,21 @@ function AppContent(): React.JSX.Element {
     isSwitchingAgent,
 
     // Actions
+    createProject,
+    toggleProjectExpanded,
+    reorderProjects,
+    deleteProject,
     createSession,
     selectSession,
     deleteSession,
-    clearCurrentSession,
+    archiveSession,
+    unarchiveSession,
     sendPrompt,
     cancelRequest,
     switchSessionAgent,
     setSessionMode,
-    setSessionModel
+    setSessionModel,
+    updateSessionTitle
   } = useApp()
 
   // UI state
@@ -69,31 +77,58 @@ function AppContent(): React.JSX.Element {
     setDefaultAgentId(agentId)
   }, [])
 
-  const handleNewSession = useCallback(() => {
-    clearCurrentSession()
-  }, [clearCurrentSession])
-
-  const handleCreateSession = useCallback(
-    async (cwd: string) => {
-      // Create session with default agent (agent starts automatically)
-      await createSession(cwd, defaultAgentId)
-    },
-    [createSession, defaultAgentId]
-  )
-
-  const handleSelectFolder = useCallback(async () => {
+  // Handler for "New Project" button - opens directory selector
+  const handleNewProject = useCallback(async () => {
     const dir = await window.electronAPI.selectDirectory()
     if (dir) {
-      // Check if the default agent is installed before creating session
+      // Check if the default agent is installed before creating project + session
       const agentCheck = await window.electronAPI.checkAgent(defaultAgentId)
       if (!agentCheck?.installed) {
         // Agent not installed - open Settings with highlight and pending folder
         openModal('settings', { highlightAgent: defaultAgentId, pendingFolder: dir })
         return
       }
-      await createSession(dir, defaultAgentId)
+      // Create project and first session
+      const project = await createProject(dir)
+      if (project) {
+        await createSession(project.id, defaultAgentId)
+      }
     }
-  }, [createSession, defaultAgentId, openModal])
+  }, [createProject, createSession, defaultAgentId, openModal])
+
+  // Handler for "+" button on a project - creates new session in that project
+  const handleNewSessionInProject = useCallback(
+    async (projectId: string) => {
+      // Check if the default agent is installed
+      const agentCheck = await window.electronAPI.checkAgent(defaultAgentId)
+      if (!agentCheck?.installed) {
+        // Agent not installed - open Settings with highlight
+        openModal('settings', { highlightAgent: defaultAgentId })
+        return
+      }
+      await createSession(projectId, defaultAgentId)
+    },
+    [createSession, defaultAgentId, openModal]
+  )
+
+  // Used by FileTree when creating session from folder
+  const handleCreateSessionFromFolder = useCallback(
+    async (cwd: string) => {
+      // Check if the default agent is installed before creating session
+      const agentCheck = await window.electronAPI.checkAgent(defaultAgentId)
+      if (!agentCheck?.installed) {
+        // Agent not installed - open Settings with highlight and pending folder
+        openModal('settings', { highlightAgent: defaultAgentId, pendingFolder: cwd })
+        return
+      }
+      // Create or get project, then create session
+      const project = await createProject(cwd)
+      if (project) {
+        await createSession(project.id, defaultAgentId)
+      }
+    },
+    [createProject, createSession, defaultAgentId, openModal]
+  )
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
@@ -102,11 +137,6 @@ function AppContent(): React.JSX.Element {
     },
     [selectSession]
   )
-
-  // Check if current session has a running agent
-  const isCurrentSessionRunning = currentSession
-    ? runningSessionsStatus.sessionIds.includes(currentSession.id)
-    : false
 
   // Handler for deleting the current session (opens delete modal)
   const handleDeleteCurrentSession = useCallback(() => {
@@ -139,21 +169,28 @@ function AppContent(): React.JSX.Element {
       >
         {/* Sidebar */}
         <AppSidebar
-          sessions={sessions}
+          projects={projects}
+          sessionsByProject={sessionsByProject}
           currentSessionId={currentSession?.id ?? null}
           processingSessionIds={runningSessionsStatus.processingSessionIds}
           permissionPendingSessionId={permissionPendingSessionId}
-          onSelect={handleSelectSession}
-          onNewSession={handleNewSession}
+          onSelectSession={handleSelectSession}
+          onNewProject={handleNewProject}
+          onNewSession={handleNewSessionInProject}
+          onToggleProjectExpanded={toggleProjectExpanded}
+          onReorderProjects={reorderProjects}
+          onUpdateSessionTitle={updateSessionTitle}
         />
 
         {/* Main area */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Status bar - fixed height */}
           <StatusBar
-            runningSessionsCount={runningSessionsStatus.runningSessions}
-            currentSession={currentSession}
-            isCurrentSessionRunning={isCurrentSessionRunning}
+            sessionTitle={
+              currentSession
+                ? currentSession.title || `Session · ${currentSession.id.slice(0, 6)}`
+                : undefined
+            }
           />
 
           {/* Chat and Input container */}
@@ -167,7 +204,7 @@ function AppContent(): React.JSX.Element {
                   hasSession={!!currentSession}
                   isInitializing={isInitializing}
                   currentSessionId={currentSession?.id ?? null}
-                  onSelectFolder={handleSelectFolder}
+                  onSelectFolder={handleNewProject}
                   bottomRef={bottomRef}
                   currentModelName={
                     sessionModelState?.availableModels.find(
@@ -228,11 +265,15 @@ function AppContent(): React.JSX.Element {
         {/* Right panel - file tree */}
         <RightPanel>
           <RightPanelHeader className="justify-between">
-            <span className="text-sm font-medium">All files</span>
+            <span className="text-sm font-medium truncate" title={currentSession?.workingDirectory}>
+              {currentSession?.workingDirectory
+                ? getBaseName(currentSession.workingDirectory)
+                : 'All files'}
+            </span>
             <button
               onClick={toggleShowHiddenFiles}
               className={cn(
-                'p-1 rounded hover:bg-accent transition-colors',
+                'p-1 rounded hover:bg-accent transition-colors flex-shrink-0',
                 showHiddenFiles ? 'text-foreground' : 'text-muted-foreground'
               )}
               title={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
@@ -247,11 +288,11 @@ function AppContent(): React.JSX.Element {
             </button>
           </RightPanelHeader>
           <RightPanelContent className="p-0">
-            {currentSession ? (
+            {currentSession && currentSession.workingDirectory ? (
               <FileTree
                 rootPath={currentSession.workingDirectory}
                 directoryExists={currentSession.directoryExists}
-                onCreateSession={handleCreateSession}
+                onCreateSession={handleCreateSessionFromFolder}
               />
             ) : (
               <div className="flex h-full items-center justify-center text-muted-foreground p-4">
@@ -266,8 +307,11 @@ function AppContent(): React.JSX.Element {
       <Modals
         defaultAgentId={defaultAgentId}
         onSetDefaultAgent={handleSetDefaultAgent}
-        onCreateSession={handleCreateSession}
+        onCreateSession={handleCreateSessionFromFolder}
         onDeleteSession={deleteSession}
+        onArchiveSession={archiveSession}
+        onUnarchiveSession={unarchiveSession}
+        onDeleteProject={deleteProject}
       />
 
       {/* Toast notifications */}

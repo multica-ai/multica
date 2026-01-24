@@ -1,246 +1,151 @@
 /**
- * App Sidebar component - session list using shadcn sidebar
+ * App Sidebar component - project list with nested sessions using shadcn sidebar
  */
-import { useState } from 'react'
-import type { MulticaSession } from '../../../shared/types'
+import { useMemo } from 'react'
+import type { MulticaSession, MulticaProject } from '../../../shared/types'
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem
+  SidebarMenu
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
-import { AlertTriangle, CirclePause, Loader2, Plus, Settings, Trash2 } from 'lucide-react'
+import { FolderPlus, Settings } from 'lucide-react'
 import { useModalStore } from '../stores/modalStore'
+import { SortableProjectItem } from './ProjectItem'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
 
 interface AppSidebarProps {
-  sessions: MulticaSession[]
+  projects: MulticaProject[]
+  sessionsByProject: Map<string, MulticaSession[]>
   currentSessionId: string | null
   processingSessionIds: string[]
   permissionPendingSessionId: string | null
-  onSelect: (sessionId: string) => void
-  onNewSession: () => void
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-  return date.toLocaleDateString()
-}
-
-function getSessionTitle(session: MulticaSession): string {
-  if (session.title) return session.title
-  const parts = session.workingDirectory.split('/')
-  const folderName = parts[parts.length - 1] || session.workingDirectory
-  // Add short ID suffix to distinguish sessions in the same folder
-  const shortId = session.id.slice(0, 4)
-  return `${folderName} · ${shortId}`
-}
-
-// Session list item component
-interface SessionItemProps {
-  session: MulticaSession
-  isActive: boolean
-  isProcessing: boolean
-  needsPermission: boolean
-  onSelect: () => void
-  onDelete: () => void
-}
-
-function SessionItem({
-  session,
-  isActive,
-  isProcessing,
-  needsPermission,
-  onSelect,
-  onDelete
-}: SessionItemProps): React.JSX.Element {
-  const [isHovered, setIsHovered] = useState(false)
-  // Suppress tooltip briefly after clicking to prevent it from popping up immediately
-  const [suppressTooltip, setSuppressTooltip] = useState(false)
-  const isInvalid = session.directoryExists === false
-
-  const handleSelect = (): void => {
-    // Suppress tooltip for 300ms after clicking
-    setSuppressTooltip(true)
-    setTimeout(() => setSuppressTooltip(false), 300)
-    onSelect()
-  }
-
-  return (
-    <SidebarMenuItem
-      onMouseEnter={(): void => setIsHovered(true)}
-      onMouseLeave={(): void => setIsHovered(false)}
-    >
-      <Tooltip delayDuration={600} open={suppressTooltip ? false : undefined}>
-        <TooltipTrigger asChild>
-          <SidebarMenuButton
-            isActive={isActive}
-            onClick={handleSelect}
-            className={cn(
-              'h-auto py-2 transition-colors duration-150',
-              'hover:bg-sidebar-accent/50',
-              isActive && 'bg-sidebar-accent'
-            )}
-          >
-            {/* Two-line layout container */}
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              {/* Line 1: Title + Status indicator */}
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-medium">{getSessionTitle(session)}</span>
-                {/* Status indicators - invalid directory has highest priority */}
-                {isInvalid ? (
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                ) : needsPermission ? (
-                  <CirclePause className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                ) : isProcessing ? (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
-                ) : null}
-              </div>
-
-              {/* Line 2: Git branch (if available) + Timestamp */}
-              <span className="text-xs text-muted-foreground/60">
-                {session.gitBranch && (
-                  <>
-                    <span className="font-medium">{session.gitBranch}</span>
-                    <span className="mx-1">·</span>
-                  </>
-                )}
-                {formatDate(session.updatedAt)}
-              </span>
-            </div>
-
-            {/* Delete button - using div with role="button" to avoid nested button hydration error */}
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={(e): void => {
-                e.stopPropagation()
-                onDelete()
-              }}
-              onKeyDown={(e): void => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  onDelete()
-                }
-              }}
-              className={cn(
-                'shrink-0 cursor-pointer self-start rounded p-1 transition-opacity duration-150',
-                'hover:bg-muted active:bg-muted',
-                isHovered ? 'opacity-50 hover:opacity-100' : 'opacity-0'
-              )}
-            >
-              <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-            </div>
-          </SidebarMenuButton>
-        </TooltipTrigger>
-        <TooltipContent>
-          {isInvalid ? (
-            <p className="text-amber-500">Directory not found: {session.workingDirectory}</p>
-          ) : (
-            <p>{session.workingDirectory}</p>
-          )}
-        </TooltipContent>
-      </Tooltip>
-    </SidebarMenuItem>
-  )
-}
-
-// Session list component
-interface SessionListProps {
-  sessions: MulticaSession[]
-  currentSessionId: string | null
-  processingSessionIds: string[]
-  permissionPendingSessionId: string | null
-  onSelect: (sessionId: string) => void
-  onDeleteRequest: (session: MulticaSession) => void
-}
-
-function SessionList({
-  sessions,
-  currentSessionId,
-  processingSessionIds,
-  permissionPendingSessionId,
-  onSelect,
-  onDeleteRequest
-}: SessionListProps): React.JSX.Element {
-  if (sessions.length === 0) {
-    return <p className="px-2 py-4 text-center text-sm text-muted-foreground">No tasks yet</p>
-  }
-
-  return (
-    <SidebarMenu>
-      {sessions.map((session) => (
-        <SessionItem
-          key={session.id}
-          session={session}
-          isActive={session.id === currentSessionId}
-          isProcessing={processingSessionIds.includes(session.id)}
-          needsPermission={session.id === permissionPendingSessionId}
-          onSelect={(): void => onSelect(session.id)}
-          onDelete={(): void => onDeleteRequest(session)}
-        />
-      ))}
-    </SidebarMenu>
-  )
+  onSelectSession: (sessionId: string) => void
+  onNewProject: () => void
+  onNewSession: (projectId: string) => void
+  onToggleProjectExpanded: (projectId: string) => void
+  onReorderProjects: (projectIds: string[]) => void
+  onUpdateSessionTitle: (sessionId: string, title: string) => void
 }
 
 export function AppSidebar({
-  sessions,
+  projects,
+  sessionsByProject,
   currentSessionId,
   processingSessionIds,
   permissionPendingSessionId,
-  onSelect,
-  onNewSession
+  onSelectSession,
+  onNewProject,
+  onNewSession,
+  onToggleProjectExpanded,
+  onReorderProjects,
+  onUpdateSessionTitle
 }: AppSidebarProps): React.JSX.Element {
   const openModal = useModalStore((s) => s.openModal)
+
+  // Configure sensors for drag and drop
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8 // Require 8px movement to start drag
+      }
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates
+    })
+  )
+
+  // Get project IDs for SortableContext
+  const projectIds = useMemo(() => projects.map((p) => p.id), [projects])
+
+  // Handle drag end - reorder projects
+  const handleDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event
+
+    if (over && active.id !== over.id) {
+      const oldIndex = projects.findIndex((p) => p.id === active.id)
+      const newIndex = projects.findIndex((p) => p.id === over.id)
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        // Create new order array
+        const newOrder = [...projectIds]
+        newOrder.splice(oldIndex, 1)
+        newOrder.splice(newIndex, 0, active.id as string)
+
+        onReorderProjects(newOrder)
+      }
+    }
+  }
 
   return (
     <Sidebar>
       {/* Header - just for traffic lights spacing */}
       <SidebarHeader className="titlebar-drag-region h-11 pl-20" />
 
-      <SidebarContent className="px-2">
-        {/* New task button */}
+      <SidebarContent className="px-1">
+        {/* New Project button */}
         <Button
           variant="ghost"
+          size="sm"
           className="w-full justify-start gap-2 hover:bg-sidebar-accent"
-          onClick={onNewSession}
+          onClick={onNewProject}
         >
-          <Plus className="h-4 w-4 text-primary" />
-          New task
+          <FolderPlus className="h-4 w-4 text-primary" />
+          New Project
         </Button>
 
-        {/* Recent label */}
-        <p className="px-2 py-2 text-xs text-muted-foreground/60">Recent</p>
-
-        {/* Session list */}
-        <SessionList
-          sessions={sessions}
-          currentSessionId={currentSessionId}
-          processingSessionIds={processingSessionIds}
-          permissionPendingSessionId={permissionPendingSessionId}
-          onSelect={onSelect}
-          onDeleteRequest={(session): void => openModal('deleteSession', session)}
-        />
+        {/* Projects list */}
+        {projects.length === 0 ? (
+          <p className="px-2 py-4 text-center text-sm text-muted-foreground">No projects yet</p>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={projectIds} strategy={verticalListSortingStrategy}>
+              <SidebarMenu className="mt-2">
+                {projects.map((project) => (
+                  <SortableProjectItem
+                    key={project.id}
+                    project={project}
+                    sessions={sessionsByProject.get(project.id) ?? []}
+                    currentSessionId={currentSessionId}
+                    processingSessionIds={processingSessionIds}
+                    permissionPendingSessionId={permissionPendingSessionId}
+                    onSelectSession={onSelectSession}
+                    onNewSession={onNewSession}
+                    onToggleExpanded={onToggleProjectExpanded}
+                    onDeleteProject={(p): void => openModal('deleteProject', p)}
+                    onArchiveSession={(s): void => openModal('archiveSession', s)}
+                    onViewArchivedSessions={(p): void =>
+                      openModal('archivedSessions', { projectId: p.id, projectName: p.name })
+                    }
+                    onUpdateSessionTitle={onUpdateSessionTitle}
+                  />
+                ))}
+              </SidebarMenu>
+            </SortableContext>
+          </DndContext>
+        )}
       </SidebarContent>
 
-      <SidebarFooter className="px-2 pb-2">
+      <SidebarFooter className="px-1 pb-1">
         <Button
           variant="ghost"
           size="sm"
