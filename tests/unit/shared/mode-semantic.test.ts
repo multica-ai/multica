@@ -7,8 +7,7 @@ import {
   getSemanticType,
   isModeVisible,
   getModeConfig,
-  getNextModeId,
-  type SemanticType
+  getNextModeId
 } from '../../../src/shared/mode-semantic'
 import type { SessionMode } from '@agentclientprotocol/sdk'
 
