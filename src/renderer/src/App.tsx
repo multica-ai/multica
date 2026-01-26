@@ -19,6 +19,7 @@ import { useChatScroll } from './hooks/useChatScroll'
 import { ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getBaseName } from './utils/path'
+import { getDefaultModeForAgent } from '../../shared/mode-semantic'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -75,12 +76,15 @@ function AppContent(): React.JSX.Element {
   // Default agent for new sessions (persisted in localStorage)
   const [defaultAgentId, setDefaultAgentId] = useState(() => {
     const saved = localStorage.getItem('multica:defaultAgentId')
+    console.log('[App] Loading defaultAgentId from localStorage:', saved)
     return saved || 'claude-code'
   })
 
   // Wrapper to also persist to localStorage
   const handleSetDefaultAgent = useCallback((agentId: string) => {
+    console.log('[App] Setting default agent:', agentId)
     localStorage.setItem('multica:defaultAgentId', agentId)
+    console.log('[App] localStorage after save:', localStorage.getItem('multica:defaultAgentId'))
     setDefaultAgentId(agentId)
   }, [])
 
@@ -117,7 +121,8 @@ function AppContent(): React.JSX.Element {
       // Create project and first session
       const project = await createProject(dir)
       if (project) {
-        await createSession(project.id, defaultAgentId, defaultModes[defaultAgentId])
+        const modeToUse = defaultModes[defaultAgentId] || getDefaultModeForAgent(defaultAgentId)
+        await createSession(project.id, defaultAgentId, modeToUse)
       }
     }
   }, [createProject, createSession, defaultAgentId, defaultModes, openModal])
@@ -132,7 +137,8 @@ function AppContent(): React.JSX.Element {
         openModal('settings', { highlightAgent: defaultAgentId })
         return
       }
-      await createSession(projectId, defaultAgentId, defaultModes[defaultAgentId])
+      const modeToUse = defaultModes[defaultAgentId] || getDefaultModeForAgent(defaultAgentId)
+      await createSession(projectId, defaultAgentId, modeToUse)
     },
     [createSession, defaultAgentId, defaultModes, openModal]
   )
@@ -150,7 +156,8 @@ function AppContent(): React.JSX.Element {
       // Create or get project, then create session
       const project = await createProject(cwd)
       if (project) {
-        await createSession(project.id, defaultAgentId, defaultModes[defaultAgentId])
+        const modeToUse = defaultModes[defaultAgentId] || getDefaultModeForAgent(defaultAgentId)
+        await createSession(project.id, defaultAgentId, modeToUse)
       }
     },
     [createProject, createSession, defaultAgentId, defaultModes, openModal]
