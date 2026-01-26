@@ -11,6 +11,7 @@ import { SidebarProvider } from '@/components/ui/sidebar'
 import { useUIStore } from './stores/uiStore'
 import { usePermissionStore } from './stores/permissionStore'
 import { useModalStore } from './stores/modalStore'
+import { useAgentStore } from './stores/agentStore'
 import { RightPanel, RightPanelHeader, RightPanelContent } from './components/layout'
 import { FileTree } from './components/FileTree'
 import { Toaster } from '@/components/ui/sonner'
@@ -18,6 +19,7 @@ import { useChatScroll } from './hooks/useChatScroll'
 import { ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getBaseName } from './utils/path'
+import { getDefaultModeForAgent } from '../../shared/mode-semantic'
 
 function AppContent(): React.JSX.Element {
   const {
@@ -64,17 +66,45 @@ function AppContent(): React.JSX.Element {
   // Modal actions
   const openModal = useModalStore((s) => s.openModal)
 
+  // Agent store - for checking installation status
+  const getAgent = useAgentStore((s) => s.getAgent)
+  const currentAgentId = currentSession?.agentId
+  const currentAgentInstalled = currentAgentId
+    ? getAgent(currentAgentId)?.installed !== false
+    : true
+
   // Default agent for new sessions (persisted in localStorage)
   const [defaultAgentId, setDefaultAgentId] = useState(() => {
-    // Load from localStorage on initial render
     const saved = localStorage.getItem('multica:defaultAgentId')
-    return saved || 'claude-code' // Default to claude-code if not set
+    console.log('[App] Loading defaultAgentId from localStorage:', saved)
+    return saved || 'claude-code'
   })
 
   // Wrapper to also persist to localStorage
   const handleSetDefaultAgent = useCallback((agentId: string) => {
+    console.log('[App] Setting default agent:', agentId)
     localStorage.setItem('multica:defaultAgentId', agentId)
+    console.log('[App] localStorage after save:', localStorage.getItem('multica:defaultAgentId'))
     setDefaultAgentId(agentId)
+  }, [])
+
+  // Default modes for each agent (persisted in localStorage)
+  const [defaultModes, setDefaultModes] = useState<Record<string, string>>(() => {
+    const modes: Record<string, string> = {}
+    const agentIds = ['claude-code', 'codex', 'opencode']
+    for (const agentId of agentIds) {
+      const saved = localStorage.getItem(`multica:defaultMode:${agentId}`)
+      if (saved) {
+        modes[agentId] = saved
+      }
+    }
+    return modes
+  })
+
+  // Wrapper to also persist to localStorage
+  const handleSetDefaultMode = useCallback((agentId: string, modeId: string) => {
+    localStorage.setItem(`multica:defaultMode:${agentId}`, modeId)
+    setDefaultModes((prev) => ({ ...prev, [agentId]: modeId }))
   }, [])
 
   // Handler for "New Project" button - opens directory selector
@@ -91,10 +121,11 @@ function AppContent(): React.JSX.Element {
       // Create project and first session
       const project = await createProject(dir)
       if (project) {
-        await createSession(project.id, defaultAgentId)
+        const modeToUse = defaultModes[defaultAgentId] || getDefaultModeForAgent(defaultAgentId)
+        await createSession(project.id, defaultAgentId, modeToUse)
       }
     }
-  }, [createProject, createSession, defaultAgentId, openModal])
+  }, [createProject, createSession, defaultAgentId, defaultModes, openModal])
 
   // Handler for "+" button on a project - creates new session in that project
   const handleNewSessionInProject = useCallback(
@@ -106,9 +137,10 @@ function AppContent(): React.JSX.Element {
         openModal('settings', { highlightAgent: defaultAgentId })
         return
       }
-      await createSession(projectId, defaultAgentId)
+      const modeToUse = defaultModes[defaultAgentId] || getDefaultModeForAgent(defaultAgentId)
+      await createSession(projectId, defaultAgentId, modeToUse)
     },
-    [createSession, defaultAgentId, openModal]
+    [createSession, defaultAgentId, defaultModes, openModal]
   )
 
   // Used by FileTree when creating session from folder
@@ -124,10 +156,11 @@ function AppContent(): React.JSX.Element {
       // Create or get project, then create session
       const project = await createProject(cwd)
       if (project) {
-        await createSession(project.id, defaultAgentId)
+        const modeToUse = defaultModes[defaultAgentId] || getDefaultModeForAgent(defaultAgentId)
+        await createSession(project.id, defaultAgentId, modeToUse)
       }
     },
-    [createProject, createSession, defaultAgentId, openModal]
+    [createProject, createSession, defaultAgentId, defaultModes, openModal]
   )
 
   const handleSelectSession = useCallback(
@@ -239,12 +272,23 @@ function AppContent(): React.JSX.Element {
                     </button>
                   </div>
                 )}
+                {/* Warning when current agent is not installed */}
+                {currentSession && !currentAgentInstalled && (
+                  <div className="px-4 py-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-md mx-4 mb-2">
+                    Current agent is not installed. Please switch to another agent or reinstall it
+                    in Settings.
+                  </div>
+                )}
                 <MessageInput
                   sessionId={currentSession?.id}
                   onSend={sendPrompt}
                   onCancel={cancelRequest}
                   isProcessing={isProcessing}
-                  disabled={!currentSession || currentSession.directoryExists === false}
+                  disabled={
+                    !currentSession ||
+                    currentSession.directoryExists === false ||
+                    !currentAgentInstalled
+                  }
                   workingDirectory={currentSession?.workingDirectory}
                   currentAgentId={currentSession?.agentId}
                   onAgentChange={switchSessionAgent}
@@ -307,6 +351,8 @@ function AppContent(): React.JSX.Element {
       <Modals
         defaultAgentId={defaultAgentId}
         onSetDefaultAgent={handleSetDefaultAgent}
+        defaultModes={defaultModes}
+        onSetDefaultMode={handleSetDefaultMode}
         onCreateSession={handleCreateSessionFromFolder}
         onDeleteSession={deleteSession}
         onArchiveSession={archiveSession}

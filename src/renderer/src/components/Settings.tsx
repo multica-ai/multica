@@ -5,8 +5,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import type { AgentCheckResult, AgentVersionInfo, UpdateStatus } from '../../../shared/electron-api'
 import { useTheme } from '../contexts/ThemeContext'
+import { useAgentStore } from '../stores/agentStore'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import {
   Sun,
   Moon,
@@ -17,9 +25,16 @@ import {
   ArrowUp,
   Download,
   RefreshCw,
-  CheckCircle
+  CheckCircle,
+  Check,
+  ChevronsUpDown
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  getVisibleModesForAgent,
+  getDefaultModeForAgent,
+  getModeDisplayName
+} from '../../../shared/mode-semantic'
 
 // Agent icons
 import claudeIcon from '../assets/agents/claude-color.svg'
@@ -41,6 +56,8 @@ interface SettingsProps {
   defaultAgentId: string
   onSetDefaultAgent: (agentId: string) => void
   highlightAgent?: string // Agent to highlight (when opened due to missing dependency)
+  defaultModes: Record<string, string> // agentId -> modeId
+  onSetDefaultMode: (agentId: string, modeId: string) => void
 }
 
 type ThemeMode = 'light' | 'dark' | 'system'
@@ -66,9 +83,14 @@ export function Settings({
   onClose,
   defaultAgentId,
   onSetDefaultAgent,
-  highlightAgent
+  highlightAgent,
+  defaultModes,
+  onSetDefaultMode
 }: SettingsProps): React.ReactElement {
-  const [agentResults, setAgentResults] = useState<Map<string, AgentCheckResult>>(new Map())
+  // Use global agent store for shared state
+  const { agents: agentResults, loadAgents: storeLoadAgents, refreshAgent } = useAgentStore()
+
+  // Local state for UI-specific concerns
   const [agentVersions, setAgentVersions] = useState<Map<string, AgentVersionInfo>>(new Map())
   const [checkingAgents, setCheckingAgents] = useState<Set<string>>(new Set())
   const [installStatus, setInstallStatus] = useState<InstallStatus>({
@@ -80,13 +102,66 @@ export function Settings({
   const { mode, setMode } = useTheme()
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Load all agents concurrently
+  const loadAgents = useCallback(async (): Promise<void> => {
+    const allIds = AGENT_LIST.map((a) => a.id)
+    setCheckingAgents(new Set(allIds))
+
+    // Load agents into global store
+    await storeLoadAgents()
+
+    // Get fresh data from store (avoid stale closure)
+    const freshResults = useAgentStore.getState().agents
+
+    // After store is loaded, check versions for installed agents
+    const versionPromises: Promise<void>[] = []
+    for (const id of allIds) {
+      const result = freshResults.get(id)
+      if (result?.installed && result.commands) {
+        const commands = result.commands.map((c) => c.command)
+        const promise = window.electronAPI
+          .checkAgentLatestVersions(id, commands)
+          .then((versionInfo) => {
+            setAgentVersions((prev) => new Map(prev).set(id, versionInfo))
+          })
+          .catch((err) => {
+            console.error(`Failed to check versions for ${id}:`, err)
+          })
+        versionPromises.push(promise)
+      }
+    }
+
+    // Wait for all version checks to complete before clearing loading state
+    await Promise.allSettled(versionPromises)
+    setCheckingAgents(new Set())
+  }, [storeLoadAgents])
+
+  // Load data when dialog opens - this is intentional async data fetching
   useEffect((): void => {
     if (isOpen) {
-      loadAgents()
-      // Fetch app version
-      window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error)
+      // Defer to microtask to avoid synchronous setState in effect warning
+      queueMicrotask(() => {
+        loadAgents()
+        window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error)
+      })
     }
-  }, [isOpen])
+  }, [isOpen, loadAgents])
+
+  // Handle dialog close - cleanup when closing
+  const handleOpenChange = useCallback(
+    (open: boolean): void => {
+      if (!open) {
+        // Cleanup when closing
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+        setInstallStatus({ agentId: null, state: 'idle' })
+        onClose()
+      }
+    },
+    [onClose]
+  )
 
   // Listen for update status changes
   useEffect(() => {
@@ -96,7 +171,7 @@ export function Settings({
     return () => unsubscribe()
   }, [])
 
-  // Cleanup polling on unmount or when dialog closes
+  // Cleanup polling on unmount
   useEffect((): (() => void) => {
     return (): void => {
       if (pollingIntervalRef.current) {
@@ -105,16 +180,6 @@ export function Settings({
       }
     }
   }, [])
-
-  // Stop polling when dialog closes
-  useEffect((): void => {
-    if (!isOpen && pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-      pollingIntervalRef.current = null
-      // Reset install status when closing
-      setInstallStatus({ agentId: null, state: 'idle' })
-    }
-  }, [isOpen])
 
   // Polling logic for checking installation
   const startPolling = useCallback(
@@ -128,14 +193,13 @@ export function Settings({
         try {
           const result = await window.electronAPI.checkAgent(agentId)
           if (result?.installed) {
-            // Installation detected! Stop polling and update state
+            // Installation detected! Stop polling and update global store
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current)
               pollingIntervalRef.current = null
             }
-            setAgentResults(
-              (prev): Map<string, AgentCheckResult> => new Map(prev).set(agentId, result)
-            )
+            // Update global store - this will sync with AgentModelSelector
+            await refreshAgent(agentId)
             setInstallStatus({ agentId, state: 'success' })
 
             // Clear success state after a moment
@@ -148,47 +212,8 @@ export function Settings({
         }
       }, INSTALL_CHECK_INTERVAL)
     },
-    [setAgentResults, setInstallStatus]
+    [refreshAgent]
   )
-
-  // Load all agents concurrently
-  async function loadAgents(): Promise<void> {
-    const allIds = AGENT_LIST.map((a) => a.id)
-    setCheckingAgents(new Set(allIds))
-
-    // Check all agents concurrently
-    await Promise.all(
-      allIds.map(async (id): Promise<void> => {
-        try {
-          const result = await window.electronAPI.checkAgent(id)
-          if (result) {
-            setAgentResults((prev): Map<string, AgentCheckResult> => new Map(prev).set(id, result))
-
-            // If installed, check for latest versions asynchronously (don't block UI)
-            if (result.installed && result.commands) {
-              const commands = result.commands.map((c) => c.command)
-              window.electronAPI
-                .checkAgentLatestVersions(id, commands)
-                .then((versionInfo) => {
-                  setAgentVersions((prev) => new Map(prev).set(id, versionInfo))
-                })
-                .catch((err) => {
-                  console.error(`Failed to check versions for ${id}:`, err)
-                })
-            }
-          }
-        } catch (err) {
-          console.error(`Failed to check agent ${id}:`, err)
-        } finally {
-          setCheckingAgents((prev): Set<string> => {
-            const next = new Set(prev)
-            next.delete(id)
-            return next
-          })
-        }
-      })
-    )
-  }
 
   // Direct selection - Linear style, no confirm button needed
   function handleSelectAgent(agentId: string): void {
@@ -229,8 +254,8 @@ export function Settings({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-5xl h-[85vh] max-h-[85vh] overflow-y-auto content-start">
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:w-[90vw] sm:max-w-5xl h-[85vh] max-h-[85vh] overflow-y-auto content-start">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
@@ -277,13 +302,14 @@ export function Settings({
                   <span className="text-xs text-amber-600 dark:text-amber-400">
                     v{updateStatus.info.version} available
                   </span>
-                  <button
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     onClick={() => window.electronAPI.downloadUpdate()}
-                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
                   >
-                    <Download className="h-3 w-3" />
+                    <Download className="h-3.5 w-3.5" />
                     Download
-                  </button>
+                  </Button>
                 </>
               )}
               {updateStatus?.status === 'downloading' && (
@@ -294,13 +320,15 @@ export function Settings({
                 </span>
               )}
               {updateStatus?.status === 'downloaded' && (
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-green-600 dark:text-green-400"
                   onClick={() => window.electronAPI.installUpdate()}
-                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 transition-colors"
                 >
-                  <CheckCircle className="h-3 w-3" />
+                  <CheckCircle className="h-3.5 w-3.5" />
                   Restart to Update
-                </button>
+                </Button>
               )}
               {updateStatus?.status === 'error' && (
                 <span className="text-xs text-destructive">Update failed</span>
@@ -308,13 +336,14 @@ export function Settings({
               {(!updateStatus ||
                 updateStatus.status === 'not-available' ||
                 updateStatus.status === 'error') && (
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onClick={() => window.electronAPI.checkForUpdates()}
-                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
                 >
-                  <RefreshCw className="h-3 w-3" />
+                  <RefreshCw className="h-3.5 w-3.5" />
                   Check for Updates
-                </button>
+                </Button>
               )}
               {updateStatus?.status === 'checking' && (
                 <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -362,6 +391,8 @@ export function Settings({
                   onInstall={handleInstall}
                   onCancelWaiting={handleCancelWaiting}
                   isHighlighted={id === highlightAgent}
+                  defaultMode={defaultModes[id]}
+                  onSetDefaultMode={(modeId) => onSetDefaultMode(id, modeId)}
                 />
               )
             })}
@@ -384,6 +415,8 @@ interface AgentItemProps {
   onInstall: (agentId: string) => void
   onCancelWaiting: () => void
   isHighlighted?: boolean // When true, auto-expand and highlight this agent
+  defaultMode?: string // User's preferred default mode for this agent
+  onSetDefaultMode: (modeId: string) => void
 }
 
 function AgentItem({
@@ -397,7 +430,9 @@ function AgentItem({
   installStatus,
   onInstall,
   onCancelWaiting,
-  isHighlighted
+  isHighlighted,
+  defaultMode,
+  onSetDefaultMode
 }: AgentItemProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
 
@@ -475,12 +510,9 @@ function AgentItem({
         ) : status === 'selected' ? (
           <span className="text-xs text-green-600">Selected</span>
         ) : status === 'ready' ? (
-          <button
-            onClick={handleSelectClick}
-            className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-          >
+          <Button size="sm" variant="ghost" onClick={handleSelectClick}>
             Use
-          </button>
+          </Button>
         ) : hasInstallSuccess ? (
           <span className="text-xs text-green-600">Installed</span>
         ) : isWaiting ? (
@@ -489,15 +521,16 @@ function AgentItem({
             Waiting...
           </span>
         ) : canInstall ? (
-          <button
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={(e: React.MouseEvent): void => {
               e.stopPropagation()
               onInstall(agentId)
             }}
-            className="text-xs px-2 py-0.5 rounded transition-colors bg-primary/10 text-primary hover:bg-primary/20"
           >
             Install
-          </button>
+          </Button>
         ) : (
           <span className="text-xs text-muted-foreground">Setup required</span>
         )}
@@ -505,7 +538,7 @@ function AgentItem({
 
       {/* Expanded content */}
       {expanded && (
-        <div className="pl-9 pr-3 pb-2 text-sm text-muted-foreground">
+        <div className="pl-9 pr-3 pb-2 text-xs text-muted-foreground">
           {status === 'checking' ? (
             <p className="text-xs">Checking installation status...</p>
           ) : status === 'setup' ? (
@@ -523,15 +556,16 @@ function AgentItem({
                 <p className="text-xs text-muted-foreground/70">
                   This will automatically detect when installation is complete.
                 </p>
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onClick={(e: React.MouseEvent): void => {
                     e.stopPropagation()
                     onCancelWaiting()
                   }}
-                  className="text-xs px-2 py-0.5 rounded transition-colors bg-muted text-muted-foreground hover:bg-muted/80"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             ) : canInstall ? (
               <p className="text-xs">
@@ -544,10 +578,21 @@ function AgentItem({
               </p>
             ) : null
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-3">
               <p className="text-xs">{getAgentDescription(agentId)}</p>
+
+              {/* Default Mode Selection */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Default Mode:</span>
+                <ModeDropdown
+                  agentId={agentId}
+                  selectedMode={defaultMode}
+                  onSelectMode={onSetDefaultMode}
+                />
+              </div>
+
               {agent?.commands && agent.commands.length > 0 && (
-                <div className="mt-2 space-y-0.5">
+                <div className="space-y-0.5">
                   {agent.commands.map((cmd): React.ReactElement => {
                     // Find version info for this command
                     const cmdVersion = versionInfo?.commands.find((v) => v.command === cmd.command)
@@ -561,19 +606,21 @@ function AgentItem({
                         {cmd.path || <span className="italic">not installed</span>}
                         {version && <span className="text-muted-foreground/50"> ({version})</span>}
                         {hasUpdate && latestVersion && (
-                          <button
+                          <Button
+                            size="sm"
+                            variant="link"
+                            className="h-auto p-0 text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 ml-1"
                             onClick={(e: React.MouseEvent): void => {
                               e.stopPropagation()
                               window.electronAPI.updateCommand(cmd.command).catch((err) => {
                                 console.error(`Failed to update ${cmd.command}:`, err)
                               })
                             }}
-                            className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 ml-1 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
                             title={`Update to ${latestVersion}`}
                           >
                             <ArrowUp className="h-3 w-3" />
                             <span>{latestVersion}</span>
-                          </button>
+                          </Button>
                         )}
                       </div>
                     )
@@ -596,4 +643,53 @@ function getAgentDescription(agentId: string): string {
     gemini: "Google's AI assistant. By Google."
   }
   return descriptions[agentId] || 'AI coding assistant'
+}
+
+interface ModeDropdownProps {
+  agentId: string
+  selectedMode?: string
+  onSelectMode: (modeId: string) => void
+}
+
+function ModeDropdown({
+  agentId,
+  selectedMode,
+  onSelectMode
+}: ModeDropdownProps): React.ReactElement {
+  const modes = getVisibleModesForAgent(agentId)
+  const agentDefault = getDefaultModeForAgent(agentId)
+
+  // If no selected mode, use agent default
+  const currentMode = selectedMode || agentDefault || modes[0]?.id
+  const currentModeName = currentMode ? getModeDisplayName(currentMode) : 'Select mode'
+
+  if (modes.length === 0) {
+    return <span className="text-xs text-muted-foreground/50">No modes available</span>
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
+          {currentModeName}
+          <ChevronsUpDown className="h-3 w-3 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[120px]">
+        {modes.map((mode) => (
+          <DropdownMenuItem
+            key={mode.id}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelectMode(mode.id)
+            }}
+            className="flex items-center justify-between gap-2 text-xs"
+          >
+            <span>{mode.name}</span>
+            {mode.id === currentMode && <Check className="h-3.5 w-3.5 text-primary" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }

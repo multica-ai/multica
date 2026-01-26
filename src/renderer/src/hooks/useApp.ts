@@ -18,6 +18,7 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { useFileChangeStore } from '../stores/fileChangeStore'
 import { useCommandStore } from '../stores/commandStore'
 import { useDraftStore } from '../stores/draftStore'
+import { useAgentStore } from '../stores/agentStore'
 import { toast } from 'sonner'
 import { getErrorMessage } from '../utils/error'
 
@@ -78,7 +79,7 @@ export interface AppActions {
 
   // Session actions
   loadSessions: () => Promise<void>
-  createSession: (projectId: string, agentId: string) => Promise<void>
+  createSession: (projectId: string, agentId: string, defaultModeId?: string) => Promise<void>
   selectSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string) => Promise<void>
@@ -516,12 +517,17 @@ export function useApp(): AppState & AppActions {
     }
   }, [currentSession, loadProjectsAndSessions, updateCurrentSession])
 
-  // Subscribe to app focus event to validate directory existence
+  // Subscribe to app focus event to validate directory existence and refresh agent state
   useEffect(() => {
     const unsubFocus = window.electronAPI.onAppFocus(async () => {
-      // Only validate if we have a current session
+      // Start agent refresh immediately
+      const agentRefresh = useAgentStore.getState().loadAgents()
+
+      // Parallelize when both operations are needed, otherwise just refresh agents
       if (currentSession) {
-        await validateCurrentSessionDirectory()
+        await Promise.all([agentRefresh, validateCurrentSessionDirectory()])
+      } else {
+        await agentRefresh
       }
     })
 
@@ -612,16 +618,24 @@ export function useApp(): AppState & AppActions {
   )
 
   const createSession = useCallback(
-    async (projectId: string, agentId: string) => {
+    async (projectId: string, agentId: string, defaultModeId?: string) => {
       try {
         setIsInitializing(true)
         const session = await window.electronAPI.createSession(projectId, agentId)
         updateCurrentSession(session)
         setSessionUpdates([])
-        await loadProjectsAndSessions()
-        await loadRunningStatus()
+
+        // Parallel fetch: these two operations are independent
+        await Promise.all([loadProjectsAndSessions(), loadRunningStatus()])
+
         // Agent starts immediately now, load mode/model state
         await loadSessionModeModel(session.id)
+
+        // Apply user's default mode if set (ACP doesn't support mode in newSession)
+        if (defaultModeId) {
+          await window.electronAPI.setSessionMode(session.id, defaultModeId)
+          setSessionModeState((prev) => (prev ? { ...prev, currentModeId: defaultModeId } : null))
+        }
       } catch (err) {
         toast.error(`Failed to create session: ${getErrorMessage(err)}`)
       } finally {
@@ -821,6 +835,12 @@ export function useApp(): AppState & AppActions {
     async (newAgentId: string) => {
       if (!currentSession) {
         toast.error('No active session')
+        return
+      }
+
+      // Validate agent is installed before switching
+      if (!useAgentStore.getState().isAgentInstalled(newAgentId)) {
+        toast.error('Agent is not installed. Please install it in Settings.')
         return
       }
 

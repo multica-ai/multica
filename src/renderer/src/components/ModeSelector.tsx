@@ -10,6 +10,7 @@ import {
   filterVisibleModes,
   getSemanticType,
   getNextModeId,
+  getModeDisplayName,
   type SemanticType
 } from '../../../shared/mode-semantic'
 import {
@@ -77,11 +78,24 @@ export function ModeSelector({
   )
 
   // Global Shift+Tab keyboard shortcut to cycle through modes
+  // Only trigger when not in an input/textarea to avoid accessibility conflicts
   useEffect(() => {
     if (!modeState || disabled) return
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Tab' && e.shiftKey) {
+        // Don't capture Shift+Tab in inputs, textareas, or contenteditable elements
+        // This preserves accessibility (reverse tab navigation)
+        const activeElement = document.activeElement
+        const tagName = activeElement?.tagName.toLowerCase()
+        if (
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          (activeElement as HTMLElement)?.isContentEditable
+        ) {
+          return
+        }
+
         e.preventDefault()
         const nextModeId = getNextModeId(modeState.availableModes, modeState.currentModeId)
         if (nextModeId) {
@@ -109,7 +123,8 @@ export function ModeSelector({
   }
 
   const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId)
-  const currentModeName = currentMode?.name || modeState.currentModeId
+  // Use displayName from MODE_CONFIG for consistency with Settings
+  const currentModeName = getModeDisplayName(modeState.currentModeId)
   const currentSemantic = getSemanticType(modeState.currentModeId)
   const currentIndicator = getSemanticIndicator(currentSemantic)
 
@@ -183,7 +198,7 @@ export function ModeSelector({
                       isSelected ? 'text-foreground font-medium' : 'text-foreground'
                     )}
                   >
-                    {mode.name}
+                    {getModeDisplayName(mode.id)}
                   </span>
                   {mode.description && (
                     <span className="text-xs text-muted-foreground/80 leading-tight mt-0.5 line-clamp-2">
