@@ -364,6 +364,7 @@ export function MessageInput({
     if (showCommandMenu && ['Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'Escape'].includes(e.key)) {
       return
     }
+
     // Don't submit while IME is composing
     if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault()
