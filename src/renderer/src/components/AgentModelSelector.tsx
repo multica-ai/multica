@@ -95,10 +95,11 @@ export function AgentModelSelector({
     return availableModels.filter((m) => m.name.toLowerCase().includes(query))
   }, [availableModels, searchQuery])
 
-  // Reset search, highlight, and scroll position when dropdown opens
+  // Handle dropdown open/close - reset state when opening
   // Use -1 to indicate no item is highlighted until user interacts
-  useEffect(() => {
-    if (open) {
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    if (newOpen) {
+      // Reset state when opening - done in event handler, not effect
       setSearchQuery('')
       setHighlightedIndex(-1)
       // Reset scroll position after DOM updates
@@ -108,12 +109,8 @@ export function AgentModelSelector({
         }
       })
     }
-  }, [open])
-
-  // Reset highlight when filtered results change
-  useEffect(() => {
-    setHighlightedIndex(-1)
-  }, [filteredModels.length])
+    setOpen(newOpen)
+  }, [])
 
   const currentModelId = modelState?.currentModelId
   const handleAgentSelect = useCallback(
@@ -207,7 +204,7 @@ export function AgentModelSelector({
   const currentAgentNeedsInvert = INVERT_IN_DARK.has(currentAgentId)
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <Tooltip open={isHovered && !open}>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild disabled={disabled || loading || isSwitching}>
@@ -278,7 +275,10 @@ export function AgentModelSelector({
                   type="text"
                   autoFocus
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value)
+                    setHighlightedIndex(-1) // Reset highlight when search changes
+                  }}
                   placeholder="Search models..."
                   className="w-full h-7 pl-7 pr-2 text-xs bg-muted/50 border-none rounded-md outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
                   onClick={(e) => e.stopPropagation()}

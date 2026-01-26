@@ -114,11 +114,12 @@ export function Settings({
     const freshResults = useAgentStore.getState().agents
 
     // After store is loaded, check versions for installed agents
+    const versionPromises: Promise<void>[] = []
     for (const id of allIds) {
       const result = freshResults.get(id)
       if (result?.installed && result.commands) {
         const commands = result.commands.map((c) => c.command)
-        window.electronAPI
+        const promise = window.electronAPI
           .checkAgentLatestVersions(id, commands)
           .then((versionInfo) => {
             setAgentVersions((prev) => new Map(prev).set(id, versionInfo))
@@ -126,20 +127,41 @@ export function Settings({
           .catch((err) => {
             console.error(`Failed to check versions for ${id}:`, err)
           })
+        versionPromises.push(promise)
       }
     }
 
-    // Clear checking state
+    // Wait for all version checks to complete before clearing loading state
+    await Promise.allSettled(versionPromises)
     setCheckingAgents(new Set())
   }, [storeLoadAgents])
 
+  // Load data when dialog opens - this is intentional async data fetching
   useEffect((): void => {
     if (isOpen) {
-      loadAgents()
-      // Fetch app version
-      window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error)
+      // Defer to microtask to avoid synchronous setState in effect warning
+      queueMicrotask(() => {
+        loadAgents()
+        window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error)
+      })
     }
   }, [isOpen, loadAgents])
+
+  // Handle dialog close - cleanup when closing
+  const handleOpenChange = useCallback(
+    (open: boolean): void => {
+      if (!open) {
+        // Cleanup when closing
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+        setInstallStatus({ agentId: null, state: 'idle' })
+        onClose()
+      }
+    },
+    [onClose]
+  )
 
   // Listen for update status changes
   useEffect(() => {
@@ -149,7 +171,7 @@ export function Settings({
     return () => unsubscribe()
   }, [])
 
-  // Cleanup polling on unmount or when dialog closes
+  // Cleanup polling on unmount
   useEffect((): (() => void) => {
     return (): void => {
       if (pollingIntervalRef.current) {
@@ -158,16 +180,6 @@ export function Settings({
       }
     }
   }, [])
-
-  // Stop polling when dialog closes
-  useEffect((): void => {
-    if (!isOpen && pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-      pollingIntervalRef.current = null
-      // Reset install status when closing
-      setInstallStatus({ agentId: null, state: 'idle' })
-    }
-  }, [isOpen])
 
   // Polling logic for checking installation
   const startPolling = useCallback(
@@ -242,7 +254,7 @@ export function Settings({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:w-[90vw] sm:max-w-5xl h-[85vh] max-h-[85vh] overflow-y-auto content-start">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>

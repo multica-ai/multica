@@ -78,11 +78,24 @@ export function ModeSelector({
   )
 
   // Global Shift+Tab keyboard shortcut to cycle through modes
+  // Only trigger when not in an input/textarea to avoid accessibility conflicts
   useEffect(() => {
     if (!modeState || disabled) return
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Tab' && e.shiftKey) {
+        // Don't capture Shift+Tab in inputs, textareas, or contenteditable elements
+        // This preserves accessibility (reverse tab navigation)
+        const activeElement = document.activeElement
+        const tagName = activeElement?.tagName.toLowerCase()
+        if (
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          (activeElement as HTMLElement)?.isContentEditable
+        ) {
+          return
+        }
+
         e.preventDefault()
         const nextModeId = getNextModeId(modeState.availableModes, modeState.currentModeId)
         if (nextModeId) {

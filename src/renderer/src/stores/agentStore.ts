@@ -45,6 +45,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       const results = await window.electronAPI.checkAgents()
       const agentsMap = new Map(results.map((r) => [r.id, r]))
       set({ agents: agentsMap, lastLoadedAt: Date.now() })
+    } catch (err) {
+      console.error('[AgentStore] Failed to load agents:', err)
     } finally {
       set({ isLoading: false })
     }
@@ -67,6 +69,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   isAgentInstalled: (agentId: string) => {
     const agent = get().agents.get(agentId)
-    return agent?.installed !== false
+    // Return true only if agent is found and explicitly installed
+    return agent?.installed === true
   }
 }))
