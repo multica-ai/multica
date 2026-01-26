@@ -10,6 +10,7 @@ import {
   filterVisibleModes,
   getSemanticType,
   getNextModeId,
+  getModeDisplayName,
   type SemanticType
 } from '../../../shared/mode-semantic'
 import {
@@ -109,7 +110,8 @@ export function ModeSelector({
   }
 
   const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId)
-  const currentModeName = currentMode?.name || modeState.currentModeId
+  // Use displayName from MODE_CONFIG for consistency with Settings
+  const currentModeName = getModeDisplayName(modeState.currentModeId)
   const currentSemantic = getSemanticType(modeState.currentModeId)
   const currentIndicator = getSemanticIndicator(currentSemantic)
 
@@ -183,7 +185,7 @@ export function ModeSelector({
                       isSelected ? 'text-foreground font-medium' : 'text-foreground'
                     )}
                   >
-                    {mode.name}
+                    {getModeDisplayName(mode.id)}
                   </span>
                   {mode.description && (
                     <span className="text-xs text-muted-foreground/80 leading-tight mt-0.5 line-clamp-2">

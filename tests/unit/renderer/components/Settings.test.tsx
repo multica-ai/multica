@@ -22,6 +22,32 @@ vi.mock('@/components/ui/toggle-group', () => ({
   ToggleGroupItem: ({ children }: { children: React.ReactNode }) => <button>{children}</button>
 }))
 
+vi.mock('@/components/ui/button', () => ({
+  Button: ({
+    children,
+    onClick
+  }: {
+    children: React.ReactNode
+    onClick?: React.MouseEventHandler
+  }) => <button onClick={onClick}>{children}</button>
+}))
+
+vi.mock('@/components/ui/dropdown-menu', () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
+}))
+
+vi.mock('../../../../src/shared/mode-semantic', () => ({
+  getVisibleModesForAgent: () => [
+    { id: 'default', name: 'Default' },
+    { id: 'plan', name: 'Plan' }
+  ],
+  getDefaultModeForAgent: () => 'default',
+  getModeDisplayName: (modeId: string) => modeId
+}))
+
 vi.mock('../../../../src/renderer/src/contexts/ThemeContext', () => ({
   useTheme: () => ({ mode: 'system', setMode: vi.fn() })
 }))
@@ -29,6 +55,31 @@ vi.mock('../../../../src/renderer/src/contexts/ThemeContext', () => ({
 vi.mock('@/lib/utils', () => ({
   cn: (...args: (string | boolean | undefined)[]) => args.filter(Boolean).join(' ')
 }))
+
+vi.mock('../../../../src/renderer/src/stores/agentStore', () => {
+  const mockAgentStoreState = {
+    agents: new Map([
+      [
+        'claude-code',
+        { id: 'claude-code', name: 'Claude Code', installed: true, command: 'claude' }
+      ],
+      ['opencode', { id: 'opencode', name: 'opencode', installed: false, command: 'opencode' }],
+      ['codex', { id: 'codex', name: 'Codex CLI', installed: false, command: 'codex' }]
+    ]),
+    isLoading: false,
+    lastLoadedAt: Date.now(),
+    loadAgents: vi.fn().mockResolvedValue(undefined),
+    refreshAgent: vi.fn().mockResolvedValue(undefined),
+    getAgent: vi.fn(),
+    getAllAgents: vi.fn()
+  }
+
+  const mockUseAgentStore = Object.assign(() => mockAgentStoreState, {
+    getState: () => mockAgentStoreState
+  })
+
+  return { useAgentStore: mockUseAgentStore }
+})
 
 describe('Settings - Software Update Section', () => {
   let container: HTMLDivElement
@@ -74,6 +125,8 @@ describe('Settings - Software Update Section', () => {
           onClose={vi.fn()}
           defaultAgentId="claude-code"
           onSetDefaultAgent={vi.fn()}
+          defaultModes={{}}
+          onSetDefaultMode={vi.fn()}
         />
       )
     })

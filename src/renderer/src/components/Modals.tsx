@@ -22,6 +22,8 @@ interface ModalsProps {
   // Settings props
   defaultAgentId: string
   onSetDefaultAgent: (agentId: string) => void
+  defaultModes: Record<string, string>
+  onSetDefaultMode: (agentId: string, modeId: string) => void
   // NewSession props
   onCreateSession: (cwd: string) => Promise<void>
   // DeleteSession props
@@ -37,6 +39,8 @@ interface ModalsProps {
 export function Modals({
   defaultAgentId,
   onSetDefaultAgent,
+  defaultModes,
+  onSetDefaultMode,
   onCreateSession,
   onDeleteSession,
   onArchiveSession,
@@ -50,6 +54,8 @@ export function Modals({
       <SettingsModal
         defaultAgentId={defaultAgentId}
         onSetDefaultAgent={onSetDefaultAgent}
+        defaultModes={defaultModes}
+        onSetDefaultMode={onSetDefaultMode}
         onCreateSession={onCreateSession}
         onClose={() => closeModal('settings')}
       />
@@ -78,6 +84,8 @@ export function Modals({
 interface SettingsModalProps {
   defaultAgentId: string
   onSetDefaultAgent: (agentId: string) => void
+  defaultModes: Record<string, string>
+  onSetDefaultMode: (agentId: string, modeId: string) => void
   onCreateSession: (cwd: string) => Promise<void>
   onClose: () => void
 }
@@ -85,6 +93,8 @@ interface SettingsModalProps {
 function SettingsModal({
   defaultAgentId,
   onSetDefaultAgent,
+  defaultModes,
+  onSetDefaultMode,
   onCreateSession,
   onClose
 }: SettingsModalProps): React.JSX.Element {
@@ -109,6 +119,8 @@ function SettingsModal({
       onClose={handleClose}
       defaultAgentId={defaultAgentId}
       onSetDefaultAgent={onSetDefaultAgent}
+      defaultModes={defaultModes}
+      onSetDefaultMode={onSetDefaultMode}
       highlightAgent={data?.highlightAgent}
     />
   )

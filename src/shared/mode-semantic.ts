@@ -26,6 +26,12 @@ interface ModeConfig {
   visible: boolean
   /** Semantic type for UI rendering */
   semantic: SemanticType
+  /** Which agents support this mode */
+  agentIds: string[]
+  /** Is this the default mode for the agent? */
+  isDefault?: boolean
+  /** Display name (must match ACP returned name) */
+  displayName: string
 }
 
 /**
@@ -33,23 +39,71 @@ interface ModeConfig {
  *
  * Only modes listed here with visible: true are shown in UI.
  * Unknown modes are hidden by default.
+ * displayName must match the name returned by ACP server.
  */
 const MODE_CONFIG: Record<string, ModeConfig> = {
   // Claude Code (show 3 of 5)
-  default: { visible: true, semantic: 'default' },
-  acceptEdits: { visible: true, semantic: 'auto' }, // Auto-Accept
-  plan: { visible: true, semantic: 'plan' },
-  dontAsk: { visible: false, semantic: 'default' }, // internal
-  bypassPermissions: { visible: false, semantic: 'auto' }, // dangerous
+  default: {
+    visible: true,
+    semantic: 'default',
+    agentIds: ['claude-code'],
+    isDefault: true,
+    displayName: 'Normal'
+  },
+  acceptEdits: {
+    visible: true,
+    semantic: 'auto',
+    agentIds: ['claude-code'],
+    displayName: 'Auto-accept edits'
+  },
+  plan: {
+    visible: true,
+    semantic: 'plan',
+    agentIds: ['claude-code', 'opencode'],
+    displayName: 'Plan'
+  },
+  dontAsk: {
+    visible: false,
+    semantic: 'default',
+    agentIds: ['claude-code'],
+    displayName: "Don't ask"
+  },
+  bypassPermissions: {
+    visible: false,
+    semantic: 'auto',
+    agentIds: ['claude-code'],
+    displayName: 'Bypass permissions'
+  },
 
   // Codex (show 2 of 3)
-  'read-only': { visible: true, semantic: 'readonly' }, // Suggest mode
-  auto: { visible: true, semantic: 'auto' }, // Auto-Edit
-  'full-access': { visible: false, semantic: 'auto' }, // Full-Auto, dangerous
+  'read-only': {
+    visible: true,
+    semantic: 'readonly',
+    agentIds: ['codex'],
+    isDefault: true,
+    displayName: 'Read Only'
+  },
+  auto: {
+    visible: true,
+    semantic: 'auto',
+    agentIds: ['codex'],
+    displayName: 'Agent'
+  },
+  'full-access': {
+    visible: false,
+    semantic: 'auto',
+    agentIds: ['codex'],
+    displayName: 'Full access'
+  },
 
   // OpenCode (show both)
-  build: { visible: true, semantic: 'default' }
-  // 'plan' already defined above
+  build: {
+    visible: true,
+    semantic: 'default',
+    agentIds: ['opencode'],
+    isDefault: true,
+    displayName: 'Build'
+  }
 }
 
 /**
@@ -91,4 +145,44 @@ export function getNextModeId(modes: SessionMode[], currentModeId: string): stri
 
   const nextIndex = (currentIndex + 1) % visibleModes.length
   return visibleModes[nextIndex].id
+}
+
+/**
+ * Get visible modes for an agent (from static config)
+ * Returns array of { id, name } objects
+ */
+export function getVisibleModesForAgent(agentId: string): Array<{ id: string; name: string }> {
+  const modes: Array<{ id: string; name: string }> = []
+
+  for (const [modeId, config] of Object.entries(MODE_CONFIG)) {
+    if (config.visible && config.agentIds.includes(agentId)) {
+      modes.push({
+        id: modeId,
+        name: config.displayName
+      })
+    }
+  }
+
+  return modes
+}
+
+/**
+ * Get default mode for an agent (from static config)
+ */
+export function getDefaultModeForAgent(agentId: string): string | undefined {
+  for (const [modeId, config] of Object.entries(MODE_CONFIG)) {
+    if (config.isDefault && config.agentIds.includes(agentId)) {
+      return modeId
+    }
+  }
+  // Fallback to first visible mode
+  const visibleModes = getVisibleModesForAgent(agentId)
+  return visibleModes[0]?.id
+}
+
+/**
+ * Get display name for a mode (from MODE_CONFIG)
+ */
+export function getModeDisplayName(modeId: string): string {
+  return MODE_CONFIG[modeId]?.displayName || modeId
 }
