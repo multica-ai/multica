@@ -60,18 +60,18 @@ describe('agent-install', () => {
 
   describe('INSTALL_COMMANDS', () => {
     it('should have install commands for supported agents', () => {
-      // Claude Code: CLI + ACP
+      // Claude Code: CLI + ACP (--force to handle partial installs)
       expect(INSTALL_COMMANDS['claude-code']).toBe(
-        'curl -fsSL https://claude.ai/install.sh | bash && npm install -g @zed-industries/claude-code-acp'
+        'curl -fsSL https://claude.ai/install.sh | bash && npm install -g @zed-industries/claude-code-acp --force'
       )
       // OpenCode: official install script
       expect(INSTALL_COMMANDS['opencode']).toBe('curl -fsSL https://opencode.ai/install | bash')
-      // Codex: CLI + ACP in one command
+      // Codex: CLI + ACP in one command (--force to handle partial installs)
       expect(INSTALL_COMMANDS['codex']).toBe(
-        'npm install -g @openai/codex @zed-industries/codex-acp'
+        'npm install -g @openai/codex @zed-industries/codex-acp --force'
       )
-      // Gemini: single package
-      expect(INSTALL_COMMANDS['gemini']).toBe('npm install -g @google/gemini-cli')
+      // Gemini: single package (--force for consistency)
+      expect(INSTALL_COMMANDS['gemini']).toBe('npm install -g @google/gemini-cli --force')
     })
   })
 
