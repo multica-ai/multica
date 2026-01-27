@@ -8,16 +8,18 @@ import type { InstallResult } from '../../shared/electron-api'
 
 // Install commands for each agent
 // Claude Code and Codex need both CLI and ACP installed
+// Note: --force is used for npm installs to handle cases where one package
+// is already installed (avoids EEXIST errors when binary already exists)
 export const INSTALL_COMMANDS: Record<string, string> = {
   // Claude Code: Install official CLI first, then ACP adapter
   'claude-code':
-    'curl -fsSL https://claude.ai/install.sh | bash && npm install -g @zed-industries/claude-code-acp',
+    'curl -fsSL https://claude.ai/install.sh | bash && npm install -g @zed-industries/claude-code-acp --force',
   // OpenCode: Official install script
   opencode: 'curl -fsSL https://opencode.ai/install | bash',
-  // Codex: Install CLI and ACP adapter together
-  codex: 'npm install -g @openai/codex @zed-industries/codex-acp',
+  // Codex: Install CLI and ACP adapter together (--force handles partial installs)
+  codex: 'npm install -g @openai/codex @zed-industries/codex-acp --force',
   // Gemini: Single npm package
-  gemini: 'npm install -g @google/gemini-cli'
+  gemini: 'npm install -g @google/gemini-cli --force'
 }
 
 // Update commands for individual commands (not agents)
