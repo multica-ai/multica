@@ -4,8 +4,8 @@
  */
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { ChevronDown, Loader2, Check, Search } from 'lucide-react'
-import type { AgentCheckResult } from '../../../shared/electron-api'
 import type { SessionModelState, ModelId } from '../../../shared/types'
+import { useAgentStore } from '../stores/agentStore'
 
 // Agent icons
 import claudeIcon from '../assets/agents/claude-color.svg'
@@ -56,29 +56,22 @@ export function AgentModelSelector({
   isInitializing = false,
   onSelectionComplete
 }: AgentModelSelectorProps): React.JSX.Element {
-  const [agents, setAgents] = useState<AgentCheckResult[]>([])
-  const [loading, setLoading] = useState(true)
+  // Use global agent store for shared state (syncs with Settings)
+  const { getAllAgents, isLoading: loading, loadAgents, lastLoadedAt } = useAgentStore()
+  const agents = getAllAgents()
+
   const [open, setOpen] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
+  // Load agents on mount if not already loaded
   useEffect(() => {
-    loadAgents()
-  }, [])
-
-  async function loadAgents(): Promise<void> {
-    setLoading(true)
-    try {
-      const results = await window.electronAPI.checkAgents()
-      setAgents(results)
-    } catch (err) {
-      console.error('Failed to check agents:', err)
-    } finally {
-      setLoading(false)
+    if (!lastLoadedAt) {
+      loadAgents()
     }
-  }
+  }, [lastLoadedAt, loadAgents])
 
   const currentAgent = agents.find((a) => a.id === currentAgentId)
   const currentAgentName = currentAgent?.name || currentAgentId
@@ -94,17 +87,19 @@ export function AgentModelSelector({
   const showSearch = (modelState?.availableModels.length ?? 0) >= MIN_MODELS_FOR_SEARCH
 
   // Filter models based on search query
+  const availableModels = modelState?.availableModels
   const filteredModels = useMemo(() => {
-    if (!modelState?.availableModels) return []
-    if (!searchQuery.trim()) return modelState.availableModels
+    if (!availableModels) return []
+    if (!searchQuery.trim()) return availableModels
     const query = searchQuery.toLowerCase()
-    return modelState.availableModels.filter((m) => m.name.toLowerCase().includes(query))
-  }, [modelState?.availableModels, searchQuery])
+    return availableModels.filter((m) => m.name.toLowerCase().includes(query))
+  }, [availableModels, searchQuery])
 
-  // Reset search, highlight, and scroll position when dropdown opens
+  // Handle dropdown open/close - reset state when opening
   // Use -1 to indicate no item is highlighted until user interacts
-  useEffect(() => {
-    if (open) {
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    if (newOpen) {
+      // Reset state when opening - done in event handler, not effect
       setSearchQuery('')
       setHighlightedIndex(-1)
       // Reset scroll position after DOM updates
@@ -114,13 +109,10 @@ export function AgentModelSelector({
         }
       })
     }
-  }, [open])
+    setOpen(newOpen)
+  }, [])
 
-  // Reset highlight when filtered results change
-  useEffect(() => {
-    setHighlightedIndex(-1)
-  }, [filteredModels.length])
-
+  const currentModelId = modelState?.currentModelId
   const handleAgentSelect = useCallback(
     (agentId: string): void => {
       if (agentId !== currentAgentId) {
@@ -129,18 +121,18 @@ export function AgentModelSelector({
       setOpen(false)
       onSelectionComplete?.()
     },
-    [currentAgentId, onAgentChange, onSelectionComplete]
+    [currentAgentId, onAgentChange, onSelectionComplete, setOpen]
   )
 
   const handleModelSelect = useCallback(
     (modelId: ModelId): void => {
-      if (modelId !== modelState?.currentModelId) {
+      if (modelId !== currentModelId) {
         onModelChange(modelId)
       }
       setOpen(false)
       onSelectionComplete?.()
     },
-    [modelState?.currentModelId, onModelChange, onSelectionComplete]
+    [currentModelId, onModelChange, onSelectionComplete, setOpen]
   )
 
   // Keyboard navigation handler for search input
@@ -212,7 +204,7 @@ export function AgentModelSelector({
   const currentAgentNeedsInvert = INVERT_IN_DARK.has(currentAgentId)
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <Tooltip open={isHovered && !open}>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild disabled={disabled || loading || isSwitching}>
@@ -267,7 +259,11 @@ export function AgentModelSelector({
               )}
               <span className="text-xs text-muted-foreground">{currentAgentName}</span>
             </div>
-            <span className="text-xs text-green-600/70">Active</span>
+            {currentAgent?.installed !== false ? (
+              <span className="text-xs text-green-600/70">Active</span>
+            ) : (
+              <span className="text-xs text-amber-600">Not installed</span>
+            )}
           </div>
 
           {/* Search input for many models */}
@@ -279,7 +275,10 @@ export function AgentModelSelector({
                   type="text"
                   autoFocus
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value)
+                    setHighlightedIndex(-1) // Reset highlight when search changes
+                  }}
                   placeholder="Search models..."
                   className="w-full h-7 pl-7 pr-2 text-xs bg-muted/50 border-none rounded-md outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
                   onClick={(e) => e.stopPropagation()}
