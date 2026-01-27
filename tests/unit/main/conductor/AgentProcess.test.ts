@@ -7,14 +7,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'events'
 import { Readable, Writable } from 'stream'
 
+// Mock process type
+type MockProcess = EventEmitter & {
+  stdin: Writable
+  stdout: Readable
+  pid: number
+  kill: ReturnType<typeof vi.fn>
+}
+
 // Create a mock process factory
-function createMockProcess() {
-  const proc = new EventEmitter() as EventEmitter & {
-    stdin: Writable
-    stdout: Readable
-    pid: number
-    kill: ReturnType<typeof vi.fn>
-  }
+function createMockProcess(): MockProcess {
+  const proc = new EventEmitter() as MockProcess
 
   proc.stdin = new Writable({
     write(_chunk, _encoding, callback) {
