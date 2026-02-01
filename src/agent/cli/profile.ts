@@ -65,11 +65,10 @@ function cmdNew(profileId: string | undefined) {
   console.log(`Location: ${dir}`);
   console.log("");
   console.log("Files created:");
-  console.log("  - soul.md       (personality and constraints)");
-  console.log("  - identity.md   (name and role)");
-  console.log("  - tools.md      (tool usage instructions)");
+  console.log("  - soul.md       (identity, personality and behavior)");
+  console.log("  - user.md       (information about the user)");
+  console.log("  - workspace.md  (workspace rules and conventions)");
   console.log("  - memory.md     (persistent knowledge)");
-  console.log("  - bootstrap.md  (initial context)");
   console.log("");
   console.log("Edit these files to customize your agent, then run:");
   console.log(`  pnpm agent:cli --profile ${profileId} "Hello"`);
@@ -120,33 +119,27 @@ function cmdShow(profileId: string | undefined) {
   console.log(`Location: ${getProfileDir(profileId)}`);
   console.log("");
 
-  if (profile.identity) {
-    console.log("=== identity.md ===");
-    console.log(profile.identity.trim());
-    console.log("");
-  }
-
   if (profile.soul) {
     console.log("=== soul.md ===");
     console.log(profile.soul.trim());
     console.log("");
   }
 
-  if (profile.tools) {
-    console.log("=== tools.md ===");
-    console.log(profile.tools.trim());
+  if (profile.user) {
+    console.log("=== user.md ===");
+    console.log(profile.user.trim());
+    console.log("");
+  }
+
+  if (profile.workspace) {
+    console.log("=== workspace.md ===");
+    console.log(profile.workspace.trim());
     console.log("");
   }
 
   if (profile.memory) {
     console.log("=== memory.md ===");
     console.log(profile.memory.trim());
-    console.log("");
-  }
-
-  if (profile.bootstrap) {
-    console.log("=== bootstrap.md ===");
-    console.log(profile.bootstrap.trim());
     console.log("");
   }
 }

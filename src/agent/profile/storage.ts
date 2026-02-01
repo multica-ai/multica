@@ -92,24 +92,19 @@ export function loadProfile(profileId: string, options?: StorageOptions): AgentP
   return {
     id: profileId,
     soul: readProfileFile(profileId, PROFILE_FILES.soul, options),
-    identity: readProfileFile(profileId, PROFILE_FILES.identity, options),
     user: readProfileFile(profileId, PROFILE_FILES.user, options),
     workspace: readProfileFile(profileId, PROFILE_FILES.workspace, options),
     memory: readProfileFile(profileId, PROFILE_FILES.memory, options),
-    bootstrap: readProfileFile(profileId, PROFILE_FILES.bootstrap, options),
     config: readProfileConfig(profileId, options),
   };
 }
 
 /** 保存 AgentProfile（只写入非空字段） */
 export function saveProfile(profile: AgentProfile, options?: StorageOptions): void {
-  const { id, soul, identity, user, workspace, memory, bootstrap, config } = profile;
+  const { id, soul, user, workspace, memory, config } = profile;
 
   if (soul !== undefined) {
     writeProfileFile(id, PROFILE_FILES.soul, soul, options);
-  }
-  if (identity !== undefined) {
-    writeProfileFile(id, PROFILE_FILES.identity, identity, options);
   }
   if (user !== undefined) {
     writeProfileFile(id, PROFILE_FILES.user, user, options);
@@ -119,9 +114,6 @@ export function saveProfile(profile: AgentProfile, options?: StorageOptions): vo
   }
   if (memory !== undefined) {
     writeProfileFile(id, PROFILE_FILES.memory, memory, options);
-  }
-  if (bootstrap !== undefined) {
-    writeProfileFile(id, PROFILE_FILES.bootstrap, bootstrap, options);
   }
   if (config !== undefined) {
     writeProfileConfig(id, config, options);

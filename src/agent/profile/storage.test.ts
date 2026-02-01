@@ -150,22 +150,18 @@ describe("storage", () => {
       const dir = join(testBaseDir, profileId);
       mkdirSync(dir, { recursive: true });
 
-      writeFileSync(join(dir, "SOUL.md"), "Soul content");
-      writeFileSync(join(dir, "IDENTITY.md"), "Identity content");
-      writeFileSync(join(dir, "USER.md"), "User content");
-      writeFileSync(join(dir, "WORKSPACE.md"), "Workspace content");
-      writeFileSync(join(dir, "MEMORY.md"), "Memory content");
-      writeFileSync(join(dir, "BOOTSTRAP.md"), "Bootstrap content");
+      writeFileSync(join(dir, "soul.md"), "Soul content");
+      writeFileSync(join(dir, "user.md"), "User content");
+      writeFileSync(join(dir, "workspace.md"), "Workspace content");
+      writeFileSync(join(dir, "memory.md"), "Memory content");
 
       const profile = loadProfile(profileId, { baseDir: testBaseDir });
 
       expect(profile.id).toBe(profileId);
       expect(profile.soul).toBe("Soul content");
-      expect(profile.identity).toBe("Identity content");
       expect(profile.user).toBe("User content");
       expect(profile.workspace).toBe("Workspace content");
       expect(profile.memory).toBe("Memory content");
-      expect(profile.bootstrap).toBe("Bootstrap content");
     });
 
     it("should return undefined for missing files", () => {
@@ -173,17 +169,15 @@ describe("storage", () => {
       const dir = join(testBaseDir, profileId);
       mkdirSync(dir, { recursive: true });
 
-      writeFileSync(join(dir, "SOUL.md"), "Soul only");
+      writeFileSync(join(dir, "soul.md"), "Soul only");
 
       const profile = loadProfile(profileId, { baseDir: testBaseDir });
 
       expect(profile.id).toBe(profileId);
       expect(profile.soul).toBe("Soul only");
-      expect(profile.identity).toBeUndefined();
       expect(profile.user).toBeUndefined();
       expect(profile.workspace).toBeUndefined();
       expect(profile.memory).toBeUndefined();
-      expect(profile.bootstrap).toBeUndefined();
     });
 
     it("should handle non-existent profile", () => {
@@ -191,7 +185,6 @@ describe("storage", () => {
 
       expect(profile.id).toBe("non-existent");
       expect(profile.soul).toBeUndefined();
-      expect(profile.identity).toBeUndefined();
     });
   });
 
@@ -200,40 +193,34 @@ describe("storage", () => {
       const profile = {
         id: "save-test",
         soul: "Soul data",
-        identity: "Identity data",
         user: "User data",
         workspace: "Workspace data",
         memory: "Memory data",
-        bootstrap: "Bootstrap data",
       };
 
       saveProfile(profile, { baseDir: testBaseDir });
 
       const dir = join(testBaseDir, profile.id);
-      expect(readFileSync(join(dir, "SOUL.md"), "utf-8")).toBe("Soul data");
-      expect(readFileSync(join(dir, "IDENTITY.md"), "utf-8")).toBe("Identity data");
-      expect(readFileSync(join(dir, "USER.md"), "utf-8")).toBe("User data");
-      expect(readFileSync(join(dir, "WORKSPACE.md"), "utf-8")).toBe("Workspace data");
-      expect(readFileSync(join(dir, "MEMORY.md"), "utf-8")).toBe("Memory data");
-      expect(readFileSync(join(dir, "BOOTSTRAP.md"), "utf-8")).toBe("Bootstrap data");
+      expect(readFileSync(join(dir, "soul.md"), "utf-8")).toBe("Soul data");
+      expect(readFileSync(join(dir, "user.md"), "utf-8")).toBe("User data");
+      expect(readFileSync(join(dir, "workspace.md"), "utf-8")).toBe("Workspace data");
+      expect(readFileSync(join(dir, "memory.md"), "utf-8")).toBe("Memory data");
     });
 
     it("should only save defined fields", () => {
       const profile = {
         id: "partial-save",
         soul: "Soul only",
-        identity: undefined,
         user: undefined,
         workspace: undefined,
         memory: undefined,
-        bootstrap: undefined,
       };
 
       saveProfile(profile, { baseDir: testBaseDir });
 
       const dir = join(testBaseDir, profile.id);
-      expect(existsSync(join(dir, "SOUL.md"))).toBe(true);
-      expect(existsSync(join(dir, "IDENTITY.md"))).toBe(false);
+      expect(existsSync(join(dir, "soul.md"))).toBe(true);
+      expect(existsSync(join(dir, "user.md"))).toBe(false);
     });
 
     it("should create profile directory if needed", () => {

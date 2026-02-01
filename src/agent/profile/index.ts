@@ -43,11 +43,9 @@ export function createAgentProfile(
   // 如果使用模板，填充默认内容
   if (useTemplates) {
     profile.soul = DEFAULT_TEMPLATES.soul;
-    profile.identity = DEFAULT_TEMPLATES.identity;
     profile.user = DEFAULT_TEMPLATES.user;
     profile.workspace = DEFAULT_TEMPLATES.workspace;
     profile.memory = DEFAULT_TEMPLATES.memory;
-    profile.bootstrap = DEFAULT_TEMPLATES.bootstrap;
 
     // 保存到文件
     saveProfile(profile, { baseDir });
@@ -137,10 +135,6 @@ export class ProfileManager {
 
     const parts: string[] = [];
 
-    if (profile.identity) {
-      parts.push(profile.identity);
-    }
-
     if (profile.soul) {
       parts.push(profile.soul);
     }
@@ -155,10 +149,6 @@ export class ProfileManager {
 
     if (profile.memory) {
       parts.push(profile.memory);
-    }
-
-    if (profile.bootstrap) {
-      parts.push(profile.bootstrap);
     }
 
     // 注入 profile 目录路径，让 Agent 知道文件在哪里
