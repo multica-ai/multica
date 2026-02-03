@@ -10,6 +10,7 @@ import { AppSidebar } from "@multica/ui/components/app-sidebar";
 import { ThemeProvider } from "@multica/ui/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { HubSidebar } from "@multica/ui/components/hub-sidebar";
+import { ServiceWorkerRegister } from "./sw-register";
 
 const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
 if (gatewayUrl) {
@@ -37,6 +38,14 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "Multica",
   description: "Distributed AI agent framework",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Multica",
+  },
+  icons: {
+    apple: "/icon-192x192.png",
+  },
 };
 
 export default function RootLayout({
@@ -65,6 +74,7 @@ export default function RootLayout({
           </SidebarProvider>
         </ThemeProvider>
         <Toaster />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
