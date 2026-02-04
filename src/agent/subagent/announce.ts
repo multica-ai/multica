@@ -9,6 +9,7 @@
 
 import { readEntries } from "../session/storage.js";
 import { getHub } from "../../hub/hub-singleton.js";
+import { buildSystemPrompt } from "../system-prompt/index.js";
 import type {
   SubagentAnnounceParams,
   SubagentRunOutcome,
@@ -17,33 +18,18 @@ import type {
 
 /**
  * Build the system prompt injected into a subagent session.
+ * Uses the structured prompt builder with "minimal" mode.
  */
 export function buildSubagentSystemPrompt(params: SubagentSystemPromptParams): string {
-  const { requesterSessionId, childSessionId, label, task } = params;
-
-  const lines: string[] = [
-    "You are a subagent spawned to complete a specific task.",
-    "",
-    "## Rules",
-    "- Stay focused on the assigned task below.",
-    "- Complete the task thoroughly and report your findings.",
-    "- Do NOT initiate side actions unrelated to the task.",
-    "- Do NOT attempt to communicate with the user directly.",
-    "- Do NOT spawn nested subagents.",
-    "- Your session is ephemeral and will be cleaned up after completion.",
-    "",
-    "## Context",
-    `Requester session: ${requesterSessionId}`,
-    `Child session: ${childSessionId}`,
-  ];
-
-  if (label) {
-    lines.push(`Label: "${label}"`);
-  }
-
-  lines.push("", "## Task", task);
-
-  return lines.join("\n");
+  return buildSystemPrompt({
+    mode: "minimal",
+    subagent: {
+      requesterSessionId: params.requesterSessionId,
+      childSessionId: params.childSessionId,
+      label: params.label,
+      task: params.task,
+    },
+  });
 }
 
 /**

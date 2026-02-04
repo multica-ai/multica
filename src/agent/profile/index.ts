@@ -17,6 +17,7 @@ import {
   writeProfileFile,
 } from "./storage.js";
 import { PROFILE_FILES } from "./types.js";
+import { buildSystemPrompt as buildPrompt } from "../system-prompt/index.js";
 
 export { type AgentProfile, type CreateProfileOptions, type ProfileConfig, type ProfileManagerOptions } from "./types.js";
 export { DEFAULT_TEMPLATES } from "./templates.js";
@@ -135,41 +136,24 @@ export class ProfileManager {
     return getProfileDir(this.profileId, { baseDir: this.baseDir });
   }
 
-  /** 构建 system prompt */
+  /** Build system prompt using the structured prompt builder */
   buildSystemPrompt(): string {
     const profile = this.getProfile();
-    console.log('[ProfileManager] buildSystemPrompt called, profile exists:', !!profile);
     if (!profile) {
       return "";
     }
 
-    const parts: string[] = [];
-
-    if (profile.soul) {
-      console.log('[ProfileManager] Adding soul, length:', profile.soul.length);
-      parts.push(profile.soul);
-    }
-
-    if (profile.user) {
-      console.log('[ProfileManager] Adding user, content:', profile.user.substring(0, 100));
-      parts.push(profile.user);
-    } else {
-      console.log('[ProfileManager] No user content in profile');
-    }
-
-    if (profile.workspace) {
-      parts.push(profile.workspace);
-    }
-
-    if (profile.memory) {
-      parts.push(profile.memory);
-    }
-
-    // 注入 profile 目录路径，让 Agent 知道文件在哪里
-    const profileDir = this.getProfileDir();
-    parts.push(`## Profile Directory\n\nYour profile files are located at: \`${profileDir}\`\n\nUse \`edit\` or \`write\` tools to update these files when needed.`);
-
-    return parts.join("\n\n");
+    return buildPrompt({
+      mode: "full",
+      profile: {
+        soul: profile.soul,
+        user: profile.user,
+        workspace: profile.workspace,
+        memory: profile.memory,
+        config: profile.config,
+      },
+      profileDir: this.getProfileDir(),
+    });
   }
 
   /** 获取 tools 配置 */

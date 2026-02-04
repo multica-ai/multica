@@ -28,6 +28,11 @@ import {
   markAuthProfileUsed,
   markAuthProfileGood,
 } from "./auth-profiles/index.js";
+import {
+  buildSystemPrompt as buildStructuredSystemPrompt,
+  collectRuntimeInfo,
+  type SystemPromptMode,
+} from "./system-prompt/index.js";
 import type { AuthProfileFailureReason } from "./auth-profiles/index.js";
 
 // ============================================================
@@ -153,7 +158,6 @@ export class Agent {
 
     // Load Agent Profile (if profileId is specified)
     // Every Agent should have a Profile for memory, tools config, and other settings
-    let systemPrompt: string | undefined;
     if (options.profileId) {
       this.profile = new ProfileManager({
         profileId: options.profileId,
@@ -161,10 +165,6 @@ export class Agent {
       });
       // Ensure profile directory exists (creates with default templates if new)
       this.profile.getOrCreateProfile(true);
-      systemPrompt = this.profile.buildSystemPrompt();
-    } else if (options.systemPrompt) {
-      // Use provided systemPrompt directly (no profile - memory tools won't work)
-      systemPrompt = options.systemPrompt;
     }
 
     // Initialize SkillManager (enabled by default)
@@ -174,17 +174,6 @@ export class Agent {
         profileBaseDir: options.profileBaseDir,
         config: options.skills,
       });
-
-      // Append skills prompt to system prompt
-      const skillsPrompt = this.skillManager.buildSkillsPrompt();
-      if (skillsPrompt) {
-        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${skillsPrompt}` : skillsPrompt;
-      }
-    }
-
-    // Set the combined system prompt
-    if (systemPrompt) {
-      this.agent.setSystemPrompt(systemPrompt);
     }
 
     this.sessionId = options.sessionId ?? uuidv7();
@@ -249,7 +238,7 @@ export class Agent {
       compactionMode,
       // Token 模式参数
       contextWindowTokens: this.contextWindowGuard.tokens,
-      systemPrompt,
+      // systemPrompt is set later via setSystemPrompt() after tools are resolved
       reserveTokens: options.reserveTokens,
       targetRatio: options.compactionTargetRatio,
       minKeepMessages: options.minKeepMessages,
@@ -286,6 +275,14 @@ export class Agent {
       console.error(`[debug] Resolved ${tools.length} tools: ${tools.map(t => t.name).join(", ") || "(none)"}`);
     }
     this.agent.setTools(tools);
+
+    // Build the system prompt using the structured builder
+    const toolNames = tools.map((t: { name: string }) => t.name);
+    const systemPrompt = this.buildFullSystemPrompt(options, toolNames);
+    if (systemPrompt) {
+      this.agent.setSystemPrompt(systemPrompt);
+      this.session.setSystemPrompt(systemPrompt);
+    }
 
     this.session.saveMeta({
       provider: this.agent.state.model?.provider,
@@ -579,35 +576,78 @@ export class Agent {
   }
 
   /**
+   * Build the full system prompt using the structured builder.
+   * Combines profile content, tools, skills, and runtime info.
+   */
+  private buildFullSystemPrompt(
+    options: AgentOptions,
+    toolNames: string[],
+  ): string | undefined {
+    const skillsPrompt = this.skillManager?.buildSkillsPrompt();
+
+    // If a raw systemPrompt is provided directly, use it as-is (backward compat)
+    if (!options.profileId && options.systemPrompt) {
+      return skillsPrompt
+        ? `${options.systemPrompt}\n\n${skillsPrompt}`
+        : options.systemPrompt;
+    }
+
+    if (!this.profile?.getProfile() && !options.profileId) {
+      return skillsPrompt || undefined;
+    }
+
+    return this.rebuildSystemPrompt(toolNames);
+  }
+
+  /**
    * Reload profile from disk and rebuild system prompt.
    * Call this after updating profile files to apply changes immediately.
    */
   reloadSystemPrompt(): void {
     if (!this.profile) {
-      console.log('[Agent] reloadSystemPrompt: no profile');
       return;
     }
 
-    // Reload profile from disk
-    console.log('[Agent] Reloading profile from disk...');
     this.profile.reloadProfile();
 
-    // Rebuild system prompt
-    let systemPrompt = this.profile.buildSystemPrompt();
-    console.log('[Agent] Built system prompt, length:', systemPrompt?.length);
+    const toolNames = (this.agent.state.tools ?? []).map((t: { name: string }) => t.name);
+    const systemPrompt = this.rebuildSystemPrompt(toolNames);
 
-    // Re-add skills prompt if skills are enabled
-    if (this.skillManager) {
-      const skillsPrompt = this.skillManager.buildModelSkillsPrompt();
-      if (skillsPrompt) {
-        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${skillsPrompt}` : skillsPrompt;
-      }
-    }
-
-    // Apply new system prompt
     if (systemPrompt) {
-      console.log('[Agent] Applying system prompt, first 200 chars:', systemPrompt.substring(0, 200));
       this.agent.setSystemPrompt(systemPrompt);
+      this.session.setSystemPrompt(systemPrompt);
     }
+  }
+
+  /**
+   * Rebuild system prompt from current state.
+   * Shared by constructor (via buildFullSystemPrompt) and reloadSystemPrompt.
+   */
+  private rebuildSystemPrompt(toolNames: string[]): string | undefined {
+    const profile = this.profile?.getProfile();
+    if (!profile) return undefined;
+
+    const skillsPrompt = this.skillManager?.buildSkillsPrompt();
+
+    const runtime = collectRuntimeInfo({
+      agentName: this.profile?.getName(),
+      provider: this.resolvedProvider,
+      model: this.agent.state.model?.id,
+    });
+
+    return buildStructuredSystemPrompt({
+      mode: "full",
+      profile: {
+        soul: profile.soul,
+        user: profile.user,
+        workspace: profile.workspace,
+        memory: profile.memory,
+        config: profile.config,
+      },
+      profileDir: this.profile!.getProfileDir(),
+      tools: toolNames,
+      skillsPrompt,
+      runtime,
+    });
   }
 }

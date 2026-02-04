@@ -10,11 +10,12 @@ describe("buildSubagentSystemPrompt", () => {
       task: "Analyze the auth module for security issues",
     });
 
-    expect(prompt).toContain("You are a subagent spawned to complete a specific task");
+    expect(prompt).toContain("## Subagent Rules");
     expect(prompt).toContain("Analyze the auth module for security issues");
     expect(prompt).toContain("parent-123");
     expect(prompt).toContain("child-456");
     expect(prompt).toContain("Do NOT spawn nested subagents");
+    expect(prompt).toContain("## Safety");
   });
 
   it("includes label when provided", () => {
