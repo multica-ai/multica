@@ -1,5 +1,23 @@
 /**
- * SessionStore - Manages session persistence
+ * @deprecated This is a legacy file-based session storage implementation.
+ *
+ * **DO NOT USE** - Use `DatabaseStore` instead, which:
+ * - Implements the `ISessionStore` interface
+ * - Uses SQLite for better performance and reliability
+ * - Supports project management features
+ * - Supports session archiving
+ *
+ * This file is kept for reference only and will be removed in a future release.
+ * See: https://github.com/multica-ai/multica/issues/121
+ *
+ * Migration completed in commit introducing DatabaseStore.
+ *
+ * @see DatabaseStore - The current SQLite-based implementation
+ * @see ISessionStore - The interface all session stores should implement
+ *
+ * ---
+ *
+ * LEGACY: SessionStore - Manages session persistence (FILE-BASED)
  *
  * Storage structure:
  * ~/.multica/
@@ -39,6 +57,11 @@ function getDefaultStoragePath(): string {
   }
 }
 
+/**
+ * @deprecated Use `DatabaseStore` instead. This legacy file-based store does not implement
+ * the `ISessionStore` interface and lacks project management features.
+ * Scheduled for removal - see https://github.com/multica-ai/multica/issues/121
+ */
 export class SessionStore {
   private basePath: string
   private indexPath: string
