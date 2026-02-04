@@ -106,7 +106,8 @@ export function useAgentStatus(): AgentStatusState & AgentStatusActions {
             sessionId: currentSession.agentSessionId,
             update: {
               sessionUpdate: 'user_message',
-              content: content
+              content: content,
+              _internal: false
             }
           }
         } as unknown as StoredSessionUpdate
