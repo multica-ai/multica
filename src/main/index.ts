@@ -8,7 +8,7 @@ import log from './logger'
 
 log.info('Multica starting...')
 
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -42,7 +42,8 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      backgroundThrottling: false
     }
   })
 
@@ -145,6 +146,13 @@ app.whenReady().then(async () => {
 
   // Notify renderer when app window gains focus
   mainWindow.on('focus', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.APP_FOCUS)
+    }
+  })
+
+  // Notify renderer when system resumes from sleep (reuse APP_FOCUS to trigger DB sync)
+  powerMonitor.on('resume', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(IPC_CHANNELS.APP_FOCUS)
     }

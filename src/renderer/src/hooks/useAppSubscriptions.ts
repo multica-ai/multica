@@ -14,6 +14,7 @@ import { useFileChangeStore } from '../stores/fileChangeStore'
 import { useCommandStore } from '../stores/commandStore'
 import { useAgentStore } from '../stores/agentStore'
 import { toast } from 'sonner'
+import { mergeSessionUpdates } from '../utils/sessionUpdates'
 
 function isGitHeadPath(filePath: string): boolean {
   const normalizedPath = filePath.replace(/\\/g, '/')
@@ -232,6 +233,18 @@ export function useAppSubscriptions(callbacks: SubscriptionCallbacks): void {
 
       if (currentSession) {
         await Promise.all([agentRefresh, callbacks.validateCurrentSessionDirectory()])
+
+        // Re-sync session updates from DB to capture any IPC messages that were
+        // lost during system sleep/wake or Chromium background throttling
+        try {
+          const sessionId = currentSession.id
+          const freshData = await window.electronAPI.getSession(sessionId)
+          if (freshData?.updates && currentSessionIdRef.current === sessionId) {
+            setSessionUpdates((prev) => mergeSessionUpdates(prev, freshData.updates))
+          }
+        } catch (err) {
+          console.error('[useAppSubscriptions] Failed to refresh session updates on focus:', err)
+        }
       } else {
         await agentRefresh
       }
