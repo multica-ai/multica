@@ -60,6 +60,8 @@ export function useAppSubscriptions(callbacks: SubscriptionCallbacks): void {
 
   // Debounce timer for git branch refresh
   const gitBranchRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const focusSyncInFlightRef = useRef(false)
+  const lastFocusSyncAtRef = useRef(0)
 
   // Get current session ID for stable reference in effects
   const currentSessionId = currentSession?.id
@@ -237,13 +239,33 @@ export function useAppSubscriptions(callbacks: SubscriptionCallbacks): void {
         // Re-sync session updates from DB to capture any IPC messages that were
         // lost during system sleep/wake or Chromium background throttling
         try {
+          const now = Date.now()
+          if (focusSyncInFlightRef.current || now - lastFocusSyncAtRef.current < 500) {
+            if (import.meta.env.DEV) {
+              console.log(
+                '[useAppSubscriptions] Skip focus sync (deduped)',
+                'inFlight:',
+                focusSyncInFlightRef.current,
+                'ageMs:',
+                now - lastFocusSyncAtRef.current
+              )
+            }
+            return
+          }
+          focusSyncInFlightRef.current = true
+          lastFocusSyncAtRef.current = now
           const sessionId = currentSession.id
+          if (import.meta.env.DEV) {
+            console.log('[useAppSubscriptions] Focus sync start', sessionId)
+          }
           const freshData = await window.electronAPI.getSession(sessionId)
           if (freshData?.updates && currentSessionIdRef.current === sessionId) {
             setSessionUpdates((prev) => mergeSessionUpdates(prev, freshData.updates))
           }
         } catch (err) {
           console.error('[useAppSubscriptions] Failed to refresh session updates on focus:', err)
+        } finally {
+          focusSyncInFlightRef.current = false
         }
       } else {
         await agentRefresh
