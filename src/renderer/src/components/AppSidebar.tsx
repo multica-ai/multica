@@ -29,6 +29,31 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 
+// Custom KeyboardSensor that doesn't intercept keyboard events from input fields.
+// The default KeyboardSensor uses Space to activate drag, which prevents typing
+// spaces in the session rename input.
+class SidebarKeyboardSensor extends KeyboardSensor {
+  static activators = [
+    {
+      eventName: 'onKeyDown' as const,
+      handler: (
+        ...args: Parameters<(typeof KeyboardSensor.activators)[0]['handler']>
+      ): boolean | undefined => {
+        const [event] = args
+        const target = event.target as HTMLElement
+        if (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable
+        ) {
+          return false
+        }
+        return KeyboardSensor.activators[0].handler(...args)
+      }
+    }
+  ] as (typeof KeyboardSensor)['activators']
+}
+
 interface AppSidebarProps {
   projects: MulticaProject[]
   sessionsByProject: Map<string, MulticaSession[]>
@@ -65,7 +90,7 @@ export function AppSidebar({
         distance: 8 // Require 8px movement to start drag
       }
     }),
-    useSensor(KeyboardSensor, {
+    useSensor(SidebarKeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates
     })
   )
