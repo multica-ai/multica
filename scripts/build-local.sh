@@ -32,6 +32,12 @@ done
 
 cd "$PROJECT_DIR"
 
+# 0. 清空 dist 目录
+if [ -d "$PROJECT_DIR/dist" ]; then
+  echo "==> 清空 dist 目录..."
+  rm -rf "$PROJECT_DIR/dist"
+fi
+
 # 1. TypeCheck（可选）
 if [ "$SKIP_TYPECHECK" = false ]; then
   echo "==> 运行 TypeScript 类型检查..."
