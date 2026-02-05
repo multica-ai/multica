@@ -82,6 +82,17 @@ export interface LocalChatEvent {
   }
 }
 
+// Local chat approval request (mirrors ExecApprovalRequestPayload from @multica/sdk)
+export interface LocalChatApproval {
+  approvalId: string
+  agentId: string
+  command: string
+  cwd?: string
+  riskLevel: 'safe' | 'needs-review' | 'dangerous'
+  riskReasons: string[]
+  expiresAtMs: number
+}
+
 // Available style options
 export const AGENT_STYLES = ['concise', 'warm', 'playful', 'professional'] as const
 export type AgentStyle = (typeof AGENT_STYLES)[number]
@@ -117,6 +128,18 @@ const electronAPI = {
     },
     listDevices: () => ipcRenderer.invoke('hub:listDevices'),
     revokeDevice: (deviceId: string) => ipcRenderer.invoke('hub:revokeDevice', deviceId),
+    onConnectionStateChanged: (callback: (state: string) => void) => {
+      ipcRenderer.on('hub:connection-state-changed', (_event, state: string) => callback(state))
+    },
+    offConnectionStateChanged: () => {
+      ipcRenderer.removeAllListeners('hub:connection-state-changed')
+    },
+    onDevicesChanged: (callback: () => void) => {
+      ipcRenderer.on('hub:devices-changed', () => callback())
+    },
+    offDevicesChanged: () => {
+      ipcRenderer.removeAllListeners('hub:devices-changed')
+    },
   },
 
   // Tools management
@@ -184,11 +207,13 @@ const electronAPI = {
     subscribe: (agentId: string) => ipcRenderer.invoke('localChat:subscribe', agentId),
     /** Unsubscribe from agent events */
     unsubscribe: (agentId: string) => ipcRenderer.invoke('localChat:unsubscribe', agentId),
-    /** Get message history for local chat */
-    getHistory: (agentId: string): Promise<{ messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; agentId: string }> }> =>
-      ipcRenderer.invoke('localChat:getHistory', agentId),
+    /** Get message history for local chat (returns raw AgentMessageItem[]) */
+    getHistory: (agentId: string) => ipcRenderer.invoke('localChat:getHistory', agentId),
     /** Send message to agent via direct IPC (no Gateway) */
     send: (agentId: string, content: string) => ipcRenderer.invoke('localChat:send', agentId, content),
+    /** Resolve an exec approval request */
+    resolveExecApproval: (approvalId: string, decision: string) =>
+      ipcRenderer.invoke('localChat:resolveExecApproval', approvalId, decision),
     /** Listen for agent events */
     onEvent: (callback: (event: LocalChatEvent) => void) => {
       ipcRenderer.on('localChat:event', (_event, data: LocalChatEvent) => callback(data))
@@ -196,6 +221,14 @@ const electronAPI = {
     /** Remove event listener */
     offEvent: () => {
       ipcRenderer.removeAllListeners('localChat:event')
+    },
+    /** Listen for exec approval requests */
+    onApproval: (callback: (approval: LocalChatApproval) => void) => {
+      ipcRenderer.on('localChat:approval', (_event, data: LocalChatApproval) => callback(data))
+    },
+    /** Remove approval listener */
+    offApproval: () => {
+      ipcRenderer.removeAllListeners('localChat:approval')
     },
   },
 }

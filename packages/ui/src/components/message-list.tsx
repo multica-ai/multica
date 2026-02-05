@@ -4,13 +4,22 @@ import { memo, useMemo } from "react";
 import { MemoizedMarkdown } from "@multica/ui/components/markdown";
 import { StreamingMarkdown } from "@multica/ui/components/markdown/StreamingMarkdown";
 import { ToolCallItem } from "@multica/ui/components/tool-call-item";
+import { ThinkingItem } from "@multica/ui/components/thinking-item";
 import { cn, getTextContent } from "@multica/ui/lib/utils";
 import type { Message } from "@multica/store";
-import type { ContentBlock, ToolCall } from "@multica/sdk";
+import type { ContentBlock, ToolCall, ThinkingContent } from "@multica/sdk";
 
 /** Extract toolCall blocks from content */
 function getToolCalls(blocks: ContentBlock[]): ToolCall[] {
   return blocks.filter((b): b is ToolCall => b.type === "toolCall")
+}
+
+/** Extract concatenated thinking text from content blocks */
+function getThinkingText(blocks: ContentBlock[]): string {
+  return blocks
+    .filter((b): b is ThinkingContent => b.type === "thinking")
+    .map((b) => b.thinking ?? "")
+    .join("")
 }
 
 /** Build a synthetic "running" toolResult Message from a ToolCall block */
@@ -46,7 +55,7 @@ export const MessageList = memo(function MessageList({ messages, streamingIds }:
   }, [messages])
 
   return (
-    <div className="relative px-4 py-6 max-w-4xl mx-auto">
+    <div className="relative p-6 px-10 max-w-4xl mx-auto">
       {messages.map((msg) => {
         // ToolResult messages → render as tool execution item
         if (msg.role === "toolResult") {
@@ -55,17 +64,24 @@ export const MessageList = memo(function MessageList({ messages, streamingIds }:
 
         const text = getTextContent(msg.content)
         const toolCalls = msg.role === "assistant" ? getToolCalls(msg.content) : []
+        const thinking = msg.role === "assistant" ? getThinkingText(msg.content) : ""
+        const hasThinkingBlocks = msg.role === "assistant" && msg.content.some((b) => b.type === "thinking")
         const isStreaming = streamingIds.has(msg.id)
 
         // Find toolCall blocks that don't have a toolResult message yet —
         // these are tools the LLM decided to call but haven't started executing
         const unresolvedToolCalls = toolCalls.filter((tc) => !resolvedToolCallIds.has(tc.id))
 
-        // Skip completely empty messages (no text, no unresolved tools, not streaming)
-        if (!text && unresolvedToolCalls.length === 0 && !isStreaming) return null
+        // Skip completely empty messages (no text, no unresolved tools, no thinking, not streaming)
+        if (!text && unresolvedToolCalls.length === 0 && !hasThinkingBlocks && !isStreaming) return null
 
         return (
           <div key={msg.id}>
+            {/* Render thinking content (before text, matching LLM output order) */}
+            {hasThinkingBlocks && (
+              <ThinkingItem thinking={thinking} isStreaming={isStreaming} />
+            )}
+
             {/* Render text content (if any) */}
             {(text || isStreaming) && (
               <div

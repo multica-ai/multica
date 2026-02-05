@@ -1,0 +1,20 @@
+{
+  "name": "@multica/hooks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@multica/sdk": "workspace:*",
+    "react": "catalog:",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/uuid": "^11.0.0",
+    "typescript": "catalog:"
+  }
+}

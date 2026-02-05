@@ -1,166 +1,114 @@
-/**
- * Hook for local direct chat with agent via IPC (no Gateway required).
- *
- * This hook bridges IPC events to useMessagesStore, allowing the Chat component
- * to work identically in both local IPC and remote Gateway modes.
- */
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useMessagesStore } from '@multica/store'
-import type { ContentBlock, CompactionEndEvent } from '@multica/sdk'
+import { useChat } from '@multica/hooks/use-chat'
+import type {
+  StreamPayload,
+  ExecApprovalRequestPayload,
+  ApprovalDecision,
+} from '@multica/sdk'
 
-interface UseLocalChatOptions {
-  agentId: string
-}
-
-interface UseLocalChatReturn {
-  isConnected: boolean
-  isLoading: boolean
-  sendMessage: (content: string) => void
-  disconnect: () => void
-}
-
-/**
- * Provides local IPC chat that uses the same useMessagesStore as Gateway mode.
- * This enables full Chat component reuse.
- */
-export function useLocalChat({ agentId }: UseLocalChatOptions): UseLocalChatReturn {
-  const [isConnected, setIsConnected] = useState(false)
+export function useLocalChat() {
+  const chat = useChat()
+  const chatRef = useRef(chat)
+  chatRef.current = chat
+  const [agentId, setAgentId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const currentStreamRef = useRef<string | null>(null)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true)
+  const [initError, setInitError] = useState<string | null>(null)
+  const initRef = useRef(false)
 
-  // Subscribe to agent events on mount
+  // Initialize hub and get default agent ID
+  useEffect(() => {
+    if (initRef.current) return
+    initRef.current = true
+
+    window.electronAPI.hub.init()
+      .then((result) => {
+        const r = result as { defaultAgentId?: string }
+        console.log('[LocalChat] hub.init → defaultAgentId:', r.defaultAgentId)
+        if (r.defaultAgentId) {
+          setAgentId(r.defaultAgentId)
+        } else {
+          setInitError('No default agent available')
+          setIsLoadingHistory(false)
+        }
+      })
+      .catch((err: Error) => {
+        setInitError(err.message)
+        setIsLoadingHistory(false)
+      })
+  }, [])
+
+  // Subscribe to events + fetch history once agentId is available
   useEffect(() => {
     if (!agentId) return
 
-    const subscribe = async () => {
-      const result = await window.electronAPI.localChat.subscribe(agentId)
-      if (result.ok) {
-        setIsConnected(true)
-      }
-    }
+    // Subscribe to agent events
+    window.electronAPI.localChat.subscribe(agentId).catch(() => {})
 
-    subscribe()
+    // Listen for stream events
+    window.electronAPI.localChat.onEvent((data) => {
+      // Cast IPC event to StreamPayload (same shape: { agentId, streamId, event })
+      const payload = data as unknown as StreamPayload
+      if (!payload.event) return
 
-    // Load message history from agent session
-    const loadHistory = async () => {
-      try {
-        const result = await window.electronAPI.localChat.getHistory(agentId)
-        if (result.messages && result.messages.length > 0) {
-          // Normalize: IPC may return content as string, store expects ContentBlock[]
-          useMessagesStore.getState().loadMessages(
-            result.messages.map((m: Record<string, unknown>) => ({
-              ...m,
-              content: typeof m.content === 'string'
-                ? (m.content ? [{ type: 'text' as const, text: m.content }] : [])
-                : (m.content ?? []),
-            })) as import('@multica/store').Message[]
-          )
-        }
-      } catch {
-        // History load is best-effort
-      }
-    }
-    loadHistory()
-
-    // Listen for events and route to useMessagesStore
-    window.electronAPI.localChat.onEvent((event) => {
-      if (event.agentId !== agentId) return
-
-      const store = useMessagesStore.getState()
-
-      // Handle error
-      if (event.type === 'error') {
-        store.addAssistantMessage(event.content ?? 'Unknown error', agentId)
-        setIsLoading(false)
-        return
-      }
-
-      // Handle agent events - same logic as connection-store.ts
-      const agentEvent = event.event
-      const streamId = event.streamId
-      if (!agentEvent) return
-
-      // Handle compaction events (no streamId required)
-      if (agentEvent.type === 'compaction_start') {
-        store.startCompaction()
-        return
-      }
-      if (agentEvent.type === 'compaction_end') {
-        const evt = agentEvent as CompactionEndEvent
-        store.endCompaction({
-          removed: evt.removed,
-          kept: evt.kept,
-          tokensRemoved: evt.tokensRemoved,
-          tokensKept: evt.tokensKept,
-          reason: evt.reason,
-        })
-        return
-      }
-
-      if (!streamId) return
-
-      if (agentEvent.type === 'message_start') {
-        currentStreamRef.current = streamId
-        store.startStream(streamId, agentId)
-        const content = extractContentFromAgentEvent(agentEvent)
-        if (content.length) store.appendStream(streamId, content)
-      } else if (agentEvent.type === 'message_update') {
-        const content = extractContentFromAgentEvent(agentEvent)
-        if (content.length && currentStreamRef.current) {
-          store.appendStream(currentStreamRef.current, content)
-        }
-      } else if (agentEvent.type === 'message_end') {
-        const content = extractContentFromAgentEvent(agentEvent)
-        if (currentStreamRef.current) {
-          store.endStream(currentStreamRef.current, content)
-          currentStreamRef.current = null
-        }
-        setIsLoading(false)
-      }
+      chatRef.current.handleStream(payload)
+      if (payload.event.type === 'message_start') setIsLoading(true)
+      if (payload.event.type === 'message_end') setIsLoading(false)
     })
+
+    // Listen for exec approval requests
+    window.electronAPI.localChat.onApproval((approval) => {
+      chatRef.current.addApproval(approval as ExecApprovalRequestPayload)
+    })
+
+    // Fetch history
+    window.electronAPI.localChat.getHistory(agentId)
+      .then((result) => {
+        console.log('[LocalChat] getHistory result:', result.messages?.length, 'messages, sample:', result.messages?.[0])
+        if (result.messages?.length) {
+          chatRef.current.setHistory(result.messages as never[], agentId)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingHistory(false))
 
     return () => {
       window.electronAPI.localChat.offEvent()
-      window.electronAPI.localChat.unsubscribe(agentId)
-      setIsConnected(false)
+      window.electronAPI.localChat.offApproval()
+      window.electronAPI.localChat.unsubscribe(agentId).catch(() => {})
     }
   }, [agentId])
 
   const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim() || !agentId || isLoading) return
-
-      // Add user message to store (same as Gateway mode)
-      useMessagesStore.getState().addUserMessage(content.trim(), agentId)
+    (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed || !agentId) return
+      chatRef.current.addUserMessage(trimmed, agentId)
+      chatRef.current.setError(null)
+      window.electronAPI.localChat.send(agentId, trimmed).catch(() => {})
       setIsLoading(true)
-
-      // Send via IPC
-      const result = await window.electronAPI.localChat.send(agentId, content.trim())
-      if (result.error) {
-        useMessagesStore.getState().addAssistantMessage(`Error: ${result.error}`, agentId)
-        setIsLoading(false)
-      }
     },
-    [agentId, isLoading]
+    [agentId],
   )
 
-  const disconnect = useCallback(() => {
-    useMessagesStore.getState().clearMessages()
-    setIsConnected(false)
-    setIsLoading(false)
-  }, [])
+  const resolveApproval = useCallback(
+    (approvalId: string, decision: ApprovalDecision) => {
+      chatRef.current.removeApproval(approvalId)
+      window.electronAPI.localChat.resolveExecApproval(approvalId, decision).catch(() => {})
+    },
+    [],
+  )
 
   return {
-    isConnected,
+    agentId,
+    initError,
+    messages: chat.messages,
+    streamingIds: chat.streamingIds,
     isLoading,
+    isLoadingHistory,
+    error: chat.error,
+    pendingApprovals: chat.pendingApprovals,
     sendMessage,
-    disconnect,
+    resolveApproval,
   }
-}
-
-/** Extract content blocks from AgentEvent message */
-function extractContentFromAgentEvent(event: { message?: { content?: unknown } }): ContentBlock[] {
-  if (!event.message?.content) return []
-  const content = event.message.content
-  return Array.isArray(content) ? content as ContentBlock[] : []
 }

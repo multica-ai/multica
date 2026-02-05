@@ -3,6 +3,7 @@
  */
 
 import type { ToolsConfig } from "../tools/policy.js";
+import type { ExecApprovalConfig } from "../tools/exec-approval-types.js";
 
 /** Profile filename constants */
 export const PROFILE_FILES = {
@@ -39,6 +40,8 @@ export interface ProfileConfig {
   thinkingLevel?: string;
   /** Reasoning mode: off, on, stream */
   reasoningMode?: "off" | "on" | "stream" | undefined;
+  /** Exec approval configuration (security level, ask mode, allowlist) */
+  execApproval?: ExecApprovalConfig | undefined;
 }
 
 /** Agent Profile configuration */

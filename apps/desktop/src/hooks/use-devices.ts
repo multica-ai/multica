@@ -53,5 +53,15 @@ export function useDevices(): UseDevicesReturn {
     refresh()
   }, [refresh])
 
+  // Subscribe to device list changes pushed from main process
+  useEffect(() => {
+    window.electronAPI?.hub.onDevicesChanged(() => {
+      refresh()
+    })
+    return () => {
+      window.electronAPI?.hub.offDevicesChanged()
+    }
+  }, [refresh])
+
   return { devices, loading, refresh, revokeDevice }
 }

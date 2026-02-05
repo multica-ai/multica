@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter, Playfair_Display } from "next/font/google";
 import "@multica/ui/globals.css";
 import { ThemeProvider } from "@multica/ui/components/theme-provider";
-import { AppHeader } from "./app-header";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { ServiceWorkerRegister } from "./sw-register";
 
@@ -53,9 +52,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AppHeader>
-            <div className="flex-1 overflow-hidden">{children}</div>
-          </AppHeader>
+          <div className="h-dvh overflow-hidden">{children}</div>
         </ThemeProvider>
         <Toaster />
         <ServiceWorkerRegister />

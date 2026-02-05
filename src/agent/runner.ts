@@ -353,34 +353,7 @@ export class Agent {
   }
 
   async run(prompt: string): Promise<AgentRunResult> {
-    if (!this.initialized) {
-      await this.session.repairIfNeeded((msg) => console.error(msg));
-      const restoredMessages = this.session.loadMessages();
-      if (restoredMessages.length > 0) {
-        if (this.debug) {
-          console.error(`[debug] Restoring ${restoredMessages.length} messages from session`);
-          for (const msg of restoredMessages) {
-            const msgAny = msg as any;
-            const content = Array.isArray(msgAny.content)
-              ? msgAny.content.map((c: any) => c.type || "text").join(", ")
-              : typeof msgAny.content;
-            console.error(`[debug]   ${msg.role}: ${content}`);
-            if (Array.isArray(msgAny.content)) {
-              for (const block of msgAny.content) {
-                if (block.type === "tool_use") {
-                  console.error(`[debug]     tool_use id: ${block.id}, name: ${block.name}`);
-                }
-                if (block.type === "tool_result") {
-                  console.error(`[debug]     tool_result tool_use_id: ${block.tool_use_id}`);
-                }
-              }
-            }
-          }
-        }
-        this.agent.replaceMessages(restoredMessages);
-      }
-      this.initialized = true;
-    }
+    await this.ensureInitialized();
     this.output.state.lastAssistantText = "";
 
     const canRotate = !this.pinnedProfile && this.profileCandidates.length > 1;
@@ -535,6 +508,17 @@ export class Agent {
   /** Get current active tool names */
   getActiveTools(): string[] {
     return this.agent.state.tools?.map(t => t.name) ?? [];
+  }
+
+  /** Ensure session messages are loaded from disk (idempotent) */
+  async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+    await this.session.repairIfNeeded((msg) => console.error(msg));
+    const restoredMessages = this.session.loadMessages();
+    if (restoredMessages.length > 0) {
+      this.agent.replaceMessages(restoredMessages);
+    }
+    this.initialized = true;
   }
 
   /** Get all messages from the current session */

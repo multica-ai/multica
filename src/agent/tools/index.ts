@@ -29,3 +29,20 @@ export {
   getSubagentPolicy,
   wouldToolBeAllowed,
 } from "./policy.js";
+
+// Exec approval system
+export type {
+  ExecSecurity,
+  ExecAsk,
+  ApprovalDecision,
+  ExecApprovalRequest,
+  ExecApprovalConfig,
+  ExecAllowlistEntry,
+  ExecApprovalCallback,
+  ApprovalResult,
+  SafetyEvaluation,
+} from "./exec-approval-types.js";
+export { DEFAULT_APPROVAL_TIMEOUT_MS } from "./exec-approval-types.js";
+export { evaluateCommandSafety, requiresApproval, minSecurity, maxAsk, DEFAULT_SAFE_BINS } from "./exec-safety.js";
+export { matchAllowlist, addAllowlistEntry, recordAllowlistUse, removeAllowlistEntry, normalizeAllowlist } from "./exec-allowlist.js";
+export { createCliApprovalCallback } from "./exec-approval-cli.js";

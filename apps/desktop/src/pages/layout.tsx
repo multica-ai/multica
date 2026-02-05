@@ -11,6 +11,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { cn } from '@multica/ui/lib/utils'
 import { DeviceConfirmDialog } from '../components/device-confirm-dialog'
+import ChatPage from './chat'
 
 const tabs = [
   { path: '/', label: 'Home', icon: Home01Icon, exact: true },
@@ -59,8 +60,18 @@ export default function Layout() {
       </nav>
 
       {/* Content */}
-      <main className={cn('flex-1 overflow-auto', location.pathname === '/chat' ? '' : 'p-4')}>
-        <Outlet />
+      <main className="flex-1 overflow-auto relative">
+        {/* ChatPage is always mounted (cached), hidden via CSS */}
+        <div className={cn('absolute inset-0', location.pathname === '/chat' ? '' : 'hidden')}>
+          <ChatPage />
+        </div>
+
+        {/* Other routes render normally via Outlet */}
+        {location.pathname !== '/chat' && (
+          <div className="p-4 h-full">
+            <Outlet />
+          </div>
+        )}
       </main>
       <Toaster />
       <DeviceConfirmDialog />

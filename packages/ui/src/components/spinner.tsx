@@ -1,16 +1,12 @@
 /**
- * Spinner - 3x3 grid spinner based on SpinKit Grid
+ * Spinner — 3x3 grid pulse for **active processing / execution** states.
  *
- * Features:
- * - Uses currentColor (inherits text color from parent, typically theme primary)
- * - Uses em sizing (scales with font-size)
- * - 3x3 grid of cubes with staggered scale animation
- * - Pure CSS animation (no JS state)
+ * Use when the system is actively doing work or waiting for human action
+ * (streaming content, generating responses, awaiting approval).
+ * For passive content-loading states, use `<Loading />` instead.
  *
- * Usage:
- *   <Spinner className="text-primary" />           // Uses primary theme color
- *   <Spinner className="text-muted-foreground" />  // Uses muted color
- *   <Spinner className="text-xs" />                // Controls size via Tailwind font-size
+ * Inherits color from `currentColor` (use Tailwind `text-*`).
+ * Scales with font-size (use Tailwind `text-*` for size).
  */
 import { cn } from "@multica/ui/lib/utils"
 
@@ -19,18 +15,33 @@ export interface SpinnerProps {
   className?: string
 }
 
+const DELAYS = [0.2, 0.3, 0.4, 0.1, 0.2, 0.3, 0, 0.1, 0.2]
+
+const cubeStyle: React.CSSProperties = {
+  backgroundColor: "currentColor",
+  animation: "spinner-grid 1.3s infinite ease-in-out",
+  transform: "scale3d(0.5, 0.5, 1)",
+}
+
 export function Spinner({ className }: SpinnerProps) {
   return (
-    <span className={cn("spinner", className)} role="status" aria-label="Loading">
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
+    <span
+      className={cn(className)}
+      role="status"
+      aria-label="Loading"
+      style={{
+        display: "inline-grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        width: "1em",
+        height: "1em",
+        gap: "0.08em",
+      }}
+    >
+      {DELAYS.map((delay, i) => (
+        <span key={i} style={{ ...cubeStyle, animationDelay: `${delay}s` }} />
+      ))}
+
+      <style>{`@keyframes spinner-grid{0%,70%,100%{transform:scale3d(.5,.5,1)}35%{transform:scale3d(0,0,1)}}`}</style>
     </span>
   )
 }

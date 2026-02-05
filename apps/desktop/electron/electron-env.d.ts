@@ -101,6 +101,16 @@ interface LocalChatEvent {
   }
 }
 
+interface LocalChatApproval {
+  approvalId: string
+  agentId: string
+  command: string
+  cwd?: string
+  riskLevel: 'safe' | 'needs-review' | 'dangerous'
+  riskReasons: string[]
+  expiresAtMs: number
+}
+
 interface ProviderStatus {
   id: string
   name: string
@@ -140,6 +150,10 @@ interface ElectronAPI {
     deviceConfirmResponse: (deviceId: string, allowed: boolean) => void
     listDevices: () => Promise<DeviceEntryInfo[]>
     revokeDevice: (deviceId: string) => Promise<{ ok: boolean }>
+    onConnectionStateChanged: (callback: (state: string) => void) => void
+    offConnectionStateChanged: () => void
+    onDevicesChanged: (callback: () => void) => void
+    offDevicesChanged: () => void
   }
   tools: {
     list: () => Promise<ToolInfo[]>
@@ -179,10 +193,13 @@ interface ElectronAPI {
   localChat: {
     subscribe: (agentId: string) => Promise<{ ok?: boolean; error?: string; alreadySubscribed?: boolean }>
     unsubscribe: (agentId: string) => Promise<{ ok: boolean }>
-    getHistory: (agentId: string) => Promise<{ messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; agentId: string }> }>
+    getHistory: (agentId: string) => Promise<{ messages: unknown[] }>
     send: (agentId: string, content: string) => Promise<{ ok?: boolean; error?: string }>
+    resolveExecApproval: (approvalId: string, decision: string) => Promise<{ ok: boolean }>
     onEvent: (callback: (event: LocalChatEvent) => void) => void
     offEvent: () => void
+    onApproval: (callback: (approval: LocalChatApproval) => void) => void
+    offApproval: () => void
   }
 }
 

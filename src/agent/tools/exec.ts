@@ -7,6 +7,7 @@ import {
   getFullOutput,
   PROCESS_REGISTRY,
 } from "./process-registry.js";
+import type { ExecApprovalCallback } from "./exec-approval-types.js";
 
 const ExecSchema = Type.Object({
   command: Type.String({ description: "Shell command to execute." }),
@@ -40,7 +41,10 @@ export type ExecResult = {
 
 const DEFAULT_YIELD_MS = 10000; // Changed from 5000 to 10000
 
-export function createExecTool(defaultCwd?: string): AgentTool<typeof ExecSchema, ExecResult> {
+export function createExecTool(
+  defaultCwd?: string,
+  onApprovalNeeded?: ExecApprovalCallback,
+): AgentTool<typeof ExecSchema, ExecResult> {
   return {
     name: "exec",
     label: "Exec",
@@ -50,6 +54,21 @@ export function createExecTool(defaultCwd?: string): AgentTool<typeof ExecSchema
     execute: async (_toolCallId, args, signal, onUpdate) => {
       const { command, cwd, timeoutMs, yieldMs = DEFAULT_YIELD_MS } = args as ExecArgs;
       const effectiveCwd = cwd || defaultCwd;
+
+      // Exec approval: ask for permission before executing
+      if (onApprovalNeeded) {
+        const approvalResult = await onApprovalNeeded(command, effectiveCwd);
+        if (!approvalResult.approved) {
+          return {
+            content: [{ type: "text", text: "Command execution denied by user." }],
+            details: {
+              output: "Command execution denied by user.",
+              exitCode: 1,
+              truncated: false,
+            },
+          };
+        }
+      }
 
       return new Promise((resolve) => {
         const child = spawn(command, {

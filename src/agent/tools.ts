@@ -10,6 +10,7 @@ import { createSessionsSpawnTool } from "./tools/sessions-spawn.js";
 import { createMemorySearchTool } from "./tools/memory-search.js";
 import { filterTools } from "./tools/policy.js";
 import { isMulticaError, isRetryableError } from "../shared/errors.js";
+import type { ExecApprovalCallback } from "./tools/exec-approval-types.js";
 
 // Re-export resolveModel from providers for backwards compatibility
 export { resolveModel } from "./providers/index.js";
@@ -23,6 +24,8 @@ export interface CreateToolsOptions {
   isSubagent?: boolean | undefined;
   /** Session ID of the agent (passed to sessions_spawn tool) */
   sessionId?: string | undefined;
+  /** Callback invoked when exec tool needs approval before running a command */
+  onExecApprovalNeeded?: ExecApprovalCallback | undefined;
 }
 
 type ToolErrorPayload = {
@@ -98,7 +101,7 @@ export function createAllTools(options: CreateToolsOptions | string): AgentTool<
     (tool) => tool.name !== "bash",
   ) as AgentTool<any>[];
 
-  const execTool = createExecTool(cwd);
+  const execTool = createExecTool(cwd, opts.onExecApprovalNeeded);
   const processTool = createProcessTool(cwd);
   const globTool = createGlobTool(cwd);
   const webFetchTool = createWebFetchTool();
@@ -153,6 +156,7 @@ export function resolveTools(options: ResolveToolsOptions): AgentTool<any>[] {
     profileDir: options.profileDir,
     isSubagent: options.isSubagent,
     sessionId: options.sessionId,
+    onExecApprovalNeeded: options.onExecApprovalNeeded,
   });
 
   // Apply policy filtering

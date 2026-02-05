@@ -9,18 +9,6 @@ import { Hub } from '../../../../src/hub/hub.js'
 import type { ConnectionState } from '@multica/sdk'
 import type { AsyncAgent } from '../../../../src/agent/async-agent.js'
 
-/**
- * Extract plain text from AgentMessage content (string or content block array).
- */
-function extractTextContent(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((c: { type?: string }) => c.type === 'text')
-    .map((c: { text?: string }) => c.text ?? '')
-    .join('')
-}
-
 // Singleton Hub instance
 let hub: Hub | null = null
 let defaultAgentId: string | null = null
@@ -303,9 +291,10 @@ export function registerHubIpcHandlers(): void {
 
       if (!shouldForward) return
 
-      // Track stream ID for message grouping
+      // Track stream ID for message grouping (extract from event.message.id, same as Hub.beginStream)
       if (event.type === 'message_start') {
-        currentStreamId = (event as { id?: string }).id ?? `stream-${Date.now()}`
+        const msgId = (event as { message?: { id?: string } }).message?.id
+        currentStreamId = msgId ?? `stream-${Date.now()}`
         safeLog(`[IPC] Starting stream: ${currentStreamId}`)
       }
 
@@ -323,6 +312,14 @@ export function registerHubIpcHandlers(): void {
     })
 
     ipcAgentSubscriptions.set(agentId, unsubscribe)
+
+    // Register local approval handler so exec approval requests route via IPC
+    h.setLocalApprovalHandler(agentId, (payload) => {
+      if (!mainWindowRef || mainWindowRef.isDestroyed()) return
+      safeLog(`[IPC] Sending approval request to renderer: ${payload.approvalId}`)
+      mainWindowRef.webContents.send('localChat:approval', payload)
+    })
+
     safeLog(`[IPC] Local chat subscribed to agent: ${agentId}`)
 
     return { ok: true }
@@ -337,13 +334,15 @@ export function registerHubIpcHandlers(): void {
       unsubscribe()
     }
     ipcAgentSubscriptions.delete(agentId)
+    getHub().removeLocalApprovalHandler(agentId)
     safeLog(`[IPC] Local chat unsubscribed from agent: ${agentId}`)
     return { ok: true }
   })
 
   /**
    * Get message history for local chat.
-   * Returns messages in the same format as useMessagesStore.
+   * Returns raw AgentMessageItem[] so the renderer can render content blocks,
+   * tool results, thinking blocks, etc. — same format as the Gateway RPC.
    */
   ipcMain.handle('localChat:getHistory', async (_event, agentId: string) => {
     const h = getHub()
@@ -353,17 +352,8 @@ export function registerHubIpcHandlers(): void {
     }
 
     try {
-      const sessionMessages = agent.getMessages()
-      const messages = sessionMessages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m, i) => ({
-          id: `history-${i}-${Date.now()}`,
-          role: m.role as 'user' | 'assistant',
-          content: extractTextContent((m as { content?: unknown }).content),
-          agentId,
-        }))
-        .filter((m) => m.content.length > 0)
-
+      await agent.ensureInitialized()
+      const messages = agent.getMessages()
       return { messages }
     } catch {
       return { messages: [] }
@@ -395,6 +385,15 @@ export function registerHubIpcHandlers(): void {
   })
 
   /**
+   * Resolve an exec approval request for local chat.
+   */
+  ipcMain.handle('localChat:resolveExecApproval', async (_event, approvalId: string, decision: string) => {
+    const h = getHub()
+    const ok = h.resolveExecApproval(approvalId, decision as 'allow-once' | 'allow-always' | 'deny')
+    return { ok }
+  })
+
+  /**
    * Register a one-time token for device verification.
    * Called by the QR code component when a token is generated or refreshed.
    */
@@ -417,7 +416,12 @@ export function registerHubIpcHandlers(): void {
    */
   ipcMain.handle('hub:revokeDevice', async (_event, deviceId: string) => {
     const h = getHub()
-    return { ok: h.deviceStore.revokeDevice(deviceId) }
+    const ok = h.deviceStore.revokeDevice(deviceId)
+    // Notify renderer that device list changed
+    if (ok && mainWindowRef && !mainWindowRef.isDestroyed()) {
+      mainWindowRef.webContents.send('hub:devices-changed')
+    }
+    return { ok }
   })
 
 }
@@ -453,9 +457,20 @@ export function setupDeviceConfirmation(mainWindow: Electron.BrowserWindow): voi
       pendingConfirms.set(deviceId, (allowed: boolean) => {
         clearTimeout(timeout)
         resolve(allowed)
+        // Notify renderer that device list changed when a device is approved
+        if (allowed && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('hub:devices-changed')
+        }
       })
       mainWindow.webContents.send('hub:device-confirm-request', deviceId, meta)
     })
+  })
+
+  // Forward connection state changes to renderer
+  h.onConnectionStateChange((state) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('hub:connection-state-changed', state)
+    }
   })
 }
 

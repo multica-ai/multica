@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { SkillsConfig } from "./skills/types.js";
 import type { ToolsConfig } from "./tools/policy.js";
+import type { ExecApprovalCallback, ExecApprovalConfig } from "./tools/exec-approval-types.js";
 
 /** Controls how reasoning/thinking content blocks are handled */
 export type ReasoningMode = "off" | "on" | "stream";
@@ -75,6 +76,12 @@ export type AgentOptions = {
   tools?: ToolsConfig | undefined;
   /** Whether this is a subagent (applies restricted tool set) */
   isSubagent?: boolean | undefined;
+
+  // === Exec Approval Configuration ===
+  /** Callback invoked when exec tool needs approval before running a command */
+  onExecApprovalNeeded?: ExecApprovalCallback | undefined;
+  /** Exec approval configuration (security level, ask mode, allowlist) */
+  execApproval?: ExecApprovalConfig | undefined;
 };
 
 export interface Message {

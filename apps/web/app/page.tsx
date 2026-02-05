@@ -1,5 +1,5 @@
-import { Chat } from "@multica/ui/components/chat";
+import ChatPage from "@/components/pages/chat-page";
 
 export default function Page() {
-  return <Chat />;
+  return <ChatPage />;
 }

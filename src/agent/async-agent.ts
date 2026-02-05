@@ -220,6 +220,11 @@ export class AsyncAgent {
     this.agent.reloadSystemPrompt();
   }
 
+  /** Ensure session messages are loaded from disk (idempotent) */
+  async ensureInitialized(): Promise<void> {
+    return this.agent.ensureInitialized();
+  }
+
   /**
    * Get all messages from the current session.
    */

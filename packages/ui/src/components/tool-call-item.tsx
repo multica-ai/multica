@@ -134,16 +134,18 @@ export const ToolCallItem = memo(function ToolCallItem({ message }: { message: M
 
   return (
     <div className="py-0.5 px-2.5 text-sm text-muted-foreground">
+      <div className={cn("rounded transition-colors", expanded && "bg-muted/30")}>
       <button
         type="button"
         aria-label={`${display.label}${subtitle ? ` ${subtitle}` : ""} — ${toolStatus}`}
         aria-expanded={hasDetails ? expanded : undefined}
         onClick={() => hasDetails && setExpanded(!expanded)}
         className={cn(
-          "group flex w-full items-center gap-1.5 rounded px-1.5 py-0.5",
+          "group flex w-full items-center gap-1.5 rounded px-2.5 py-1",
           "text-left transition-[color,background-color]",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 outline-none",
-          hasDetails && "hover:bg-muted/30 cursor-pointer",
+          hasDetails && !expanded && "hover:bg-muted/30 cursor-pointer",
+          hasDetails && expanded && "cursor-pointer",
           !hasDetails && "cursor-default",
         )}
       >
@@ -214,11 +216,12 @@ export const ToolCallItem = memo(function ToolCallItem({ message }: { message: M
           role="region"
           aria-label={`${display.label} result`}
           tabIndex={0}
-          className="mt-1 ml-7 text-xs bg-muted rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-all"
+          className="px-2.5 pt-1 pb-2 text-xs max-h-48 overflow-y-auto whitespace-pre-wrap break-all"
         >
           {resultText}
         </div>
       )}
+      </div>
     </div>
   )
 })

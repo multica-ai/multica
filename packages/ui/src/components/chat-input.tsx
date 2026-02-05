@@ -117,7 +117,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         <EditorContent editor={editor} />
         <div className="flex items-center justify-end pt-2">
           <Button size="icon-lg" onClick={handleSubmit} disabled={disabled}>
-            <HugeiconsIcon strokeWidth={2.5} icon={ArrowUpIcon} />
+            <HugeiconsIcon className="size-4.5" strokeWidth={2.5} icon={ArrowUpIcon} />
           </Button>
         </div>
       </div>

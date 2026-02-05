@@ -44,3 +44,11 @@ export {
   type ImageContent,
   extractThinkingFromEvent,
 } from "./stream";
+
+export {
+  ExecApprovalRequestAction,
+  type ApprovalDecision,
+  type ExecApprovalRequestPayload,
+  type ResolveExecApprovalParams,
+  type ResolveExecApprovalResult,
+} from "./exec-approval";

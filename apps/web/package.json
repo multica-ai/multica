@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@multica/hooks": "workspace:*",
     "@multica/sdk": "workspace:*",
     "@multica/store": "workspace:*",
     "@multica/ui": "workspace:*",

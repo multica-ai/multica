@@ -88,6 +88,17 @@ export function useHub(): UseHubReturn {
     initHub()
   }, [initHub])
 
+  // Subscribe to connection state changes pushed from main process
+  useEffect(() => {
+    const handler = (state: string) => {
+      setHubInfo((prev) => prev ? { ...prev, connectionState: state as HubInfo['connectionState'] } : prev)
+    }
+    window.electronAPI?.hub.onConnectionStateChanged(handler)
+    return () => {
+      window.electronAPI?.hub.offConnectionStateChanged()
+    }
+  }, [])
+
   // Refresh Hub info and agents
   const refresh = useCallback(async () => {
     try {
