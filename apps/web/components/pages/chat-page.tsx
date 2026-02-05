@@ -5,7 +5,7 @@ import { Loading } from "@multica/ui/components/ui/loading";
 import { ChatView } from "@multica/ui/components/chat-view";
 import { DevicePairing } from "@multica/ui/components/device-pairing";
 import { useGatewayConnection } from "@multica/hooks/use-gateway-connection";
-import { useChat } from "@multica/hooks/use-chat";
+import { useGatewayChat } from "@multica/hooks/use-gateway-chat";
 
 const ChatPage = () => {
   const { pageState, connectionState, identity, error, client, pairingKey, connect, disconnect } =
@@ -45,7 +45,6 @@ const ChatPage = () => {
   );
 };
 
-/** Thin wrapper that wires useChat hook to the shared ChatView */
 function ConnectedChat({
   client,
   hubId,
@@ -57,8 +56,7 @@ function ConnectedChat({
   agentId: string;
   onDisconnect: () => void;
 }) {
-  const chat = useChat({ client, hubId, agentId });
-
+  const chat = useGatewayChat({ client, hubId, agentId });
   return <ChatView {...chat} onDisconnect={onDisconnect} />;
 }
 

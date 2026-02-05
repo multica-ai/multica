@@ -55,7 +55,7 @@ export const MessageList = memo(function MessageList({ messages, streamingIds }:
   }, [messages])
 
   return (
-    <div className="relative p-6 max-w-4xl mx-auto">
+    <div className="relative p-6 px-10 max-w-4xl mx-auto">
       {messages.map((msg) => {
         // ToolResult messages → render as tool execution item
         if (msg.role === "toolResult") {
