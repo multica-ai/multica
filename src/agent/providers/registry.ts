@@ -102,14 +102,6 @@ const PROVIDER_REGISTRY: Record<string, ProviderMeta> = {
     models: ["llama-3.3-70b-versatile"],
     loginUrl: "https://console.groq.com/keys",
   },
-  "mistral": {
-    id: "mistral",
-    name: "Mistral",
-    authMethod: "api-key",
-    defaultModel: "mistral-large-latest",
-    models: ["mistral-large-latest", "codestral-latest"],
-    loginUrl: "https://console.mistral.ai/api-keys",
-  },
   "xai": {
     id: "xai",
     name: "xAI (Grok)",
