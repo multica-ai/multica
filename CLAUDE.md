@@ -122,6 +122,46 @@ See `docs/package-management.md` for detailed package management guide.
 
 - **Comments**: Always write code comments in English, regardless of the conversation language.
 
+## Design System
+
+The UI follows a **restrained, professional** design language. This is a work tool, not a consumer app.
+
+### Core Principles
+
+1. **Restraint over decoration** — No flashy colors, minimal animations
+2. **Clarity over cleverness** — Obvious > subtle, explicit > implicit
+3. **Consistency over novelty** — Use Shadcn/UI patterns, don't reinvent
+4. **Density over sprawl** — Respect screen real estate
+
+### Typography
+
+| Font | CSS Variable | Usage |
+|------|--------------|-------|
+| Geist Sans | `font-sans` | Primary UI text |
+| Geist Mono | `font-mono` | Code, technical values |
+| Playfair Display | `font-brand` | Brand name "Multica" ONLY |
+
+Fonts are loaded via `@fontsource` packages (not Google Fonts) for cross-platform consistency.
+
+### Colors
+
+- **No brand color** — Purple/blue "AI colors" feel generic. We use neutral grays.
+- **Color is for state** — Running (blue), success (green), error (red)
+- **Dark mode is true dark** — Not gray, actual near-black
+
+### Component Library
+
+- **Base**: Shadcn/UI (Radix primitives + Tailwind)
+- **Styling**: Tailwind CSS v4 with OKLCH colors
+- **Config**: `packages/ui/src/styles/globals.css`
+
+### When Building UI
+
+- Prefer existing Shadcn components over custom implementations
+- Use semantic color variables (`--muted`, `--destructive`), not raw colors
+- Keep animations subtle and purposeful (no gratuitous motion)
+- Test in both light and dark modes
+
 ## Credentials Setup
 
 ```bash
