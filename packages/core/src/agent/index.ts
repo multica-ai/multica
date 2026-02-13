@@ -14,6 +14,16 @@ export * from "./tools/policy.js";
 export * from "./tools/groups.js";
 export * from "./extract-text.js";
 export {
+  listSubagentRuns,
+  getSubagentRun,
+  getSubagentGroup,
+} from "./subagent/registry.js";
+export type {
+  SubagentRunRecord,
+  SubagentRunOutcome,
+  SubagentGroup,
+} from "./subagent/types.js";
+export {
   readClaudeCliCredentials,
   readCodexCliCredentials,
   hasValidClaudeCliCredentials,

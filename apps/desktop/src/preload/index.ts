@@ -105,6 +105,20 @@ export interface LocalChatApproval {
   expiresAtMs: number
 }
 
+export interface SubagentRunInfo {
+  runId: string
+  label: string | undefined
+  task: string
+  status: 'queued' | 'running' | 'ok' | 'error' | 'timeout' | 'unknown'
+  groupId: string | undefined
+  groupLabel: string | undefined
+  startedAt: number | undefined
+  endedAt: number | undefined
+  createdAt: number
+  findings: string | undefined
+  error: string | undefined
+}
+
 // ============================================================================
 // Expose typed API to Renderer process
 // ============================================================================
@@ -249,6 +263,12 @@ const electronAPI = {
     /** Start a channel account from saved config */
     start: (channelId: string, accountId: string) =>
       ipcRenderer.invoke('channels:start', channelId, accountId),
+  },
+
+  // Subagent dashboard
+  subagents: {
+    list: (requesterSessionId: string): Promise<SubagentRunInfo[]> =>
+      ipcRenderer.invoke('subagents:list', requesterSessionId),
   },
 
   // Cron jobs management

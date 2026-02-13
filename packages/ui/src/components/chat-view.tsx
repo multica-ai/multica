@@ -44,6 +44,8 @@ export interface ChatViewProps {
   errorAction?: { label: string; onClick: () => void };
   /** Initial prompt to pre-fill the input (e.g., from onboarding) */
   initialPrompt?: string;
+  /** Optional slot rendered between the error bar and the input footer */
+  bottomSlot?: React.ReactNode;
 }
 
 export function ChatView({
@@ -62,6 +64,7 @@ export function ChatView({
   onDisconnect,
   errorAction,
   initialPrompt,
+  bottomSlot,
 }: ChatViewProps) {
   const mainRef = useRef<HTMLElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -258,6 +261,8 @@ export function ChatView({
           </div>
         </div>
       )}
+
+      {bottomSlot}
 
       <footer className="container px-4 pb-3 pt-1">
         <ChatInput

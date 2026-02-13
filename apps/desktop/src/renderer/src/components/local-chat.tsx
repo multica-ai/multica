@@ -3,9 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { Loading } from '@multica/ui/components/ui/loading'
 import { ChatView } from '@multica/ui/components/chat-view'
 import { useLocalChat } from '../hooks/use-local-chat'
+import { useSubagentPolling } from '../hooks/use-subagent-polling'
+import { useSubagentsStore } from '../stores/subagents'
 import { useProviderStore } from '../stores/provider'
 import { ApiKeyDialog } from './api-key-dialog'
 import { OAuthDialog } from './oauth-dialog'
+import { SubagentStatusBar } from './subagent-status-bar'
+import { SubagentDashboard } from './subagent-dashboard'
 
 interface LocalChatProps {
   initialPrompt?: string
@@ -32,6 +36,11 @@ export function LocalChat({ initialPrompt }: LocalChatProps) {
   } = useLocalChat()
 
   const { providers, current, setProvider: switchProvider, refresh: refreshProviders } = useProviderStore()
+
+  // Subagent polling + dashboard
+  useSubagentPolling(agentId)
+  const subagentRuns = useSubagentsStore((s) => s.runs)
+  const [dashboardOpen, setDashboardOpen] = useState(false)
 
   // Provider config dialog state
   const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false)
@@ -116,6 +125,12 @@ export function LocalChat({ initialPrompt }: LocalChatProps) {
         loadMore={loadMore}
         resolveApproval={resolveApproval}
         errorAction={errorAction}
+        bottomSlot={
+          <SubagentStatusBar
+            runs={subagentRuns}
+            onViewClick={() => setDashboardOpen(true)}
+          />
+        }
       />
 
       {currentMeta && currentMeta.authMethod === 'api-key' && (
@@ -138,6 +153,12 @@ export function LocalChat({ initialPrompt }: LocalChatProps) {
           onSuccess={handleProviderConfigSuccess}
         />
       )}
+
+      <SubagentDashboard
+        open={dashboardOpen}
+        onOpenChange={setDashboardOpen}
+        runs={subagentRuns}
+      />
     </>
   )
 }

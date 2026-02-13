@@ -161,6 +161,20 @@ interface InboundMessageEvent {
   timestamp: number
 }
 
+interface SubagentRunInfo {
+  runId: string
+  label: string | undefined
+  task: string
+  status: 'queued' | 'running' | 'ok' | 'error' | 'timeout' | 'unknown'
+  groupId: string | undefined
+  groupLabel: string | undefined
+  startedAt: number | undefined
+  endedAt: number | undefined
+  createdAt: number
+  findings: string | undefined
+  error: string | undefined
+}
+
 interface ElectronAPI {
   app: {
     getFlags: () => Promise<{ forceOnboarding: boolean }>
@@ -235,6 +249,9 @@ interface ElectronAPI {
     removeToken: (channelId: string, accountId: string) => Promise<{ ok: boolean; error?: string }>
     stop: (channelId: string, accountId: string) => Promise<{ ok: boolean; error?: string }>
     start: (channelId: string, accountId: string) => Promise<{ ok: boolean; error?: string }>
+  }
+  subagents: {
+    list: (requesterSessionId: string) => Promise<SubagentRunInfo[]>
   }
   cron: {
     list: () => Promise<unknown[]>
