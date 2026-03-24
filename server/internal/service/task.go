@@ -42,7 +42,13 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue) (
 		return db.AgentTaskQueue{}, fmt.Errorf("load runtime: %w", err)
 	}
 
-	snapshot := buildContextSnapshot(issue, agent, runtime)
+	// Include workspace context in the snapshot when available.
+	var workspaceContext string
+	if ws, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID); err == nil && ws.Context.Valid {
+		workspaceContext = ws.Context.String
+	}
+
+	snapshot := buildContextSnapshot(issue, agent, runtime, workspaceContext)
 	contextJSON, _ := json.Marshal(snapshot)
 
 	task, err := s.Queries.CreateAgentTaskWithContext(ctx, db.CreateAgentTaskWithContextParams{
@@ -169,6 +175,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			s.createAgentComment(ctx, task.IssueID, task.AgentID, payload.Output, "comment")
 		}
 	}
+
 	if issueErr == nil {
 		s.createInboxForIssueCreator(ctx, issue, "review_requested", "attention", "Review requested: "+issue.Title, "")
 	}
@@ -250,7 +257,7 @@ func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID
 	s.broadcast(protocol.EventAgentStatus, map[string]any{"agent": agentToMap(agent)})
 }
 
-func buildContextSnapshot(issue db.Issue, agent db.Agent, runtime db.AgentRuntime) map[string]any {
+func buildContextSnapshot(issue db.Issue, agent db.Agent, runtime db.AgentRuntime, workspaceContext string) map[string]any {
 	var ac []string
 	if issue.AcceptanceCriteria != nil {
 		json.Unmarshal(issue.AcceptanceCriteria, &ac)
@@ -274,7 +281,7 @@ func buildContextSnapshot(issue db.Issue, agent db.Agent, runtime db.AgentRuntim
 		json.Unmarshal(runtime.Metadata, &metadata)
 	}
 
-	return map[string]any{
+	m := map[string]any{
 		"issue": map[string]any{
 			"id":                  util.UUIDToString(issue.ID),
 			"title":               issue.Title,
@@ -298,6 +305,10 @@ func buildContextSnapshot(issue db.Issue, agent db.Agent, runtime db.AgentRuntim
 			"metadata":     metadata,
 		},
 	}
+	if workspaceContext != "" {
+		m["workspace_context"] = workspaceContext
+	}
+	return m
 }
 
 func priorityToInt(p string) int32 {

@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -240,7 +243,52 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		agent, _ = h.Queries.GetAgent(r.Context(), agent.ID)
 	}
 
+	// Best-effort: create an initialization issue assigned to the new agent.
+	h.createAgentInitIssue(r.Context(), agent, parseUUID(ownerID))
+
 	writeJSON(w, http.StatusCreated, agentToResponse(agent))
+}
+
+// createAgentInitIssue creates an initialization issue assigned to a newly created agent.
+// It incorporates workspace context so the agent can set up its environment.
+// Failures are silently ignored — the agent creation itself has already succeeded.
+func (h *Handler) createAgentInitIssue(ctx context.Context, agent db.Agent, creatorID pgtype.UUID) {
+	ws, err := h.Queries.GetWorkspace(ctx, agent.WorkspaceID)
+	if err != nil {
+		return
+	}
+
+	var desc string
+	if ws.Context.Valid && ws.Context.String != "" {
+		desc = fmt.Sprintf("Initialize the development environment for agent **%s**.\n\n## Workspace Context\n\n%s\n\n## Instructions\n\n- Set up the local development environment based on the workspace context above\n- Clone and configure any referenced repositories\n- Verify access to the codebase and tools\n- Report back on what was set up and any issues encountered", agent.Name, ws.Context.String)
+	} else {
+		desc = fmt.Sprintf("Initialize the development environment for agent **%s**.\n\n## Instructions\n\n- Explore the local working directory and understand the project structure\n- Verify access to the codebase and tools\n- Report back on what was found and any issues encountered", agent.Name)
+	}
+
+	issue, err := h.Queries.CreateIssue(ctx, db.CreateIssueParams{
+		WorkspaceID:        agent.WorkspaceID,
+		Title:              "Initialize environment for " + agent.Name,
+		Description:        strToText(desc),
+		Status:             "todo",
+		Priority:           "medium",
+		AssigneeType:       pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:         agent.ID,
+		CreatorType:        "member",
+		CreatorID:          creatorID,
+		AcceptanceCriteria: []byte("[]"),
+		ContextRefs:        []byte("[]"),
+		Position:           0,
+	})
+	if err != nil {
+		return
+	}
+
+	h.broadcast("issue:created", map[string]any{"issue": issueToResponse(issue)})
+
+	// Enqueue the task directly — we know the agent is assigned and status is "todo".
+	if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue); err != nil {
+		log.Printf("createAgentInitIssue: enqueue task failed for issue %s: %v", issue.Title, err)
+	}
 }
 
 type UpdateAgentRequest struct {

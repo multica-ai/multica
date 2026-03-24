@@ -5,6 +5,7 @@ export interface Workspace {
   name: string;
   slug: string;
   description: string | null;
+  context: string | null;
   settings: Record<string, unknown>;
   created_at: string;
   updated_at: string;

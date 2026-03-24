@@ -13,14 +13,15 @@ SELECT * FROM workspace
 WHERE slug = $1;
 
 -- name: CreateWorkspace :one
-INSERT INTO workspace (name, slug, description)
-VALUES ($1, $2, $3)
+INSERT INTO workspace (name, slug, description, context)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: UpdateWorkspace :one
 UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
+    context = COALESCE(sqlc.narg('context'), context),
     settings = COALESCE(sqlc.narg('settings'), settings),
     updated_at = now()
 WHERE id = $1

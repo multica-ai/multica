@@ -92,6 +92,24 @@ type DaemonConnection struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type DaemonPairingSession struct {
+	ID             pgtype.UUID        `json:"id"`
+	Token          string             `json:"token"`
+	DaemonID       string             `json:"daemon_id"`
+	DeviceName     string             `json:"device_name"`
+	RuntimeName    string             `json:"runtime_name"`
+	RuntimeType    string             `json:"runtime_type"`
+	RuntimeVersion string             `json:"runtime_version"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ApprovedBy     pgtype.UUID        `json:"approved_by"`
+	Status         string             `json:"status"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	ClaimedAt      pgtype.Timestamptz `json:"claimed_at"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -172,4 +190,5 @@ type Workspace struct {
 	Settings    []byte             `json:"settings"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Context     pgtype.Text        `json:"context"`
 }

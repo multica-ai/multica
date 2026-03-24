@@ -19,6 +19,7 @@ export const mockWorkspace: Workspace = {
   name: "Test Workspace",
   slug: "test-ws",
   description: "A test workspace",
+  context: null,
   settings: {},
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",

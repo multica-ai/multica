@@ -137,6 +137,15 @@ importers:
         specifier: ^4.1.0
         version: 4.1.0(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1))
 
+  packages/agent-sdk:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.5.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
   packages/hooks:
     dependencies:
       '@multica/sdk':

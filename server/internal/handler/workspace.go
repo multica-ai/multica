@@ -11,13 +11,14 @@ import (
 )
 
 type WorkspaceResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
 	Description *string `json:"description"`
-	Settings    any    `json:"settings"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	Context     *string `json:"context"`
+	Settings    any     `json:"settings"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -33,6 +34,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Name:        w.Name,
 		Slug:        w.Slug,
 		Description: textToPtr(w.Description),
+		Context:     textToPtr(w.Context),
 		Settings:    settings,
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
@@ -95,6 +97,7 @@ type CreateWorkspaceRequest struct {
 	Name        string  `json:"name"`
 	Slug        string  `json:"slug"`
 	Description *string `json:"description"`
+	Context     *string `json:"context"`
 }
 
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +131,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Slug:        req.Slug,
 		Description: ptrToText(req.Description),
+		Context:     ptrToText(req.Context),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -159,6 +163,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 type UpdateWorkspaceRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
+	Context     *string `json:"context"`
 	Settings    any     `json:"settings"`
 }
 
@@ -187,6 +192,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Description != nil {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+	}
+	if req.Context != nil {
+		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
 		s, _ := json.Marshal(req.Settings)

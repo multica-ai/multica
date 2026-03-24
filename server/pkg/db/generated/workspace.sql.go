@@ -12,19 +12,25 @@ import (
 )
 
 const createWorkspace = `-- name: CreateWorkspace :one
-INSERT INTO workspace (name, slug, description)
-VALUES ($1, $2, $3)
-RETURNING id, name, slug, description, settings, created_at, updated_at
+INSERT INTO workspace (name, slug, description, context)
+VALUES ($1, $2, $3, $4)
+RETURNING id, name, slug, description, settings, created_at, updated_at, context
 `
 
 type CreateWorkspaceParams struct {
 	Name        string      `json:"name"`
 	Slug        string      `json:"slug"`
 	Description pgtype.Text `json:"description"`
+	Context     pgtype.Text `json:"context"`
 }
 
 func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams) (Workspace, error) {
-	row := q.db.QueryRow(ctx, createWorkspace, arg.Name, arg.Slug, arg.Description)
+	row := q.db.QueryRow(ctx, createWorkspace,
+		arg.Name,
+		arg.Slug,
+		arg.Description,
+		arg.Context,
+	)
 	var i Workspace
 	err := row.Scan(
 		&i.ID,
@@ -34,6 +40,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Context,
 	)
 	return i, err
 }
@@ -48,7 +55,7 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context FROM workspace
 WHERE id = $1
 `
 
@@ -63,12 +70,13 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Context,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context FROM workspace
 WHERE slug = $1
 `
 
@@ -83,12 +91,13 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Context,
 	)
 	return i, err
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at FROM workspace w
+SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context FROM workspace w
 JOIN member m ON m.workspace_id = w.id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC
@@ -111,6 +120,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.Settings,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Context,
 		); err != nil {
 			return nil, err
 		}
@@ -126,16 +136,18 @@ const updateWorkspace = `-- name: UpdateWorkspace :one
 UPDATE workspace SET
     name = COALESCE($2, name),
     description = COALESCE($3, description),
-    settings = COALESCE($4, settings),
+    context = COALESCE($4, context),
+    settings = COALESCE($5, settings),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at
+RETURNING id, name, slug, description, settings, created_at, updated_at, context
 `
 
 type UpdateWorkspaceParams struct {
 	ID          pgtype.UUID `json:"id"`
 	Name        pgtype.Text `json:"name"`
 	Description pgtype.Text `json:"description"`
+	Context     pgtype.Text `json:"context"`
 	Settings    []byte      `json:"settings"`
 }
 
@@ -144,6 +156,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.ID,
 		arg.Name,
 		arg.Description,
+		arg.Context,
 		arg.Settings,
 	)
 	var i Workspace
@@ -155,6 +168,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Context,
 	)
 	return i, err
 }

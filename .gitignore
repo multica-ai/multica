@@ -9,6 +9,7 @@ out
 .turbo
 build
 bin
+dist-electron
 *.tsbuildinfo
 
 # env
@@ -22,6 +23,9 @@ coverage
 server/bin/
 server/tmp/
 server/migrate
+server/daemon
+server/multica-cli
+server/multica
 
 # Test artifacts
 test-results/
@@ -29,6 +33,9 @@ apps/web/test-results/
 
 # context (agent workspace)
 .context
+
+# local settings
+.claude/
 
 # platform specific
 *.dmg

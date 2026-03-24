@@ -1,4 +1,4 @@
-.PHONY: dev daemon build test migrate-up migrate-down sqlc clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -115,11 +115,17 @@ dev:
 	cd server && go run ./cmd/server
 
 daemon:
-	cd server && MULTICA_CODEX_WORKDIR="${MULTICA_CODEX_WORKDIR:-$(abspath .)}" go run ./cmd/daemon
+	cd server && MULTICA_REPOS_ROOT="${MULTICA_REPOS_ROOT:-$(abspath .)}" go run ./cmd/multica daemon
+
+cli:
+	cd server && go run ./cmd/multica $(ARGS)
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 build:
 	cd server && go build -o bin/server ./cmd/server
-	cd server && go build -o bin/daemon ./cmd/daemon
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/multica-cli ./cmd/multica
 
 test:
 	$(REQUIRE_ENV)
