@@ -180,6 +180,20 @@ export class ApiClient {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {
+    return this.fetch("/api/issues/batch-update", {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds, updates }),
+    });
+  }
+
+  async batchDeleteIssues(issueIds: string[]): Promise<{ deleted: number }> {
+    return this.fetch("/api/issues/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds }),
+    });
+  }
+
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
     return this.fetch(`/api/issues/${issueId}/comments`);

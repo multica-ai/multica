@@ -486,3 +486,186 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ---------------------------------------------------------------------------
+// Batch operations
+// ---------------------------------------------------------------------------
+
+type BatchUpdateIssuesRequest struct {
+	IssueIDs []string           `json:"issue_ids"`
+	Updates  UpdateIssueRequest `json:"updates"`
+}
+
+func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	var req BatchUpdateIssuesRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.IssueIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "issue_ids is required")
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	// Detect which fields in "updates" were explicitly set (including null).
+	var rawTop map[string]json.RawMessage
+	json.Unmarshal(bodyBytes, &rawTop)
+	var rawUpdates map[string]json.RawMessage
+	if raw, exists := rawTop["updates"]; exists {
+		json.Unmarshal(raw, &rawUpdates)
+	}
+
+	updated := 0
+	for _, issueID := range req.IssueIDs {
+		prevIssue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
+		if err != nil {
+			continue
+		}
+		workspaceID := uuidToString(prevIssue.WorkspaceID)
+		if _, ok := h.requireWorkspaceMember(w, r, workspaceID, ""); !ok {
+			continue
+		}
+
+		params := db.UpdateIssueParams{
+			ID:           prevIssue.ID,
+			AssigneeType: prevIssue.AssigneeType,
+			AssigneeID:   prevIssue.AssigneeID,
+			DueDate:      prevIssue.DueDate,
+		}
+
+		if req.Updates.Title != nil {
+			params.Title = pgtype.Text{String: *req.Updates.Title, Valid: true}
+		}
+		if req.Updates.Description != nil {
+			params.Description = pgtype.Text{String: *req.Updates.Description, Valid: true}
+		}
+		if req.Updates.Status != nil {
+			params.Status = pgtype.Text{String: *req.Updates.Status, Valid: true}
+		}
+		if req.Updates.Priority != nil {
+			params.Priority = pgtype.Text{String: *req.Updates.Priority, Valid: true}
+		}
+		if req.Updates.Position != nil {
+			params.Position = pgtype.Float8{Float64: *req.Updates.Position, Valid: true}
+		}
+		if _, ok := rawUpdates["assignee_type"]; ok {
+			if req.Updates.AssigneeType != nil {
+				params.AssigneeType = pgtype.Text{String: *req.Updates.AssigneeType, Valid: true}
+			} else {
+				params.AssigneeType = pgtype.Text{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["assignee_id"]; ok {
+			if req.Updates.AssigneeID != nil {
+				params.AssigneeID = parseUUID(*req.Updates.AssigneeID)
+			} else {
+				params.AssigneeID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["due_date"]; ok {
+			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
+				t, err := time.Parse(time.RFC3339, *req.Updates.DueDate)
+				if err != nil {
+					continue
+				}
+				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+			} else {
+				params.DueDate = pgtype.Timestamptz{Valid: false}
+			}
+		}
+
+		issue, err := h.Queries.UpdateIssue(r.Context(), params)
+		if err != nil {
+			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
+			continue
+		}
+
+		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		resp := issueToResponse(issue, prefix)
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
+			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
+		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
+		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
+
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+			"issue":            resp,
+			"assignee_changed": assigneeChanged,
+			"status_changed":   statusChanged,
+			"priority_changed": priorityChanged,
+		})
+
+		if assigneeChanged {
+			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+			if h.shouldEnqueueAgentTask(r.Context(), issue) {
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			}
+		}
+
+		updated++
+	}
+
+	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
+	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+}
+
+type BatchDeleteIssuesRequest struct {
+	IssueIDs []string `json:"issue_ids"`
+}
+
+func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
+	var req BatchDeleteIssuesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.IssueIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "issue_ids is required")
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	deleted := 0
+	for _, issueID := range req.IssueIDs {
+		issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
+		if err != nil {
+			continue
+		}
+		workspaceID := uuidToString(issue.WorkspaceID)
+		if _, ok := h.requireWorkspaceMember(w, r, workspaceID, ""); !ok {
+			continue
+		}
+
+		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+
+		if err := h.Queries.DeleteIssue(r.Context(), parseUUID(issueID)); err != nil {
+			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
+			continue
+		}
+
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})
+		deleted++
+	}
+
+	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}

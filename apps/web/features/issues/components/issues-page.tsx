@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { ChevronRight } from "lucide-react";
 import type { IssueStatus } from "@/shared/types";
@@ -10,9 +10,11 @@ import { useIssueViewStore } from "@/features/issues/stores/view-store";
 import { useWorkspaceStore } from "@/features/workspace";
 import { WorkspaceAvatar } from "@/features/workspace";
 import { api } from "@/shared/api";
+import { useIssueSelectionStore } from "@/features/issues/stores/selection-store";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
+import { BatchActionToolbar } from "./batch-action-toolbar";
 
 const BOARD_STATUSES: IssueStatus[] = [
   "backlog",
@@ -31,6 +33,9 @@ export function IssuesPage() {
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
 
+  useEffect(() => {
+    useIssueSelectionStore.getState().clear();
+  }, [viewMode]);
 
   const issues = useMemo(() => {
     return allIssues.filter((issue) => {
@@ -133,6 +138,7 @@ export function IssuesPage() {
           <ListView issues={issues} visibleStatuses={visibleStatuses} />
         )}
       </div>
+      {viewMode === "list" && <BatchActionToolbar />}
     </div>
   );
 }
