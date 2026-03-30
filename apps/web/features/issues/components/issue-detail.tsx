@@ -209,16 +209,23 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   // Watch the global issue store for real-time updates from other users/agents
   const storeIssue = useIssueStore((s) => s.issues.find((i) => i.id === id));
 
+  const wasLoadedRef = useRef(false);
+
   useEffect(() => {
     if (storeIssue) {
+      wasLoadedRef.current = true;
       setIssue(storeIssue);
       if (!titleFocusedRef.current) {
         setTitleDraft(storeIssue.title);
       }
+    } else if (wasLoadedRef.current && !loading) {
+      // Issue was in the store but is now gone (deleted by another user)
+      setIssue(null);
     }
-  }, [storeIssue]);
+  }, [storeIssue, loading]);
 
   useEffect(() => {
+    wasLoadedRef.current = false;
     setIssue(null);
     setTitleDraft("");
     setTimeline([]);
@@ -461,8 +468,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   if (!issue) {
     return (
-      <div className="flex flex-1 min-h-0 items-center justify-center text-sm text-muted-foreground">
-        Issue not found
+      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        <p>This issue does not exist or has been deleted in this workspace.</p>
+        {!onDelete && (
+          <Button variant="outline" size="sm" onClick={() => router.push("/issues")}>
+            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+            Back to Issues
+          </Button>
+        )}
       </div>
     );
   }
@@ -844,7 +857,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </div>
 
             {/* Timeline entries */}
-            <div className="mt-4 space-y-2">
+            <div className="mt-4 flex flex-col gap-3">
               {(() => {
                 const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
                 const repliesByParent = new Map<string, TimelineEntry[]>();
@@ -856,9 +869,30 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   }
                 }
 
+                // Coalesce: same actor + same action within 2 min → keep last only
+                const COALESCE_MS = 2 * 60 * 1000;
+                const coalesced: TimelineEntry[] = [];
+                for (const entry of topLevel) {
+                  if (entry.type === "activity") {
+                    const prev = coalesced[coalesced.length - 1];
+                    if (
+                      prev?.type === "activity" &&
+                      prev.action === entry.action &&
+                      prev.actor_type === entry.actor_type &&
+                      prev.actor_id === entry.actor_id &&
+                      Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS
+                    ) {
+                      // Replace previous with this one (keep the later result)
+                      coalesced[coalesced.length - 1] = entry;
+                      continue;
+                    }
+                  }
+                  coalesced.push(entry);
+                }
+
                 // Group consecutive activities together so the connector line works
                 const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
-                for (const entry of topLevel) {
+                for (const entry of coalesced) {
                   if (entry.type === "activity") {
                     const last = groups[groups.length - 1];
                     if (last?.type === "activities") {
@@ -888,7 +922,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   }
 
                   return (
-                    <div key={group.entries[0]!.id} className="px-4">
+                    <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">
                       {group.entries.map((entry, idx) => {
                         const details = (entry.details ?? {}) as Record<string, string>;
                         const isStatusChange = entry.action === "status_changed";
@@ -908,12 +942,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                         }
 
                         return (
-                          <div key={entry.id} className="flex text-xs text-muted-foreground">
-                            <div className="mr-2.5 flex w-3.5 shrink-0 flex-col items-center">
+                          <div key={entry.id} className="relative flex text-xs text-muted-foreground">
+                            <div className="mr-2.5 flex w-3.5 shrink-0 justify-center">
                               <div className="flex h-5 items-center">{leadIcon}</div>
-                              {!isLast && <div className="w-px flex-1 bg-border" />}
                             </div>
-                            <div className={`flex flex-1 items-baseline gap-1 ${!isLast ? "pb-3" : ""}`}>
+                            {!isLast && (
+                              <div className="absolute left-[7px] top-5 h-3 w-px bg-border" />
+                            )}
+                            <div className="flex flex-1 items-baseline gap-1">
                               <span className="font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
                               <span>{formatActivity(entry, getActorName)}</span>
                               <Tooltip>

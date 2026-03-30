@@ -124,7 +124,7 @@ export function ListView({
                   </Tooltip>
                 </div>
               </Accordion.Header>
-              <Accordion.Panel>
+              <Accordion.Panel className="pt-1">
                 {statusIssues.length > 0 ? (
                   statusIssues.map((issue) => (
                     <ListRow key={issue.id} issue={issue} />

@@ -34,7 +34,7 @@ function ReplyInput({
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    const content = editorRef.current?.getMarkdown()?.trim();
+    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
     setSubmitting(true);
     try {

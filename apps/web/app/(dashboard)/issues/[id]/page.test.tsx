@@ -61,6 +61,35 @@ vi.mock("@/features/workspace", () => ({
   }),
 }));
 
+// Mock issue store — supply a stable full issue object so storeIssue
+// doesn't create a new reference each render (avoids infinite effect loop)
+// and has all required fields for rendering.
+const stableStoreIssues = vi.hoisted(() => [
+  {
+    id: "issue-1",
+    workspace_id: "ws-1",
+    number: 1,
+    identifier: "TES-1",
+    title: "Implement authentication",
+    description: "Add JWT auth to the backend",
+    status: "in_progress",
+    priority: "high",
+    assignee_type: "member",
+    assignee_id: "user-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: null,
+    position: 0,
+    due_date: "2026-06-01T00:00:00Z",
+    created_at: "2026-01-15T00:00:00Z",
+    updated_at: "2026-01-20T00:00:00Z",
+  },
+]);
+vi.mock("@/features/issues", () => ({
+  useIssueStore: (selector: (s: any) => any) =>
+    selector({ issues: stableStoreIssues }),
+}));
+
 // Mock ws-context
 vi.mock("@/features/realtime", () => ({
   useWSEvent: () => {},
@@ -246,7 +275,7 @@ describe("IssueDetailPage", () => {
     await renderPage("nonexistent-id");
 
     await waitFor(() => {
-      expect(screen.getByText("Issue not found")).toBeInTheDocument();
+      expect(screen.getByText("This issue does not exist or has been deleted in this workspace.")).toBeInTheDocument();
     });
   });
 

@@ -15,7 +15,7 @@ function CommentInput({ onSubmit }: CommentInputProps) {
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    const content = editorRef.current?.getMarkdown()?.trim();
+    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
     setSubmitting(true);
     try {
@@ -28,8 +28,8 @@ function CommentInput({ onSubmit }: CommentInputProps) {
   };
 
   return (
-    <div className="rounded-lg bg-card ring-1 ring-border">
-      <div className="min-h-20 max-h-48 overflow-y-auto px-3 py-2">
+    <div className="relative rounded-lg bg-card ring-1 ring-border">
+      <div className="min-h-20 max-h-48 overflow-y-auto px-3 py-2 pb-8">
         <RichTextEditor
           ref={editorRef}
           placeholder="Leave a comment..."
@@ -38,7 +38,7 @@ function CommentInput({ onSubmit }: CommentInputProps) {
           debounceMs={100}
         />
       </div>
-      <div className="flex items-center justify-end border-t border-border/50 px-2 py-1.5">
+      <div className="absolute bottom-1.5 right-1.5">
         <Button
           size="icon-sm"
           disabled={isEmpty || submitting}

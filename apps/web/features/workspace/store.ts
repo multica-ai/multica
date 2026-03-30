@@ -4,6 +4,7 @@ import { create } from "zustand";
 import type { Workspace, MemberWithUser, Agent, Skill } from "@/shared/types";
 import { useIssueStore } from "@/features/issues";
 import { useInboxStore } from "@/features/inbox";
+import { useRuntimeStore } from "@/features/runtimes";
 import { api } from "@/shared/api";
 import { createLogger } from "@/shared/logger";
 
@@ -93,10 +94,18 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const ws = workspaces.find((item) => item.id === workspaceId);
     if (!ws) return;
 
-    // Clear stale data from other stores before switching
+    // Switch identity FIRST — api client, localStorage, and the
+    // workspace object in this store — so that any in-flight refetch
+    // (e.g. triggered by a WS event during the async gap) already
+    // targets the new workspace.
+    api.setWorkspaceId(ws.id);
+    localStorage.setItem("multica_workspace_id", ws.id);
+
+    // Clear ALL stale data across every store before hydrating.
     useIssueStore.getState().setIssues([]);
     useInboxStore.getState().setItems([]);
-    set({ members: [], agents: [], skills: [] });
+    useRuntimeStore.getState().setRuntimes([]);
+    set({ workspace: ws, members: [], agents: [], skills: [] });
 
     await hydrateWorkspace(workspaces, ws.id);
   },

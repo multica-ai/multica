@@ -168,7 +168,7 @@ function CommentCard({
   collectReplies(entry.id);
 
   return (
-    <Card className={`!py-0 overflow-hidden${entry.id.startsWith("temp-") ? " opacity-60" : ""}`}>
+    <Card className={`!py-0 !gap-0 overflow-hidden${entry.id.startsWith("temp-") ? " opacity-60" : ""}`}>
       {/* Parent comment */}
       <div className="px-4">
         <CommentRow

@@ -91,7 +91,7 @@ export function BoardCardContent({
 
       {/* Title */}
       <p
-        className={`text-sm font-medium leading-snug line-clamp-2 text-muted-foreground transition-colors group-hover:text-foreground ${showPriority ? "mt-2" : ""}`}
+        className={`text-sm font-medium leading-snug line-clamp-2 ${showPriority ? "mt-2" : ""}`}
       >
         {issue.title}
       </p>

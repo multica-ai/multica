@@ -62,6 +62,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -145,7 +146,8 @@ function CreateAgentDialog({
         triggers: [{ id: generateId(), type: "on_assign", enabled: true, config: {} }],
       });
       onClose();
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create agent");
       setCreating(false);
     }
   };
