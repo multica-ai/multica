@@ -11,6 +11,7 @@ import {
   Wrench,
   FileText,
   BookOpenText,
+  MessageSquare,
   Timer,
   Trash2,
   Save,
@@ -30,6 +31,7 @@ import type {
   AgentStatus,
   AgentTool,
   AgentTrigger,
+  AgentTriggerType,
   AgentTask,
   RuntimeDevice,
   CreateAgentRequest,
@@ -820,7 +822,7 @@ function TriggersTab({
     setTriggers((prev) => prev.filter((t) => t.id !== triggerId));
   };
 
-  const addTrigger = (type: "on_assign" | "scheduled") => {
+  const addTrigger = (type: AgentTriggerType) => {
     const newTrigger: AgentTrigger = {
       id: generateId(),
       type,
@@ -869,18 +871,26 @@ function TriggersTab({
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
                 {trigger.type === "on_assign" ? (
                   <Bot className="h-4 w-4 text-muted-foreground" />
+                ) : trigger.type === "on_comment" ? (
+                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
                 ) : (
                   <Timer className="h-4 w-4 text-muted-foreground" />
                 )}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">
-                  {trigger.type === "on_assign" ? "On Issue Assign" : "Scheduled"}
+                  {trigger.type === "on_assign"
+                    ? "On Issue Assign"
+                    : trigger.type === "on_comment"
+                      ? "On Comment"
+                      : "Scheduled"}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {trigger.type === "on_assign"
                     ? "Runs when an issue is assigned to this agent"
-                    : `Cron: ${(trigger.config as { cron?: string }).cron ?? "Not set"}`}
+                    : trigger.type === "on_comment"
+                      ? "Runs when a member comments on the agent's issue"
+                      : `Cron: ${(trigger.config as { cron?: string }).cron ?? "Not set"}`}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -958,6 +968,15 @@ function TriggersTab({
         >
           <Bot className="h-3 w-3" />
           Add On Assign
+        </Button>
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => addTrigger("on_comment")}
+          className="border-dashed text-muted-foreground hover:text-foreground"
+        >
+          <MessageSquare className="h-3 w-3" />
+          Add On Comment
         </Button>
         <Button
           variant="outline"

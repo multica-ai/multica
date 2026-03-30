@@ -4,7 +4,7 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
-export type AgentTriggerType = "on_assign" | "scheduled";
+export type AgentTriggerType = "on_assign" | "on_comment" | "scheduled";
 
 export interface RuntimeDevice {
   id: string;
