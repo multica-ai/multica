@@ -12,8 +12,6 @@ import type {
   UpdateAgentRequest,
   AgentTask,
   AgentRuntime,
-  DaemonPairingSession,
-  ApproveDaemonPairingSessionRequest,
   InboxItem,
   IssueSubscriber,
   Comment,
@@ -350,20 +348,6 @@ export class ApiClient {
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
-  }
-
-  async getDaemonPairingSession(token: string): Promise<DaemonPairingSession> {
-    return this.fetch(`/api/daemon/pairing-sessions/${token}`);
-  }
-
-  async approveDaemonPairingSession(
-    token: string,
-    data: ApproveDaemonPairingSessionRequest,
-  ): Promise<DaemonPairingSession> {
-    return this.fetch(`/api/daemon/pairing-sessions/${token}/approve`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
   }
 
   // Inbox
