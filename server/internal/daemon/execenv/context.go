@@ -114,11 +114,23 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
 
 	b.WriteString("Run `multica issue get " + ctx.IssueID + " --output json` for full issue details and description.\n")
-	b.WriteString("Run `multica issue comment list " + ctx.IssueID + "` for discussion history.\n\n")
+	b.WriteString("Run `multica issue comment list " + ctx.IssueID + " --output json` for discussion history.\n\n")
 
 	if ctx.TriggerCommentID != "" {
-		b.WriteString("**Triggered by comment:** `" + ctx.TriggerCommentID + "`\n")
-		b.WriteString("Reply to this comment using: `multica issue comment add " + ctx.IssueID + " --parent " + ctx.TriggerCommentID + " --content \"...\"`\n\n")
+		b.WriteString("## Trigger: Comment Reply\n\n")
+		b.WriteString("This task was triggered because someone left a comment on the issue.\n")
+		b.WriteString("Your primary goal is to **read and respond to the comment**.\n\n")
+		b.WriteString("**Triggering comment ID:** `" + ctx.TriggerCommentID + "`\n\n")
+		b.WriteString("**Workflow:**\n")
+		b.WriteString("1. Read the issue and comments to understand the full context\n")
+		b.WriteString("2. Find the triggering comment and understand what is being asked\n")
+		b.WriteString("3. Reply using: `multica issue comment add " + ctx.IssueID + " --parent " + ctx.TriggerCommentID + " --content \"...\"`\n")
+		b.WriteString("4. If the comment requests further work, do the work and then reply with your findings\n")
+		b.WriteString("5. Only change issue status if the comment explicitly requests it — do NOT change status just because you replied\n\n")
+	} else {
+		b.WriteString("## Trigger: New Assignment\n\n")
+		b.WriteString("This task was triggered because you were assigned to this issue.\n")
+		b.WriteString("Read the issue description and comments, then complete the requested work.\n\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {
