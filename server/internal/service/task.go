@@ -191,10 +191,15 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
-	var payload protocol.TaskCompletedPayload
-	if err := json.Unmarshal(result, &payload); err == nil {
-		if payload.Output != "" {
-			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
+	// Post agent output as a comment, but only for assignment-triggered tasks.
+	// Comment-triggered tasks: the agent replies via CLI with --parent, so
+	// posting here would create a duplicate.
+	if !task.TriggerCommentID.Valid {
+		var payload protocol.TaskCompletedPayload
+		if err := json.Unmarshal(result, &payload); err == nil {
+			if payload.Output != "" {
+				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
+			}
 		}
 	}
 
