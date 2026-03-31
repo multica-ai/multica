@@ -50,7 +50,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica agent list` — List agents in workspace\n\n")
 
 	b.WriteString("### Write\n")
-	b.WriteString("- `multica issue comment add <issue-id> --content \"...\"` — Post a comment to an issue\n")
+	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
 
@@ -75,7 +75,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
 	fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
 	fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-	b.WriteString("3. Read comments for additional context or human instructions\n")
+	b.WriteString("3. Read comments for additional context or human instructions. When replying to a specific comment, use `--parent <comment-id>` to thread your response\n")
 	b.WriteString("4. If the task requires code changes:\n")
 	if len(ctx.Repos) > 0 {
 		b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")

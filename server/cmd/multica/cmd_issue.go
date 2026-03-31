@@ -146,6 +146,7 @@ func init() {
 
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (required)")
+	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -538,6 +539,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	body := map[string]any{"content": content}
+	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
+		body["parent_id"] = parentID
+	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/comments", body, &result); err != nil {
 		return fmt.Errorf("add comment: %w", err)
