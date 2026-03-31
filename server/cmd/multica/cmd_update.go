@@ -98,13 +98,11 @@ func getBrewPrefix() string {
 func updateViaBrew() error {
 	fmt.Fprintln(os.Stderr, "Updating via Homebrew...")
 
-	cmd := exec.Command("brew", "upgrade", "multica")
+	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		// `brew upgrade` exits non-zero if already up-to-date in some versions.
-		// Check if it's just "already installed".
-		return fmt.Errorf("brew upgrade failed: %w\nYou can try manually: brew upgrade multica", err)
+		return fmt.Errorf("brew upgrade failed: %w\nYou can try manually: brew upgrade multica-ai/tap/multica", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "Update complete.")
