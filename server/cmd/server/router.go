@@ -79,28 +79,34 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 
-	// Daemon API routes (no user auth; daemon auth deferred to later)
+	// Daemon API routes
 	r.Route("/api/daemon", func(r chi.Router) {
+		// Pairing session endpoints are public (used before daemon has a token).
 		r.Post("/pairing-sessions", h.CreateDaemonPairingSession)
 		r.Get("/pairing-sessions/{token}", h.GetDaemonPairingSession)
 		r.Post("/pairing-sessions/{token}/claim", h.ClaimDaemonPairingSession)
 
-		r.Post("/register", h.DaemonRegister)
-		r.Post("/deregister", h.DaemonDeregister)
-		r.Post("/heartbeat", h.DaemonHeartbeat)
+		// All other daemon routes require a valid token.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Auth(queries))
 
-		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
-		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
-		r.Post("/runtimes/{runtimeId}/usage", h.ReportRuntimeUsage)
-		r.Post("/runtimes/{runtimeId}/ping/{pingId}/result", h.ReportPingResult)
+			r.Post("/register", h.DaemonRegister)
+			r.Post("/deregister", h.DaemonDeregister)
+			r.Post("/heartbeat", h.DaemonHeartbeat)
 
-		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
-		r.Post("/tasks/{taskId}/start", h.StartTask)
-		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
-		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
-		r.Post("/tasks/{taskId}/fail", h.FailTask)
-		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
-		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
+			r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
+			r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
+			r.Post("/runtimes/{runtimeId}/usage", h.ReportRuntimeUsage)
+			r.Post("/runtimes/{runtimeId}/ping/{pingId}/result", h.ReportPingResult)
+
+			r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
+			r.Post("/tasks/{taskId}/start", h.StartTask)
+			r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
+			r.Post("/tasks/{taskId}/complete", h.CompleteTask)
+			r.Post("/tasks/{taskId}/fail", h.FailTask)
+			r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
+			r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
+		})
 	})
 
 	// Protected API routes

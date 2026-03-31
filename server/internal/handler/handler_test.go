@@ -729,6 +729,7 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 		"runtimes":[{"name":"Local Codex","type":"codex","version":"1.0.0","status":"online"}]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
 
 	testHandler.DaemonRegister(w, req)
 	if w.Code != http.StatusNotFound {

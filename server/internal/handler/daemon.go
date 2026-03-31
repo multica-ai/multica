@@ -53,6 +53,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "at least one runtime is required")
 		return
 	}
+
+	// Verify the caller is a member of the target workspace.
+	if _, ok := h.requireWorkspaceMember(w, r, req.WorkspaceID, "workspace not found"); !ok {
+		return
+	}
+
 	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(req.WorkspaceID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
