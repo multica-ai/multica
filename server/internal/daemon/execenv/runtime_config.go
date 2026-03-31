@@ -42,12 +42,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Available Commands\n\n")
+	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
-	b.WriteString("- `multica issue get <id>` — Get full issue details (title, description, status, priority, assignee)\n")
-	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X]` — List issues in workspace\n")
-	b.WriteString("- `multica issue comment list <issue-id>` — List all comments on an issue\n")
-	b.WriteString("- `multica workspace get` — Get workspace details and context\n")
-	b.WriteString("- `multica agent list` — List agents in workspace\n\n")
+	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
+	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X] --output json` — List issues in workspace\n")
+	b.WriteString("- `multica issue comment list <issue-id> --output json` — List all comments on an issue (includes id, parent_id for threading)\n")
+	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
+	b.WriteString("- `multica agent list --output json` — List agents in workspace\n\n")
 
 	b.WriteString("### Write\n")
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
