@@ -116,6 +116,11 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("Run `multica issue get " + ctx.IssueID + " --output json` for full issue details and description.\n")
 	b.WriteString("Run `multica issue comment list " + ctx.IssueID + "` for discussion history.\n\n")
 
+	if ctx.TriggerCommentID != "" {
+		b.WriteString("**Triggered by comment:** `" + ctx.TriggerCommentID + "`\n")
+		b.WriteString("Reply to this comment using: `multica issue comment add " + ctx.IssueID + " --parent " + ctx.TriggerCommentID + " --content \"...\"`\n\n")
+	}
+
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
 		b.WriteString("The following skills are available to you:\n\n")

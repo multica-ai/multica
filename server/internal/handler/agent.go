@@ -104,8 +104,9 @@ type AgentTaskResponse struct {
 	Agent          *TaskAgentData `json:"agent,omitempty"`
 	Repos          []RepoData     `json:"repos,omitempty"`
 	CreatedAt      string         `json:"created_at"`
-	PriorSessionID string         `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir   string         `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	PriorSessionID   string         `json:"prior_session_id,omitempty"`    // session ID from a previous task on same issue
+	PriorWorkDir     string         `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
+	TriggerCommentID *string        `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -133,8 +134,9 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		StartedAt:    timestampToPtr(t.StartedAt),
 		CompletedAt:  timestampToPtr(t.CompletedAt),
 		Result:       result,
-		Error:        textToPtr(t.Error),
-		CreatedAt:    timestampToString(t.CreatedAt),
+		Error:            textToPtr(t.Error),
+		CreatedAt:        timestampToString(t.CreatedAt),
+		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 	}
 }
 
