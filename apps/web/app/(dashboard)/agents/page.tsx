@@ -150,7 +150,10 @@ function CreateAgentDialog({
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
-        triggers: [{ id: generateId(), type: "on_assign", enabled: true, config: {} }],
+        triggers: [
+          { id: generateId(), type: "on_assign", enabled: true, config: {} },
+          { id: generateId(), type: "on_comment", enabled: true, config: {} },
+        ],
       });
       onClose();
     } catch (err) {
