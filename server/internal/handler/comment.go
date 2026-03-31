@@ -146,7 +146,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) {
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
+		// Resolve thread root: if the comment is a reply, agent should reply
+		// to the thread root (matching frontend behavior where all replies
+		// in a thread share the same top-level parent).
+		replyTo := comment.ID
+		if comment.ParentID.Valid {
+			replyTo = comment.ParentID
+		}
+		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, replyTo); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
