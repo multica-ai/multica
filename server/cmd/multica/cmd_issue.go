@@ -500,7 +500,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, comments)
 	}
 
-	headers := []string{"ID", "AUTHOR", "TYPE", "CONTENT", "CREATED"}
+	headers := []string{"ID", "PARENT", "AUTHOR", "TYPE", "CONTENT", "CREATED"}
 	rows := make([][]string, 0, len(comments))
 	for _, c := range comments {
 		content := strVal(c, "content")
@@ -512,8 +512,13 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		if len(created) >= 16 {
 			created = created[:16]
 		}
+		parentID := strVal(c, "parent_id")
+		if parentID == "" {
+			parentID = "—"
+		}
 		rows = append(rows, []string{
-			truncateID(strVal(c, "id")),
+			strVal(c, "id"),
+			parentID,
 			strVal(c, "author_type") + ":" + truncateID(strVal(c, "author_id")),
 			strVal(c, "type"),
 			content,
