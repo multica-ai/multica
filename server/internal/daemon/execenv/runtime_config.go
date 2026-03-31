@@ -72,26 +72,39 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
 	}
 
-	b.WriteString("### Workflow\n")
-	b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
-	fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-	fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-	b.WriteString("3. Read comments for additional context or human instructions. When replying to a specific comment, use `--parent <comment-id>` to thread your response\n")
-	b.WriteString("4. If the task requires code changes:\n")
-	if len(ctx.Repos) > 0 {
-		b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")
-		b.WriteString("   b. `cd` into the checked-out directory\n")
-		b.WriteString("   c. Implement the changes and commit\n")
+	b.WriteString("### Workflow\n\n")
+
+	if ctx.TriggerCommentID != "" {
+		// Comment-triggered: focus on reading and replying
+		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
+		fmt.Fprintf(&b, "4. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
+		b.WriteString("5. If the comment requests code changes or further work, do the work first, then reply with your results\n")
+		b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 	} else {
-		b.WriteString("   a. Create a new branch\n")
-		b.WriteString("   b. Implement the changes and commit\n")
+		// Assignment-triggered: full workflow
+		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+		b.WriteString("3. Read comments for additional context or human instructions\n")
+		b.WriteString("4. If the task requires code changes:\n")
+		if len(ctx.Repos) > 0 {
+			b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")
+			b.WriteString("   b. `cd` into the checked-out directory\n")
+			b.WriteString("   c. Implement the changes and commit\n")
+		} else {
+			b.WriteString("   a. Create a new branch\n")
+			b.WriteString("   b. Implement the changes and commit\n")
+		}
+		b.WriteString("   c. Push the branch to the remote\n")
+		b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
+		fmt.Fprintf(&b, "   e. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
+		b.WriteString("5. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
+		fmt.Fprintf(&b, "6. Run `multica issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
-	b.WriteString("   c. Push the branch to the remote\n")
-	b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
-	fmt.Fprintf(&b, "   e. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
-	b.WriteString("5. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
-	fmt.Fprintf(&b, "6. Run `multica issue status %s in_review`\n", ctx.IssueID)
-	fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Skills\n\n")
