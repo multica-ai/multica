@@ -1,0 +1,168 @@
+# Default values for multica.
+
+## Server (Go backend)
+server:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/multica-ai/multica
+    pullPolicy: IfNotPresent
+    tag: ""  # Defaults to Chart.appVersion
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+  env:
+    PORT: "8080"
+    LOG_LEVEL: "info"
+    APP_ENV: "production"
+    # FRONTEND_ORIGIN: "https://app.example.com"
+    # CORS_ALLOWED_ORIGINS: "https://app.example.com"
+    # COOKIE_DOMAIN: ".example.com"
+  # Secret env vars — set these via existingSecret or extraEnvFrom
+  # JWT_SECRET, DATABASE_URL, RESEND_API_KEY, AWS_ACCESS_KEY_ID, etc.
+  existingSecret: ""  # Name of an existing Secret with env vars
+  extraEnv: []
+    # - name: RESEND_API_KEY
+    #   value: "re_..."
+  extraEnvFrom: []
+    # - secretRef:
+    #     name: multica-secrets
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+## Web frontend (Next.js)
+web:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/multica-ai/multica-web
+    pullPolicy: IfNotPresent
+    tag: ""  # Defaults to Chart.appVersion
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+  env:
+    NODE_ENV: "production"
+    # REMOTE_API_URL is set automatically to point to the server service
+
+## Database migration job
+migrate:
+  enabled: true
+  # Image is the same as server (migrate binary is bundled)
+  annotations: {}
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+
+## Ingress
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  # API/backend host
+  serverHost: api.example.com
+  # Web frontend host
+  webHost: app.example.com
+  tls: []
+    # - secretName: multica-tls
+    #   hosts:
+    #     - api.example.com
+    #     - app.example.com
+
+## Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+## Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+
+## Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+## Image pull secrets
+imagePullSecrets: []
+
+## Node selector, tolerations, affinity
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## Extra labels applied to all resources
+commonLabels: {}
+
+## PostgreSQL subchart (Bitnami)
+## Set postgresql.enabled=false to use an external database
+postgresql:
+  enabled: true
+  auth:
+    database: multica
+    username: multica
+    # Set password via --set postgresql.auth.password=<pass> or existingSecret
+    password: ""
+    existingSecret: ""
+  primary:
+    initdb:
+      scripts:
+        enable-pgvector.sql: |
+          CREATE EXTENSION IF NOT EXISTS vector;
+    persistence:
+      enabled: true
+      size: 10Gi
+
+## External database (used when postgresql.enabled=false)
+externalDatabase:
+  url: ""  # Full connection string: postgres://user:pass@host:5432/db?sslmode=require
+  existingSecret: ""
+  existingSecretKey: "DATABASE_URL"
+
+## JWT secret — provide via existingSecret or direct value (not recommended for prod)
+jwt:
+  secret: ""
+  existingSecret: ""
+  existingSecretKey: "JWT_SECRET"

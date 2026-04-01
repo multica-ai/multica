@@ -1,0 +1,588 @@
+{{- /*
+Copyright Broadcom, Inc. All Rights Reserved.
+SPDX-License-Identifier: APACHE-2.0
+*/}}
+
+{{- if eq .Values.architecture "replication" }}
+{{- $customUser := include "postgresql.v1.username" . }}
+apiVersion: {{ include "common.capabilities.statefulset.apiVersion" . }}
+kind: StatefulSet
+metadata:
+  name: {{ include "postgresql.v1.readReplica.fullname" . }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  {{- $labels := include "common.tplvalues.merge" ( dict "values" ( list .Values.readReplicas.labels .Values.commonLabels ) "context" . ) }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" $labels "context" $ ) | nindent 4 }}
+    app.kubernetes.io/component: read
+  {{- if or .Values.commonAnnotations .Values.readReplicas.annotations }}
+  {{- $annotations := include "common.tplvalues.merge" ( dict "values" ( list .Values.readReplicas.annotations .Values.commonAnnotations ) "context" . ) }}
+  annotations: {{- include "common.tplvalues.render" ( dict "value" $annotations "context" $) | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.readReplicas.replicaCount }}
+  serviceName: {{ include "postgresql.v1.readReplica.svc.headless" . }}
+  {{- if .Values.readReplicas.updateStrategy }}
+  updateStrategy: {{- toYaml .Values.readReplicas.updateStrategy | nindent 4 }}
+  {{- end }}
+  {{- $podLabels := include "common.tplvalues.merge" ( dict "values" ( list .Values.readReplicas.podLabels .Values.commonLabels ) "context" . ) }}
+  selector:
+    matchLabels: {{- include "common.labels.matchLabels" ( dict "customLabels" $podLabels "context" $ ) | nindent 6 }}
+      app.kubernetes.io/component: read
+  template:
+    metadata:
+      name: {{ include "postgresql.v1.readReplica.fullname" . }}
+      labels: {{- include "common.labels.standard" ( dict "customLabels" $podLabels "context" $ ) | nindent 8 }}
+        app.kubernetes.io/component: read
+      {{- if or .Values.passwordUpdateJob.enabled (include "postgresql.v1.readReplicas.createExtendedConfigmap" .) .Values.readReplicas.podAnnotations }}
+      annotations:
+        {{- if (include "postgresql.v1.readReplicas.createExtendedConfigmap" .) }}
+        checksum/extended-configuration: {{ pick (include (print $.Template.BasePath "/primary/extended-configmap.yaml") . | fromYaml) "data" | toYaml | sha256sum }}
+        {{- end }}
+        {{- if .Values.passwordUpdateJob.enabled }}
+        charts.bitnami.com/password-last-update: {{ now | date "20060102150405" | quote }}
+        {{- end }}
+        {{- if .Values.readReplicas.podAnnotations }}
+        {{- include "common.tplvalues.render" ( dict "value" .Values.readReplicas.podAnnotations "context" $ ) | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      {{- if .Values.readReplicas.extraPodSpec }}
+      {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.extraPodSpec "context" $) | nindent 6 }}
+      {{- end }}
+      serviceAccountName: {{ include "postgresql.v1.serviceAccountName" . }}
+      {{- include "postgresql.v1.imagePullSecrets" . | nindent 6 }}
+      automountServiceAccountToken: {{ .Values.readReplicas.automountServiceAccountToken }}
+      {{- if .Values.readReplicas.hostAliases }}
+      hostAliases: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.hostAliases "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if .Values.readReplicas.affinity }}
+      affinity: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.affinity "context" $) | nindent 8 }}
+      {{- else }}
+      affinity:
+        podAffinity: {{- include "common.affinities.pods" (dict "type" .Values.readReplicas.podAffinityPreset "component" "read" "customLabels" $podLabels "context" $) | nindent 10 }}
+        podAntiAffinity: {{- include "common.affinities.pods" (dict "type" .Values.readReplicas.podAntiAffinityPreset "component" "read" "customLabels" $podLabels "context" $) | nindent 10 }}
+        nodeAffinity: {{- include "common.affinities.nodes" (dict "type" .Values.readReplicas.nodeAffinityPreset.type "key" .Values.readReplicas.nodeAffinityPreset.key "values" .Values.readReplicas.nodeAffinityPreset.values) | nindent 10 }}
+      {{- end }}
+      {{- if .Values.readReplicas.nodeSelector }}
+      nodeSelector: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.nodeSelector "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if .Values.readReplicas.tolerations }}
+      tolerations: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.tolerations "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if .Values.readReplicas.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.topologySpreadConstraints "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if .Values.readReplicas.priorityClassName }}
+      priorityClassName: {{ .Values.readReplicas.priorityClassName }}
+      {{- end }}
+      {{- if .Values.readReplicas.schedulerName }}
+      schedulerName: {{ .Values.readReplicas.schedulerName | quote }}
+      {{- end }}
+      {{- if .Values.readReplicas.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.readReplicas.terminationGracePeriodSeconds }}
+      {{- end }}
+      {{- if .Values.readReplicas.podSecurityContext.enabled }}
+      securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.readReplicas.podSecurityContext "context" $) | nindent 8 }}
+      {{- end }}
+      hostNetwork: {{ .Values.readReplicas.hostNetwork }}
+      hostIPC: {{ .Values.readReplicas.hostIPC }}
+      {{- if or (and .Values.tls.enabled (not .Values.volumePermissions.enabled)) (and .Values.volumePermissions.enabled (or .Values.readReplicas.persistence.enabled .Values.shmVolume.enabled)) .Values.readReplicas.initContainers }}
+      initContainers:
+        {{- if and .Values.tls.enabled (not .Values.volumePermissions.enabled) }}
+        - name: copy-certs
+          image: {{ include "postgresql.v1.volumePermissions.image" . }}
+          imagePullPolicy: {{ .Values.volumePermissions.image.pullPolicy | quote }}
+          {{- if .Values.readReplicas.resources }}
+          resources: {{- toYaml .Values.readReplicas.resources | nindent 12 }}
+          {{- else if ne .Values.readReplicas.resourcesPreset "none" }}
+          resources: {{- include "common.resources.preset" (dict "type" .Values.readReplicas.resourcesPreset) | nindent 12 }}
+          {{- end }}
+          # We don't require a privileged container in this case
+          {{- if .Values.readReplicas.containerSecurityContext.enabled }}
+          securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.readReplicas.containerSecurityContext "context" $) | nindent 12 }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              cp /tmp/certs/* /opt/bitnami/postgresql/certs/
+              chmod 600 {{ include "postgresql.v1.tlsCertKey" . }}
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: raw-certificates
+              mountPath: /tmp/certs
+            - name: postgresql-certificates
+              mountPath: /opt/bitnami/postgresql/certs
+        {{- else if and .Values.volumePermissions.enabled (or .Values.readReplicas.persistence.enabled .Values.shmVolume.enabled) }}
+        - name: init-chmod-data
+          image: {{ include "postgresql.v1.volumePermissions.image" . }}
+          imagePullPolicy: {{ .Values.volumePermissions.image.pullPolicy | quote }}
+          {{- if .Values.readReplicas.resources }}
+          resources: {{- toYaml .Values.readReplicas.resources | nindent 12 }}
+          {{- else if ne .Values.readReplicas.resourcesPreset "none" }}
+          resources: {{- include "common.resources.preset" (dict "type" .Values.readReplicas.resourcesPreset) | nindent 12 }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              {{- if .Values.readReplicas.persistence.enabled }}
+              {{- if eq ( toString ( .Values.volumePermissions.containerSecurityContext.runAsUser )) "auto" }}
+              chown `id -u`:`id -G | cut -d " " -f2` {{ .Values.readReplicas.persistence.mountPath }}
+              {{- else }}
+              chown {{ .Values.readReplicas.containerSecurityContext.runAsUser }}:{{ .Values.readReplicas.podSecurityContext.fsGroup }} {{ .Values.readReplicas.persistence.mountPath }}
+              {{- end }}
+              mkdir -p {{ .Values.readReplicas.persistence.mountPath }}/data {{- if (include "postgresql.v1.mountConfigurationCM" .) }} {{ .Values.readReplicas.persistence.mountPath }}/conf {{- end }}
+              chmod 700 {{ .Values.readReplicas.persistence.mountPath }}/data {{- if (include "postgresql.v1.mountConfigurationCM" .) }} {{ .Values.readReplicas.persistence.mountPath }}/conf {{- end }}
+              find {{ .Values.readReplicas.persistence.mountPath }} -mindepth 1 -maxdepth 1 {{- if not (include "postgresql.v1.mountConfigurationCM" .) }} -not -name "conf" {{- end }} -not -name ".snapshot" -not -name "lost+found" | \
+              {{- if eq ( toString ( .Values.volumePermissions.containerSecurityContext.runAsUser )) "auto" }}
+                xargs -r chown -R `id -u`:`id -G | cut -d " " -f2`
+              {{- else }}
+                xargs -r chown -R {{ .Values.readReplicas.containerSecurityContext.runAsUser }}:{{ .Values.readReplicas.podSecurityContext.fsGroup }}
+              {{- end }}
+              {{- end }}
+              {{- if .Values.shmVolume.enabled }}
+              chmod -R 777 /dev/shm
+              {{- end }}
+              {{- if .Values.tls.enabled }}
+              cp /tmp/certs/* /opt/bitnami/postgresql/certs/
+              {{- if eq ( toString ( .Values.volumePermissions.containerSecurityContext.runAsUser )) "auto" }}
+              chown -R `id -u`:`id -G | cut -d " " -f2` /opt/bitnami/postgresql/certs/
+              {{- else }}
+              chown -R {{ .Values.readReplicas.containerSecurityContext.runAsUser }}:{{ .Values.readReplicas.podSecurityContext.fsGroup }} /opt/bitnami/postgresql/certs/
+              {{- end }}
+              chmod 600 {{ include "postgresql.v1.tlsCertKey" . }}
+              {{- end }}
+          {{- if eq ( toString ( .Values.volumePermissions.containerSecurityContext.runAsUser )) "auto" }}
+          securityContext: {{- omit .Values.volumePermissions.containerSecurityContext "runAsUser" | toYaml | nindent 12 }}
+          {{- else }}
+          securityContext: {{- .Values.volumePermissions.containerSecurityContext | toYaml | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: data
+              mountPath: {{ .Values.readReplicas.persistence.mountPath }}
+              {{- if .Values.readReplicas.persistence.subPath }}
+              subPath: {{ .Values.readReplicas.persistence.subPath }}
+              {{- end }}
+            {{- if .Values.shmVolume.enabled }}
+            - name: dshm
+              mountPath: /dev/shm
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: raw-certificates
+              mountPath: /tmp/certs
+            - name: postgresql-certificates
+              mountPath: /opt/bitnami/postgresql/certs
+            {{- end }}
+        {{- end }}
+        {{- if .Values.readReplicas.initContainers }}
+        {{- include "common.tplvalues.render" ( dict "value" .Values.readReplicas.initContainers "context" $ ) | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: postgresql
+          image: {{ include "postgresql.v1.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+          {{- if .Values.readReplicas.containerSecurityContext.enabled }}
+          securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.readReplicas.containerSecurityContext "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.diagnosticMode.enabled }}
+          command: {{- include "common.tplvalues.render" (dict "value" .Values.diagnosticMode.command "context" $) | nindent 12 }}
+          {{- else if .Values.readReplicas.command }}
+          command: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.command "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.diagnosticMode.enabled }}
+          args: {{- include "common.tplvalues.render" (dict "value" .Values.diagnosticMode.args "context" $) | nindent 12 }}
+          {{- else if .Values.readReplicas.args }}
+          args: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.args "context" $) | nindent 12 }}
+          {{- end }}
+          env:
+            - name: BITNAMI_DEBUG
+              value: {{ ternary "true" "false" (or .Values.image.debug .Values.diagnosticMode.enabled) | quote }}
+            - name: POSTGRESQL_PORT_NUMBER
+              value: {{ .Values.containerPorts.postgresql | quote }}
+            - name: POSTGRESQL_VOLUME_DIR
+              value: {{ .Values.readReplicas.persistence.mountPath | quote }}
+            {{- if .Values.readReplicas.persistence.mountPath }}
+            - name: PGDATA
+              value: {{ .Values.postgresqlDataDir | quote }}
+            {{- end }}
+            # Authentication
+            {{- if or (eq $customUser "postgres") (empty $customUser) }}
+            {{- if .Values.auth.enablePostgresUser }}
+            {{- if .Values.auth.usePasswordFiles }}
+            - name: POSTGRES_PASSWORD_FILE
+              value: {{ printf "/opt/bitnami/postgresql/secrets/%s" (include "postgresql.v1.adminPasswordKey" .) }}
+            {{- else }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "postgresql.v1.secretName" . }}
+                  key: {{ include "postgresql.v1.adminPasswordKey" . }}
+            {{- end }}
+            {{- else }}
+            - name: ALLOW_EMPTY_PASSWORD
+              value: "true"
+            {{- end }}
+            {{- else }}
+            - name: POSTGRES_USER
+              value: {{ $customUser | quote }}
+            {{- if .Values.auth.usePasswordFiles }}
+            - name: POSTGRES_PASSWORD_FILE
+              value: {{ printf "/opt/bitnami/postgresql/secrets/%s" (include "postgresql.v1.userPasswordKey" .) }}
+            {{- else }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "postgresql.v1.secretName" . }}
+                  key: {{ include "postgresql.v1.userPasswordKey" . }}
+            {{- end }}
+            {{- if .Values.auth.enablePostgresUser }}
+            {{- if .Values.auth.usePasswordFiles }}
+            - name: POSTGRES_POSTGRES_PASSWORD_FILE
+              value: {{ printf "/opt/bitnami/postgresql/secrets/%s" (include "postgresql.v1.adminPasswordKey" .) }}
+            {{- else }}
+            - name: POSTGRES_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "postgresql.v1.secretName" . }}
+                  key: {{ include "postgresql.v1.adminPasswordKey" . }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            # Replication
+            - name: POSTGRES_REPLICATION_MODE
+              value: "slave"
+            - name: POSTGRES_REPLICATION_USER
+              value: {{ .Values.auth.replicationUsername | quote }}
+            {{- if .Values.auth.usePasswordFiles }}
+            - name: POSTGRES_REPLICATION_PASSWORD_FILE
+              value: {{ printf "/opt/bitnami/postgresql/secrets/%s" (include "postgresql.v1.replicationPasswordKey" .) }}
+            {{- else }}
+            - name: POSTGRES_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "postgresql.v1.secretName" . }}
+                  key: {{ include "postgresql.v1.replicationPasswordKey" . }}
+            {{- end }}
+            - name: POSTGRES_CLUSTER_APP_NAME
+              value: {{ .Values.replication.applicationName }}
+            - name: POSTGRES_MASTER_HOST
+              value: {{ include "postgresql.v1.primary.fullname" . }}
+            - name: POSTGRES_MASTER_PORT_NUMBER
+              value: {{ include "postgresql.v1.service.port" . | quote }}
+            # TLS
+            - name: POSTGRESQL_ENABLE_TLS
+              value: {{ ternary "yes" "no" .Values.tls.enabled | quote }}
+            {{- if .Values.tls.enabled }}
+            - name: POSTGRESQL_TLS_PREFER_SERVER_CIPHERS
+              value: {{ ternary "yes" "no" .Values.tls.preferServerCiphers | quote }}
+            - name: POSTGRESQL_TLS_CERT_FILE
+              value: {{ include "postgresql.v1.tlsCert" . }}
+            - name: POSTGRESQL_TLS_KEY_FILE
+              value: {{ include "postgresql.v1.tlsCertKey" . }}
+            {{- if .Values.tls.certCAFilename }}
+            - name: POSTGRESQL_TLS_CA_FILE
+              value: {{ include "postgresql.v1.tlsCACert" . }}
+            {{- end }}
+            {{- if .Values.tls.crlFilename }}
+            - name: POSTGRESQL_TLS_CRL_FILE
+              value: {{ include "postgresql.v1.tlsCRL" . }}
+            {{- end }}
+            {{- end }}
+            # Audit
+            - name: POSTGRESQL_LOG_HOSTNAME
+              value: {{ .Values.audit.logHostname | quote }}
+            - name: POSTGRESQL_LOG_CONNECTIONS
+              value: {{ .Values.audit.logConnections | quote }}
+            - name: POSTGRESQL_LOG_DISCONNECTIONS
+              value: {{ .Values.audit.logDisconnections | quote }}
+            {{- if .Values.audit.logLinePrefix }}
+            - name: POSTGRESQL_LOG_LINE_PREFIX
+              value: {{ .Values.audit.logLinePrefix | quote }}
+            {{- end }}
+            {{- if .Values.audit.logTimezone }}
+            - name: POSTGRESQL_LOG_TIMEZONE
+              value: {{ .Values.audit.logTimezone | quote }}
+            {{- end }}
+            {{- if .Values.audit.pgAuditLog }}
+            - name: POSTGRESQL_PGAUDIT_LOG
+              value: {{ .Values.audit.pgAuditLog | quote }}
+            {{- end }}
+            - name: POSTGRESQL_PGAUDIT_LOG_CATALOG
+              value: {{ .Values.audit.pgAuditLogCatalog | quote }}
+            # Others
+            - name: POSTGRESQL_CLIENT_MIN_MESSAGES
+              value: {{ .Values.audit.clientMinMessages | quote }}
+            - name: POSTGRESQL_SHARED_PRELOAD_LIBRARIES
+              value: {{ .Values.postgresqlSharedPreloadLibraries | quote }}
+            {{- if .Values.readReplicas.extraEnvVars }}
+            {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.extraEnvVars "context" $) | nindent 12 }}
+            {{- end }}
+          {{- if or .Values.readReplicas.extraEnvVarsCM .Values.readReplicas.extraEnvVarsSecret }}
+          envFrom:
+            {{- if .Values.readReplicas.extraEnvVarsCM }}
+            - configMapRef:
+                name: {{ .Values.readReplicas.extraEnvVarsCM }}
+            {{- end }}
+            {{- if .Values.readReplicas.extraEnvVarsSecret }}
+            - secretRef:
+                name: {{ .Values.readReplicas.extraEnvVarsSecret }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: tcp-postgresql
+              containerPort: {{ .Values.containerPorts.postgresql }}
+          {{- if not .Values.diagnosticMode.enabled }}
+          {{- if .Values.readReplicas.customStartupProbe }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.customStartupProbe "context" $) | nindent 12 }}
+          {{- else if .Values.readReplicas.startupProbe.enabled }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" (omit .Values.readReplicas.startupProbe "enabled") "context" $) | nindent 12 }}
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                {{- if (include "postgresql.v1.database" .) }}
+                - exec pg_isready -U {{ default "postgres" $customUser| quote }} -d "dbname={{ include "postgresql.v1.database" . }} {{- if and .Values.tls.enabled .Values.tls.certCAFilename }} sslcert={{ include "postgresql.v1.tlsCert" . }} sslkey={{ include "postgresql.v1.tlsCertKey" . }}{{- end }}" -h 127.0.0.1 -p {{ .Values.containerPorts.postgresql }}
+                {{- else }}
+                - exec pg_isready -U {{ default "postgres" $customUser | quote }} {{- if and .Values.tls.enabled .Values.tls.certCAFilename }} -d "sslcert={{ include "postgresql.v1.tlsCert" . }} sslkey={{ include "postgresql.v1.tlsCertKey" . }}"{{- end }} -h 127.0.0.1 -p {{ .Values.containerPorts.postgresql }}
+                {{- end }}
+          {{- end }}
+          {{- if .Values.readReplicas.customLivenessProbe }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.customLivenessProbe "context" $) | nindent 12 }}
+          {{- else if .Values.readReplicas.livenessProbe.enabled }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" (omit .Values.readReplicas.livenessProbe "enabled") "context" $) | nindent 12 }}
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                {{- if (include "postgresql.v1.database" .) }}
+                - exec pg_isready -U {{ default "postgres" $customUser | quote }} -d "dbname={{ include "postgresql.v1.database" . }} {{- if and .Values.tls.enabled .Values.tls.certCAFilename }} sslcert={{ include "postgresql.v1.tlsCert" . }} sslkey={{ include "postgresql.v1.tlsCertKey" . }}{{- end }}" -h 127.0.0.1 -p {{ .Values.containerPorts.postgresql }}
+                {{- else }}
+                - exec pg_isready -U {{default "postgres" $customUser | quote }} {{- if and .Values.tls.enabled .Values.tls.certCAFilename }} -d "sslcert={{ include "postgresql.v1.tlsCert" . }} sslkey={{ include "postgresql.v1.tlsCertKey" . }}"{{- end }} -h 127.0.0.1 -p {{ .Values.containerPorts.postgresql }}
+                {{- end }}
+          {{- end }}
+          {{- if .Values.readReplicas.customReadinessProbe }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.customReadinessProbe "context" $) | nindent 12 }}
+          {{- else if .Values.readReplicas.readinessProbe.enabled }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" (omit .Values.readReplicas.readinessProbe "enabled") "context" $) | nindent 12 }}
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - -e
+                {{- include "postgresql.v1.readinessProbeCommand" . | nindent 16 }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.readReplicas.resources }}
+          resources: {{- toYaml .Values.readReplicas.resources | nindent 12 }}
+          {{- else if ne .Values.readReplicas.resourcesPreset "none" }}
+          resources: {{- include "common.resources.preset" (dict "type" .Values.readReplicas.resourcesPreset) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readReplicas.lifecycleHooks }}
+          lifecycle: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.lifecycleHooks "context" $) | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/postgresql/conf
+              subPath: app-conf-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/postgresql/tmp
+              subPath: app-tmp-dir
+            {{- if and .Values.auth.usePasswordFiles (or .Values.auth.enablePostgresUser $customUser) }}
+            - name: postgresql-password
+              mountPath: /opt/bitnami/postgresql/secrets/
+            {{- end }}
+            {{- if .Values.readReplicas.extendedConfiguration }}
+            - name: postgresql-extended-config
+              mountPath: {{ .Values.readReplicas.persistence.mountPath }}/conf/conf.d/
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: postgresql-certificates
+              mountPath: /opt/bitnami/postgresql/certs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.shmVolume.enabled }}
+            - name: dshm
+              mountPath: /dev/shm
+            {{- end }}
+            - name: data
+              mountPath: {{ .Values.readReplicas.persistence.mountPath }}
+              {{- if .Values.readReplicas.persistence.subPath }}
+              subPath: {{ .Values.readReplicas.persistence.subPath }}
+              {{- end }}
+            {{- if .Values.readReplicas.extraVolumeMounts }}
+            {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.extraVolumeMounts "context" $) | nindent 12 }}
+            {{- end }}
+        {{- if .Values.metrics.enabled }}
+        - name: metrics
+          image: {{ include "postgresql.v1.metrics.image" . }}
+          imagePullPolicy: {{ .Values.metrics.image.pullPolicy | quote }}
+          {{- if .Values.metrics.containerSecurityContext.enabled }}
+          securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.metrics.containerSecurityContext "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.diagnosticMode.enabled }}
+          command: {{- include "common.tplvalues.render" (dict "value" .Values.diagnosticMode.command "context" $) | nindent 12 }}
+          args: {{- include "common.tplvalues.render" (dict "value" .Values.diagnosticMode.args "context" $) | nindent 12 }}
+          {{- else if or .Values.metrics.customMetrics .Values.metrics.collectors }}
+          args:
+            {{- if .Values.metrics.customMetrics }}
+            - --extend.query-path
+            - /conf/custom-metrics.yaml
+            {{- end }}
+            {{- range $name, $enabled := .Values.metrics.collectors }}
+            - --{{ if not $enabled }}no-{{ end }}collector.{{ $name }}
+            {{- end }}
+          {{- end }}
+          env:
+            - name: DATA_SOURCE_URI
+              value: {{ printf "127.0.0.1:%d/postgres?sslmode=disable" (int (include "postgresql.v1.service.port" .)) }}
+            {{- if .Values.auth.usePasswordFiles }}
+            - name: DATA_SOURCE_PASS_FILE
+              value: {{ printf "/opt/bitnami/postgresql/secrets/%s" (include (ternary "postgresql.v1.adminPasswordKey" "postgresql.v1.userPasswordKey" (empty $customUser)) .) }}
+            {{- else }}
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "postgresql.v1.secretName" . }}
+                  key: {{ include (ternary "postgresql.v1.adminPasswordKey" "postgresql.v1.userPasswordKey" (empty $customUser)) . }}
+            {{- end }}
+            - name: DATA_SOURCE_USER
+              value: {{ default "postgres" $customUser | quote }}
+            {{- if .Values.metrics.extraEnvVars }}
+            {{- include "common.tplvalues.render" (dict "value" .Values.metrics.extraEnvVars "context" $) | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http-metrics
+              containerPort: {{ .Values.metrics.containerPorts.metrics }}
+          {{- if not .Values.diagnosticMode.enabled }}
+          {{- if .Values.metrics.customStartupProbe }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" .Values.metrics.customStartupProbe "context" $) | nindent 12 }}
+          {{- else if .Values.metrics.startupProbe.enabled }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" (omit .Values.metrics.startupProbe "enabled") "context" $) | nindent 12 }}
+            tcpSocket:
+              port: http-metrics
+          {{- end }}
+          {{- if .Values.metrics.customLivenessProbe }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" .Values.metrics.customLivenessProbe "context" $) | nindent 12 }}
+          {{- else if .Values.metrics.livenessProbe.enabled }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" (omit .Values.metrics.livenessProbe "enabled") "context" $) | nindent 12 }}
+            httpGet:
+              path: /
+              port: http-metrics
+          {{- end }}
+          {{- if .Values.metrics.customReadinessProbe }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" .Values.metrics.customReadinessProbe "context" $) | nindent 12 }}
+          {{- else if .Values.metrics.readinessProbe.enabled }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" (omit .Values.metrics.readinessProbe "enabled") "context" $) | nindent 12 }}
+            httpGet:
+              path: /
+              port: http-metrics
+          {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            {{- if and .Values.auth.usePasswordFiles (or .Values.auth.enablePostgresUser $customUser) }}
+            - name: postgresql-password
+              mountPath: /opt/bitnami/postgresql/secrets/
+            {{- end }}
+            {{- if .Values.metrics.customMetrics }}
+            - name: custom-metrics
+              mountPath: /conf
+              readOnly: true
+            {{- end }}
+          {{- if .Values.metrics.resources }}
+          resources: {{- toYaml .Values.metrics.resources | nindent 12 }}
+          {{- else if ne .Values.metrics.resourcesPreset "none" }}
+          resources: {{- include "common.resources.preset" (dict "type" .Values.metrics.resourcesPreset) | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- if .Values.readReplicas.sidecars }}
+        {{- include "common.tplvalues.render" ( dict "value" .Values.readReplicas.sidecars "context" $ ) | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- if .Values.readReplicas.extendedConfiguration }}
+        - name: postgresql-extended-config
+          configMap:
+            name: {{ include "postgresql.v1.readReplicas.extendedConfigmapName" . }}
+        {{- end }}
+        {{- if and .Values.auth.usePasswordFiles (or .Values.auth.enablePostgresUser $customUser) }}
+        - name: postgresql-password
+          secret:
+            secretName: {{ include "postgresql.v1.secretName" . }}
+        {{- end }}
+        {{- if .Values.tls.enabled }}
+        - name: raw-certificates
+          secret:
+            secretName: {{ include "postgresql.v1.tlsSecretName" . }}
+        - name: postgresql-certificates
+          emptyDir: {}
+        {{- end }}
+        {{- if and .Values.metrics.enabled .Values.metrics.customMetrics }}
+        - name: custom-metrics
+          configMap:
+            name: {{ printf "%s-metrics" (include "postgresql.v1.readReplica.fullname" .) }}
+        {{- end }}
+        {{- if .Values.shmVolume.enabled }}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            {{- if .Values.shmVolume.sizeLimit }}
+            sizeLimit: {{ .Values.shmVolume.sizeLimit }}
+            {{- end }}
+        {{- end }}
+        - name: empty-dir
+          emptyDir: {}
+        {{- if .Values.readReplicas.extraVolumes }}
+        {{- include "common.tplvalues.render" ( dict "value" .Values.readReplicas.extraVolumes "context" $ ) | nindent 8 }}
+        {{- end }}
+  {{- if and .Values.readReplicas.persistence.enabled .Values.readReplicas.persistence.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ tpl .Values.readReplicas.persistence.existingClaim $ }}
+  {{- else if not .Values.readReplicas.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+  {{- else }}
+  {{- if .Values.readReplicas.persistentVolumeClaimRetentionPolicy.enabled }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: {{ .Values.readReplicas.persistentVolumeClaimRetentionPolicy.whenDeleted }}
+    whenScaled: {{ .Values.readReplicas.persistentVolumeClaimRetentionPolicy.whenScaled }}
+  {{- end }}
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+        {{- if .Values.readReplicas.persistence.annotations }}
+        annotations: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.persistence.annotations "context" $) | nindent 10 }}
+        {{- end }}
+        {{- if .Values.readReplicas.persistence.labels }}
+        labels: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.persistence.labels "context" $) | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+        {{- range .Values.readReplicas.persistence.accessModes }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- if .Values.readReplicas.persistence.dataSource }}
+        dataSource: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.persistence.dataSource "context" $) | nindent 10 }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.readReplicas.persistence.size | quote }}
+        {{- if .Values.readReplicas.persistence.selector }}
+        selector: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.persistence.selector "context" $) | nindent 10 }}
+        {{- end -}}
+        {{- include "common.storage.class" (dict "persistence" .Values.readReplicas.persistence "global" .Values.global) | nindent 8 }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,18 @@
+{{- if .Values.web.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "multica.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.web.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.web.service.type }}
+  ports:
+    - port: {{ .Values.web.service.port }}
+      targetPort: {{ .Values.web.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "multica.web.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: multica
+description: AI-native task management platform with first-class agent support
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - ai
+  - task-management
+  - agents
+home: https://github.com/multica-ai/multica
+sources:
+  - https://github.com/multica-ai/multica
+maintainers:
+  - name: multica-ai
+dependencies:
+  - name: postgresql
+    version: "16.7.27"
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled

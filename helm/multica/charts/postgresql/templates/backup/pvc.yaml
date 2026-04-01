@@ -1,0 +1,34 @@
+{{- /*
+Copyright Broadcom, Inc. All Rights Reserved.
+SPDX-License-Identifier: APACHE-2.0
+*/}}
+
+{{- if and .Values.backup.enabled .Values.backup.cronjob.storage.enabled (not .Values.backup.cronjob.storage.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "postgresql.v1.primary.fullname" . }}-pgdumpall
+  namespace: {{ include "common.names.namespace" . | quote }}
+  {{- $labels := include "common.tplvalues.merge" ( dict "values" ( list .Values.backup.cronjob.labels .Values.commonLabels ) "context" . ) }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" $labels "context" $ ) | nindent 4 }}
+    app.kubernetes.io/component: pg_dumpall
+  {{- if or .Values.backup.cronjob.annotations .Values.commonAnnotations .Values.backup.cronjob.storage.resourcePolicy }}
+  annotations:
+    {{- if or .Values.backup.cronjob.annotations .Values.commonAnnotations }}
+    {{- $annotations := include "common.tplvalues.merge" ( dict "values" ( list .Values.backup.cronjob.annotations .Values.commonAnnotations ) "context" . ) }}
+    {{- include "common.tplvalues.render" ( dict "value" $annotations "context" $) | nindent 4 }}
+    {{- end }}
+    {{- if .Values.backup.cronjob.storage.resourcePolicy }}
+    helm.sh/resource-policy: {{ .Values.backup.cronjob.storage.resourcePolicy | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  accessModes:
+  {{- range .Values.backup.cronjob.storage.accessModes }}
+    - {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.cronjob.storage.size | quote }}
+  {{ include "common.storage.class" (dict "persistence" .Values.backup.cronjob.storage "global" .Values.global) }}
+{{- end }}

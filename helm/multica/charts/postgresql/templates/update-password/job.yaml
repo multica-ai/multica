@@ -1,0 +1,235 @@
+{{- /*
+Copyright Broadcom, Inc. All Rights Reserved.
+SPDX-License-Identifier: APACHE-2.0
+*/}}
+
+{{- if .Values.passwordUpdateJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-password-update" (include "postgresql.v1.chart.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
+    app.kubernetes.io/part-of: postgresql
+    app.kubernetes.io/component: update-job
+  {{- $defaultAnnotations := dict "helm.sh/hook" "pre-upgrade" "helm.sh/hook-delete-policy" "hook-succeeded" }}
+  {{- $annotations := include "common.tplvalues.merge" ( dict "values" ( list .Values.passwordUpdateJob.annotations .Values.commonAnnotations $defaultAnnotations ) "context" . ) }}
+  annotations: {{- include "common.tplvalues.render" ( dict "value" $annotations "context" $ ) | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.passwordUpdateJob.backoffLimit }}
+  template:
+    metadata:
+      {{- $podLabels := include "common.tplvalues.merge" ( dict "values" ( list .Values.passwordUpdateJob.podLabels .Values.commonLabels ) "context" . ) }}
+      labels: {{- include "common.labels.standard" ( dict "customLabels" $podLabels "context" $ ) | nindent 8 }}
+        app.kubernetes.io/part-of: postgresql
+        app.kubernetes.io/component: update-job
+      {{- if .Values.passwordUpdateJob.podAnnotations }}
+      annotations: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.podAnnotations "context" $) | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "postgresql.v1.imagePullSecrets" . | nindent 6 }}
+      restartPolicy: OnFailure
+      {{- if .Values.passwordUpdateJob.podSecurityContext.enabled }}
+      securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.passwordUpdateJob.podSecurityContext "context" $) | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: {{ .Values.passwordUpdateJob.automountServiceAccountToken }}
+      {{- if .Values.passwordUpdateJob.hostAliases }}
+      hostAliases: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.hostAliases "context" $) | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- if .Values.passwordUpdateJob.initContainers }}
+        {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.initContainers "context" $) | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: update-credentials
+          image: {{ template "postgresql.v1.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.passwordUpdateJob.command }}
+          command: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.command "context" $) | nindent 12 }}
+          {{- else }}
+          command:
+            - /bin/bash
+            - -ec
+          {{- end }}
+          {{- if .Values.passwordUpdateJob.args }}
+          args: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.args "context" $) | nindent 12 }}
+          {{- else }}
+          args:
+            - |
+              {{- $customUser := include "postgresql.v1.username" . }}
+              {{- $customDatabase := include "postgresql.v1.database" . | default "postgres" }}
+              {{- if .Values.auth.usePasswordFiles }}
+              # We need to load all the secret env vars to the system
+              for file in $(find /bitnami/postgresql/secrets -type f); do
+                  env_var_name="$(basename $file)"
+                  echo "Exporting $env_var_name"
+                  export $env_var_name="$(< $file)"
+              done
+              {{- end }}
+
+              . /opt/bitnami/scripts/postgresql-env.sh
+              . /opt/bitnami/scripts/libpostgresql.sh
+              . /opt/bitnami/scripts/liblog.sh
+
+              primary_host={{ include "postgresql.v1.primary.fullname" . }}-0.{{ include "postgresql.v1.primary.svc.headless" . }}
+              info "Starting password update job"
+              {{- if .Values.auth.enablePostgresUser }}
+              if [[ -f /job-status/postgres-password-changed ]]; then
+                  info "Postgres password already updated. Skipping"
+              else
+                  info "Updating postgres password"
+                  echo "ALTER USER postgres WITH PASSWORD '$POSTGRESQL_NEW_POSTGRES_PASSWORD';" | postgresql_remote_execute $primary_host {{ .Values.containerPorts.postgresql }} "" postgres $POSTGRESQL_PREVIOUS_POSTGRES_PASSWORD
+                  touch /job-status/postgres-password-changed
+                  info "Postgres password successfully updated"
+              fi
+              {{- end }}
+              {{- if and (not (empty $customUser)) (ne $customUser "postgres") }}
+              if [[ -f /job-status/password-changed ]]; then
+                  info "User password already updated. Skipping"
+              else
+                  info "Updating user password"
+                  echo "ALTER USER {{ $customUser }} WITH PASSWORD '$POSTGRESQL_NEW_PASSWORD';" | postgresql_remote_execute $primary_host {{ .Values.containerPorts.postgresql }} "{{ $customDatabase }}" $POSTGRESQL_USER $POSTGRESQL_PREVIOUS_PASSWORD
+                  touch /job-status/password-changed
+                  info "User password successfully updated"
+              fi
+              {{- end }}
+              {{- if or (eq .Values.architecture "replication") .Values.primary.standby.enabled }}
+              if [[ -f /job-status/replication-password-changed ]]; then
+                  info "Replication password already updated. Skipping"
+              else
+                  info "Updating replication password"
+                  echo "ALTER USER $POSTGRESQL_REPLICATION_USER WITH PASSWORD '$POSTGRESQL_NEW_REPLICATION_PASSWORD';" | postgresql_remote_execute $primary_host {{ .Values.containerPorts.postgresql }} "{{ $customDatabase }}" $POSTGRESQL_REPLICATION_USER  $POSTGRESQL_PREVIOUS_REPLICATION_PASSWORD
+                  touch /job-status/replication-password-changed
+                  info "Replication password successfully updated"
+              fi
+              {{- end }}
+              {{- if .Values.passwordUpdateJob.extraCommands }}
+              info "Running extra commmands"
+              {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.extraCommands "context" $) | nindent 14 }}
+              {{- end }}
+              info "Password update job finished successfully"
+          {{- end }}
+          env:
+            - name: BITNAMI_DEBUG
+              value: {{ ternary "true" "false" .Values.image.debug | quote }}
+            {{- if not .Values.auth.usePasswordFiles }}
+            - name: POSTGRESQL_PREVIOUS_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "postgresql.v1.update-job.previousSecretName" . }}
+                  key: {{ include "postgresql.v1.adminPasswordKey" . }}
+            - name: POSTGRESQL_NEW_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "postgresql.v1.update-job.newSecretName" . }}
+                  key: {{ include "postgresql.v1.adminPasswordKey" . }}
+            {{- end }}
+            {{- if not (empty .Values.auth.username) }}
+            - name: POSTGRESQL_USER
+              value: {{ .Values.auth.username | quote }}
+            {{- if not .Values.auth.usePasswordFiles }}
+            - name: POSTGRESQL_PREVIOUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "postgresql.v1.update-job.previousSecretName" . }}
+                  key: {{ include "postgresql.v1.userPasswordKey" . }}
+            - name: POSTGRESQL_NEW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "postgresql.v1.update-job.newSecretName" . }}
+                  key: {{ include "postgresql.v1.userPasswordKey" . }}
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.architecture "replication" }}
+            - name: POSTGRESQL_REPLICATION_USER
+              value: {{ .Values.auth.replicationUsername | quote }}
+            {{- if not .Values.auth.usePasswordFiles }}
+            - name: POSTGRESQL_PREVIOUS_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "postgresql.v1.update-job.previousSecretName" . }}
+                  key: {{ include "postgresql.v1.replicationPasswordKey" . }}
+            - name: POSTGRESQL_NEW_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "postgresql.v1.update-job.newSecretName" . }}
+                  key: {{ include "postgresql.v1.replicationPasswordKey" . }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.passwordUpdateJob.extraEnvVars }}
+            {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.extraEnvVars "context" $) | nindent 12 }}
+            {{- end }}
+          {{- if or .Values.passwordUpdateJob.extraEnvVarsCM .Values.passwordUpdateJob.extraEnvVarsSecret }}
+          envFrom:
+            {{- if .Values.passwordUpdateJob.extraEnvVarsCM }}
+            - configMapRef:
+                name: {{ .Values.passwordUpdateJob.extraEnvVarsCM }}
+            {{- end }}
+            {{- if .Values.passwordUpdateJob.extraEnvVarsSecret }}
+            - secretRef:
+                name: {{ .Values.passwordUpdateJob.extraEnvVarsSecret }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.passwordUpdateJob.containerSecurityContext.enabled }}
+          securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.passwordUpdateJob.containerSecurityContext "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.passwordUpdateJob.customLivenessProbe }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.customLivenessProbe "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.passwordUpdateJob.customReadinessProbe }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.customReadinessProbe "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.passwordUpdateJob.customStartupProbe }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.customStartupProbe "context" $) | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /job-status
+              subPath: job-dir
+            {{- if .Values.auth.usePasswordFiles }}
+            - name: postgresql-previous-credentials
+              mountPath: /bitnami/postgresql/secrets/previous
+            - name: postgresql-new-credentials
+              mountPath: /bitnami/postgresql/secrets/new
+            {{- end }}
+          {{- if .Values.passwordUpdateJob.extraVolumeMounts }}
+            {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.extraVolumeMounts "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.passwordUpdateJob.resources }}
+          resources: {{- toYaml .Values.passwordUpdateJob.resources | nindent 12 }}
+          {{- else if ne .Values.passwordUpdateJob.resourcesPreset "none" }}
+          resources: {{- include "common.resources.preset" (dict "type" .Values.passwordUpdateJob.resourcesPreset) | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        {{- if .Values.auth.usePasswordFiles }}
+        - name: postgresql-previous-credentials
+          secret:
+            secretName: {{ template "postgresql.v1.update-job.previousSecretName" . }}
+            items:
+              - key: {{ include "postgresql.v1.adminPasswordKey" . }}
+                path: POSTGRESQL_PREVIOUS_POSTGRES_PASSWORD
+              - key: {{ include "postgresql.v1.userPasswordKey" . }}
+                path: POSTGRESQL_PREVIOUS_PASSWORD
+              {{- if eq .Values.architecture "replication" }}
+              - key: {{ include "postgresql.v1.replicationPasswordKey" . }}
+                path: POSTGRESQL_PREVIOUS_REPLICATION_PASSWORD
+              {{- end }}
+        - name: postgresql-new-credentials
+          secret:
+            secretName: {{ template "postgresql.v1.update-job.newSecretName" . }}
+            items:
+              - key: {{ include "postgresql.v1.adminPasswordKey" . }}
+                path: POSTGRESQL_NEW_POSTGRES_PASSWORD
+              - key: {{ include "postgresql.v1.userPasswordKey" . }}
+                path: POSTGRESQL_NEW_PASSWORD
+              {{- if eq .Values.architecture "replication" }}
+              - key: {{ include "postgresql.v1.replicationPasswordKey" . }}
+                path: POSTGRESQL_NEW_REPLICATION_PASSWORD
+              {{- end }}
+        {{- end }}
+      {{- if .Values.passwordUpdateJob.extraVolumes }}
+      {{- include "common.tplvalues.render" (dict "value" .Values.passwordUpdateJob.extraVolumes "context" $) | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,26 @@
+1. Get the application URL:
+{{- if .Values.ingress.enabled }}
+  Web:    http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.webHost }}
+  API:    http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.serverHost }}
+{{- else if contains "NodePort" .Values.server.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "multica.server.serviceName" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.server.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  Watch its status with: kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "multica.server.serviceName" . }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "multica.server.serviceName" . }} --template "{{ "{{" }} range (index .status.loadBalancer.ingress 0) {{ "}}" }}{{ "{{" }} . {{ "}}" }}{{ "{{" }} end {{ "}}" }}")
+  echo http://$SERVICE_IP:{{ .Values.server.service.port }}
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "multica.server.serviceName" . }} 8080:{{ .Values.server.service.port }}
+  echo "API available at http://127.0.0.1:8080"
+  {{- if .Values.web.enabled }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "multica.fullname" . }}-web 3000:{{ .Values.web.service.port }}
+  echo "Web available at http://127.0.0.1:3000"
+  {{- end }}
+{{- end }}
+
+2. Database migrations run automatically as a pre-install/pre-upgrade hook.
+
+3. Check server logs:
+   kubectl logs --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/component=server,app.kubernetes.io/instance={{ .Release.Name }}"

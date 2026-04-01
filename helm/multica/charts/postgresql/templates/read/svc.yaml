@@ -1,0 +1,60 @@
+{{- /*
+Copyright Broadcom, Inc. All Rights Reserved.
+SPDX-License-Identifier: APACHE-2.0
+*/}}
+
+{{- if eq .Values.architecture "replication" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "postgresql.v1.readReplica.fullname" . }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  {{- $labels := .Values.commonLabels }}
+  {{- if .Values.readReplicas.service.labels }}
+  {{- $labels = include "common.tplvalues.merge" ( dict "values" ( list .Values.readReplicas.service.labels $labels ) "context" . ) }}
+  {{- end }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" $labels "context" $ ) | nindent 4 }}
+    app.kubernetes.io/component: read
+  {{- if or .Values.commonAnnotations .Values.readReplicas.service.annotations }}
+  {{- $annotations := include "common.tplvalues.merge" ( dict "values" ( list .Values.readReplicas.service.annotations .Values.commonAnnotations ) "context" . ) }}
+  annotations: {{- include "common.tplvalues.render" ( dict "value" $annotations "context" $) | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.readReplicas.service.type }}
+  {{- if or (eq .Values.readReplicas.service.type "LoadBalancer") (eq .Values.readReplicas.service.type "NodePort") }}
+  externalTrafficPolicy: {{ .Values.readReplicas.service.externalTrafficPolicy | quote }}
+  {{- end }}
+  {{- if and (eq .Values.readReplicas.service.type "LoadBalancer") (not (empty .Values.readReplicas.service.loadBalancerSourceRanges)) }}
+  loadBalancerSourceRanges: {{ .Values.readReplicas.service.loadBalancerSourceRanges }}
+  {{- end }}
+  {{- if and (eq .Values.readReplicas.service.type "LoadBalancer") (not (empty .Values.readReplicas.service.loadBalancerClass)) }}
+  loadBalancerClass: {{ .Values.readReplicas.service.loadBalancerClass }}
+  {{- end }}
+  {{- if and (eq .Values.readReplicas.service.type "LoadBalancer") (not (empty .Values.readReplicas.service.loadBalancerIP)) }}
+  loadBalancerIP: {{ .Values.readReplicas.service.loadBalancerIP }}
+  {{- end }}
+  {{- if and .Values.readReplicas.service.clusterIP (eq .Values.readReplicas.service.type "ClusterIP") }}
+  clusterIP: {{ .Values.readReplicas.service.clusterIP }}
+  {{- end }}
+  {{- if .Values.readReplicas.service.sessionAffinity }}
+  sessionAffinity: {{ .Values.readReplicas.service.sessionAffinity }}
+  {{- end }}
+  {{- if .Values.readReplicas.service.sessionAffinityConfig }}
+  sessionAffinityConfig: {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.service.sessionAffinityConfig "context" $) | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: tcp-postgresql
+      port: {{ include "postgresql.v1.readReplica.service.port" . }}
+      targetPort: tcp-postgresql
+      {{- if and (or (eq .Values.readReplicas.service.type "NodePort") (eq .Values.readReplicas.service.type "LoadBalancer")) (not (empty .Values.readReplicas.service.nodePorts.postgresql)) }}
+      nodePort: {{ .Values.readReplicas.service.nodePorts.postgresql }}
+      {{- else if eq .Values.readReplicas.service.type "ClusterIP" }}
+      nodePort: null
+      {{- end }}
+    {{- if .Values.readReplicas.service.extraPorts }}
+    {{- include "common.tplvalues.render" (dict "value" .Values.readReplicas.service.extraPorts "context" $) | nindent 4 }}
+    {{- end }}
+  {{- $podLabels := include "common.tplvalues.merge" ( dict "values" ( list .Values.readReplicas.podLabels .Values.commonLabels ) "context" . ) }}
+  selector: {{- include "common.labels.matchLabels" ( dict "customLabels" $podLabels "context" $ ) | nindent 4 }}
+    app.kubernetes.io/component: read
+{{- end }}

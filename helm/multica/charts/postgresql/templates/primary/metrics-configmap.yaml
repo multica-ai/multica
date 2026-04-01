@@ -1,0 +1,18 @@
+{{- /*
+Copyright Broadcom, Inc. All Rights Reserved.
+SPDX-License-Identifier: APACHE-2.0
+*/}}
+
+{{- if and .Values.metrics.enabled .Values.metrics.customMetrics }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-metrics" (include "postgresql.v1.primary.fullname" .) }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
+  {{- if .Values.commonAnnotations }}
+  annotations: {{- include "common.tplvalues.render" ( dict "value" .Values.commonAnnotations "context" $ ) | nindent 4 }}
+  {{- end }}
+data:
+  custom-metrics.yaml: {{ toYaml .Values.metrics.customMetrics | quote }}
+{{- end }}

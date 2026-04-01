@@ -1,0 +1,123 @@
+{{- $releaseNamespace := include "common.names.namespace" . }}
+CHART NAME: {{ .Chart.Name }}
+CHART VERSION: {{ .Chart.Version }}
+APP VERSION: {{ .Chart.AppVersion }}
+
+⚠ WARNING: Since August 28th, 2025, only a limited subset of images/charts are available for free.
+    Subscribe to Bitnami Secure Images to receive continued support and security updates.
+    More info at https://bitnami.com and https://github.com/bitnami/containers/issues/83267
+
+** Please be patient while the chart is being deployed **
+
+{{- if .Values.diagnosticMode.enabled }}
+The chart has been deployed in diagnostic mode. All probes have been disabled and the command has been overwritten with:
+
+  command: {{- include "common.tplvalues.render" (dict "value" .Values.diagnosticMode.command "context" $) | nindent 4 }}
+  args: {{- include "common.tplvalues.render" (dict "value" .Values.diagnosticMode.args "context" $) | nindent 4 }}
+
+Get the list of pods by executing:
+
+  kubectl get pods --namespace {{ $releaseNamespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Access the pod you want to debug by executing
+
+  kubectl exec --namespace {{ $releaseNamespace }} -ti <NAME OF THE POD> -- /opt/bitnami/scripts/postgresql/entrypoint.sh /bin/bash
+
+In order to replicate the container startup scripts execute this command:
+
+    /opt/bitnami/scripts/postgresql/entrypoint.sh /opt/bitnami/scripts/postgresql/run.sh
+
+{{- else }}
+
+{{- $customUser := include "postgresql.v1.username" . }}
+{{- $postgresPassword := include "common.secrets.lookup" (dict "secret" (include "postgresql.v1.chart.fullname" .) "key" .Values.auth.secretKeys.adminPasswordKey "defaultValue" (ternary .Values.auth.postgresPassword .Values.auth.password  (eq $customUser "postgres")) "context" $) -}}
+{{- $authEnabled := and (not (or .Values.global.postgresql.auth.existingSecret .Values.auth.existingSecret)) (or $postgresPassword .Values.auth.enablePostgresUser (and (not (empty $customUser)) (ne $customUser "postgres"))) }}
+{{- if not $authEnabled }}
+
+WARNING: PostgreSQL has been configured without authentication, this is not recommended for production environments.
+{{- end }}
+
+PostgreSQL can be accessed via port {{ include "postgresql.v1.service.port" . }} on the following DNS names from within your cluster:
+
+    {{ include "postgresql.v1.primary.fullname" . }}.{{ $releaseNamespace }}.svc.cluster.local - Read/Write connection
+
+{{- if eq .Values.architecture "replication" }}
+
+    {{ include "postgresql.v1.readReplica.fullname" . }}.{{ $releaseNamespace }}.svc.cluster.local - Read only connection
+
+{{- end }}
+
+{{- if and (not (empty $customUser)) (ne $customUser "postgres") }}
+{{- if .Values.auth.enablePostgresUser }}
+
+To get the password for "postgres" run:
+
+    export POSTGRES_ADMIN_PASSWORD=$(kubectl get secret --namespace {{ $releaseNamespace }} {{ include "postgresql.v1.secretName" . }} -o jsonpath="{.data.{{include "postgresql.v1.adminPasswordKey" .}}}" | base64 -d)
+{{- end }}
+
+To get the password for "{{ $customUser }}" run:
+
+    export POSTGRES_PASSWORD=$(kubectl get secret --namespace {{ $releaseNamespace }} {{ include "postgresql.v1.secretName" . }} -o jsonpath="{.data.{{include "postgresql.v1.userPasswordKey" .}}}" | base64 -d)
+{{- else }}
+{{- if .Values.auth.enablePostgresUser }}
+
+To get the password for "{{ default "postgres" $customUser }}" run:
+
+    export POSTGRES_PASSWORD=$(kubectl get secret --namespace {{ $releaseNamespace }} {{ include "postgresql.v1.secretName" . }} -o jsonpath="{.data.{{ ternary "password" (include "postgresql.v1.adminPasswordKey" .)  (and (not (empty $customUser)) (ne $customUser "postgres")) }}}" | base64 -d)
+{{- end }}
+{{- end }}
+
+To connect to your database run the following command:
+    {{- if $authEnabled }}
+
+    kubectl run {{ include "postgresql.v1.chart.fullname" . }}-client --rm --tty -i --restart='Never' --namespace {{ $releaseNamespace }} --image {{ include "postgresql.v1.image" . }} --env="PGPASSWORD=$POSTGRES_PASSWORD" \
+      --command -- psql --host {{ include "postgresql.v1.primary.fullname" . }} -U {{ default "postgres" $customUser }} -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }} -p {{ include "postgresql.v1.service.port" . }}
+    {{- else }}
+
+    kubectl run {{ include "postgresql.v1.chart.fullname" . }}-client --rm --tty -i --restart='Never' --namespace {{ $releaseNamespace }} --image {{ include "postgresql.v1.image" . }} \
+      --command -- psql --host {{ include "postgresql.v1.primary.fullname" . }} -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }} -p {{ include "postgresql.v1.service.port" . }}
+    {{- end }}
+
+    > NOTE: If you access the container using bash, make sure that you execute "/opt/bitnami/scripts/postgresql/entrypoint.sh /bin/bash" in order to avoid the error "psql: local user with ID {{ .Values.primary.containerSecurityContext.runAsUser }}} does not exist"
+
+To connect to your database from outside the cluster execute the following commands:
+
+{{- if contains "NodePort" .Values.primary.service.type }}
+
+    export NODE_IP=$(kubectl get nodes --namespace {{ $releaseNamespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+    export NODE_PORT=$(kubectl get --namespace {{ $releaseNamespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "postgresql.v1.primary.fullname" . }})
+    {{- if $authEnabled }}
+    PGPASSWORD="$POSTGRES_PASSWORD" psql --host $NODE_IP --port $NODE_PORT -U {{ default "postgres" $customUser }} -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }}
+    {{- else }}
+    psql --host $NODE_IP --port $NODE_PORT -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }}
+    {{- end }}
+{{- else if contains "LoadBalancer" .Values.primary.service.type }}
+
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        Watch the status with: 'kubectl get svc --namespace {{ $releaseNamespace }} -w {{ include "postgresql.v1.primary.fullname" . }}'
+
+    export SERVICE_IP=$(kubectl get svc --namespace {{ $releaseNamespace }} {{ include "postgresql.v1.primary.fullname" . }} --template "{{ "{{ range (index .status.loadBalancer.ingress 0) }}{{ . }}{{ end }}" }}")
+    {{- if $authEnabled }}
+    PGPASSWORD="$POSTGRES_PASSWORD" psql --host $SERVICE_IP --port {{ include "postgresql.v1.service.port" . }} -U {{ default "postgres" $customUser }} -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }}
+    {{- else }}
+    psql --host $SERVICE_IP --port {{ include "postgresql.v1.service.port" . }} -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }}
+    {{- end }}
+{{- else if contains "ClusterIP" .Values.primary.service.type }}
+
+    kubectl port-forward --namespace {{ $releaseNamespace }} svc/{{ include "postgresql.v1.primary.fullname" . }} {{ include "postgresql.v1.service.port" . }}:{{ include "postgresql.v1.service.port" . }} &
+    {{- if $authEnabled }}
+    PGPASSWORD="$POSTGRES_PASSWORD" psql --host 127.0.0.1 -U {{ default "postgres" $customUser }} -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }} -p {{ include "postgresql.v1.service.port" . }}
+    {{- else }}
+    psql --host 127.0.0.1 -d {{- if include "postgresql.v1.database" . }} {{ include "postgresql.v1.database" . }}{{- else }} postgres{{- end }} -p {{ include "postgresql.v1.service.port" . }}
+    {{- end }}
+{{- end }}
+{{- end }}
+
+WARNING: The configured password will be ignored on new installation in case when previous PostgreSQL release was deleted through the helm command. In that case, old PVC will have an old password, and setting it through helm won't take effect. Deleting persistent volumes (PVs) will solve the issue.
+
+{{- include "postgresql.v1.validateValues" . -}}
+{{- include "common.warnings.rollingTag" .Values.image -}}
+{{- include "common.warnings.rollingTag" .Values.volumePermissions.image }}
+{{- include "common.warnings.resources" (dict "sections" (list "metrics" "primary" "readReplicas" "volumePermissions") "context" $) }}
+{{- include "common.warnings.modifiedImages" (dict "images" (list .Values.image .Values.volumePermissions.image .Values.metrics.image) "context" $) }}
+{{- include "common.errors.insecureImages" (dict "images" (list .Values.image .Values.volumePermissions.image .Values.metrics.image) "context" $) }}
