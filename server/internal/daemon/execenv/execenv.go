@@ -117,6 +117,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
+	// Symlink local skills from ~/.claude/skills/ and ~/.openclaw/skills/
+	if params.Provider == "claude" {
+		if count, err := SymlinkLocalSkills(workDir); err != nil {
+			logger.Warn("execenv: failed to symlink local skills", "error", err)
+		} else if count > 0 {
+			logger.Info("execenv: symlinked local skills", "count", count)
+		}
+	}
+
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
 	return env, nil
 }
