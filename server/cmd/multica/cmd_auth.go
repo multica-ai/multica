@@ -87,7 +87,9 @@ func openBrowser(url string) error {
 		args = []string{url}
 	case "windows":
 		cmd = "cmd"
-		args = []string{"/c", "start", url}
+		// The empty "" is required as the window title argument to `start`.
+		// Without it, `start` treats a URL containing & or = as multiple commands.
+		args = []string{"/c", "start", "", url}
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
