@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build menubar test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -134,6 +134,10 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 build:
 	cd server && go build -o bin/server ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/multica ./cmd/multica
+
+menubar:
+	cd apps/menubar && swift build -c release
+	@echo "✓ Menu bar app built: apps/menubar/.build/release/MulticaMenuBar"
 
 test:
 	$(REQUIRE_ENV)

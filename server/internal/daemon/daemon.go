@@ -24,6 +24,16 @@ type workspaceState struct {
 	runtimeIDs  []string
 }
 
+// ActiveTask represents a task currently being executed by the daemon.
+type ActiveTask struct {
+	ID          string    `json:"id"`
+	IssueID     string    `json:"issue_id"`
+	WorkspaceID string    `json:"workspace_id"`
+	AgentName   string    `json:"agent_name"`
+	Provider    string    `json:"provider"`
+	StartedAt   time.Time `json:"started_at"`
+}
+
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
 	cfg       Config
@@ -34,7 +44,8 @@ type Daemon struct {
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
-	reloading    sync.Mutex         // prevents concurrent reloadWorkspaces
+	activeTasks  map[string]*ActiveTask // taskID -> ActiveTask
+	reloading    sync.Mutex            // prevents concurrent reloadWorkspaces
 }
 
 // New creates a new Daemon instance.
@@ -47,6 +58,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:       logger,
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
+		activeTasks:  make(map[string]*ActiveTask),
 	}
 }
 
@@ -658,6 +670,17 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 	}
 }
 
+// GetActiveTasks returns a snapshot of currently running tasks.
+func (d *Daemon) GetActiveTasks() []*ActiveTask {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	tasks := make([]*ActiveTask, 0, len(d.activeTasks))
+	for _, t := range d.activeTasks {
+		tasks = append(tasks, t)
+	}
+	return tasks
+}
+
 func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
@@ -671,6 +694,23 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		agentName = task.Agent.Name
 	}
 	taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
+
+	// Track active task.
+	d.mu.Lock()
+	d.activeTasks[task.ID] = &ActiveTask{
+		ID:          task.ID,
+		IssueID:     task.IssueID,
+		WorkspaceID: task.WorkspaceID,
+		AgentName:   agentName,
+		Provider:    provider,
+		StartedAt:   time.Now(),
+	}
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		delete(d.activeTasks, task.ID)
+		d.mu.Unlock()
+	}()
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)

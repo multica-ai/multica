@@ -14,14 +14,15 @@ import (
 
 // HealthResponse is returned by the daemon's local health endpoint.
 type HealthResponse struct {
-	Status     string            `json:"status"`
-	PID        int               `json:"pid"`
-	Uptime     string            `json:"uptime"`
-	DaemonID   string            `json:"daemon_id"`
-	DeviceName string            `json:"device_name"`
-	ServerURL  string            `json:"server_url"`
-	Agents     []string          `json:"agents"`
-	Workspaces []healthWorkspace `json:"workspaces"`
+	Status      string            `json:"status"`
+	PID         int               `json:"pid"`
+	Uptime      string            `json:"uptime"`
+	DaemonID    string            `json:"daemon_id"`
+	DeviceName  string            `json:"device_name"`
+	ServerURL   string            `json:"server_url"`
+	Agents      []string          `json:"agents"`
+	Workspaces  []healthWorkspace `json:"workspaces"`
+	ActiveTasks []*ActiveTask     `json:"active_tasks"`
 }
 
 type healthWorkspace struct {
@@ -69,15 +70,18 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			agents = append(agents, name)
 		}
 
+		activeTasks := d.GetActiveTasks()
+
 		resp := HealthResponse{
-			Status:     "running",
-			PID:        os.Getpid(),
-			Uptime:     time.Since(startedAt).Truncate(time.Second).String(),
-			DaemonID:   d.cfg.DaemonID,
-			DeviceName: d.cfg.DeviceName,
-			ServerURL:  d.cfg.ServerBaseURL,
-			Agents:     agents,
-			Workspaces: wsList,
+			Status:      "running",
+			PID:         os.Getpid(),
+			Uptime:      time.Since(startedAt).Truncate(time.Second).String(),
+			DaemonID:    d.cfg.DaemonID,
+			DeviceName:  d.cfg.DeviceName,
+			ServerURL:   d.cfg.ServerBaseURL,
+			Agents:      agents,
+			Workspaces:  wsList,
+			ActiveTasks: activeTasks,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

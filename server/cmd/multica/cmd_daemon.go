@@ -372,6 +372,20 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	if ws, ok := health["workspaces"].([]any); ok {
 		fmt.Fprintf(os.Stdout, "Workspaces:  %d\n", len(ws))
 	}
+	if tasks, ok := health["active_tasks"].([]any); ok && len(tasks) > 0 {
+		fmt.Fprintf(os.Stdout, "Tasks:       %d running\n", len(tasks))
+		for _, t := range tasks {
+			if tm, ok := t.(map[string]any); ok {
+				agentName, _ := tm["agent_name"].(string)
+				issueID, _ := tm["issue_id"].(string)
+				provider, _ := tm["provider"].(string)
+				if agentName == "" {
+					agentName = provider
+				}
+				fmt.Fprintf(os.Stdout, "  • %s working on issue %s\n", agentName, shortIssueID(issueID))
+			}
+		}
+	}
 	return nil
 }
 
@@ -419,6 +433,14 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 		return map[string]any{"status": "stopped"}
 	}
 	return result
+}
+
+// shortIssueID returns the first 8 characters of an issue ID.
+func shortIssueID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 // flagString returns a string flag value or empty string.
