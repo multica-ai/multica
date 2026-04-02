@@ -72,6 +72,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
+import { buildAgentInstructionStarter } from "@/features/agents/instruction-starter";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useRuntimeStore } from "@/features/runtimes";
 import { useIssueStore } from "@/features/issues";
@@ -124,10 +125,19 @@ function CreateAgentDialog({
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [instructions, setInstructions] = useState(() => buildAgentInstructionStarter());
+  const [instructionsTouched, setInstructionsTouched] = useState(false);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimes[0]?.id ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const starter = buildAgentInstructionStarter({ name, description });
+
+  useEffect(() => {
+    if (!instructionsTouched) {
+      setInstructions(starter);
+    }
+  }, [instructionsTouched, starter]);
 
   useEffect(() => {
     if (!selectedRuntimeId && runtimes[0]) {
@@ -144,6 +154,7 @@ function CreateAgentDialog({
       await onCreate({
         name: name.trim(),
         description: description.trim(),
+        instructions: instructions.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
         triggers: [
@@ -160,7 +171,7 @@ function CreateAgentDialog({
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Create Agent</DialogTitle>
           <DialogDescription>
@@ -190,6 +201,35 @@ function CreateAgentDialog({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What does this agent do?"
               className="mt-1"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-xs text-muted-foreground">Instructions</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  setInstructions(starter);
+                  setInstructionsTouched(false);
+                }}
+                disabled={instructions === starter}
+              >
+                Reset Starter
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Start from a strong default, then edit it to match your working style.
+            </p>
+            <textarea
+              value={instructions}
+              onChange={(e) => {
+                setInstructions(e.target.value);
+                setInstructionsTouched(true);
+              }}
+              className="min-h-[240px] w-full resize-y rounded-md border bg-transparent px-3 py-2 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
 
@@ -370,6 +410,10 @@ function InstructionsTab({
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const isDirty = value !== (agent.instructions ?? "");
+  const starter = buildAgentInstructionStarter({
+    name: agent.name,
+    description: agent.description,
+  });
 
   // Sync when switching between agents.
   useEffect(() => {
@@ -393,6 +437,21 @@ function InstructionsTab({
           Define this agent&apos;s identity and working style. These instructions are
           injected into the agent&apos;s context for every task.
         </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
+        <p className="text-xs text-muted-foreground">
+          Start from the shared baseline, then tune it for this agent.
+        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={() => setValue(starter)}
+          disabled={value === starter}
+        >
+          Use Starter
+        </Button>
       </div>
 
       <textarea
