@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/platform"
 )
 
 var daemonCmd = &cobra.Command{
@@ -156,7 +156,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttrDetach(child)
 
 	if err := child.Start(); err != nil {
 		logFile.Close()
@@ -230,6 +230,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 }
 
 func runDaemonForeground(cmd *cobra.Command) error {
+	// Apply any staged update from a previous daemon lifecycle (Windows).
+	applyPendingUpdate()
+
 	profile := resolveProfile(cmd)
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
@@ -265,7 +268,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	cfg.CLIVersion = version
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), platform.ShutdownSignals()...)
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
@@ -297,7 +300,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		setSysProcAttrDetach(child)
 
 		if err := child.Start(); err != nil {
 			logFile.Close()
@@ -341,19 +344,18 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("could not determine daemon PID from health endpoint")
 	}
 
-	process, err := os.FindProcess(int(pid))
-	if err != nil {
-		return fmt.Errorf("find process %d: %w", int(pid), err)
-	}
-
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
-	}
-
 	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
 
+	// Request graceful shutdown via HTTP (cross-platform).
+	shutdownURL := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
+	req, _ := http.NewRequest(http.MethodPost, shutdownURL, nil)
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	if resp, err := httpClient.Do(req); err == nil {
+		resp.Body.Close()
+	}
+
 	// Poll health endpoint until daemon is gone.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		time.Sleep(500 * time.Millisecond)
 		ctx2, cancel2 := context.WithTimeout(context.Background(), 1*time.Second)
 		h := checkDaemonHealthOnPort(ctx2, healthPort)
@@ -365,7 +367,14 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Daemon is still stopping. It may be finishing a running task.")
+	// Timeout fallback: force-terminate the process.
+	process, err := os.FindProcess(int(pid))
+	if err == nil {
+		sendTermSignal(process)
+	}
+	time.Sleep(1 * time.Second)
+	os.Remove(daemonPIDPathForProfile(profile))
+	fmt.Fprintln(os.Stderr, "Daemon stopped (forced).")
 	return nil
 }
 
@@ -421,16 +430,7 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	lines, _ := cmd.Flags().GetInt("lines")
 
-	args := []string{"-n", strconv.Itoa(lines)}
-	if follow {
-		args = append(args, "-f")
-	}
-	args = append(args, logPath)
-
-	tail := exec.Command("tail", args...)
-	tail.Stdout = os.Stdout
-	tail.Stderr = os.Stderr
-	return tail.Run()
+	return tailLogFile(logPath, lines, follow)
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.

@@ -124,13 +124,17 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, downloadURL)
 	}
 
-	// Extract the "multica" binary from the tarball.
-	binaryData, err := extractBinaryFromTarGz(resp.Body, "multica")
+	// Extract the binary from the tarball (name differs by platform).
+	binName := "multica"
+	if runtime.GOOS == "windows" {
+		binName = "multica.exe"
+	}
+	binaryData, err := extractBinaryFromTarGz(resp.Body, binName)
 	if err != nil {
 		return "", fmt.Errorf("extract binary: %w", err)
 	}
 
-	// Atomic replace: write to temp file, then rename over the original.
+	// Write to temp file first.
 	dir := filepath.Dir(exePath)
 	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
 	if err != nil {
@@ -145,7 +149,18 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 	}
 	tmpFile.Close()
 
-	// Preserve original file permissions.
+	// On Windows, a running executable cannot be replaced in-place.
+	// Stage the update as <exe>.update; the daemon applies it on next startup.
+	if runtime.GOOS == "windows" {
+		updatePath := exePath + ".update"
+		if err := os.Rename(tmpPath, updatePath); err != nil {
+			os.Remove(tmpPath)
+			return "", fmt.Errorf("stage update file: %w", err)
+		}
+		return fmt.Sprintf("Downloaded %s, staged at %s (will apply on restart)", assetName, updatePath), nil
+	}
+
+	// Unix: atomic in-place replacement.
 	info, err := os.Stat(exePath)
 	if err != nil {
 		os.Remove(tmpPath)
@@ -155,8 +170,6 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
-
-	// Replace the original binary.
 	if err := os.Rename(tmpPath, exePath); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("replace binary: %w", err)

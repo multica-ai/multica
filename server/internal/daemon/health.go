@@ -84,6 +84,21 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		json.NewEncoder(w).Encode(resp)
 	})
 
+	mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		d.logger.Info("shutdown requested via HTTP")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"shutting_down"}`))
+		// Trigger the same graceful exit path as SIGTERM.
+		if d.cancelFunc != nil {
+			d.cancelFunc()
+		}
+	})
+
 	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
