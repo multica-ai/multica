@@ -7,7 +7,24 @@ config({ path: resolve(__dirname, "../../.env") });
 
 const remoteApiUrl = process.env.REMOTE_API_URL || "http://localhost:8080";
 
+// Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
+// allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
+const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
+  ? process.env.CORS_ALLOWED_ORIGINS.split(",")
+      .map((origin) => {
+        try {
+          return new URL(origin.trim()).hostname;
+        } catch {
+          return origin.trim();
+        }
+      })
+      .filter(Boolean)
+  : undefined;
+
 const nextConfig: NextConfig = {
+  ...(allowedDevOrigins && allowedDevOrigins.length > 0
+    ? { allowedDevOrigins }
+    : {}),
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
