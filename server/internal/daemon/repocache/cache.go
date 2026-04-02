@@ -29,7 +29,7 @@ type CachedRepo struct {
 
 // Cache manages bare git clones for workspace repositories.
 type Cache struct {
-	root   string       // base directory for all caches (e.g. ~/multica_workspaces/.repos)
+	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
 	logger *slog.Logger
 	mu     sync.Mutex
 }
@@ -195,7 +195,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	}
 
 	// Exclude agent context files from git tracking.
-	for _, pattern := range []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude"} {
+	for _, pattern := range []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".config/opencode"} {
 		_ = excludeFromGit(worktreePath, pattern)
 	}
 

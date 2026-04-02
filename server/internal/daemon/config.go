@@ -11,15 +11,15 @@ import (
 )
 
 const (
-	DefaultServerURL            = "ws://localhost:8080/ws"
-	DefaultPollInterval         = 3 * time.Second
-	DefaultHeartbeatInterval    = 15 * time.Second
-	DefaultAgentTimeout         = 2 * time.Hour
-	DefaultRuntimeName          = "Local Agent"
+	DefaultServerURL             = "ws://localhost:8080/ws"
+	DefaultPollInterval          = 3 * time.Second
+	DefaultHeartbeatInterval     = 15 * time.Second
+	DefaultAgentTimeout          = 2 * time.Hour
+	DefaultRuntimeName           = "Local Agent"
 	DefaultConfigReloadInterval  = 5 * time.Second
 	DefaultWorkspaceSyncInterval = 30 * time.Second
 	DefaultHealthPort            = 19514
-	DefaultMaxConcurrentTasks   = 20
+	DefaultMaxConcurrentTasks    = 20
 )
 
 // Config holds all daemon configuration.
@@ -29,7 +29,7 @@ type Config struct {
 	DeviceName         string
 	RuntimeName        string
 	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // "claude" -> entry, "codex" -> entry
+	Agents             map[string]AgentEntry // "claude" -> entry, "codex" -> entry, "opencode" -> entry
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -84,8 +84,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
 		}
 	}
+	opencodePath := envOrDefault("MULTICA_OPENCODE_PATH", "opencode")
+	if _, err := exec.LookPath(opencodePath); err == nil {
+		agents["opencode"] = AgentEntry{
+			Path:  opencodePath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCODE_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude or codex and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, or opencode and ensure it is on PATH")
 	}
 
 	// Host info

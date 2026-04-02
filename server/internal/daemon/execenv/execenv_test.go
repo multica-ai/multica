@@ -441,6 +441,148 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "opencode-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Skills should be in .config/opencode/skills/ (native discovery).
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .config/opencode/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	// Supporting files should also be under .config/opencode/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "templates", "example.go"))
+	if err != nil {
+		t.Fatalf("failed to read supporting file: %v", err)
+	}
+	if string(supportFile) != "package main" {
+		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	// .agent_context/skills/ should NOT exist for OpenCode.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for OpenCode provider")
+	}
+
+	// issue_context.md should still be in .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
+		t.Error("expected .agent_context/issue_context.md to exist")
+	}
+}
+
+func TestInjectRuntimeConfigOpencode(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// OpenCode uses AGENTS.md (same as codex).
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+
+	// CLAUDE.md should NOT exist.
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("expected CLAUDE.md to NOT exist for OpenCode provider")
+	}
+}
+
+func TestPrepareWithRepoContextOpencode(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID: "c3d4e5f6-a7b8-9012-cdef-123456789012",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/backend", Description: "Go backend"},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-test-oc",
+		TaskID:         "c3d4e5f6-a7b8-9012-cdef-123456789012",
+		AgentName:      "OpenCode Agent",
+		Provider:       "opencode",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// Workdir should only contain expected entries.
+	entries, err := os.ReadDir(env.WorkDir)
+	if err != nil {
+		t.Fatalf("failed to read workdir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name != ".agent_context" && name != "AGENTS.md" {
+			t.Errorf("unexpected entry in workdir: %s", name)
+		}
+	}
+
+	// AGENTS.md should contain repo info.
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"multica repo checkout",
+		"https://github.com/org/backend",
+		"Go backend",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AGENTS.md missing %q", want)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -1,5 +1,5 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex). It mirrors the happy-cli AgentBackend
+// coding agents (Claude Code, Codex, OpenCode). It mirrors the happy-cli AgentBackend
 // pattern, translated to idiomatic Go.
 package agent
 
@@ -25,7 +25,7 @@ type ExecOptions struct {
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration
-	ResumeSessionID string // if non-empty, resume a previous Claude Code session
+	ResumeSessionID string // if non-empty, resume a previous agent session
 }
 
 // Session represents a running agent execution.
@@ -73,13 +73,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude or codex)
+	ExecutablePath string            // path to CLI binary (claude, codex, or opencode)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex".
+// Supported types: "claude", "codex", "opencode".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -90,8 +90,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &claudeBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
+	case "opencode":
+		return &opencodeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode)", agentType)
 	}
 }
 
