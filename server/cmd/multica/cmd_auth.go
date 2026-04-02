@@ -86,10 +86,10 @@ func openBrowser(url string) error {
 		cmd = "xdg-open"
 		args = []string{url}
 	case "windows":
-		cmd = "cmd"
-		// The empty "" is required as the window title argument to `start`.
-		// Without it, `start` treats a URL containing & or = as multiple commands.
-		args = []string{"/c", "start", "", url}
+		// Use rundll32 to open the URL, avoiding cmd.exe shell interpretation
+		// that would break URLs containing & or other special characters.
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", url}
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
