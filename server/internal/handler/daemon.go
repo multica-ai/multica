@@ -204,6 +204,14 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		resp["pending_ping"] = map[string]string{"id": pending.ID}
 	}
 
+	// Check for pending update requests for this runtime.
+	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
+		resp["pending_update"] = map[string]string{
+			"id":             pending.ID,
+			"target_version": pending.TargetVersion,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

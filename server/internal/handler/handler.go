@@ -40,6 +40,7 @@ type Handler struct {
 	TaskService  *service.TaskService
 	EmailService *service.EmailService
 	PingStore    *PingStore
+	UpdateStore  *UpdateStore
 	Storage      *storage.S3Storage
 	CFSigner     *auth.CloudFrontSigner
 }
@@ -59,6 +60,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:  service.NewTaskService(queries, hub, bus),
 		EmailService: emailService,
 		PingStore:    NewPingStore(),
+		UpdateStore:  NewUpdateStore(),
 		Storage:      s3,
 		CFSigner:     cfSigner,
 	}

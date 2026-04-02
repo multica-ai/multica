@@ -31,6 +31,7 @@ import type {
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimePing,
+  RuntimeUpdate,
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
@@ -342,6 +343,23 @@ export class ApiClient {
 
   async getPingResult(runtimeId: string, pingId: string): Promise<RuntimePing> {
     return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
+  }
+
+  async initiateUpdate(
+    runtimeId: string,
+    targetVersion: string,
+  ): Promise<RuntimeUpdate> {
+    return this.fetch(`/api/runtimes/${runtimeId}/update`, {
+      method: "POST",
+      body: JSON.stringify({ target_version: targetVersion }),
+    });
+  }
+
+  async getUpdateResult(
+    runtimeId: string,
+    updateId: string,
+  ): Promise<RuntimeUpdate> {
+    return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {

@@ -35,6 +35,10 @@ type Daemon struct {
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
 	reloading    sync.Mutex         // prevents concurrent reloadWorkspaces
+
+	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
+	restartBinary string             // non-empty after a successful update; path to the new binary
+	updating      atomic.Bool        // prevents concurrent update attempts
 }
 
 // New creates a new Daemon instance.
@@ -52,6 +56,10 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Wrap context so handleUpdate can cancel the daemon for restart.
+	ctx, cancel := context.WithCancel(ctx)
+	d.cancelFunc = cancel
+
 	// Bind health port early to detect another running daemon.
 	healthLn, err := d.listenHealth()
 	if err != nil {
@@ -96,6 +104,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.usageScanLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx)
+}
+
+// RestartBinary returns the path to the new binary if the daemon needs to restart
+// after a successful update, or empty string if no restart is needed.
+func (d *Daemon) RestartBinary() string {
+	return d.restartBinary
 }
 
 // deregisterRuntimes notifies the server that all runtimes are going offline.
@@ -440,6 +454,11 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 						go d.handlePing(ctx, *rt, resp.PendingPing.ID)
 					}
 				}
+
+				// Handle pending update requests.
+				if resp.PendingUpdate != nil {
+					go d.handleUpdate(ctx, rid, resp.PendingUpdate)
+				}
 			}
 		}
 	}
@@ -516,6 +535,73 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 			"error":       errMsg,
 			"duration_ms": durationMs,
 		})
+	}
+}
+
+// handleUpdate performs the CLI update when triggered by the server via heartbeat.
+func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *PendingUpdate) {
+	// Prevent concurrent update attempts.
+	if !d.updating.CompareAndSwap(false, true) {
+		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+		return
+	}
+	defer d.updating.Store(false)
+
+	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
+
+	// Report running status.
+	d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		"status": "running",
+	})
+
+	// Check if installed via Homebrew.
+	if !cli.IsBrewInstall() {
+		d.logger.Warn("CLI not installed via Homebrew, cannot auto-update")
+		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "CLI was not installed via Homebrew. Please update manually: https://github.com/multica-ai/multica/releases/latest",
+		})
+		return
+	}
+
+	// Execute brew upgrade.
+	d.logger.Info("updating CLI via Homebrew...")
+	output, err := cli.UpdateViaBrew()
+	if err != nil {
+		d.logger.Error("CLI update failed", "error", err, "output", output)
+		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  fmt.Sprintf("brew upgrade failed: %v", err),
+		})
+		return
+	}
+
+	d.logger.Info("CLI update completed successfully", "output", output)
+	d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		"status": "completed",
+		"output": fmt.Sprintf("Updated to %s", update.TargetVersion),
+	})
+
+	// Trigger daemon restart with the new binary.
+	d.triggerRestart()
+}
+
+// triggerRestart initiates a graceful daemon restart after a successful CLI update.
+// It finds the new binary path and cancels the daemon context so Run() returns.
+// The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
+func (d *Daemon) triggerRestart() {
+	newBin, err := cli.DetectNewBinaryPath()
+	if err != nil {
+		d.logger.Error("could not find updated binary for restart", "error", err)
+		return
+	}
+
+	d.logger.Info("scheduling daemon restart", "new_binary", newBin)
+	d.restartBinary = newBin
+
+	// Cancel the main context to trigger graceful shutdown.
+	if d.cancelFunc != nil {
+		d.cancelFunc()
 	}
 }
 

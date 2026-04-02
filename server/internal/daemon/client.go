@@ -139,13 +139,20 @@ func (c *Client) ReportUsage(ctx context.Context, runtimeID string, entries []ma
 
 // HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
 type HeartbeatResponse struct {
-	Status      string       `json:"status"`
-	PendingPing *PendingPing `json:"pending_ping,omitempty"`
+	Status        string         `json:"status"`
+	PendingPing   *PendingPing   `json:"pending_ping,omitempty"`
+	PendingUpdate *PendingUpdate `json:"pending_update,omitempty"`
 }
 
 // PendingPing represents a ping test request from the server.
 type PendingPing struct {
 	ID string `json:"id"`
+}
+
+// PendingUpdate represents a CLI update request from the server.
+type PendingUpdate struct {
+	ID            string `json:"id"`
+	TargetVersion string `json:"target_version"`
 }
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
@@ -160,6 +167,11 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 
 func (c *Client) ReportPingResult(ctx context.Context, runtimeID, pingID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/ping/%s/result", runtimeID, pingID), result, nil)
+}
+
+// ReportUpdateResult sends the CLI update result back to the server.
+func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.

@@ -2,9 +2,20 @@ import type { AgentRuntime } from "@/shared/types";
 import { formatLastSeen } from "../utils";
 import { RuntimeModeIcon, StatusBadge, InfoField } from "./shared";
 import { PingSection } from "./ping-section";
+import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 
+function getCliVersion(metadata: Record<string, unknown>): string | null {
+  if (metadata && typeof metadata.version === "string" && metadata.version) {
+    return metadata.version;
+  }
+  return null;
+}
+
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
+  const cliVersion =
+    runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -42,6 +53,20 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             <InfoField label="Daemon ID" value={runtime.daemon_id} mono />
           )}
         </div>
+
+        {/* CLI Version & Update */}
+        {runtime.runtime_mode === "local" && (
+          <div>
+            <h3 className="text-xs font-medium text-muted-foreground mb-3">
+              CLI Version
+            </h3>
+            <UpdateSection
+              runtimeId={runtime.id}
+              currentVersion={cliVersion}
+              isOnline={runtime.status === "online"}
+            />
+          </div>
+        )}
 
         {/* Connection Test */}
         <div>
