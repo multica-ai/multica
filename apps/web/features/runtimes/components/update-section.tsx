@@ -126,6 +126,9 @@ export function UpdateSection({
             setOutput(result.output ?? "");
             setUpdating(false);
             cleanup();
+            // Auto-clear status after a few seconds so the UI
+            // refreshes to show the new version from the re-fetched runtime data.
+            setTimeout(() => setStatus(null), 5000);
           } else if (
             result.status === "failed" ||
             result.status === "timeout"

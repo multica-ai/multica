@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -85,6 +89,109 @@ func UpdateViaBrew() (string, error) {
 		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
 	}
 	return string(out), nil
+}
+
+// UpdateViaDownload downloads the latest release binary from GitHub and replaces
+// the current executable in-place. Returns the combined output message and any error.
+func UpdateViaDownload(targetVersion string) (string, error) {
+	// Determine current binary path.
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve executable path: %w", err)
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlink: %w", err)
+	}
+
+	// Build download URL: multica_{os}_{arch}.tar.gz
+	tag := targetVersion
+	if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag
+	}
+	assetName := fmt.Sprintf("multica_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	downloadURL := fmt.Sprintf("https://github.com/multica-ai/multica/releases/download/%s/%s", tag, assetName)
+
+	// Download the tarball.
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Get(downloadURL)
+	if err != nil {
+		return "", fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, downloadURL)
+	}
+
+	// Extract the "multica" binary from the tarball.
+	binaryData, err := extractBinaryFromTarGz(resp.Body, "multica")
+	if err != nil {
+		return "", fmt.Errorf("extract binary: %w", err)
+	}
+
+	// Atomic replace: write to temp file, then rename over the original.
+	dir := filepath.Dir(exePath)
+	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(binaryData); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Preserve original file permissions.
+	info, err := os.Stat(exePath)
+	if err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("stat original binary: %w", err)
+	}
+	if err := os.Chmod(tmpPath, info.Mode()); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	// Replace the original binary.
+	if err := os.Rename(tmpPath, exePath); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("replace binary: %w", err)
+	}
+
+	return fmt.Sprintf("Downloaded %s and replaced %s", assetName, exePath), nil
+}
+
+// extractBinaryFromTarGz reads a .tar.gz stream and returns the contents of the
+// named file entry.
+func extractBinaryFromTarGz(r io.Reader, name string) ([]byte, error) {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("binary %q not found in archive", name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read tar: %w", err)
+		}
+		// Match the binary name (may be prefixed with a directory).
+		if filepath.Base(hdr.Name) == name && hdr.Typeflag == tar.TypeReg {
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("read binary: %w", err)
+			}
+			return data, nil
+		}
+	}
 }
 
 // DetectNewBinaryPath returns the path to the multica binary after an update.

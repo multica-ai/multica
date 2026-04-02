@@ -70,7 +70,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for name := range d.cfg.Agents {
 		agentNames = append(agentNames, name)
 	}
-	logFields := []any{"agents", agentNames, "server", d.cfg.ServerBaseURL}
+	logFields := []any{"version", d.cfg.CLIVersion, "agents", agentNames, "server", d.cfg.ServerBaseURL}
 	if d.cfg.Profile != "" {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
@@ -555,26 +555,32 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		"status": "running",
 	})
 
-	// Check if installed via Homebrew.
-	if !cli.IsBrewInstall() {
-		d.logger.Warn("CLI not installed via Homebrew, cannot auto-update")
-		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-			"status": "failed",
-			"error":  "CLI was not installed via Homebrew. Please update manually: https://github.com/multica-ai/multica/releases/latest",
-		})
-		return
-	}
-
-	// Execute brew upgrade.
-	d.logger.Info("updating CLI via Homebrew...")
-	output, err := cli.UpdateViaBrew()
-	if err != nil {
-		d.logger.Error("CLI update failed", "error", err, "output", output)
-		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-			"status": "failed",
-			"error":  fmt.Sprintf("brew upgrade failed: %v", err),
-		})
-		return
+	// Try Homebrew first, fall back to direct download.
+	var output string
+	if cli.IsBrewInstall() {
+		d.logger.Info("updating CLI via Homebrew...")
+		var err error
+		output, err = cli.UpdateViaBrew()
+		if err != nil {
+			d.logger.Error("CLI update failed", "error", err, "output", output)
+			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+				"status": "failed",
+				"error":  fmt.Sprintf("brew upgrade failed: %v", err),
+			})
+			return
+		}
+	} else {
+		d.logger.Info("updating CLI via direct download...", "target_version", update.TargetVersion)
+		var err error
+		output, err = cli.UpdateViaDownload(update.TargetVersion)
+		if err != nil {
+			d.logger.Error("CLI update failed", "error", err)
+			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+				"status": "failed",
+				"error":  fmt.Sprintf("download update failed: %v", err),
+			})
+			return
+		}
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
@@ -588,13 +594,22 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
-// It finds the new binary path and cancels the daemon context so Run() returns.
+// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/multica)
+// so the restarted daemon picks up the new Cellar version automatically.
+// For non-brew installs, it resolves to the absolute path of the replaced binary.
 // The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
 func (d *Daemon) triggerRestart() {
-	newBin, err := cli.DetectNewBinaryPath()
+	newBin, err := os.Executable()
 	if err != nil {
-		d.logger.Error("could not find updated binary for restart", "error", err)
+		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
+	}
+	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
+	// points to the latest Cellar version, so we must preserve it.
+	if !cli.IsBrewInstall() {
+		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
+			newBin = resolved
+		}
 	}
 
 	d.logger.Info("scheduling daemon restart", "new_binary", newBin)

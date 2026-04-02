@@ -184,9 +184,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	if profile != "" {
-		fmt.Fprintf(os.Stderr, "Daemon [%s] started (pid %d)\n", profile, child.Process.Pid)
+		fmt.Fprintf(os.Stderr, "Daemon [%s] started (pid %d, version %s)\n", profile, child.Process.Pid, version)
 	} else {
-		fmt.Fprintf(os.Stderr, "Daemon started (pid %d)\n", child.Process.Pid)
+		fmt.Fprintf(os.Stderr, "Daemon started (pid %d, version %s)\n", child.Process.Pid, version)
 	}
 	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 	return nil

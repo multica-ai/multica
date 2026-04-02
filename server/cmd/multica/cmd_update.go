@@ -45,13 +45,16 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Not installed via brew — show manual instructions.
-	fmt.Fprintln(os.Stderr, "multica was not installed via Homebrew.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "To install via Homebrew (recommended):")
-	fmt.Fprintln(os.Stderr, "  brew install multica-ai/tap/multica")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Or download the latest release from:")
-	fmt.Fprintln(os.Stderr, "  https://github.com/multica-ai/multica/releases/latest")
+	// Not installed via brew — download binary directly from GitHub Releases.
+	targetVersion := version
+	if latest != nil {
+		targetVersion = latest.TagName
+	}
+	fmt.Fprintf(os.Stderr, "Downloading %s from GitHub Releases...\n", targetVersion)
+	output, err := cli.UpdateViaDownload(targetVersion)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "%s\nUpdate complete.\n", output)
 	return nil
 }
