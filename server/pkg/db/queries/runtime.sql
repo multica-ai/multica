@@ -21,8 +21,9 @@ INSERT INTO agent_runtime (
     status,
     device_info,
     metadata,
-    last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+    last_seen_at,
+    owner_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), sqlc.narg(owner_id))
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -31,7 +32,17 @@ DO UPDATE SET
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
     last_seen_at = now(),
-    updated_at = now()
+    updated_at = now(),
+    owner_id = COALESCE(agent_runtime.owner_id, EXCLUDED.owner_id)
+RETURNING *;
+
+-- name: GetAgentRuntimeOwner :one
+SELECT owner_id FROM agent_runtime WHERE id = $1;
+
+-- name: UpdateAgentRuntimeVisibility :one
+UPDATE agent_runtime
+SET visibility = $2, updated_at = now()
+WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAgentRuntimeHeartbeat :one

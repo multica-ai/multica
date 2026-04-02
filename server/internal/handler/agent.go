@@ -263,6 +263,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only the runtime owner (or workspace admin/owner) can create agents on a runtime.
+	runtimeOwnerID := uuidToString(runtime.OwnerID)
+	if runtimeOwnerID != "" && runtimeOwnerID != ownerID {
+		member, ok := h.workspaceMember(w, r, workspaceID)
+		if !ok || !roleAllowed(member.Role, "owner", "admin") {
+			writeError(w, http.StatusForbidden, "you can only create agents on your own runtimes")
+			return
+		}
+	}
+
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")

@@ -54,6 +54,8 @@ type AgentRuntime struct {
 	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
 }
 
 type AgentSkill struct {
