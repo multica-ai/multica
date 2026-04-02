@@ -14,8 +14,14 @@ export function formatLastSeen(lastSeenAt: string | null): string {
 }
 
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return m >= 100 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    const k = n / 1_000;
+    return k >= 100 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
+  }
   return n.toLocaleString();
 }
 

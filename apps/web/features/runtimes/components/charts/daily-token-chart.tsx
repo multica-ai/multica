@@ -42,7 +42,7 @@ export function DailyTokenChart({ data }: { data: DailyTokenData[] }) {
             axisLine={false}
             tickMargin={8}
             tickFormatter={(v: number) => formatTokens(v)}
-            width={50}
+            width={60}
           />
           <ChartTooltip
             content={
