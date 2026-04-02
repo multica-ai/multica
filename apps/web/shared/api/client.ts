@@ -379,6 +379,10 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
   }
 
+  async archiveInboxByIssue(issueId: string): Promise<{ count: number }> {
+    return this.fetch(`/api/inbox/by-issue/${issueId}/archive`, { method: "POST" });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }

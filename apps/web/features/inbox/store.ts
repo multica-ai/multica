@@ -50,6 +50,7 @@ interface InboxState {
   addItem: (item: InboxItem) => void;
   markRead: (id: string) => void;
   archive: (id: string) => void;
+  archiveByIssue: (issueId: string) => void;
   markAllRead: () => void;
   archiveAll: () => void;
   archiveAllRead: () => void;
@@ -90,6 +91,12 @@ export const useInboxStore = create<InboxState>((set, get) => ({
   archive: (id) =>
     set((s) => ({
       items: s.items.map((i) => (i.id === id ? { ...i, archived: true } : i)),
+    })),
+  archiveByIssue: (issueId: string) =>
+    set((s) => ({
+      items: s.items.map((i) =>
+        i.issue_id === issueId && !i.archived ? { ...i, archived: true } : i
+      ),
     })),
   markAllRead: () =>
     set((s) => ({

@@ -32,6 +32,10 @@ UPDATE inbox_item SET archived = true
 WHERE id = $1
 RETURNING *;
 
+-- name: ArchiveInboxByIssue :execrows
+UPDATE inbox_item SET archived = true
+WHERE issue_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
+
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;

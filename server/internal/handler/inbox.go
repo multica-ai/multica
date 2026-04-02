@@ -154,6 +154,32 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) ArchiveInboxByIssue(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "issueId")
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	count, err := h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
+		IssueID:     parseUUID(issueID),
+		RecipientID: parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive inbox by issue")
+		return
+	}
+
+	workspaceID := r.Header.Get("X-Workspace-ID")
+	h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
+		"recipient_id": userID,
+		"issue_id":     issueID,
+		"count":        count,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
 func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

@@ -252,12 +252,20 @@ export default function InboxPage() {
 
   const handleArchive = async (id: string) => {
     try {
-      await api.archiveInbox(id);
-      useInboxStore.getState().archive(id);
-      const archived = items.find((i) => i.id === id);
-      if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
+      const item = items.find((i) => i.id === id);
+      const issueId = item?.issue_id;
+      if (issueId) {
+        useInboxStore.getState().archiveByIssue(issueId);
+        if (issueId === selectedKey) setSelectedKey("");
+        await api.archiveInboxByIssue(issueId);
+      } else {
+        useInboxStore.getState().archive(id);
+        if (item && item.id === selectedKey) setSelectedKey("");
+        await api.archiveInbox(id);
+      }
     } catch {
       toast.error("Failed to archive");
+      useInboxStore.getState().fetch();
     }
   };
 
