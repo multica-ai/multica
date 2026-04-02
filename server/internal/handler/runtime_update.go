@@ -91,10 +91,10 @@ func (s *UpdateStore) Get(id string) *UpdateRequest {
 	if !ok {
 		return nil
 	}
-	// Check for timeout.
-	if req.Status == UpdatePending && time.Since(req.CreatedAt) > 120*time.Second {
+	// Check for timeout (both pending and running states).
+	if (req.Status == UpdatePending || req.Status == UpdateRunning) && time.Since(req.CreatedAt) > 120*time.Second {
 		req.Status = UpdateTimeout
-		req.Error = "daemon did not respond within 120 seconds"
+		req.Error = "update did not complete within 120 seconds"
 		req.UpdatedAt = time.Now()
 	}
 	return req
@@ -194,7 +194,7 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 	updateID := chi.URLParam(r, "updateId")
 
 	var req struct {
-		Status string `json:"status"` // "completed" or "failed"
+		Status string `json:"status"` // "running", "completed", or "failed"
 		Output string `json:"output"`
 		Error  string `json:"error"`
 	}
@@ -203,10 +203,18 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Status == "completed" {
+	switch req.Status {
+	case "completed":
 		h.UpdateStore.Complete(updateID, req.Output)
-	} else {
+	case "failed":
 		h.UpdateStore.Fail(updateID, req.Error)
+	case "running":
+		// No-op: status is already "running" from PopPending. This call is
+		// just a progress signal from the daemon to confirm it received the
+		// update command and is executing it.
+	default:
+		writeError(w, http.StatusBadRequest, "invalid status: "+req.Status)
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
