@@ -277,7 +277,7 @@ function LoginPageContent() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Multica</CardTitle>
-          <CardDescription>AI-native task management</CardDescription>
+          <CardDescription>Turn coding agents into real teammates</CardDescription>
         </CardHeader>
         <CardContent>
           <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
