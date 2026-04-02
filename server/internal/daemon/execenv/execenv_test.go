@@ -417,6 +417,30 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigCommentTriggerSetsInProgress(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "test-issue-id",
+		TriggerCommentID: "test-comment-id",
+	}
+
+	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "multica issue status test-issue-id in_progress") {
+		t.Error("comment-triggered runtime config should instruct agent to set status to in_progress")
+	}
+}
+
 func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

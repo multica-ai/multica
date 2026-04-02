@@ -84,9 +84,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
 		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
 		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
-		fmt.Fprintf(&b, "4. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
-		b.WriteString("5. If the comment requests code changes or further work, do the work first, then reply with your results\n")
-		b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		fmt.Fprintf(&b, "4. If the comment requests work beyond a quick answer, run `multica issue status %s in_progress` before starting\n", ctx.IssueID)
+		fmt.Fprintf(&b, "5. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
+		b.WriteString("6. If the comment requests code changes or further work, do the work first, then reply with your results\n\n")
 	} else {
 		// Assignment-triggered: full workflow
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
