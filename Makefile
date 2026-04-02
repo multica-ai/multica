@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build build-windows test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build build-windows build-win test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -128,8 +128,14 @@ cli:
 multica:
 	cd server && go run ./cmd/multica $(MULTICA_ARGS)
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# On Windows cmd, `2>/dev/null` and `||` are not valid; use conditional fallback.
+ifeq ($(OS),Windows_NT)
+  VERSION ?= $(shell git describe --tags --always --dirty 2>NUL || echo dev)
+  COMMIT  ?= $(shell git rev-parse --short HEAD 2>NUL || echo unknown)
+else
+  VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+  COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+endif
 
 build:
 	cd server && go build -o bin/server ./cmd/server
@@ -137,6 +143,11 @@ build:
 
 build-windows:
 	cd server && GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/multica.exe ./cmd/multica
+
+# Windows-native build (use from PowerShell/cmd where make is available)
+build-win:
+	cd server && go build -o bin\server.exe .\cmd\server
+	cd server && go build -ldflags "-X main.version=dev" -o bin\multica.exe .\cmd\multica
 
 test:
 	$(REQUIRE_ENV)
