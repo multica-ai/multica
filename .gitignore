@@ -36,6 +36,7 @@ apps/web/test-results/
 
 # local settings
 .claude/
+.tool-versions
 
 # feature tracking
 _features/
