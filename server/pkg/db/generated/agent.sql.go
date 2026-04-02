@@ -59,6 +59,11 @@ SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue active
+          WHERE active.issue_id = atq.issue_id
+            AND active.status IN ('dispatched', 'running')
+      )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
@@ -66,6 +71,10 @@ WHERE id = (
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id
 `
 
+// Claims the next queued task for an agent, enforcing per-issue serialization:
+// a task is only claimable when no other task for the same issue is already
+// dispatched or running. This guarantees serial execution within an issue
+// while allowing parallel execution across different issues.
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue

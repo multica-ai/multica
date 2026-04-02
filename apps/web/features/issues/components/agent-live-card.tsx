@@ -194,10 +194,13 @@ export function AgentLiveCard({ issueId, agentName }: AgentLiveCardProps) {
     }, [issueId]),
   );
 
-  // Pick up new tasks
+  // Pick up new tasks — skip if we're already showing an active task to avoid
+  // replacing its timeline mid-execution (per-issue serialization in the
+  // backend prevents this race, but this is a defensive safeguard).
   useWSEvent(
     "task:dispatch",
     useCallback(() => {
+      if (activeTask) return;
       api.getActiveTaskForIssue(issueId).then(({ task }) => {
         if (task) {
           setActiveTask(task);
@@ -205,7 +208,7 @@ export function AgentLiveCard({ issueId, agentName }: AgentLiveCardProps) {
           seenSeqs.current.clear();
         }
       }).catch(() => {});
-    }, [issueId]),
+    }, [issueId, activeTask]),
   );
 
   // Elapsed time
