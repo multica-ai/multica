@@ -46,10 +46,10 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 
 	// Not installed via brew — download binary directly from GitHub Releases.
-	targetVersion := version
-	if latest != nil {
-		targetVersion = latest.TagName
+	if latest == nil {
+		return fmt.Errorf("could not determine latest version; check https://github.com/multica-ai/multica/releases/latest")
 	}
+	targetVersion := latest.TagName
 	fmt.Fprintf(os.Stderr, "Downloading %s from GitHub Releases...\n", targetVersion)
 	output, err := cli.UpdateViaDownload(targetVersion)
 	if err != nil {

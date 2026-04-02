@@ -194,9 +194,3 @@ func extractBinaryFromTarGz(r io.Reader, name string) ([]byte, error) {
 	}
 }
 
-// DetectNewBinaryPath returns the path to the multica binary after an update.
-// It uses exec.LookPath to find the binary in PATH, which will resolve to the
-// updated version after a brew upgrade.
-func DetectNewBinaryPath() (string, error) {
-	return exec.LookPath("multica")
-}
