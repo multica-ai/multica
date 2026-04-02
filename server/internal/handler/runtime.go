@@ -21,6 +21,8 @@ type AgentRuntimeResponse struct {
 	Status      string  `json:"status"`
 	DeviceInfo  string  `json:"device_info"`
 	Metadata    any     `json:"metadata"`
+	OwnerID     *string `json:"owner_id"`
+	Visibility  string  `json:"visibility"`
 	LastSeenAt  *string `json:"last_seen_at"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
@@ -45,6 +47,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Status:      rt.Status,
 		DeviceInfo:  rt.DeviceInfo,
 		Metadata:    metadata,
+		OwnerID:     uuidToPtr(rt.OwnerID),
+		Visibility:  rt.Visibility,
 		LastSeenAt:  timestampToPtr(rt.LastSeenAt),
 		CreatedAt:   timestampToString(rt.CreatedAt),
 		UpdatedAt:   timestampToString(rt.UpdatedAt),

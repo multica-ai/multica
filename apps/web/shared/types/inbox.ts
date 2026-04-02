@@ -16,7 +16,8 @@ export type InboxItemType =
   | "task_failed"
   | "agent_blocked"
   | "agent_completed"
-  | "reaction_added";
+  | "reaction_added"
+  | "task_approval_required";
 
 export interface InboxItem {
   id: string;

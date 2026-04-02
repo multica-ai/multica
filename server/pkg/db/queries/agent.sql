@@ -20,8 +20,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    tools, triggers, instructions
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    tools, triggers, instructions, approval_required
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -38,6 +38,7 @@ UPDATE agent SET
     tools = COALESCE(sqlc.narg('tools'), tools),
     triggers = COALESCE(sqlc.narg('triggers'), triggers),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
+    approval_required = COALESCE(sqlc.narg('approval_required'), approval_required),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -58,19 +59,19 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, requested_by)
+VALUES ($1, $2, $3, $4, $5, sqlc.narg(trigger_comment_id), sqlc.narg(requested_by))
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
+WHERE issue_id = $1 AND status IN ('pending_approval', 'queued', 'dispatched', 'running');
 
 -- name: CancelAgentTasksByAgent :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running');
+WHERE agent_id = $1 AND status IN ('pending_approval', 'queued', 'dispatched', 'running');
 
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
@@ -136,7 +137,7 @@ RETURNING id, agent_id, issue_id;
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE id = $1 AND status IN ('pending_approval', 'queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: CountRunningTasks :one
@@ -149,18 +150,18 @@ SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
 
 -- name: HasPendingTaskForIssue :one
--- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
+-- Returns true if there is a pending_approval, queued, or dispatched task for the issue.
 -- Used by the coalescing queue: allow enqueue when a task is running (so
 -- the agent picks up new comments on the next cycle) but skip if a pending
 -- task already exists (natural dedup).
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1 AND status IN ('pending_approval', 'queued', 'dispatched');
 
 -- name: HasPendingTaskForIssueAndAgent :one
--- Returns true if a specific agent already has a queued or dispatched task
--- for the given issue. Used by @mention trigger dedup.
+-- Returns true if a specific agent already has a pending_approval, queued,
+-- or dispatched task for the given issue. Used by @mention trigger dedup.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('pending_approval', 'queued', 'dispatched');
 
 -- name: ListPendingTasksByRuntime :many
 SELECT * FROM agent_task_queue
@@ -169,7 +170,7 @@ ORDER BY priority DESC, created_at ASC;
 
 -- name: ListActiveTasksByIssue :many
 SELECT * FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+WHERE issue_id = $1 AND status IN ('pending_approval', 'queued', 'dispatched', 'running')
 ORDER BY created_at DESC;
 
 -- name: ListTasksByIssue :many
@@ -180,4 +181,16 @@ ORDER BY created_at DESC;
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: ApproveAgentTask :one
+UPDATE agent_task_queue
+SET status = 'queued'
+WHERE id = $1 AND status = 'pending_approval'
+RETURNING *;
+
+-- name: RejectAgentTask :one
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), error = 'rejected by runtime owner'
+WHERE id = $1 AND status = 'pending_approval'
 RETURNING *;

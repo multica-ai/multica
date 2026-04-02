@@ -39,6 +39,7 @@ type Agent struct {
 	Instructions       string             `json:"instructions"`
 	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy         pgtype.UUID        `json:"archived_by"`
+	ApprovalRequired   bool               `json:"approval_required"`
 }
 
 type AgentRuntime struct {
@@ -54,6 +55,8 @@ type AgentRuntime struct {
 	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
 }
 
 type AgentSkill struct {
@@ -79,6 +82,7 @@ type AgentTaskQueue struct {
 	SessionID        pgtype.Text        `json:"session_id"`
 	WorkDir          pgtype.Text        `json:"work_dir"`
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	RequestedBy      pgtype.UUID        `json:"requested_by"`
 }
 
 type Attachment struct {

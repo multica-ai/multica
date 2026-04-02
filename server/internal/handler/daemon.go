@@ -104,6 +104,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			Status:      status,
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
+			OwnerID:     parseUUID(requestUserID(r)),
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())

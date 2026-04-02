@@ -27,6 +27,7 @@ type AgentResponse struct {
 	Status             string          `json:"status"`
 	MaxConcurrentTasks int32           `json:"max_concurrent_tasks"`
 	OwnerID            *string         `json:"owner_id"`
+	ApprovalRequired   bool            `json:"approval_required"`
 	Skills             []SkillResponse `json:"skills"`
 	Tools              any             `json:"tools"`
 	Triggers           any             `json:"triggers"`
@@ -75,6 +76,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		OwnerID:            uuidToPtr(a.OwnerID),
+		ApprovalRequired:   a.ApprovalRequired,
 		Skills:             []SkillResponse{},
 		Tools:              tools,
 		Triggers:           triggers,
@@ -221,6 +223,7 @@ type CreateAgentRequest struct {
 	RuntimeConfig      any     `json:"runtime_config"`
 	Visibility         string  `json:"visibility"`
 	MaxConcurrentTasks int32   `json:"max_concurrent_tasks"`
+	ApprovalRequired   bool    `json:"approval_required"`
 	Tools              any     `json:"tools"`
 	Triggers           any     `json:"triggers"`
 }
@@ -290,6 +293,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            parseUUID(ownerID),
+		ApprovalRequired:   req.ApprovalRequired,
 		Tools:              tools,
 		Triggers:           triggers,
 	})
@@ -323,6 +327,7 @@ type UpdateAgentRequest struct {
 	Visibility         *string `json:"visibility"`
 	Status             *string `json:"status"`
 	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
+	ApprovalRequired   *bool   `json:"approval_required"`
 	Tools              any     `json:"tools"`
 	Triggers           any     `json:"triggers"`
 }
@@ -408,6 +413,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Triggers != nil {
 		triggers, _ := json.Marshal(req.Triggers)
 		params.Triggers = triggers
+	}
+	if req.ApprovalRequired != nil {
+		params.ApprovalRequired = pgtype.Bool{Bool: *req.ApprovalRequired, Valid: true}
 	}
 
 	agent, err := h.Queries.UpdateAgent(r.Context(), params)

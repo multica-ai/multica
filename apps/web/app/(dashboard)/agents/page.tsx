@@ -69,6 +69,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/shared/api";
@@ -93,6 +94,7 @@ const statusConfig: Record<AgentStatus, { label: string; color: string; dot: str
 };
 
 const taskStatusConfig: Record<string, { label: string; icon: typeof CheckCircle2; color: string }> = {
+  pending_approval: { label: "Pending Approval", icon: AlertCircle, color: "text-warning" },
   queued: { label: "Queued", icon: Clock, color: "text-muted-foreground" },
   dispatched: { label: "Dispatched", icon: Play, color: "text-info" },
   running: { label: "Running", icon: Loader2, color: "text-success" },
@@ -127,6 +129,7 @@ function CreateAgentDialog({
   const [description, setDescription] = useState("");
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimes[0]?.id ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
+  const [approvalRequired, setApprovalRequired] = useState(false);
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
 
@@ -147,6 +150,7 @@ function CreateAgentDialog({
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
+        approval_required: approvalRequired,
         triggers: [
           { id: generateId(), type: "on_assign", enabled: true, config: {} },
           { id: generateId(), type: "on_comment", enabled: true, config: {} },
@@ -296,6 +300,14 @@ function CreateAgentDialog({
                 ))}
               </PopoverContent>
             </Popover>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+            <div>
+              <div className="text-sm font-medium">Require approval</div>
+              <div className="text-xs text-muted-foreground">Tasks from other members need your approval before running</div>
+            </div>
+            <Switch checked={approvalRequired} onCheckedChange={setApprovalRequired} />
           </div>
         </div>
 
@@ -1192,6 +1204,7 @@ function SettingsTab({
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
+  const [approvalRequired, setApprovalRequired] = useState(agent.approval_required);
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1214,7 +1227,8 @@ function SettingsTab({
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
-    maxTasks !== agent.max_concurrent_tasks;
+    maxTasks !== agent.max_concurrent_tasks ||
+    approvalRequired !== agent.approval_required;
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -1223,7 +1237,7 @@ function SettingsTab({
     }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
+      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks, approval_required: approvalRequired });
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
@@ -1332,6 +1346,14 @@ function SettingsTab({
           onChange={(e) => setMaxTasks(Number(e.target.value))}
           className="mt-1 w-24"
         />
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+        <div>
+          <div className="text-sm font-medium">Require approval</div>
+          <div className="text-xs text-muted-foreground">Tasks from other members need your approval before running</div>
+        </div>
+        <Switch checked={approvalRequired} onCheckedChange={setApprovalRequired} />
       </div>
 
       <div>

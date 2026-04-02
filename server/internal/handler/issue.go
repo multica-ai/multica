@@ -295,7 +295,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Only ready issues in todo are enqueued for agents.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, requestUserID(r))
 		}
 	}
 
@@ -448,7 +448,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, requestUserID(r))
 		}
 	}
 
@@ -724,7 +724,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, requestUserID(r))
 			}
 		}
 

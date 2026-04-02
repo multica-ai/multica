@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square } from "lucide-react";
+import { Bot, ChevronRight, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, ShieldCheck, X, Check } from "lucide-react";
 import { api } from "@/shared/api";
 import { useWSEvent } from "@/features/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@/shared/types/events";
@@ -92,6 +92,86 @@ function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
     });
   }
   return items.sort((a, b) => a.seq - b.seq);
+}
+
+// ─── PendingApprovalCard ───────────────────────────────────────────────────
+
+function PendingApprovalCard({
+  task,
+  issueId,
+  agentName,
+  onApproved,
+  onRejected,
+}: {
+  task: AgentTask;
+  issueId: string;
+  agentName?: string;
+  onApproved: () => void;
+  onRejected: () => void;
+}) {
+  const { getActorName } = useActorName();
+  const [acting, setActing] = useState(false);
+  const name = (task.agent_id ? getActorName("agent", task.agent_id) : agentName) ?? "Agent";
+
+  const handleApprove = async () => {
+    setActing(true);
+    try {
+      await api.approveTask(issueId, task.id);
+      toast.success("Task approved");
+      onApproved();
+    } catch {
+      toast.error("Failed to approve task");
+      setActing(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setActing(true);
+    try {
+      await api.rejectTask(issueId, task.id);
+      toast.success("Task rejected");
+      onRejected();
+    } catch {
+      toast.error("Failed to reject task");
+      setActing(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <div className="flex items-center justify-center h-5 w-5 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-400 shrink-0">
+          <ShieldCheck className="h-3 w-3" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+            {name} needs approval to run this task
+          </p>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+            A teammate assigned this task. Approve to execute on your runtime.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={handleReject}
+            disabled={acting}
+            className="flex items-center gap-1 rounded-md border border-amber-300 dark:border-amber-700 bg-white dark:bg-amber-950 px-2 py-1 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 transition-colors disabled:opacity-50"
+          >
+            <X className="h-3 w-3" />
+            Reject
+          </button>
+          <button
+            onClick={handleApprove}
+            disabled={acting}
+            className="flex items-center gap-1 rounded-md bg-amber-600 px-2 py-1 text-xs text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+          >
+            <Check className="h-3 w-3" />
+            Approve
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── AgentLiveCard (real-time view) ────────────────────────────────────────
@@ -246,6 +326,22 @@ export function AgentLiveCard({ issueId, agentName }: AgentLiveCardProps) {
   }, [activeTask, issueId, cancelling]);
 
   if (!activeTask) return null;
+
+  if (activeTask.status === "pending_approval") {
+    return (
+      <PendingApprovalCard
+        task={activeTask}
+        issueId={issueId}
+        agentName={agentName}
+        onApproved={() => {
+          api.getActiveTaskForIssue(issueId).then(({ task }) => setActiveTask(task)).catch(console.error);
+        }}
+        onRejected={() => {
+          setActiveTask(null);
+        }}
+      />
+    );
+  }
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 

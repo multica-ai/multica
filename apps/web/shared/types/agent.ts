@@ -6,6 +6,8 @@ export type AgentVisibility = "workspace" | "private";
 
 export type AgentTriggerType = "on_assign" | "on_comment" | "scheduled";
 
+export type RuntimeVisibility = "workspace" | "private";
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -16,6 +18,8 @@ export interface RuntimeDevice {
   status: "online" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
+  owner_id: string | null;
+  visibility: RuntimeVisibility;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -44,7 +48,7 @@ export interface AgentTask {
   agent_id: string;
   runtime_id: string;
   issue_id: string;
-  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  status: "pending_approval" | "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;
@@ -68,6 +72,7 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   owner_id: string | null;
+  approval_required: boolean;
   skills: Skill[];
   tools: AgentTool[];
   triggers: AgentTrigger[];
@@ -86,6 +91,7 @@ export interface CreateAgentRequest {
   runtime_config?: Record<string, unknown>;
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
+  approval_required?: boolean;
   tools?: AgentTool[];
   triggers?: AgentTrigger[];
 }
@@ -100,6 +106,7 @@ export interface UpdateAgentRequest {
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
+  approval_required?: boolean;
   tools?: AgentTool[];
   triggers?: AgentTrigger[];
 }

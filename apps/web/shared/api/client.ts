@@ -389,6 +389,18 @@ export class ApiClient {
     });
   }
 
+  async approveTask(issueId: string, taskId: string): Promise<{ task_id: string; status: string }> {
+    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/approve`, {
+      method: "POST",
+    });
+  }
+
+  async rejectTask(issueId: string, taskId: string): Promise<{ task_id: string; status: string }> {
+    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/reject`, {
+      method: "POST",
+    });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");

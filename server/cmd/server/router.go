@@ -171,6 +171,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
+					r.Post("/tasks/{taskId}/approve", h.ApproveTask)
+					r.Post("/tasks/{taskId}/reject", h.RejectTask)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)

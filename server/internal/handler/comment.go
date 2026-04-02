@@ -182,7 +182,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if comment.ParentID.Valid {
 			replyTo = comment.ParentID
 		}
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, replyTo); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, requestUserID(r), replyTo); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}

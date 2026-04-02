@@ -17,6 +17,8 @@ import {
   Archive,
   BookCheck,
   ListChecks,
+  Check,
+  X,
 } from "lucide-react";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@/shared/types";
 import { Button } from "@/components/ui/button";
@@ -54,6 +56,7 @@ const typeLabels: Record<InboxItemType, string> = {
   agent_blocked: "Agent blocked",
   agent_completed: "Agent completed",
   reaction_added: "Reacted",
+  task_approval_required: "Approval required",
 };
 
 function timeAgo(dateStr: string): string {
@@ -133,6 +136,8 @@ function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (emoji) return <span>Reacted {emoji} to your comment</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
+    case "task_approval_required":
+      return <span>Task requires your approval to run</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }
@@ -315,6 +320,36 @@ export default function InboxPage() {
     }
   };
 
+  const handleApproveTask = async (item: InboxItem) => {
+    const taskId = item.details?.task_id;
+    const issueId = item.issue_id;
+    if (!taskId || !issueId) return;
+    try {
+      await api.approveTask(issueId, taskId);
+      await api.archiveInbox(item.id);
+      useInboxStore.getState().archive(item.id);
+      setSelectedKey("");
+      toast.success("Task approved");
+    } catch {
+      toast.error("Failed to approve task");
+    }
+  };
+
+  const handleRejectTask = async (item: InboxItem) => {
+    const taskId = item.details?.task_id;
+    const issueId = item.issue_id;
+    if (!taskId || !issueId) return;
+    try {
+      await api.rejectTask(issueId, taskId);
+      await api.archiveInbox(item.id);
+      useInboxStore.getState().archive(item.id);
+      setSelectedKey("");
+      toast.success("Task rejected");
+    } catch {
+      toast.error("Failed to reject task");
+    }
+  };
+
   if (loading) {
     return (
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
@@ -422,16 +457,33 @@ export default function InboxPage() {
       {/* Right column — detail */}
       <div className="flex flex-col min-h-0 h-full">
         {selected?.issue_id ? (
-          <IssueDetail
-            key={selected.id}
-            issueId={selected.issue_id}
-            defaultSidebarOpen={false}
-            layoutId="multica_inbox_issue_detail_layout"
-            highlightCommentId={selected.details?.comment_id ?? undefined}
-            onDelete={() => {
-              handleArchive(selected.id);
-            }}
-          />
+          <>
+            {selected.type === "task_approval_required" && (
+              <div className="flex items-center gap-2 border-b px-4 py-2 bg-amber-50 dark:bg-amber-950/20">
+                <span className="text-sm text-amber-700 dark:text-amber-400 flex-1">
+                  A teammate requested this task on your runtime. Approve to execute.
+                </span>
+                <Button size="sm" variant="outline" onClick={() => handleRejectTask(selected)}>
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Reject
+                </Button>
+                <Button size="sm" onClick={() => handleApproveTask(selected)}>
+                  <Check className="mr-1 h-3.5 w-3.5" />
+                  Approve
+                </Button>
+              </div>
+            )}
+            <IssueDetail
+              key={selected.id}
+              issueId={selected.issue_id}
+              defaultSidebarOpen={false}
+              layoutId="multica_inbox_issue_detail_layout"
+              highlightCommentId={selected.details?.comment_id ?? undefined}
+              onDelete={() => {
+                handleArchive(selected.id);
+              }}
+            />
+          </>
         ) : selected ? (
           <div className="p-6">
             <h2 className="text-lg font-semibold">{selected.title}</h2>
