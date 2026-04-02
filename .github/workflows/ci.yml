@@ -109,6 +109,42 @@ jobs:
         run: |
           cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o /dev/null ./cmd/server
 
+  # Windows binary smoke test: build and actually run the CLI on a Windows runner
+  # to verify the binary works, not just compiles.
+  windows-smoke-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: server/go.sum
+
+      - name: Build Windows CLI
+        run: |
+          cd server
+          go build -ldflags "-s -w -X main.version=ci -X main.commit=${{ github.sha }}" -o multica.exe ./cmd/multica
+
+      - name: Verify binary runs — version
+        run: |
+          server\multica.exe version
+
+      - name: Verify binary runs — help
+        run: |
+          server\multica.exe --help
+
+      - name: Verify binary runs — daemon help
+        run: |
+          server\multica.exe daemon --help
+
+      - name: Verify binary runs — config show (graceful error without config)
+        run: |
+          server\multica.exe config show 2>&1 || echo "Expected: config not yet initialized"
+        shell: cmd
+
   # Container build verification: ensure the Dockerfile builds successfully.
   docker-build:
     runs-on: ubuntu-latest
