@@ -16,20 +16,24 @@ import (
 
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
+	Type        string
 	URL         string
+	LocalPath   string
 	Description string
 }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
 type CachedRepo struct {
+	Type        string // "remote" or "local"
 	URL         string // remote URL
+	SourcePath  string // absolute path to the local repo when type=local
 	Description string // human-readable description
-	LocalPath   string // absolute path to the bare clone
+	CachePath   string // absolute path to the bare clone when type=remote
 }
 
 // Cache manages bare git clones for workspace repositories.
 type Cache struct {
-	root   string       // base directory for all caches (e.g. ~/multica_workspaces/.repos)
+	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
 	logger *slog.Logger
 	mu     sync.Mutex
 }
@@ -37,6 +41,17 @@ type Cache struct {
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
 	return &Cache{root: root, logger: logger}
+}
+
+func normalizeRepoType(repoType string) string {
+	switch strings.TrimSpace(repoType) {
+	case "", "remote":
+		return "remote"
+	case "local":
+		return "local"
+	default:
+		return repoType
+	}
 }
 
 // Sync ensures all repos for a workspace are cloned (or fetched if already cached).
@@ -53,8 +68,26 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 
 	var firstErr error
 	for _, repo := range repos {
-		if repo.URL == "" {
+		switch normalizeRepoType(repo.Type) {
+		case "local":
+			if strings.TrimSpace(repo.LocalPath) == "" {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("local repo path is required")
+				}
+				continue
+			}
+			if !isGitRepo(repo.LocalPath) {
+				err := fmt.Errorf("local repo is not a git repository: %s", repo.LocalPath)
+				c.logger.Warn("repo cache: invalid local repo", "path", repo.LocalPath, "error", err)
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
 			continue
+		default:
+			if repo.URL == "" {
+				continue
+			}
 		}
 		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
 
@@ -127,6 +160,11 @@ func isBareRepo(path string) bool {
 	return err == nil
 }
 
+func isGitRepo(path string) bool {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
+	return cmd.Run() == nil
+}
+
 func gitCloneBare(url, dest string) error {
 	cmd := exec.Command("git", "clone", "--bare", url, dest)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -154,7 +192,7 @@ func gitFetch(barePath string) error {
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
 	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
+	Repo        RepoInfo
 	WorkDir     string // parent directory for the worktree (e.g. task workdir)
 	AgentName   string // for branch naming
 	TaskID      string // for branch naming uniqueness
@@ -169,28 +207,43 @@ type WorktreeResult struct {
 // CreateWorktree looks up the bare cache for a repo, fetches latest, and creates
 // a git worktree in the agent's working directory.
 func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
-	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
-	if barePath == "" {
-		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
-	}
+	repoType := normalizeRepoType(params.Repo.Type)
+	gitRoot := ""
+	repoLabel := strings.TrimSpace(params.Repo.URL)
+	if repoType == "local" {
+		gitRoot = strings.TrimSpace(params.Repo.LocalPath)
+		repoLabel = gitRoot
+		if gitRoot == "" {
+			return nil, fmt.Errorf("local repo path is required")
+		}
+		if !isGitRepo(gitRoot) {
+			return nil, fmt.Errorf("local repo is not a git repository: %s", gitRoot)
+		}
+	} else {
+		barePath := c.Lookup(params.WorkspaceID, params.Repo.URL)
+		if barePath == "" {
+			return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.Repo.URL, params.WorkspaceID)
+		}
+		gitRoot = barePath
 
-	// Fetch latest from origin.
-	if err := gitFetch(barePath); err != nil {
-		c.logger.Warn("repo checkout: fetch failed (continuing with cached state)", "url", params.RepoURL, "error", err)
+		// Fetch latest from origin.
+		if err := gitFetch(barePath); err != nil {
+			c.logger.Warn("repo checkout: fetch failed (continuing with cached state)", "url", params.Repo.URL, "error", err)
+		}
 	}
 
 	// Determine the default branch to base the worktree on.
-	baseRef := getRemoteDefaultBranch(barePath)
+	baseRef := getRemoteDefaultBranch(gitRoot)
 
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
 
-	// Derive directory name from repo URL.
-	dirName := repoNameFromURL(params.RepoURL)
+	// Derive directory name from repo identifier.
+	dirName := repoNameFromURL(repoLabel)
 	worktreePath := filepath.Join(params.WorkDir, dirName)
 
 	// Create the worktree.
-	if err := createWorktree(barePath, worktreePath, branchName, baseRef); err != nil {
+	if err := createWorktree(gitRoot, worktreePath, branchName, baseRef); err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
@@ -200,7 +253,8 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	}
 
 	c.logger.Info("repo checkout: worktree created",
-		"url", params.RepoURL,
+		"repo", repoLabel,
+		"type", repoType,
 		"path", worktreePath,
 		"branch", branchName,
 		"base", baseRef,

@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -22,16 +24,43 @@ const workspaceTabs = [
   { value: "members", label: "Members", icon: Users },
 ];
 
-export default function SettingsPage() {
+const VALID_TABS = new Set([
+  "profile",
+  "appearance",
+  "tokens",
+  "workspace",
+  "repositories",
+  "members",
+]);
+
+function tabFromSearchParams(searchParams: URLSearchParams): string {
+  const t = searchParams.get("tab");
+  return t && VALID_TABS.has(t) ? t : "profile";
+}
+
+function SettingsPageContent() {
+  const searchParams = useSearchParams();
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const [activeTab, setActiveTab] = useState(() =>
+    tabFromSearchParams(searchParams),
+  );
+
+  useEffect(() => {
+    setActiveTab(tabFromSearchParams(searchParams));
+  }, [searchParams]);
 
   return (
-    <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
-      {/* Left nav */}
+    <Tabs
+      value={activeTab}
+      onValueChange={(v) => {
+        if (v) setActiveTab(v);
+      }}
+      orientation="vertical"
+      className="flex-1 min-h-0 gap-0"
+    >
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
         <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
         <TabsList variant="line" className="flex-col items-stretch">
-          {/* My Account group */}
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
             My Account
           </span>
@@ -42,7 +71,6 @@ export default function SettingsPage() {
             </TabsTrigger>
           ))}
 
-          {/* Workspace group */}
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
             {workspaceName ?? "Workspace"}
           </span>
@@ -55,7 +83,6 @@ export default function SettingsPage() {
         </TabsList>
       </div>
 
-      {/* Right content */}
       <div className="flex-1 min-w-0 overflow-y-auto">
         <div className="w-full max-w-3xl mx-auto p-6">
           <TabsContent value="profile"><AccountTab /></TabsContent>
@@ -67,5 +94,13 @@ export default function SettingsPage() {
         </div>
       </div>
     </Tabs>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsPageContent />
+    </Suspense>
   );
 }

@@ -22,6 +22,7 @@ import (
 type workspaceState struct {
 	workspaceID string
 	runtimeIDs  []string
+	repos       []RepoData
 }
 
 // Daemon is the local agent runtime that polls for and executes tasks.
@@ -126,8 +127,8 @@ func (d *Daemon) resolveAuth() error {
 		if d.cfg.Profile != "" {
 			loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
 		}
-		d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
-		return fmt.Errorf("not authenticated: run %s first", loginHint)
+		d.logger.Warn("not authenticated — browser login does not configure the CLI; run " + loginHint + " (or create a token under Settings → API Tokens, then run 'multica login --token'), then restart the daemon")
+		return fmt.Errorf("not authenticated: run %s, or use Settings → API Tokens with multica login --token", loginHint)
 	}
 	d.client.SetToken(cfg.Token)
 	d.logger.Info("authenticated")
@@ -158,7 +159,7 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 			d.logger.Info("registered runtime", "workspace_id", ws.ID, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
 		d.mu.Lock()
-		d.workspaces[ws.ID] = &workspaceState{workspaceID: ws.ID, runtimeIDs: runtimeIDs}
+		d.workspaces[ws.ID] = &workspaceState{workspaceID: ws.ID, runtimeIDs: runtimeIDs, repos: resp.Repos}
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
 		}
@@ -211,6 +212,22 @@ func (d *Daemon) providerToRuntimeMap() map[string]string {
 		m[rt.Provider] = id
 	}
 	return m
+}
+
+func (d *Daemon) findWorkspaceRepo(workspaceID, repoRef string) (RepoData, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return RepoData{}, false
+	}
+	for _, repo := range ws.repos {
+		if repo.URL == repoRef || repo.LocalPath == repoRef {
+			return repo, true
+		}
+	}
+	return RepoData{}, false
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
@@ -382,7 +399,7 @@ func (d *Daemon) reloadWorkspaces(ctx context.Context) {
 				runtimeIDs[i] = rt.ID
 			}
 			d.mu.Lock()
-			d.workspaces[id] = &workspaceState{workspaceID: id, runtimeIDs: runtimeIDs}
+			d.workspaces[id] = &workspaceState{workspaceID: id, runtimeIDs: runtimeIDs, repos: resp.Repos}
 			for _, rt := range resp.Runtimes {
 				d.runtimeIndex[rt.ID] = rt
 			}
@@ -1021,7 +1038,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
 	for i, r := range repos {
-		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description}
+		info[i] = repocache.RepoInfo{
+			Type:        r.Type,
+			URL:         r.URL,
+			LocalPath:   r.LocalPath,
+			Description: r.Description,
+		}
 	}
 	return info
 }
@@ -1032,7 +1054,12 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{
+			Type:        r.Type,
+			URL:         r.URL,
+			LocalPath:   r.LocalPath,
+			Description: r.Description,
+		}
 	}
 	return result
 }

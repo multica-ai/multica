@@ -112,7 +112,6 @@ export function WorkspaceTab() {
 
   return (
     <div className="space-y-8">
-      {/* Workspace settings */}
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">General</h2>
 
@@ -175,7 +174,6 @@ export function WorkspaceTab() {
         </Card>
       </section>
 
-      {/* Danger Zone */}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <LogOut className="h-4 w-4 text-muted-foreground" />

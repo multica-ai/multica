@@ -42,7 +42,7 @@ export function RepositoriesTab() {
   };
 
   const handleAddRepo = () => {
-    setRepos([...repos, { url: "", description: "" }]);
+    setRepos([...repos, { type: "remote", url: "", local_path: "", description: "" }]);
   };
 
   const handleRemoveRepo = (index: number) => {
@@ -51,6 +51,21 @@ export function RepositoriesTab() {
 
   const handleRepoChange = (index: number, field: keyof WorkspaceRepo, value: string) => {
     setRepos(repos.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  };
+
+  const handleChooseFolder = async (index: number) => {
+    if (!canManageWorkspace) return;
+
+    try {
+      const { path } = await api.chooseDirectory("Choose a folder");
+      setRepos(repos.map((repo, i) => (
+        i === index
+          ? { ...repo, type: "local", local_path: path }
+          : repo
+      )));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to choose folder");
+    }
   };
 
   if (!workspace) return null;
@@ -63,26 +78,73 @@ export function RepositoriesTab() {
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              GitHub repositories associated with this workspace. Agents use these to clone and work on code.
+              Configure remote repositories or existing local git directories. Remote repos use clone and fetch; local repos create worktrees directly from the path you provide.
             </p>
 
             {repos.map((repo, index) => (
               <div key={index} className="flex gap-2">
                 <div className="flex-1 space-y-1.5">
-                  <Input
-                    type="url"
-                    value={repo.url}
-                    onChange={(e) => handleRepoChange(index, "url", e.target.value)}
-                    disabled={!canManageWorkspace}
-                    placeholder="https://github.com/org/repo"
-                    className="text-sm"
-                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={!canManageWorkspace}
+                      onClick={() => handleRepoChange(index, "type", "remote")}
+                      className={`rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
+                        (repo.type ?? "remote") === "remote"
+                          ? "border-primary bg-primary/5"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      Remote
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canManageWorkspace}
+                      onClick={() => handleRepoChange(index, "type", "local")}
+                      className={`rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
+                        repo.type === "local"
+                          ? "border-primary bg-primary/5"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      Local Path
+                    </button>
+                  </div>
+                  {(repo.type ?? "remote") === "local" ? (
+                    <div className="flex gap-2">
+                      <Input
+                        type="text"
+                        value={repo.local_path ?? ""}
+                        onChange={(e) => handleRepoChange(index, "local_path", e.target.value)}
+                        disabled={!canManageWorkspace}
+                        placeholder="Folder path"
+                        className="text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void handleChooseFolder(index)}
+                        disabled={!canManageWorkspace}
+                      >
+                        Choose Folder
+                      </Button>
+                    </div>
+                  ) : (
+                    <Input
+                      type="url"
+                      value={repo.url}
+                      onChange={(e) => handleRepoChange(index, "url", e.target.value)}
+                      disabled={!canManageWorkspace}
+                      placeholder="https://github.com/org/repo"
+                      className="text-sm"
+                    />
+                  )}
                   <Input
                     type="text"
                     value={repo.description}
                     onChange={(e) => handleRepoChange(index, "description", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="Description (e.g. Go backend + Next.js frontend)"
+                    placeholder="Description"
                     className="text-sm"
                   />
                 </div>

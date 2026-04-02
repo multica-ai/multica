@@ -42,7 +42,9 @@ func (d *Daemon) listenHealth() (net.Listener, error) {
 
 // repoCheckoutRequest is the body of a POST /repo/checkout request.
 type repoCheckoutRequest struct {
-	URL         string `json:"url"`
+	Type        string `json:"type,omitempty"`
+	Repo        string `json:"repo"`
+	LocalPath   string `json:"local_path,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	WorkDir     string `json:"workdir"`
 	AgentName   string `json:"agent_name"`
@@ -95,8 +97,8 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if req.URL == "" {
-			http.Error(w, "url is required", http.StatusBadRequest)
+		if req.Repo == "" {
+			http.Error(w, "repo is required", http.StatusBadRequest)
 			return
 		}
 		if req.WorkDir == "" {
@@ -109,15 +111,28 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
+		repo := repocache.RepoInfo{
+			Type:      req.Type,
+			URL:       req.Repo,
+			LocalPath: req.LocalPath,
+		}
+		if repo.Type == "" && repo.LocalPath == "" {
+			if configured, ok := d.findWorkspaceRepo(req.WorkspaceID, req.Repo); ok {
+				repo.Type = configured.Type
+				repo.URL = configured.URL
+				repo.LocalPath = configured.LocalPath
+			}
+		}
+
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
 			WorkspaceID: req.WorkspaceID,
-			RepoURL:     req.URL,
+			Repo:        repo,
 			WorkDir:     req.WorkDir,
 			AgentName:   req.AgentName,
 			TaskID:      req.TaskID,
 		})
 		if err != nil {
-			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
+			d.logger.Error("repo checkout failed", "repo", req.Repo, "type", req.Type, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

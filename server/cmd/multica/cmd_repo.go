@@ -18,9 +18,9 @@ var repoCmd = &cobra.Command{
 }
 
 var repoCheckoutCmd = &cobra.Command{
-	Use:   "checkout <url>",
+	Use:   "checkout <repo>",
 	Short: "Check out a repository into the working directory",
-	Long:  "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.",
+	Long:  "Creates a git worktree from a configured workspace repository. Remote repos use the daemon cache; local repos use the configured local path directly.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runRepoCheckout,
 }
@@ -30,7 +30,9 @@ func init() {
 }
 
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
-	repoURL := args[0]
+	repoRef := args[0]
+	repoType := os.Getenv("MULTICA_REPO_TYPE")
+	localPath := os.Getenv("MULTICA_REPO_LOCAL_PATH")
 
 	daemonPort := os.Getenv("MULTICA_DAEMON_PORT")
 	if daemonPort == "" {
@@ -48,7 +50,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	reqBody := map[string]string{
-		"url":          repoURL,
+		"type":         repoType,
+		"repo":         repoRef,
+		"local_path":   localPath,
 		"workspace_id": workspaceID,
 		"workdir":      workDir,
 		"agent_name":   agentName,
@@ -86,7 +90,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
-	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
+	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoRef, result.Path, result.BranchName)
 
 	return nil
 }

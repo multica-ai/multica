@@ -162,14 +162,18 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		logFile.Close()
 		return fmt.Errorf("start daemon: %w", err)
 	}
+	childPID := child.Process.Pid
 	logFile.Close()
 
 	// Detach: we don't Wait() on the child — it runs independently.
-	child.Process.Release()
+	// Capture PID before Release: after Release, Process.Pid may be invalid (-1) on some platforms.
+	if err := child.Process.Release(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: release daemon process: %v\n", err)
+	}
 
 	// Write PID file.
 	pidPath := daemonPIDPathForProfile(profile)
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(child.Process.Pid)), 0o644); err != nil {
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(childPID)), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
@@ -184,9 +188,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	if profile != "" {
-		fmt.Fprintf(os.Stderr, "Daemon [%s] started (pid %d)\n", profile, child.Process.Pid)
+		fmt.Fprintf(os.Stderr, "Daemon [%s] started (pid %d)\n", profile, childPID)
 	} else {
-		fmt.Fprintf(os.Stderr, "Daemon started (pid %d)\n", child.Process.Pid)
+		fmt.Fprintf(os.Stderr, "Daemon started (pid %d)\n", childPID)
 	}
 	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 	return nil

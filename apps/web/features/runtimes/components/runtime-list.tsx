@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Server } from "lucide-react";
 import type { AgentRuntime } from "@/shared/types";
 import { RuntimeModeIcon } from "./shared";
@@ -64,12 +65,24 @@ export function RuntimeList({
           <p className="mt-3 text-sm text-muted-foreground">
             No runtimes registered
           </p>
-          <p className="mt-1 text-xs text-muted-foreground text-center">
-            Run{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              multica daemon start
-            </code>{" "}
-            to register a local runtime.
+          <p className="mt-2 max-w-sm text-xs text-muted-foreground text-center leading-relaxed">
+            The web app and the CLI use separate credentials. After signing in here, connect the CLI once:
+            open{" "}
+            <Link
+              href="/settings?tab=tokens"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              Settings → API Tokens
+            </Link>
+            , create a token, then run{" "}
+            <code className="rounded bg-muted px-1 py-0.5">multica login --token</code>{" "}
+            and paste it (this also watches your workspaces). Finally run{" "}
+            <code className="rounded bg-muted px-1 py-0.5">multica daemon start</code>.
+          </p>
+          <p className="mt-3 text-xs text-muted-foreground text-center">
+            Or run{" "}
+            <code className="rounded bg-muted px-1 py-0.5">multica login</code>{" "}
+            and finish in the browser (click Authorize if you are already signed in).
           </p>
         </div>
       ) : (

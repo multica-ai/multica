@@ -42,6 +42,10 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface ChooseDirectoryResponse {
+  path: string;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -150,6 +154,13 @@ export class ApiClient {
     return this.fetch("/api/me", {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async chooseDirectory(prompt?: string): Promise<ChooseDirectoryResponse> {
+    return this.fetch("/api/system/choose-directory", {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
     });
   }
 

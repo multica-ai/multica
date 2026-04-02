@@ -207,7 +207,7 @@ func TestCreateWorktree(t *testing.T) {
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
 		WorkspaceID: "ws-1",
-		RepoURL:     sourceRepo,
+		Repo:        RepoInfo{URL: sourceRepo},
 		WorkDir:     workDir,
 		AgentName:   "Code Reviewer",
 		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -244,7 +244,7 @@ func TestCreateWorktreeNotCached(t *testing.T) {
 
 	_, err := cache.CreateWorktree(WorktreeParams{
 		WorkspaceID: "ws-1",
-		RepoURL:     "https://github.com/org/nonexistent",
+		Repo:        RepoInfo{URL: "https://github.com/org/nonexistent"},
 		WorkDir:     t.TempDir(),
 		AgentName:   "Agent",
 		TaskID:      "test-task-id",

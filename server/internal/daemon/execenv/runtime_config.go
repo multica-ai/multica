@@ -61,15 +61,23 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
-		b.WriteString("| URL | Description |\n")
-		b.WriteString("|-----|-------------|\n")
+		b.WriteString("Use `multica repo checkout <repo>` to check out a repository into your working directory.\n\n")
+		b.WriteString("| Type | Repo | Description |\n")
+		b.WriteString("|------|------|-------------|\n")
 		for _, repo := range ctx.Repos {
 			desc := repo.Description
 			if desc == "" {
 				desc = "—"
 			}
-			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			repoRef := repo.URL
+			if strings.TrimSpace(repo.Type) == "local" {
+				repoRef = repo.LocalPath
+			}
+			repoType := repo.Type
+			if repoType == "" {
+				repoType = "remote"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", repoType, repoRef, desc)
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
 	}
@@ -93,7 +101,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("3. Read comments for additional context or human instructions\n")
 		b.WriteString("4. If the task requires code changes:\n")
 		if len(ctx.Repos) > 0 {
-			b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")
+			b.WriteString("   a. Run `multica repo checkout <repo>` to check out the appropriate repository\n")
 			b.WriteString("   b. `cd` into the checked-out directory\n")
 			b.WriteString("   c. Implement the changes and commit\n")
 		} else {

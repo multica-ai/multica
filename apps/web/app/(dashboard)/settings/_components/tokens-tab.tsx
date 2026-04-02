@@ -33,6 +33,11 @@ export function TokensTab() {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
+  const [appOrigin, setAppOrigin] = useState("http://localhost:3000");
+
+  useEffect(() => {
+    setAppOrigin(window.location.origin);
+  }, []);
 
   const loadTokens = useCallback(async () => {
     try {
@@ -160,6 +165,25 @@ export function TokensTab() {
               Copy your personal access token now. You won&apos;t be able to see it again.
             </DialogDescription>
           </DialogHeader>
+          <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground space-y-2">
+            <p className="font-medium text-foreground">Connect the CLI (local dev)</p>
+            <p>
+              Point the CLI at this server (skip if already set in{" "}
+              <code className="rounded bg-muted px-1">~/.multica/config.json</code>):
+            </p>
+            <pre className="overflow-x-auto rounded bg-muted px-2 py-1.5 text-[11px] leading-relaxed text-foreground">
+              {`multica config set server_url ${process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080/ws"}
+multica config set app_url ${appOrigin}`}
+            </pre>
+            <p>Then paste the token:</p>
+            <pre className="overflow-x-auto rounded bg-muted px-2 py-1.5 text-[11px] text-foreground">
+              multica login --token
+            </pre>
+            <p>Finally start the daemon:</p>
+            <pre className="overflow-x-auto rounded bg-muted px-2 py-1.5 text-[11px] text-foreground">
+              multica daemon start
+            </pre>
+          </div>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded-md border bg-muted/50 px-3 py-2 text-sm break-all select-all">
               {newToken}
