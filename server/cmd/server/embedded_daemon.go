@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os/exec"
 	"sync"
@@ -41,14 +42,12 @@ func NewEmbeddedDaemon(queries *db.Queries, taskSvc *service.TaskService) *Embed
 	for _, provider := range []string{"claude", "codex", "opencode"} {
 		if path, err := exec.LookPath(provider); err == nil {
 			slog.Info("detected agent CLI", "provider", provider, "path", path)
-			switch provider {
-			case "claude":
-				d.backends[provider] = agent.NewClaude()
-			case "codex":
-				d.backends[provider] = agent.NewCodex()
-			case "opencode":
-				d.backends[provider] = agent.NewOpenCode()
+			backend, err := agent.New(provider, agent.Config{ExecutablePath: path})
+			if err != nil {
+				slog.Error("failed to create backend", "provider", provider, "error", err)
+				continue
 			}
+			d.backends[provider] = backend
 		}
 	}
 
@@ -81,7 +80,7 @@ func (d *EmbeddedDaemon) RegisterRuntimes(ctx context.Context) {
 			rt, err := d.queries.UpsertAgentRuntime(ctx, db.UpsertAgentRuntimeParams{
 				ID:          uuid.New().String(),
 				WorkspaceID: ws.ID,
-				DaemonID:    "embedded",
+				DaemonID:    sql.NullString{String: "embedded", Valid: true},
 				Name:        hostname + " (" + provider + ")",
 				RuntimeMode: "local",
 				Provider:    provider,
