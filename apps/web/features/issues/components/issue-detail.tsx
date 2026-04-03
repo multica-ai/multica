@@ -198,6 +198,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const didHighlightRef = useRef<string | null>(null);
 
   // Single source of truth: read issue directly from global store
   const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? null;
@@ -239,17 +240,16 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   const loading = issueLoading;
 
-  // Scroll to highlighted comment once timeline loads
+  // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
     if (!highlightCommentId || timeline.length === 0) return;
-    // Find the comment element — could be a top-level comment or a reply
+    if (didHighlightRef.current === highlightCommentId) return;
     const el = document.getElementById(`comment-${highlightCommentId}`);
     if (el) {
-      // Small delay to ensure layout is settled
+      didHighlightRef.current = highlightCommentId;
       requestAnimationFrame(() => {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         setHighlightedId(highlightCommentId);
-        // Clear highlight after animation
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
       });
