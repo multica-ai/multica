@@ -95,6 +95,28 @@ type Attachment struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type Channel struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Provider    string             `json:"provider"`
+	Config      []byte             `json:"config"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelMessage struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueChannelID pgtype.UUID        `json:"issue_channel_id"`
+	Direction      string             `json:"direction"`
+	Content        string             `json:"content"`
+	ExternalID     pgtype.Text        `json:"external_id"`
+	SenderType     string             `json:"sender_type"`
+	SenderRef      pgtype.Text        `json:"sender_ref"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Comment struct {
 	ID          pgtype.UUID        `json:"id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
@@ -175,6 +197,14 @@ type Issue struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
+}
+
+type IssueChannel struct {
+	ID        pgtype.UUID        `json:"id"`
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	ThreadRef pgtype.Text        `json:"thread_ref"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueDependency struct {

@@ -28,6 +28,7 @@ export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry } from "./activity";
+export type { Channel, IssueChannel, ChannelMessage, CreateChannelRequest } from "./channel";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";

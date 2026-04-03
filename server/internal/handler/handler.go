@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -32,17 +33,18 @@ type dbExecutor interface {
 }
 
 type Handler struct {
-	Queries      *db.Queries
-	DB           dbExecutor
-	TxStarter    txStarter
-	Hub          *realtime.Hub
-	Bus          *events.Bus
-	TaskService  *service.TaskService
-	EmailService *service.EmailService
-	PingStore    *PingStore
-	UpdateStore  *UpdateStore
-	Storage      *storage.S3Storage
-	CFSigner     *auth.CloudFrontSigner
+	Queries        *db.Queries
+	DB             dbExecutor
+	TxStarter      txStarter
+	Hub            *realtime.Hub
+	Bus            *events.Bus
+	TaskService    *service.TaskService
+	EmailService   *service.EmailService
+	ChannelService *service.ChannelService
+	PingStore      *PingStore
+	UpdateStore    *UpdateStore
+	Storage        *storage.S3Storage
+	CFSigner       *auth.CloudFrontSigner
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 *storage.S3Storage, cfSigner *auth.CloudFrontSigner) *Handler {
@@ -52,17 +54,18 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	return &Handler{
-		Queries:      queries,
-		DB:           executor,
-		TxStarter:    txStarter,
-		Hub:          hub,
-		Bus:          bus,
-		TaskService:  service.NewTaskService(queries, hub, bus),
-		EmailService: emailService,
-		PingStore:    NewPingStore(),
-		UpdateStore:  NewUpdateStore(),
-		Storage:      s3,
-		CFSigner:     cfSigner,
+		Queries:        queries,
+		DB:             executor,
+		TxStarter:      txStarter,
+		Hub:            hub,
+		Bus:            bus,
+		TaskService:    service.NewTaskService(queries, hub, bus),
+		EmailService:   emailService,
+		ChannelService: service.NewChannelService(queries, os.Getenv("MULTICA_APP_URL")),
+		PingStore:      NewPingStore(),
+		UpdateStore:    NewUpdateStore(),
+		Storage:        s3,
+		CFSigner:       cfSigner,
 	}
 }
 

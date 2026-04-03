@@ -83,6 +83,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 
+	// Webhooks (public, no auth)
+	r.Post("/webhooks/slack", h.SlackWebhook)
+
 	// Daemon API routes (all require a valid token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.Auth(queries))
@@ -175,6 +178,25 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					// Channels on issues
+					r.Get("/channels", h.ListIssueChannels)
+					r.Post("/channels", h.AssignChannel)
+					r.Delete("/channels/{channelId}", h.UnassignChannel)
+					r.Post("/channel-ask", h.ChannelAsk)
+					r.Get("/channel-history", h.ChannelHistory)
+				})
+			})
+
+			// Channel message polling
+			r.Get("/api/channel-messages/{id}/response", h.ChannelPoll)
+
+			// Channels (workspace-level)
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/", h.CreateChannel)
+				r.Route("/{id}", func(r chi.Router) {
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Put("/", h.UpdateChannel)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Delete("/", h.DeleteChannel)
 				})
 			})
 

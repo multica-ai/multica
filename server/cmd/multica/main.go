@@ -34,6 +34,7 @@ func init() {
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(attachmentCmd)
 	rootCmd.AddCommand(repoCmd)
+	rootCmd.AddCommand(channelCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(updateCmd)
 }

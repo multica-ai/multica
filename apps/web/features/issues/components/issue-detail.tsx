@@ -17,6 +17,7 @@ import {
   UserMinus,
   Users,
   X,
+  Hash,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -60,6 +61,7 @@ import { ActorAvatar } from "@/components/common/actor-avatar";
 import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@/shared/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { StatusIcon, PriorityIcon, DueDatePicker, AssigneePicker, canAssignAgent } from "@/features/issues/components";
+import { ChannelPicker } from "./channel-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
@@ -1017,6 +1019,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   dueDate={issue.due_date}
                   onUpdate={handleUpdateField}
                 />
+              </PropRow>
+
+              {/* Channels */}
+              <PropRow label="Channels">
+                <ChannelPicker issueId={issue.id} />
               </PropRow>
             </div>}
           </div>

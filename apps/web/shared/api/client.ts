@@ -579,4 +579,47 @@ export class ApiClient {
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
   }
+
+  // Channels
+  async listChannels(): Promise<import("@/shared/types").Channel[]> {
+    return this.fetch("/api/channels");
+  }
+
+  async createChannel(data: import("@/shared/types").CreateChannelRequest): Promise<import("@/shared/types").Channel> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(id: string, data: { name?: string; config?: Record<string, string> }): Promise<import("@/shared/types").Channel> {
+    return this.fetch(`/api/channels/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}`, { method: "DELETE" });
+  }
+
+  // Issue Channels
+  async listIssueChannels(issueId: string): Promise<import("@/shared/types").IssueChannel[]> {
+    return this.fetch(`/api/issues/${issueId}/channels`);
+  }
+
+  async assignChannel(issueId: string, channelId: string): Promise<{ id: string }> {
+    return this.fetch(`/api/issues/${issueId}/channels`, {
+      method: "POST",
+      body: JSON.stringify({ channel_id: channelId }),
+    });
+  }
+
+  async unassignChannel(issueId: string, channelId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/channels/${channelId}`, { method: "DELETE" });
+  }
+
+  async getChannelHistory(issueId: string): Promise<import("@/shared/types").ChannelMessage[]> {
+    return this.fetch(`/api/issues/${issueId}/channel-history`);
+  }
 }

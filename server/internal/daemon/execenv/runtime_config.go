@@ -59,6 +59,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
 
+	b.WriteString("### Interactive Channels\n")
+	b.WriteString("- `multica channel ask \"your question\"` — Send a question to the assigned channel (e.g. Slack) and wait for a response. Blocks until a reply is received or timeout (default 10m).\n")
+	b.WriteString("- `multica channel history --output json` — View full channel conversation history for this issue\n\n")
+	b.WriteString("**When to use channels:** If you are uncertain about requirements, need clarification on ambiguous instructions, or need a decision from the user, use `multica channel ask` instead of guessing. ")
+	b.WriteString("After receiving a response, post a summary of the decisions as a comment on the issue.\n\n")
+
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
