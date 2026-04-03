@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -47,34 +48,34 @@ type SkillWithFilesResponse struct {
 
 func skillToResponse(s db.Skill) SkillResponse {
 	var config any
-	if s.Config != nil {
-		json.Unmarshal(s.Config, &config)
+	if s.Config != "" {
+		json.Unmarshal([]byte(s.Config), &config)
 	}
 	if config == nil {
 		config = map[string]any{}
 	}
 
 	return SkillResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
+		ID:          s.ID,
+		WorkspaceID: s.WorkspaceID,
 		Name:        s.Name,
 		Description: s.Description,
 		Content:     s.Content,
 		Config:      config,
-		CreatedBy:   uuidToPtr(s.CreatedBy),
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		CreatedBy:   nullStringToPtr(s.CreatedBy),
+		CreatedAt:   s.CreatedAt,
+		UpdatedAt:   s.UpdatedAt,
 	}
 }
 
 func skillFileToResponse(f db.SkillFile) SkillFileResponse {
 	return SkillFileResponse{
-		ID:        uuidToString(f.ID),
-		SkillID:   uuidToString(f.SkillID),
+		ID:        f.ID,
+		SkillID:   f.SkillID,
 		Path:      f.Path,
 		Content:   f.Content,
-		CreatedAt: timestampToString(f.CreatedAt),
-		UpdatedAt: timestampToString(f.UpdatedAt),
+		CreatedAt: f.CreatedAt,
+		UpdatedAt: f.UpdatedAt,
 	}
 }
 
@@ -130,8 +131,8 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 	}
 
 	skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
-		ID:          parseUUID(id),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          id,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "skill not found")
@@ -145,7 +146,7 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 
-	skills, err := h.Queries.ListSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	skills, err := h.Queries.ListSkillsByWorkspace(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
@@ -211,25 +212,26 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 
 	config, _ := json.Marshal(req.Config)
 	if req.Config == nil {
-		config = []byte("{}")
+		config = []byte(`{}`)
 	}
 
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	qtx := h.Queries.WithTx(tx)
 
 	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          newUUID(),
+		WorkspaceID: workspaceID,
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Config:      config,
-		CreatedBy:   parseUUID(creatorID),
+		Config:      string(config),
+		CreatedBy:   sql.NullString{String: creatorID, Valid: true},
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -254,7 +256,7 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		fileResps = append(fileResps, skillFileToResponse(sf))
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
@@ -274,7 +276,7 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if _, ok := h.requireWorkspaceRole(w, r, skill.WorkspaceID, "skill not found", "owner", "admin"); !ok {
 		return
 	}
 
@@ -291,30 +293,30 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	qtx := h.Queries.WithTx(tx)
 
 	params := db.UpdateSkillParams{
-		ID: parseUUID(id),
+		ID: id,
 	}
 	if req.Name != nil {
-		params.Name = pgtype.Text{String: *req.Name, Valid: true}
+		params.Name = sql.NullString{String: *req.Name, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = sql.NullString{String: *req.Description, Valid: true}
 	}
 	if req.Content != nil {
-		params.Content = pgtype.Text{String: *req.Content, Valid: true}
+		params.Content = sql.NullString{String: *req.Content, Valid: true}
 	}
 	if req.Config != nil {
 		config, _ := json.Marshal(req.Config)
-		params.Config = config
+		params.Config = sql.NullString{String: string(config), Valid: true}
 	}
 
 	skill, err = qtx.UpdateSkill(r.Context(), params)
@@ -355,7 +357,7 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
@@ -376,16 +378,16 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if _, ok := h.requireWorkspaceRole(w, r, skill.WorkspaceID, "skill not found", "owner", "admin"); !ok {
 		return
 	}
 
-	if err := h.Queries.DeleteSkill(r.Context(), parseUUID(id)); err != nil {
+	if err := h.Queries.DeleteSkill(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill")
 		return
 	}
-	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(skill.WorkspaceID))
-	h.publish(protocol.EventSkillDeleted, uuidToString(skill.WorkspaceID), actorType, actorID, map[string]any{"skill_id": id})
+	actorType, actorID := h.resolveActor(r, requestUserID(r), skill.WorkspaceID)
+	h.publish(protocol.EventSkillDeleted, skill.WorkspaceID, actorType, actorID, map[string]any{"skill_id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -801,22 +803,23 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create skill in database
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	qtx := h.Queries.WithTx(tx)
 
 	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          newUUID(),
+		WorkspaceID: workspaceID,
 		Name:        imported.name,
 		Description: imported.description,
 		Content:     imported.content,
-		Config:      []byte("{}"),
-		CreatedBy:   parseUUID(creatorID),
+		Config:      "{}",
+		CreatedBy:   sql.NullString{String: creatorID, Valid: true},
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -843,7 +846,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		fileResps = append(fileResps, skillFileToResponse(sf))
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
@@ -885,7 +888,7 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if _, ok := h.requireWorkspaceRole(w, r, skill.WorkspaceID, "skill not found", "owner", "admin"); !ok {
 		return
 	}
 
@@ -919,12 +922,12 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if _, ok := h.requireWorkspaceRole(w, r, skill.WorkspaceID, "skill not found", "owner", "admin"); !ok {
 		return
 	}
 
 	fileID := chi.URLParam(r, "fileId")
-	if err := h.Queries.DeleteSkillFile(r.Context(), parseUUID(fileID)); err != nil {
+	if err := h.Queries.DeleteSkillFile(r.Context(), fileID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
@@ -969,12 +972,12 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	qtx := h.Queries.WithTx(tx)
 
@@ -986,14 +989,14 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	for _, skillID := range req.SkillIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
 			AgentID: agent.ID,
-			SkillID: parseUUID(skillID),
+			SkillID: skillID,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
 			return
 		}
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
@@ -1009,7 +1012,7 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	for i, s := range skills {
 		resp[i] = skillToResponse(s)
 	}
-	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
-	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})
+	actorType, actorID := h.resolveActor(r, requestUserID(r), agent.WorkspaceID)
+	h.publish(protocol.EventAgentStatus, agent.WorkspaceID, actorType, actorID, map[string]any{"agent_id": agent.ID, "skills": resp})
 	writeJSON(w, http.StatusOK, resp)
 }

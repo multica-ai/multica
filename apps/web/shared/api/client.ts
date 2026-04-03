@@ -143,6 +143,13 @@ export class ApiClient {
     });
   }
 
+  // MULTICA-LOCAL: Auto-login as the local user (no email/code needed).
+  async localLogin(): Promise<LoginResponse> {
+    return this.fetch("/auth/local-login", {
+      method: "POST",
+    });
+  }
+
   async getMe(): Promise<User> {
     return this.fetch("/api/me");
   }

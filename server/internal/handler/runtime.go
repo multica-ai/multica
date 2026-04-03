@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -28,26 +27,26 @@ type AgentRuntimeResponse struct {
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	var metadata any
-	if rt.Metadata != nil {
-		json.Unmarshal(rt.Metadata, &metadata)
+	if rt.Metadata != "" {
+		json.Unmarshal([]byte(rt.Metadata), &metadata)
 	}
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
 
 	return AgentRuntimeResponse{
-		ID:          uuidToString(rt.ID),
-		WorkspaceID: uuidToString(rt.WorkspaceID),
-		DaemonID:    textToPtr(rt.DaemonID),
+		ID:          rt.ID,
+		WorkspaceID: rt.WorkspaceID,
+		DaemonID:    nullStringToPtr(rt.DaemonID),
 		Name:        rt.Name,
 		RuntimeMode: rt.RuntimeMode,
 		Provider:    rt.Provider,
 		Status:      rt.Status,
 		DeviceInfo:  rt.DeviceInfo,
 		Metadata:    metadata,
-		LastSeenAt:  timestampToPtr(rt.LastSeenAt),
-		CreatedAt:   timestampToString(rt.CreatedAt),
-		UpdatedAt:   timestampToString(rt.UpdatedAt),
+		LastSeenAt:  nullStringToPtr(rt.LastSeenAt),
+		CreatedAt:   rt.CreatedAt,
+		UpdatedAt:   rt.UpdatedAt,
 	}
 }
 
@@ -98,8 +97,9 @@ func (h *Handler) ReportRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.Queries.UpsertRuntimeUsage(r.Context(), db.UpsertRuntimeUsageParams{
-			RuntimeID:        parseUUID(runtimeID),
-			Date:             pgtype.Date{Time: date, Valid: true},
+			ID:               newUUID(),
+			RuntimeID:        runtimeID,
+			Date:             date.Format("2006-01-02"),
 			Provider:         entry.Provider,
 			Model:            entry.Model,
 			InputTokens:      entry.InputTokens,
@@ -116,25 +116,25 @@ func (h *Handler) ReportRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
 	}
 
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	if _, ok := h.requireWorkspaceMember(w, r, rt.WorkspaceID, "runtime not found"); !ok {
 		return
 	}
 
-	limit := int32(90)
+	limit := int64(90)
 	if l := r.URL.Query().Get("days"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 365 {
-			limit = int32(parsed)
+			limit = int64(parsed)
 		}
 	}
 
 	rows, err := h.Queries.ListRuntimeUsage(r.Context(), db.ListRuntimeUsageParams{
-		RuntimeID: parseUUID(runtimeID),
+		RuntimeID: runtimeID,
 		Limit:     limit,
 	})
 	if err != nil {
@@ -146,7 +146,7 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	for i, row := range rows {
 		resp[i] = RuntimeUsageResponse{
 			RuntimeID:        runtimeID,
-			Date:             row.Date.Time.Format("2006-01-02"),
+			Date:             row.Date,
 			Provider:         row.Provider,
 			Model:            row.Model,
 			InputTokens:      row.InputTokens,
@@ -163,17 +163,17 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
 	}
 
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	if _, ok := h.requireWorkspaceMember(w, r, rt.WorkspaceID, "runtime not found"); !ok {
 		return
 	}
 
-	rows, err := h.Queries.GetRuntimeTaskHourlyActivity(r.Context(), parseUUID(runtimeID))
+	rows, err := h.Queries.GetRuntimeTaskHourlyActivity(r.Context(), runtimeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get task activity")
 		return
@@ -195,7 +195,7 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 
-	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list runtimes")
 		return

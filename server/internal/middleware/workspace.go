@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -96,8 +95,8 @@ func buildMiddleware(queries *db.Queries, resolve func(*http.Request) string, ro
 			}
 
 			member, err := queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-				UserID:      util.ParseUUID(userID),
-				WorkspaceID: util.ParseUUID(workspaceID),
+				UserID:      userID,
+				WorkspaceID: workspaceID,
 			})
 			if err != nil {
 				writeError(w, http.StatusNotFound, "workspace not found")

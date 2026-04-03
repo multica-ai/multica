@@ -111,9 +111,9 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 // subscriber:added event for real-time frontend sync.
 func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
 	err := queries.AddIssueSubscriber(context.Background(), db.AddIssueSubscriberParams{
-		IssueID:  parseUUID(issueID),
+		IssueID:  issueID,
 		UserType: userType,
-		UserID:   parseUUID(userID),
+		UserID:   userID,
 		Reason:   reason,
 	})
 	if err != nil {

@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -49,7 +48,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 // sweepStaleRuntimes marks runtimes offline if they haven't heartbeated,
 // then fails any tasks belonging to those offline runtimes.
 func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
-	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, staleThresholdSeconds)
+	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, fmt.Sprintf("%g", staleThresholdSeconds))
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to mark stale runtimes offline", "error", err)
 		return
@@ -61,8 +60,7 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 	// Collect unique workspace IDs to notify.
 	workspaces := make(map[string]bool)
 	for _, row := range staleRows {
-		wsID := util.UUIDToString(row.WorkspaceID)
-		workspaces[wsID] = true
+		workspaces[row.WorkspaceID] = true
 	}
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
@@ -96,8 +94,8 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 // - A server restart left tasks in a non-terminal state
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
-		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		DispatchTimeoutSecs: fmt.Sprintf("%g", dispatchTimeoutSeconds),
+		RunningTimeoutSecs:  fmt.Sprintf("%g", runningTimeoutSeconds),
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
@@ -113,9 +111,9 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) 
 
 // failedTask is a common interface for both sweeper result types.
 type failedTask struct {
-	ID      pgtype.UUID
-	AgentID pgtype.UUID
-	IssueID pgtype.UUID
+	ID      string
+	AgentID string
+	IssueID string
 }
 
 // broadcastFailedTasks publishes task:failed events with the correct WorkspaceID
@@ -133,13 +131,13 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 		}
 	}
 
-	affectedAgents := make(map[string]pgtype.UUID)
+	affectedAgents := make(map[string]string)
 
 	for _, ft := range items {
 		// Look up workspace ID from the issue so the event reaches the right WS room.
 		workspaceID := ""
 		if issue, err := queries.GetIssue(ctx, ft.IssueID); err == nil {
-			workspaceID = util.UUIDToString(issue.WorkspaceID)
+			workspaceID = issue.WorkspaceID
 		}
 
 		bus.Publish(events.Event{
@@ -147,15 +145,14 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 			WorkspaceID: workspaceID,
 			ActorType:   "system",
 			Payload: map[string]any{
-				"task_id":  util.UUIDToString(ft.ID),
-				"agent_id": util.UUIDToString(ft.AgentID),
-				"issue_id": util.UUIDToString(ft.IssueID),
+				"task_id":  ft.ID,
+				"agent_id": ft.AgentID,
+				"issue_id": ft.IssueID,
 				"status":   "failed",
 			},
 		})
 
-		agentKey := util.UUIDToString(ft.AgentID)
-		affectedAgents[agentKey] = ft.AgentID
+		affectedAgents[ft.AgentID] = ft.AgentID
 	}
 
 	// Reconcile status for each affected agent.
@@ -165,7 +162,7 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 }
 
 // reconcileAgentStatus checks running task count and updates agent status.
-func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.Bus, agentID pgtype.UUID) {
+func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.Bus, agentID string) {
 	running, err := queries.CountRunningTasks(ctx, agentID)
 	if err != nil {
 		return
@@ -183,8 +180,8 @@ func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.
 	}
 	bus.Publish(events.Event{
 		Type:        protocol.EventAgentStatus,
-		WorkspaceID: util.UUIDToString(agent.WorkspaceID),
+		WorkspaceID: agent.WorkspaceID,
 		ActorType:   "system",
-		Payload:     map[string]any{"agent_id": util.UUIDToString(agent.ID), "status": agent.Status},
+		Payload:     map[string]any{"agent_id": agent.ID, "status": agent.Status},
 	})
 }

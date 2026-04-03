@@ -1,6 +1,33 @@
 # Contributing Guide
 
-This guide documents the local development workflow for contributors working on the Multica codebase.
+This guide documents the local development workflow for contributors working on the Multica Local codebase.
+
+## Upstream Sync
+
+Multica Local is a fork of [multica-ai/multica](https://github.com/multica-ai/multica). We maintain upstream compatibility where possible.
+
+### File Ownership
+
+| Category | Files | Sync Strategy |
+|----------|-------|---------------|
+| **Upstream-owned** | `apps/web/` (most), `server/pkg/agent/`, `server/internal/realtime/`, `server/internal/events/`, `docs/` | Take upstream on merge |
+| **Local-owned** | `server/migrations/`, `server/pkg/db/queries/`, `server/sqlc.yaml`, `server/go.mod`, `server/internal/storage/`, `server/internal/auth/cloudfront.go` | Keep local on merge |
+| **Modified upstream** | `server/cmd/server/main.go`, `server/internal/handler/`, `server/internal/middleware/` | Manual merge — look for `// MULTICA-LOCAL` markers |
+| **Local-only** | `ARCHITECTURE.md`, `scripts/sync-upstream.sh`, `server/internal/local/` | Not in upstream |
+
+### Running a Sync
+
+```bash
+./scripts/sync-upstream.sh        # merge upstream/main
+./scripts/sync-upstream.sh v1.2   # merge a specific tag
+```
+
+After resolving any conflicts:
+```bash
+cd server && make sqlc            # regenerate DB code
+go build ./...                    # verify compilation
+go test ./...                     # run tests
+```
 
 It covers:
 

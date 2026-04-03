@@ -7,27 +7,28 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"strings"
 )
 
 const addReaction = `-- name: AddReaction :one
-INSERT INTO comment_reaction (comment_id, workspace_id, actor_type, actor_id, emoji)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO comment_reaction (id, comment_id, workspace_id, actor_type, actor_id, emoji)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (comment_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = comment_reaction.created_at
 RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at
 `
 
 type AddReactionParams struct {
-	CommentID   pgtype.UUID `json:"comment_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ActorType   string      `json:"actor_type"`
-	ActorID     pgtype.UUID `json:"actor_id"`
-	Emoji       string      `json:"emoji"`
+	ID          string `json:"id"`
+	CommentID   string `json:"comment_id"`
+	WorkspaceID string `json:"workspace_id"`
+	ActorType   string `json:"actor_type"`
+	ActorID     string `json:"actor_id"`
+	Emoji       string `json:"emoji"`
 }
 
 func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (CommentReaction, error) {
-	row := q.db.QueryRow(ctx, addReaction,
+	row := q.db.QueryRowContext(ctx, addReaction,
+		arg.ID,
 		arg.CommentID,
 		arg.WorkspaceID,
 		arg.ActorType,
@@ -49,12 +50,22 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (Comme
 
 const listReactionsByCommentIDs = `-- name: ListReactionsByCommentIDs :many
 SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at FROM comment_reaction
-WHERE comment_id = ANY($1::uuid[])
+WHERE comment_id IN (/*SLICE:comment_ids*/?)
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]CommentReaction, error) {
-	rows, err := q.db.Query(ctx, listReactionsByCommentIDs, dollar_1)
+func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, commentIds []string) ([]CommentReaction, error) {
+	query := listReactionsByCommentIDs
+	var queryParams []interface{}
+	if len(commentIds) > 0 {
+		for _, v := range commentIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:comment_ids*/?", strings.Repeat(",?", len(commentIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:comment_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +86,9 @@ func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgty
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -83,18 +97,18 @@ func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgty
 
 const removeReaction = `-- name: RemoveReaction :exec
 DELETE FROM comment_reaction
-WHERE comment_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
+WHERE comment_id = ? AND actor_type = ? AND actor_id = ? AND emoji = ?
 `
 
 type RemoveReactionParams struct {
-	CommentID pgtype.UUID `json:"comment_id"`
-	ActorType string      `json:"actor_type"`
-	ActorID   pgtype.UUID `json:"actor_id"`
-	Emoji     string      `json:"emoji"`
+	CommentID string `json:"comment_id"`
+	ActorType string `json:"actor_type"`
+	ActorID   string `json:"actor_id"`
+	Emoji     string `json:"emoji"`
 }
 
 func (q *Queries) RemoveReaction(ctx context.Context, arg RemoveReactionParams) error {
-	_, err := q.db.Exec(ctx, removeReaction,
+	_, err := q.db.ExecContext(ctx, removeReaction,
 		arg.CommentID,
 		arg.ActorType,
 		arg.ActorID,

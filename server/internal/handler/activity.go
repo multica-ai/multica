@@ -1,12 +1,12 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -43,7 +43,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	activities, err := h.Queries.ListActivities(r.Context(), db.ListActivitiesParams{
-		IssueID: issue.ID,
+		IssueID: sql.NullString{String: issue.ID, Valid: true},
 		Limit:   200,
 		Offset:  0,
 	})
@@ -69,19 +69,23 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		if a.ActorType.Valid {
 			actorType = a.ActorType.String
 		}
+		actorID := ""
+		if a.ActorID.Valid {
+			actorID = a.ActorID.String
+		}
 		timeline = append(timeline, TimelineEntry{
 			Type:      "activity",
-			ID:        uuidToString(a.ID),
+			ID:        a.ID,
 			ActorType: actorType,
-			ActorID:   uuidToString(a.ActorID),
+			ActorID:   actorID,
 			Action:    &action,
-			Details:   a.Details,
-			CreatedAt: timestampToString(a.CreatedAt),
+			Details:   json.RawMessage(a.Details),
+			CreatedAt: a.CreatedAt,
 		})
 	}
 
 	// Fetch reactions and attachments for all comments in one batch.
-	commentIDs := make([]pgtype.UUID, len(comments))
+	commentIDs := make([]string, len(comments))
 	for i, c := range comments {
 		commentIDs[i] = c.ID
 	}
@@ -91,17 +95,17 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	for _, c := range comments {
 		content := c.Content
 		commentType := c.Type
-		updatedAt := timestampToString(c.UpdatedAt)
-		cid := uuidToString(c.ID)
+		updatedAt := c.UpdatedAt
+		cid := c.ID
 		timeline = append(timeline, TimelineEntry{
 			Type:        "comment",
 			ID:          cid,
 			ActorType:   c.AuthorType,
-			ActorID:     uuidToString(c.AuthorID),
+			ActorID:     c.AuthorID,
 			Content:     &content,
 			CommentType: &commentType,
-			ParentID:    uuidToPtr(c.ParentID),
-			CreatedAt:   timestampToString(c.CreatedAt),
+			ParentID:    nullStringToPtr(c.ParentID),
+			CreatedAt:   c.CreatedAt,
 			UpdatedAt:   &updatedAt,
 			Reactions:   grouped[cid],
 			Attachments: groupedAtt[cid],

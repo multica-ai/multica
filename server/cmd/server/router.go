@@ -1,7 +1,10 @@
 package main
 
+// MULTICA-LOCAL: Rewritten for SQLite — removed pgx, S3, CloudFront, email service.
+
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"strings"
@@ -9,15 +12,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -46,12 +45,10 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
-	queries := db.New(pool)
-	emailSvc := service.NewEmailService()
-	s3 := storage.NewS3StorageFromEnv()
-	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
+func NewRouter(sqlDB *sql.DB, hub *realtime.Hub, bus *events.Bus) chi.Router {
+	queries := db.New(sqlDB)
+	stor := storage.NewLocalStorage()
+	h := handler.New(queries, sqlDB, hub, bus, stor)
 
 	r := chi.NewRouter()
 
@@ -79,11 +76,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		realtime.HandleWebSocket(hub, mc, w, r)
 	})
 
-	// Auth (public)
+	// MULTICA-LOCAL: Local auto-login endpoint (no email/code needed).
+	r.Post("/auth/local-login", h.LocalLogin)
+	// Keep send-code/verify-code for backwards compatibility.
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 
-	// Daemon API routes (all require a valid token)
+	// Daemon API routes
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.Auth(queries))
 
@@ -109,25 +108,25 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	// Protected API routes
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries))
-		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
-		// --- User-scoped routes (no workspace context required) ---
+		// --- User-scoped routes ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Post("/api/upload-file", h.UploadFile)
+
+		// MULTICA-LOCAL: Serve locally stored files.
+		r.Get("/api/files/{id}", h.ServeFile)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
 			r.Route("/{id}", func(r chi.Router) {
-				// Member-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 				})
-				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
@@ -138,7 +137,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 						r.Delete("/", h.DeleteMember)
 					})
 				})
-				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 			})
 		})
@@ -149,11 +147,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
-		// --- Workspace-scoped routes (all require workspace membership) ---
+		// --- Workspace-scoped routes ---
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
-			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
@@ -178,11 +175,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
-			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
-			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
@@ -190,7 +185,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Delete("/reactions", h.RemoveReaction)
 			})
 
-			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
 				r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/", h.CreateAgent)
@@ -205,7 +199,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
-			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
 				r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/", h.CreateSkill)
@@ -220,7 +213,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
-			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
 				r.Get("/{runtimeId}/usage", h.GetRuntimeUsage)
@@ -231,7 +223,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/{runtimeId}/update/{updateId}", h.GetUpdate)
 			})
 
-			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
@@ -248,23 +239,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	return r
 }
 
-// membershipChecker implements realtime.MembershipChecker using database queries.
 type membershipChecker struct {
 	queries *db.Queries
 }
 
 func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID string) bool {
 	_, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      parseUUID(userID),
-		WorkspaceID: parseUUID(workspaceID),
+		UserID:      userID,
+		WorkspaceID: workspaceID,
 	})
 	return err == nil
-}
-
-func parseUUID(s string) pgtype.UUID {
-	var u pgtype.UUID
-	if err := u.Scan(s); err != nil {
-		return pgtype.UUID{}
-	}
-	return u
 }

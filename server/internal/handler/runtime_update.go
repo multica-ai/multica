@@ -145,13 +145,13 @@ func (s *UpdateStore) Fail(id string, errMsg string) {
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
 	}
 
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	if _, ok := h.requireWorkspaceMember(w, r, rt.WorkspaceID, "runtime not found"); !ok {
 		return
 	}
 

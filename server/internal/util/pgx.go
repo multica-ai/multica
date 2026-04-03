@@ -1,76 +1,48 @@
 package util
 
-import (
-	"encoding/hex"
-	"time"
+// MULTICA-LOCAL: SQLite adapter utilities.
+// With SQLite, UUIDs and timestamps are stored as TEXT strings.
+// These helpers bridge the gap between nullable SQL types and Go pointers/strings.
 
-	"github.com/jackc/pgx/v5/pgtype"
-)
+import "database/sql"
 
-func ParseUUID(s string) pgtype.UUID {
-	var u pgtype.UUID
-	_ = u.Scan(s)
-	return u
-}
-
-func UUIDToString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	b := u.Bytes
-	dst := make([]byte, 36)
-	hex.Encode(dst[0:8], b[0:4])
-	dst[8] = '-'
-	hex.Encode(dst[9:13], b[4:6])
-	dst[13] = '-'
-	hex.Encode(dst[14:18], b[6:8])
-	dst[18] = '-'
-	hex.Encode(dst[19:23], b[8:10])
-	dst[23] = '-'
-	hex.Encode(dst[24:36], b[10:16])
-	return string(dst)
-}
-
-func TextToPtr(t pgtype.Text) *string {
-	if !t.Valid {
+// NullStringToPtr converts a sql.NullString to a *string.
+func NullStringToPtr(ns sql.NullString) *string {
+	if !ns.Valid {
 		return nil
 	}
-	return &t.String
+	return &ns.String
 }
 
-func PtrToText(s *string) pgtype.Text {
+// PtrToNullString converts a *string to a sql.NullString.
+func PtrToNullString(s *string) sql.NullString {
 	if s == nil {
-		return pgtype.Text{}
+		return sql.NullString{}
 	}
-	return pgtype.Text{String: *s, Valid: true}
+	return sql.NullString{String: *s, Valid: true}
 }
 
-func StrToText(s string) pgtype.Text {
+// StrToNullString converts a string to a sql.NullString.
+// Returns an invalid NullString if the string is empty.
+func StrToNullString(s string) sql.NullString {
 	if s == "" {
-		return pgtype.Text{}
+		return sql.NullString{}
 	}
-	return pgtype.Text{String: s, Valid: true}
+	return sql.NullString{String: s, Valid: true}
 }
 
-func TimestampToString(t pgtype.Timestamptz) string {
-	if !t.Valid {
+// NullStringToString converts a sql.NullString to a string (empty if null).
+func NullStringToString(ns sql.NullString) string {
+	if !ns.Valid {
 		return ""
 	}
-	return t.Time.Format(time.RFC3339)
+	return ns.String
 }
 
-func TimestampToPtr(t pgtype.Timestamptz) *string {
-	if !t.Valid {
-		return nil
-	}
-	s := t.Time.Format(time.RFC3339)
-	return &s
-}
-
-func UUIDToPtr(u pgtype.UUID) *string {
-	if !u.Valid {
-		return nil
-	}
-	s := UUIDToString(u)
-	return &s
+// NewUUID generates a new UUID v4 string.
+func NewUUID() string {
+	// Using google/uuid for generation.
+	// Import is in the caller; we keep this package dependency-free.
+	// This is a placeholder — actual UUID generation is in the caller.
+	return ""
 }

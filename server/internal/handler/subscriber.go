@@ -20,11 +20,11 @@ type SubscriberResponse struct {
 
 func subscriberToResponse(s db.IssueSubscriber) SubscriberResponse {
 	return SubscriberResponse{
-		IssueID:   uuidToString(s.IssueID),
+		IssueID:   s.IssueID,
 		UserType:  s.UserType,
-		UserID:    uuidToString(s.UserID),
+		UserID:    s.UserID,
 		Reason:    s.Reason,
-		CreatedAt: timestampToString(s.CreatedAt),
+		CreatedAt: s.CreatedAt,
 	}
 }
 
@@ -79,7 +79,7 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 	err := h.Queries.AddIssueSubscriber(r.Context(), db.AddIssueSubscriberParams{
 		IssueID:  issue.ID,
 		UserType: targetUserType,
-		UserID:   parseUUID(targetUserID),
+		UserID:   targetUserID,
 		Reason:   "manual",
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
+	workspaceID := issue.WorkspaceID
 	callerID := requestUserID(r)
 	subActorType, subActorID := h.resolveActor(r, callerID, workspaceID)
 	h.publish(protocol.EventSubscriberAdded, workspaceID, subActorType, subActorID, map[string]any{
@@ -128,14 +128,14 @@ func (h *Handler) UnsubscribeFromIssue(w http.ResponseWriter, r *http.Request) {
 	err := h.Queries.RemoveIssueSubscriber(r.Context(), db.RemoveIssueSubscriberParams{
 		IssueID:  issue.ID,
 		UserType: targetUserType,
-		UserID:   parseUUID(targetUserID),
+		UserID:   targetUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to unsubscribe")
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
+	workspaceID := issue.WorkspaceID
 	callerID := requestUserID(r)
 	unsubActorType, unsubActorID := h.resolveActor(r, callerID, workspaceID)
 	h.publish(protocol.EventSubscriberRemoved, workspaceID, unsubActorType, unsubActorID, map[string]any{

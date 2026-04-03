@@ -61,7 +61,7 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 					return
 				}
 
-				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, uuidToString(dt.WorkspaceID))
+				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, dt.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, dt.DaemonID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
@@ -76,7 +76,7 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 					writeError(w, http.StatusUnauthorized, "invalid token")
 					return
 				}
-				r.Header.Set("X-User-ID", uuidToString(pat.UserID))
+				r.Header.Set("X-User-ID", pat.UserID)
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 				next.ServeHTTP(w, r)
 				return

@@ -7,27 +7,27 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addIssueReaction = `-- name: AddIssueReaction :one
-INSERT INTO issue_reaction (issue_id, workspace_id, actor_type, actor_id, emoji)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO issue_reaction (id, issue_id, workspace_id, actor_type, actor_id, emoji)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (issue_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = issue_reaction.created_at
 RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at
 `
 
 type AddIssueReactionParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ActorType   string      `json:"actor_type"`
-	ActorID     pgtype.UUID `json:"actor_id"`
-	Emoji       string      `json:"emoji"`
+	ID          string `json:"id"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
+	ActorType   string `json:"actor_type"`
+	ActorID     string `json:"actor_id"`
+	Emoji       string `json:"emoji"`
 }
 
 func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionParams) (IssueReaction, error) {
-	row := q.db.QueryRow(ctx, addIssueReaction,
+	row := q.db.QueryRowContext(ctx, addIssueReaction,
+		arg.ID,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.ActorType,
@@ -49,12 +49,12 @@ func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionPara
 
 const listIssueReactions = `-- name: ListIssueReactions :many
 SELECT id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at FROM issue_reaction
-WHERE issue_id = $1
+WHERE issue_id = ?
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) ([]IssueReaction, error) {
-	rows, err := q.db.Query(ctx, listIssueReactions, issueID)
+func (q *Queries) ListIssueReactions(ctx context.Context, issueID string) ([]IssueReaction, error) {
+	rows, err := q.db.QueryContext(ctx, listIssueReactions, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +75,9 @@ func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) (
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -83,18 +86,18 @@ func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) (
 
 const removeIssueReaction = `-- name: RemoveIssueReaction :exec
 DELETE FROM issue_reaction
-WHERE issue_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
+WHERE issue_id = ? AND actor_type = ? AND actor_id = ? AND emoji = ?
 `
 
 type RemoveIssueReactionParams struct {
-	IssueID   pgtype.UUID `json:"issue_id"`
-	ActorType string      `json:"actor_type"`
-	ActorID   pgtype.UUID `json:"actor_id"`
-	Emoji     string      `json:"emoji"`
+	IssueID   string `json:"issue_id"`
+	ActorType string `json:"actor_type"`
+	ActorID   string `json:"actor_id"`
+	Emoji     string `json:"emoji"`
 }
 
 func (q *Queries) RemoveIssueReaction(ctx context.Context, arg RemoveIssueReactionParams) error {
-	_, err := q.db.Exec(ctx, removeIssueReaction,
+	_, err := q.db.ExecContext(ctx, removeIssueReaction,
 		arg.IssueID,
 		arg.ActorType,
 		arg.ActorID,
