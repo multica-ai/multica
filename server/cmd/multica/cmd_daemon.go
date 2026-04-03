@@ -156,7 +156,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	child.SysProcAttr = daemonSysProcAttr()
 
 	if err := child.Start(); err != nil {
 		logFile.Close()
@@ -297,7 +297,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		child.SysProcAttr = daemonSysProcAttr()
 
 		if err := child.Start(); err != nil {
 			logFile.Close()
