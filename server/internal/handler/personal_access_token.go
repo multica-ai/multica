@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -27,12 +28,12 @@ type CreatePATResponse struct {
 
 func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
 	return PersonalAccessTokenResponse{
-		ID:         uuidToString(pat.ID),
+		ID:         pat.ID,
 		Name:       pat.Name,
 		Prefix:     pat.TokenPrefix,
-		ExpiresAt:  timestampToPtr(pat.ExpiresAt),
-		LastUsedAt: timestampToPtr(pat.LastUsedAt),
-		CreatedAt:  timestampToString(pat.CreatedAt),
+		ExpiresAt:  nullStringToPtr(pat.ExpiresAt),
+		LastUsedAt: nullStringToPtr(pat.LastUsedAt),
+		CreatedAt:  pat.CreatedAt,
 	}
 }
 
@@ -63,11 +64,11 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var expiresAt pgtype.Timestamptz
+	var expiresAt sql.NullString
 	if req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
-		expiresAt = pgtype.Timestamptz{
-			Time:  time.Now().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour),
-			Valid: true,
+		expiresAt = sql.NullString{
+			String: time.Now().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour).Format(time.RFC3339),
+			Valid:  true,
 		}
 	}
 
@@ -77,7 +78,8 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
-		UserID:    parseUUID(userID),
+		ID:        newUUID(),
+		UserID:    userID,
 		Name:      req.Name,
 		TokenHash: auth.HashToken(rawToken),
 		TokenPrefix: prefix,
@@ -100,7 +102,7 @@ func (h *Handler) ListPersonalAccessTokens(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	pats, err := h.Queries.ListPersonalAccessTokensByUser(r.Context(), parseUUID(userID))
+	pats, err := h.Queries.ListPersonalAccessTokensByUser(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tokens")
 		return
@@ -121,8 +123,8 @@ func (h *Handler) RevokePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 
 	id := chi.URLParam(r, "id")
 	if err := h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
-		ID:     parseUUID(id),
-		UserID: parseUUID(userID),
+		ID:     id,
+		UserID: userID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke token")
 		return

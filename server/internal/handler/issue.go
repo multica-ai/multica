@@ -9,8 +9,9 @@ import (
 	"strconv"
 	"time"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -59,23 +60,23 @@ func defaultAgentTriggers() []byte {
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
+		ID:            i.ID,
+		WorkspaceID:   i.WorkspaceID,
+		Number:        int32(i.Number),
 		Identifier:    identifier,
 		Title:         i.Title,
-		Description:   textToPtr(i.Description),
+		Description:   nullStringToPtr(i.Description),
 		Status:        i.Status,
 		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
+		AssigneeType:  nullStringToPtr(i.AssigneeType),
+		AssigneeID:    nullStringToPtr(i.AssigneeID),
 		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
+		CreatorID:     i.CreatorID,
+		ParentIssueID: nullStringToPtr(i.ParentIssueID),
 		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
+		DueDate:       nullStringToPtr(i.DueDate),
+		CreatedAt:     i.CreatedAt,
+		UpdatedAt:     i.UpdatedAt,
 	}
 }
 
@@ -98,23 +99,23 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse optional filter params
-	var statusFilter pgtype.Text
+	var statusFilter sql.NullString
 	if s := r.URL.Query().Get("status"); s != "" {
-		statusFilter = pgtype.Text{String: s, Valid: true}
+		statusFilter = sql.NullString{String: s, Valid: true}
 	}
-	var priorityFilter pgtype.Text
+	var priorityFilter sql.NullString
 	if p := r.URL.Query().Get("priority"); p != "" {
-		priorityFilter = pgtype.Text{String: p, Valid: true}
+		priorityFilter = sql.NullString{String: p, Valid: true}
 	}
-	var assigneeFilter pgtype.UUID
+	var assigneeFilter sql.NullString
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
-		assigneeFilter = parseUUID(a)
+		assigneeFilter = sql.NullString{String: a, Valid: true}
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Limit:       int32(limit),
-		Offset:      int32(offset),
+		WorkspaceID: workspaceID,
+		Limit:       int64(limit),
+		Offset:      int64(offset),
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,
@@ -124,7 +125,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prefix := h.getIssuePrefix(ctx, parseUUID(workspaceID))
+	prefix := h.getIssuePrefix(ctx, workspaceID)
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
 		resp[i] = issueToResponse(issue, prefix)
@@ -156,7 +157,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch issue-level attachments.
 	attachments, err := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
-		IssueID:     issue.ID,
+		IssueID:     sql.NullString{String: issue.ID, Valid: true},
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err == nil && len(attachments) > 0 {
@@ -209,13 +210,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		priority = "none"
 	}
 
-	var assigneeType pgtype.Text
-	var assigneeID pgtype.UUID
+	var assigneeType sql.NullString
+	var assigneeID sql.NullString
 	if req.AssigneeType != nil {
-		assigneeType = pgtype.Text{String: *req.AssigneeType, Valid: true}
+		assigneeType = sql.NullString{String: *req.AssigneeType, Valid: true}
 	}
 	if req.AssigneeID != nil {
-		assigneeID = parseUUID(*req.AssigneeID)
+		assigneeID = sql.NullString{String: *req.AssigneeID, Valid: true}
 	}
 
 	// Enforce agent visibility: private agents can only be assigned by owner/admin.
@@ -226,32 +227,31 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var parentIssueID pgtype.UUID
+	var parentIssueID sql.NullString
 	if req.ParentIssueID != nil {
-		parentIssueID = parseUUID(*req.ParentIssueID)
+		parentIssueID = sql.NullString{String: *req.ParentIssueID, Valid: true}
 	}
 
-	var dueDate pgtype.Timestamptz
+	var dueDate sql.NullString
 	if req.DueDate != nil && *req.DueDate != "" {
-		t, err := time.Parse(time.RFC3339, *req.DueDate)
-		if err != nil {
+		if _, err := time.Parse(time.RFC3339, *req.DueDate); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
 			return
 		}
-		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
+		dueDate = sql.NullString{String: *req.DueDate, Valid: true}
 	}
 
 	// Use a transaction to atomically increment the workspace issue counter
 	// and create the issue with the assigned number.
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	qtx := h.Queries.WithTx(tx)
-	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), parseUUID(workspaceID))
+	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), workspaceID)
 	if err != nil {
 		slog.Warn("increment issue counter failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -262,15 +262,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        parseUUID(workspaceID),
+		ID:                 newUUID(),
+		WorkspaceID:        workspaceID,
 		Title:              req.Title,
-		Description:        ptrToText(req.Description),
+		Description:        ptrToNullString(req.Description),
 		Status:             status,
 		Priority:           priority,
 		AssigneeType:       assigneeType,
 		AssigneeID:         assigneeID,
 		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
+		CreatorID:          actualCreatorID,
 		ParentIssueID:      parentIssueID,
 		Position:           0,
 		DueDate:            dueDate,
@@ -282,14 +283,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
-	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
+	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", issue.ID, "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
 
 	// Only ready issues in todo are enqueued for agents.
@@ -320,7 +321,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := requestUserID(r)
-	workspaceID := uuidToString(prevIssue.WorkspaceID)
+	workspaceID := prevIssue.WorkspaceID
 
 	// Read body as raw bytes so we can detect which fields were explicitly sent.
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -349,45 +350,44 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// COALESCE fields — only set when explicitly provided
 	if req.Title != nil {
-		params.Title = pgtype.Text{String: *req.Title, Valid: true}
+		params.Title = sql.NullString{String: *req.Title, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = sql.NullString{String: *req.Description, Valid: true}
 	}
 	if req.Status != nil {
-		params.Status = pgtype.Text{String: *req.Status, Valid: true}
+		params.Status = sql.NullString{String: *req.Status, Valid: true}
 	}
 	if req.Priority != nil {
-		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
+		params.Priority = sql.NullString{String: *req.Priority, Valid: true}
 	}
 	if req.Position != nil {
-		params.Position = pgtype.Float8{Float64: *req.Position, Valid: true}
+		params.Position = sql.NullFloat64{Float64: *req.Position, Valid: true}
 	}
 	// Nullable fields — only override when explicitly present in JSON
 	if _, ok := rawFields["assignee_type"]; ok {
 		if req.AssigneeType != nil {
-			params.AssigneeType = pgtype.Text{String: *req.AssigneeType, Valid: true}
+			params.AssigneeType = sql.NullString{String: *req.AssigneeType, Valid: true}
 		} else {
-			params.AssigneeType = pgtype.Text{Valid: false} // explicit null = unassign
+			params.AssigneeType = sql.NullString{Valid: false} // explicit null = unassign
 		}
 	}
 	if _, ok := rawFields["assignee_id"]; ok {
 		if req.AssigneeID != nil {
-			params.AssigneeID = parseUUID(*req.AssigneeID)
+			params.AssigneeID = sql.NullString{String: *req.AssigneeID, Valid: true}
 		} else {
-			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+			params.AssigneeID = sql.NullString{Valid: false} // explicit null = unassign
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
 		if req.DueDate != nil && *req.DueDate != "" {
-			t, err := time.Parse(time.RFC3339, *req.DueDate)
-			if err != nil {
+			if _, err := time.Parse(time.RFC3339, *req.DueDate); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
 				return
 			}
-			params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+			params.DueDate = sql.NullString{String: *req.DueDate, Valid: true}
 		} else {
-			params.DueDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+			params.DueDate = sql.NullString{Valid: false} // explicit null = clear date
 		}
 	}
 
@@ -411,12 +411,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
-		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
+		(prevIssue.AssigneeType.String != issue.AssigneeType.String || prevIssue.AssigneeID.String != issue.AssigneeID.String)
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
-	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
+	descriptionChanged := req.Description != nil && nullStringToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevDueDate := timestampToPtr(prevIssue.DueDate)
+	prevDueDate := nullStringToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
@@ -432,14 +432,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"description_changed": descriptionChanged,
 		"title_changed":       titleChanged,
 		"prev_title":          prevIssue.Title,
-		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
-		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
+		"prev_assignee_type":  nullStringToPtr(prevIssue.AssigneeType),
+		"prev_assignee_id":    nullStringToPtr(prevIssue.AssigneeID),
 		"prev_status":         prevIssue.Status,
 		"prev_priority":       prevIssue.Priority,
 		"prev_due_date":       prevDueDate,
-		"prev_description":    textToPtr(prevIssue.Description),
+		"prev_description":    nullStringToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
-		"creator_id":          uuidToString(prevIssue.CreatorID),
+		"creator_id":          prevIssue.CreatorID,
 	})
 
 	// Reconcile task queue when assignee changes (not on status changes —
@@ -460,8 +460,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 // workspace admins/owners.
 func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, workspaceID string) (bool, string) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-		ID:          parseUUID(agentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          agentID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return false, "agent not found"
@@ -473,7 +473,7 @@ func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, 
 		return true, ""
 	}
 	userID := requestUserID(r)
-	if uuidToString(agent.OwnerID) == userID {
+	if agent.OwnerID.String == userID {
 		return true, ""
 	}
 	member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
@@ -523,8 +523,8 @@ func (h *Handler) isAgentTriggerEnabled(ctx context.Context, issue db.Issue, tri
 		return false
 	}
 
-	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID.String)
+	if err != nil || agent.RuntimeID == "" || agent.ArchivedAt.Valid {
 		return false
 	}
 
@@ -534,9 +534,9 @@ func (h *Handler) isAgentTriggerEnabled(ctx context.Context, issue db.Issue, tri
 // isAgentMentionTriggerEnabled checks if a specific agent has the on_mention
 // trigger enabled. Unlike isAgentTriggerEnabled, this takes an explicit agent
 // ID rather than deriving it from the issue assignee.
-func (h *Handler) isAgentMentionTriggerEnabled(ctx context.Context, agentID pgtype.UUID) bool {
+func (h *Handler) isAgentMentionTriggerEnabled(ctx context.Context, agentID string) bool {
 	agent, err := h.Queries.GetAgent(ctx, agentID)
-	if err != nil || !agent.RuntimeID.Valid {
+	if err != nil || agent.RuntimeID == "" {
 		return false
 	}
 
@@ -547,13 +547,13 @@ func (h *Handler) isAgentMentionTriggerEnabled(ctx context.Context, agentID pgty
 // trigger config. Returns true (default-enabled) when the triggers list is
 // empty or does not contain the requested type — for backwards compatibility
 // with agents created before explicit trigger config was introduced.
-func agentHasTriggerEnabled(raw []byte, triggerType string) bool {
-	if raw == nil || len(raw) == 0 {
+func agentHasTriggerEnabled(raw string, triggerType string) bool {
+	if raw == "" {
 		return true
 	}
 
 	var triggers []agentTriggerSnapshot
-	if err := json.Unmarshal(raw, &triggers); err != nil {
+	if err := json.Unmarshal([]byte(raw), &triggers); err != nil {
 		return false
 	}
 	if len(triggers) == 0 {
@@ -577,9 +577,12 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), db.ListAttachmentURLsByIssueOrCommentsParams{
+		IssueID:   sql.NullString{String: issue.ID, Valid: true},
+		IssueID_2: issue.ID,
+	})
 
-	err := h.Queries.DeleteIssue(r.Context(), parseUUID(id))
+	err := h.Queries.DeleteIssue(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
@@ -587,9 +590,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": id})
-	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", uuidToString(issue.WorkspaceID))...)
+	actorType, actorID := h.resolveActor(r, userID, issue.WorkspaceID)
+	h.publish(protocol.EventIssueDeleted, issue.WorkspaceID, actorType, actorID, map[string]any{"issue_id": id})
+	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", issue.WorkspaceID)...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -637,8 +640,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          parseUUID(issueID),
-			WorkspaceID: parseUUID(workspaceID),
+			ID:          issueID,
+			WorkspaceID: workspaceID,
 		})
 		if err != nil {
 			continue
@@ -652,43 +655,42 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if req.Updates.Title != nil {
-			params.Title = pgtype.Text{String: *req.Updates.Title, Valid: true}
+			params.Title = sql.NullString{String: *req.Updates.Title, Valid: true}
 		}
 		if req.Updates.Description != nil {
-			params.Description = pgtype.Text{String: *req.Updates.Description, Valid: true}
+			params.Description = sql.NullString{String: *req.Updates.Description, Valid: true}
 		}
 		if req.Updates.Status != nil {
-			params.Status = pgtype.Text{String: *req.Updates.Status, Valid: true}
+			params.Status = sql.NullString{String: *req.Updates.Status, Valid: true}
 		}
 		if req.Updates.Priority != nil {
-			params.Priority = pgtype.Text{String: *req.Updates.Priority, Valid: true}
+			params.Priority = sql.NullString{String: *req.Updates.Priority, Valid: true}
 		}
 		if req.Updates.Position != nil {
-			params.Position = pgtype.Float8{Float64: *req.Updates.Position, Valid: true}
+			params.Position = sql.NullFloat64{Float64: *req.Updates.Position, Valid: true}
 		}
 		if _, ok := rawUpdates["assignee_type"]; ok {
 			if req.Updates.AssigneeType != nil {
-				params.AssigneeType = pgtype.Text{String: *req.Updates.AssigneeType, Valid: true}
+				params.AssigneeType = sql.NullString{String: *req.Updates.AssigneeType, Valid: true}
 			} else {
-				params.AssigneeType = pgtype.Text{Valid: false}
+				params.AssigneeType = sql.NullString{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["assignee_id"]; ok {
 			if req.Updates.AssigneeID != nil {
-				params.AssigneeID = parseUUID(*req.Updates.AssigneeID)
+				params.AssigneeID = sql.NullString{String: *req.Updates.AssigneeID, Valid: true}
 			} else {
-				params.AssigneeID = pgtype.UUID{Valid: false}
+				params.AssigneeID = sql.NullString{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
 			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
-				t, err := time.Parse(time.RFC3339, *req.Updates.DueDate)
-				if err != nil {
+				if _, err := time.Parse(time.RFC3339, *req.Updates.DueDate); err != nil {
 					continue
 				}
-				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+				params.DueDate = sql.NullString{String: *req.Updates.DueDate, Valid: true}
 			} else {
-				params.DueDate = pgtype.Timestamptz{Valid: false}
+				params.DueDate = sql.NullString{Valid: false}
 			}
 		}
 
@@ -710,7 +712,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
-			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
+			(prevIssue.AssigneeType.String != issue.AssigneeType.String || prevIssue.AssigneeID.String != issue.AssigneeID.String)
 		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 
@@ -760,8 +762,8 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          parseUUID(issueID),
-			WorkspaceID: parseUUID(workspaceID),
+			ID:          issueID,
+			WorkspaceID: workspaceID,
 		})
 		if err != nil {
 			continue
@@ -769,7 +771,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), parseUUID(issueID)); err != nil {
+		if err := h.Queries.DeleteIssue(r.Context(), issueID); err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}

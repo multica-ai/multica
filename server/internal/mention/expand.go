@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -21,7 +20,7 @@ type IssueResolver interface {
 
 // PrefixResolver looks up a workspace to get its issue prefix.
 type PrefixResolver interface {
-	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetWorkspace(ctx context.Context, id string) (db.Workspace, error)
 }
 
 // Resolver combines both interfaces needed for mention expansion.
@@ -38,7 +37,7 @@ type Resolver interface {
 //   - Already inside a markdown link: [MUL-117](...)
 //   - Inside inline code: `MUL-117`
 //   - Inside fenced code blocks: ```...```
-func ExpandIssueIdentifiers(ctx context.Context, resolver Resolver, workspaceID pgtype.UUID, content string) string {
+func ExpandIssueIdentifiers(ctx context.Context, resolver Resolver, workspaceID string, content string) string {
 	// Get the workspace prefix.
 	ws, err := resolver.GetWorkspace(ctx, workspaceID)
 	if err != nil || ws.IssuePrefix == "" {
@@ -92,14 +91,14 @@ func ExpandIssueIdentifiers(ctx context.Context, resolver Resolver, workspaceID 
 		// Look up the issue.
 		issue, err := resolver.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 			WorkspaceID: workspaceID,
-			Number:      int32(num),
+			Number:      int64(num),
 		})
 		if err != nil {
 			continue // Issue doesn't exist — leave as-is.
 		}
 
 		identifier := content[identStart:identEnd]
-		issueID := uuidToString(issue.ID)
+		issueID := issue.ID
 		mentionLink := fmt.Sprintf("[%s](mention://issue/%s)", identifier, issueID)
 
 		replacements = append(replacements, replacement{
@@ -186,11 +185,5 @@ func isInsideMarkdownLink(content string, start, end int) bool {
 	return false
 }
 
-func uuidToString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	b := u.Bytes
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-}
+// fmt import used by mentionLink formatting.
+var _ = fmt.Sprintf

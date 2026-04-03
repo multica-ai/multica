@@ -7,25 +7,25 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createDaemonToken = `-- name: CreateDaemonToken :one
-INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at)
-VALUES ($1, $2, $3, $4)
+INSERT INTO daemon_token (id, token_hash, workspace_id, daemon_id, expires_at)
+VALUES (?, ?, ?, ?, ?)
 RETURNING id, token_hash, workspace_id, daemon_id, expires_at, created_at
 `
 
 type CreateDaemonTokenParams struct {
-	TokenHash   string             `json:"token_hash"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	DaemonID    string             `json:"daemon_id"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	ID          string `json:"id"`
+	TokenHash   string `json:"token_hash"`
+	WorkspaceID string `json:"workspace_id"`
+	DaemonID    string `json:"daemon_id"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenParams) (DaemonToken, error) {
-	row := q.db.QueryRow(ctx, createDaemonToken,
+	row := q.db.QueryRowContext(ctx, createDaemonToken,
+		arg.ID,
 		arg.TokenHash,
 		arg.WorkspaceID,
 		arg.DaemonID,
@@ -45,36 +45,36 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 
 const deleteDaemonTokensByWorkspaceAndDaemon = `-- name: DeleteDaemonTokensByWorkspaceAndDaemon :exec
 DELETE FROM daemon_token
-WHERE workspace_id = $1 AND daemon_id = $2
+WHERE workspace_id = ? AND daemon_id = ?
 `
 
 type DeleteDaemonTokensByWorkspaceAndDaemonParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    string      `json:"daemon_id"`
+	WorkspaceID string `json:"workspace_id"`
+	DaemonID    string `json:"daemon_id"`
 }
 
 func (q *Queries) DeleteDaemonTokensByWorkspaceAndDaemon(ctx context.Context, arg DeleteDaemonTokensByWorkspaceAndDaemonParams) error {
-	_, err := q.db.Exec(ctx, deleteDaemonTokensByWorkspaceAndDaemon, arg.WorkspaceID, arg.DaemonID)
+	_, err := q.db.ExecContext(ctx, deleteDaemonTokensByWorkspaceAndDaemon, arg.WorkspaceID, arg.DaemonID)
 	return err
 }
 
 const deleteExpiredDaemonTokens = `-- name: DeleteExpiredDaemonTokens :exec
 DELETE FROM daemon_token
-WHERE expires_at <= now()
+WHERE expires_at <= datetime('now')
 `
 
 func (q *Queries) DeleteExpiredDaemonTokens(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredDaemonTokens)
+	_, err := q.db.ExecContext(ctx, deleteExpiredDaemonTokens)
 	return err
 }
 
 const getDaemonTokenByHash = `-- name: GetDaemonTokenByHash :one
 SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at FROM daemon_token
-WHERE token_hash = $1 AND expires_at > now()
+WHERE token_hash = ? AND expires_at > datetime('now')
 `
 
 func (q *Queries) GetDaemonTokenByHash(ctx context.Context, tokenHash string) (DaemonToken, error) {
-	row := q.db.QueryRow(ctx, getDaemonTokenByHash, tokenHash)
+	row := q.db.QueryRowContext(ctx, getDaemonTokenByHash, tokenHash)
 	var i DaemonToken
 	err := row.Scan(
 		&i.ID,

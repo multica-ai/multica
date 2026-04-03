@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"database/sql"
+
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -31,12 +32,12 @@ type UserResponse struct {
 
 func userToResponse(u db.User) UserResponse {
 	return UserResponse{
-		ID:        uuidToString(u.ID),
+		ID:        u.ID,
 		Name:      u.Name,
 		Email:     u.Email,
-		AvatarURL: textToPtr(u.AvatarUrl),
-		CreatedAt: timestampToString(u.CreatedAt),
-		UpdatedAt: timestampToString(u.UpdatedAt),
+		AvatarURL: nullStringToPtr(u.AvatarUrl),
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
 	}
 }
 
@@ -102,7 +103,7 @@ func defaultWorkspaceSlug(user db.User) string {
 		}
 	}
 
-	userID := uuidToString(user.ID)
+	userID := user.ID
 	if len(userID) >= 8 {
 		return base + "-" + userID[:8]
 	}
@@ -118,11 +119,11 @@ func (h *Handler) ensureUserWorkspace(ctx context.Context, user db.User) error {
 		return nil
 	}
 
-	tx, err := h.TxStarter.Begin(ctx)
+	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	qtx := h.Queries.WithTx(tx)
 	workspaces, err = qtx.ListWorkspaces(ctx, user.ID)
@@ -135,9 +136,10 @@ func (h *Handler) ensureUserWorkspace(ctx context.Context, user db.User) error {
 
 	wsName := defaultWorkspaceName(user)
 	workspace, err := qtx.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		ID:          newUUID(),
 		Name:        wsName,
 		Slug:        defaultWorkspaceSlug(user),
-		Description: pgtype.Text{},
+		Description: sql.NullString{},
 		IssuePrefix: generateIssuePrefix(wsName),
 	})
 	if err != nil {
@@ -151,6 +153,7 @@ func (h *Handler) ensureUserWorkspace(ctx context.Context, user db.User) error {
 	}
 
 	if _, err := qtx.CreateMember(ctx, db.CreateMemberParams{
+		ID:          newUUID(),
 		WorkspaceID: workspace.ID,
 		UserID:      user.ID,
 		Role:        "owner",
@@ -158,7 +161,7 @@ func (h *Handler) ensureUserWorkspace(ctx context.Context, user db.User) error {
 		return err
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func generateCode() (string, error) {
@@ -172,7 +175,7 @@ func generateCode() (string, error) {
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":   uuidToString(user.ID),
+		"sub":   user.ID,
 		"email": user.Email,
 		"name":  user.Name,
 		"exp":   time.Now().Add(72 * time.Hour).Unix(),
@@ -192,6 +195,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, 
 			name = email[:at]
 		}
 		user, err = h.Queries.CreateUser(ctx, db.CreateUserParams{
+			ID:    newUUID(),
 			Name:  name,
 			Email: email,
 		})
@@ -217,9 +221,11 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 
 	// Rate limit: max 1 code per 10 seconds per email
 	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
-	if err == nil && time.Since(latest.CreatedAt.Time) < 10*time.Second {
-		writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
-		return
+	if err == nil {
+		if t, parseErr := time.Parse(time.RFC3339, latest.CreatedAt); parseErr == nil && time.Since(t) < 10*time.Second {
+			writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
+			return
+		}
 	}
 
 	code, err := generateCode()
@@ -229,9 +235,10 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.Queries.CreateVerificationCode(r.Context(), db.CreateVerificationCodeParams{
+		ID:        newUUID(),
 		Email:     email,
 		Code:      code,
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(10 * time.Minute), Valid: true},
+		ExpiresAt: time.Now().Add(10 * time.Minute).Format(time.RFC3339),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store verification code")
@@ -307,7 +314,29 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", user.ID, "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(user),
+	})
+}
+
+// MULTICA-LOCAL: LocalLogin auto-authenticates as the local user.
+// No email/code required — returns a JWT immediately.
+func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	const localEmail = "local@multica-local"
+	user, err := h.Queries.GetUserByEmail(r.Context(), localEmail)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "local user not found — restart the server")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
 		User:  userToResponse(user),
@@ -320,7 +349,7 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	user, err := h.Queries.GetUser(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
@@ -346,7 +375,7 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	currentUser, err := h.Queries.GetUser(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
@@ -366,7 +395,7 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		Name: name,
 	}
 	if req.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: strings.TrimSpace(*req.AvatarURL), Valid: true}
+		params.AvatarUrl = sql.NullString{String: strings.TrimSpace(*req.AvatarURL), Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

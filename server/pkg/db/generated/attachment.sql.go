@@ -7,39 +7,41 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"database/sql"
+	"strings"
 )
 
 const createAttachment = `-- name: CreateAttachment :one
-INSERT INTO attachment (workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
-VALUES ($1, $8, $9, $2, $3, $4, $5, $6, $7)
+INSERT INTO attachment (id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+VALUES (?, ?, ?9, ?10, ?, ?, ?, ?, ?, ?)
 RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at
 `
 
 type CreateAttachmentParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	UploaderType string      `json:"uploader_type"`
-	UploaderID   pgtype.UUID `json:"uploader_id"`
-	Filename     string      `json:"filename"`
-	Url          string      `json:"url"`
-	ContentType  string      `json:"content_type"`
-	SizeBytes    int64       `json:"size_bytes"`
-	IssueID      pgtype.UUID `json:"issue_id"`
-	CommentID    pgtype.UUID `json:"comment_id"`
+	ID           string         `json:"id"`
+	WorkspaceID  string         `json:"workspace_id"`
+	IssueID      sql.NullString `json:"issue_id"`
+	CommentID    sql.NullString `json:"comment_id"`
+	UploaderType string         `json:"uploader_type"`
+	UploaderID   string         `json:"uploader_id"`
+	Filename     string         `json:"filename"`
+	Url          string         `json:"url"`
+	ContentType  string         `json:"content_type"`
+	SizeBytes    int64          `json:"size_bytes"`
 }
 
 func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (Attachment, error) {
-	row := q.db.QueryRow(ctx, createAttachment,
+	row := q.db.QueryRowContext(ctx, createAttachment,
+		arg.ID,
 		arg.WorkspaceID,
+		arg.IssueID,
+		arg.CommentID,
 		arg.UploaderType,
 		arg.UploaderID,
 		arg.Filename,
 		arg.Url,
 		arg.ContentType,
 		arg.SizeBytes,
-		arg.IssueID,
-		arg.CommentID,
 	)
 	var i Attachment
 	err := row.Scan(
@@ -59,31 +61,31 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 }
 
 const deleteAttachment = `-- name: DeleteAttachment :exec
-DELETE FROM attachment WHERE id = $1 AND workspace_id = $2
+DELETE FROM attachment WHERE id = ? AND workspace_id = ?
 `
 
 type DeleteAttachmentParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentParams) error {
-	_, err := q.db.Exec(ctx, deleteAttachment, arg.ID, arg.WorkspaceID)
+	_, err := q.db.ExecContext(ctx, deleteAttachment, arg.ID, arg.WorkspaceID)
 	return err
 }
 
 const getAttachment = `-- name: GetAttachment :one
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
-WHERE id = $1 AND workspace_id = $2
+WHERE id = ? AND workspace_id = ?
 `
 
 type GetAttachmentParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (Attachment, error) {
-	row := q.db.QueryRow(ctx, getAttachment, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRowContext(ctx, getAttachment, arg.ID, arg.WorkspaceID)
 	var i Attachment
 	err := row.Scan(
 		&i.ID,
@@ -103,30 +105,42 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (A
 
 const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
 UPDATE attachment
-SET comment_id = $1
-WHERE issue_id = $2
+SET comment_id = ?
+WHERE issue_id = ?
   AND comment_id IS NULL
-  AND id = ANY($3::uuid[])
+  AND id IN (/*SLICE:attachment_ids*/?)
 `
 
 type LinkAttachmentsToCommentParams struct {
-	CommentID pgtype.UUID   `json:"comment_id"`
-	IssueID   pgtype.UUID   `json:"issue_id"`
-	Column3   []pgtype.UUID `json:"column_3"`
+	CommentID     sql.NullString `json:"comment_id"`
+	IssueID       sql.NullString `json:"issue_id"`
+	AttachmentIds []string       `json:"attachment_ids"`
 }
 
 func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) error {
-	_, err := q.db.Exec(ctx, linkAttachmentsToComment, arg.CommentID, arg.IssueID, arg.Column3)
+	query := linkAttachmentsToComment
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.CommentID)
+	queryParams = append(queryParams, arg.IssueID)
+	if len(arg.AttachmentIds) > 0 {
+		for _, v := range arg.AttachmentIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:attachment_ids*/?", strings.Repeat(",?", len(arg.AttachmentIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:attachment_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 
 const listAttachmentURLsByCommentID = `-- name: ListAttachmentURLsByCommentID :many
 SELECT url FROM attachment
-WHERE comment_id = $1
+WHERE comment_id = ?
 `
 
-func (q *Queries) ListAttachmentURLsByCommentID(ctx context.Context, commentID pgtype.UUID) ([]string, error) {
-	rows, err := q.db.Query(ctx, listAttachmentURLsByCommentID, commentID)
+func (q *Queries) ListAttachmentURLsByCommentID(ctx context.Context, commentID sql.NullString) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachmentURLsByCommentID, commentID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +152,9 @@ func (q *Queries) ListAttachmentURLsByCommentID(ctx context.Context, commentID p
 			return nil, err
 		}
 		items = append(items, url)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -147,12 +164,17 @@ func (q *Queries) ListAttachmentURLsByCommentID(ctx context.Context, commentID p
 
 const listAttachmentURLsByIssueOrComments = `-- name: ListAttachmentURLsByIssueOrComments :many
 SELECT a.url FROM attachment a
-WHERE a.issue_id = $1
-   OR a.comment_id IN (SELECT c.id FROM comment c WHERE c.issue_id = $1)
+WHERE a.issue_id = ?
+   OR a.comment_id IN (SELECT c.id FROM comment c WHERE c.issue_id = ?)
 `
 
-func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issueID pgtype.UUID) ([]string, error) {
-	rows, err := q.db.Query(ctx, listAttachmentURLsByIssueOrComments, issueID)
+type ListAttachmentURLsByIssueOrCommentsParams struct {
+	IssueID   sql.NullString `json:"issue_id"`
+	IssueID_2 string         `json:"issue_id_2"`
+}
+
+func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, arg ListAttachmentURLsByIssueOrCommentsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachmentURLsByIssueOrComments, arg.IssueID, arg.IssueID_2)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +187,9 @@ func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issue
 		}
 		items = append(items, url)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -173,17 +198,17 @@ func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issue
 
 const listAttachmentsByComment = `-- name: ListAttachmentsByComment :many
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
-WHERE comment_id = $1 AND workspace_id = $2
+WHERE comment_id = ? AND workspace_id = ?
 ORDER BY created_at ASC
 `
 
 type ListAttachmentsByCommentParams struct {
-	CommentID   pgtype.UUID `json:"comment_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CommentID   sql.NullString `json:"comment_id"`
+	WorkspaceID string         `json:"workspace_id"`
 }
 
 func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachmentsByCommentParams) ([]Attachment, error) {
-	rows, err := q.db.Query(ctx, listAttachmentsByComment, arg.CommentID, arg.WorkspaceID)
+	rows, err := q.db.QueryContext(ctx, listAttachmentsByComment, arg.CommentID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +232,9 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -216,12 +244,22 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 
 const listAttachmentsByCommentIDs = `-- name: ListAttachmentsByCommentIDs :many
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
-WHERE comment_id = ANY($1::uuid[])
+WHERE comment_id IN (/*SLICE:comment_ids*/?)
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]Attachment, error) {
-	rows, err := q.db.Query(ctx, listAttachmentsByCommentIDs, dollar_1)
+func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, commentIds []sql.NullString) ([]Attachment, error) {
+	query := listAttachmentsByCommentIDs
+	var queryParams []interface{}
+	if len(commentIds) > 0 {
+		for _, v := range commentIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:comment_ids*/?", strings.Repeat(",?", len(commentIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:comment_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +283,9 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, dollar_1 []pg
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -254,17 +295,17 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, dollar_1 []pg
 
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = ? AND workspace_id = ?
 ORDER BY created_at ASC
 `
 
 type ListAttachmentsByIssueParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     sql.NullString `json:"issue_id"`
+	WorkspaceID string         `json:"workspace_id"`
 }
 
 func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachmentsByIssueParams) ([]Attachment, error) {
-	rows, err := q.db.Query(ctx, listAttachmentsByIssue, arg.IssueID, arg.WorkspaceID)
+	rows, err := q.db.QueryContext(ctx, listAttachmentsByIssue, arg.IssueID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +329,9 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

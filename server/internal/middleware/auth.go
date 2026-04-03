@@ -1,5 +1,7 @@
 package middleware
 
+// MULTICA-LOCAL: Rewritten for SQLite — removed pgtype dependency.
+
 import (
 	"context"
 	"log/slog"
@@ -7,13 +9,9 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
-
-func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
 // Auth middleware validates JWT tokens or Personal Access Tokens from the Authorization header.
 // Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
@@ -48,7 +46,7 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 					return
 				}
 
-				r.Header.Set("X-User-ID", uuidToString(pat.UserID))
+				r.Header.Set("X-User-ID", pat.UserID)
 
 				// Best-effort: update last_used_at
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)

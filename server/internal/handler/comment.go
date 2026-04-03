@@ -8,8 +8,9 @@ import (
 	"strconv"
 	"time"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -39,15 +40,15 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
-		ID:          uuidToString(c.ID),
-		IssueID:     uuidToString(c.IssueID),
+		ID:          c.ID,
+		IssueID:     c.IssueID,
 		AuthorType:  c.AuthorType,
-		AuthorID:    uuidToString(c.AuthorID),
+		AuthorID:    c.AuthorID,
 		Content:     c.Content,
 		Type:        c.Type,
-		ParentID:    uuidToPtr(c.ParentID),
-		CreatedAt:   timestampToString(c.CreatedAt),
-		UpdatedAt:   timestampToString(c.UpdatedAt),
+		ParentID:    nullStringToPtr(c.ParentID),
+		CreatedAt:   c.CreatedAt,
+		UpdatedAt:   c.UpdatedAt,
 		Reactions:   reactions,
 		Attachments: attachments,
 	}
@@ -62,7 +63,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	// Parse optional pagination query params.
 	q := r.URL.Query()
-	var limit, offset int32
+	var limit, offset int64
 	var hasPagination bool
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -70,7 +71,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid limit parameter")
 			return
 		}
-		limit = int32(n)
+		limit = int64(n)
 		hasPagination = true
 	}
 	if v := q.Get("offset"); v != "" {
@@ -79,25 +80,24 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid offset parameter")
 			return
 		}
-		offset = int32(n)
+		offset = int64(n)
 		hasPagination = true
 	}
 
-	var sinceTime pgtype.Timestamptz
+	var sinceTime string
 	if v := q.Get("since"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
+		if _, err := time.Parse(time.RFC3339, v); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
 			return
 		}
-		sinceTime = pgtype.Timestamptz{Time: t, Valid: true}
+		sinceTime = v
 	}
 
 	var comments []db.Comment
 	var err error
 
 	switch {
-	case sinceTime.Valid && hasPagination:
+	case sinceTime != "" && hasPagination:
 		if limit == 0 {
 			limit = 50
 		}
@@ -108,7 +108,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			Limit:       limit,
 			Offset:      offset,
 		})
-	case sinceTime.Valid:
+	case sinceTime != "":
 		// Apply a server-side cap to prevent unbounded result sets when
 		// --since is used without --limit.
 		comments, err = h.Queries.ListCommentsSincePaginated(r.Context(), db.ListCommentsSincePaginatedParams{
@@ -140,7 +140,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commentIDs := make([]pgtype.UUID, len(comments))
+	commentIDs := make([]string, len(comments))
 	for i, c := range comments {
 		commentIDs[i] = c.ID
 	}
@@ -149,7 +149,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]CommentResponse, len(comments))
 	for i, c := range comments {
-		cid := uuidToString(c.ID)
+		cid := c.ID
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
 	}
 
@@ -200,12 +200,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		req.Type = "comment"
 	}
 
-	var parentID pgtype.UUID
+	var parentID sql.NullString
 	var parentComment *db.Comment
 	if req.ParentID != nil {
-		parentID = parseUUID(*req.ParentID)
-		parent, err := h.Queries.GetComment(r.Context(), parentID)
-		if err != nil || uuidToString(parent.IssueID) != issueID {
+		parentID = sql.NullString{String: *req.ParentID, Valid: true}
+		parent, err := h.Queries.GetComment(r.Context(), *req.ParentID)
+		if err != nil || parent.IssueID != issueID {
 			writeError(w, http.StatusBadRequest, "invalid parent comment")
 			return
 		}
@@ -213,16 +213,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
-	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	authorType, authorID := h.resolveActor(r, userID, issue.WorkspaceID)
 
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		ID:          newUUID(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  authorType,
-		AuthorID:    parseUUID(authorID),
+		AuthorID:    authorID,
 		Content:     req.Content,
 		Type:        req.Type,
 		ParentID:    parentID,
@@ -239,14 +240,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch linked attachments so the response includes them.
-	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
-	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
-	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
+	groupedAtt := h.groupAttachments(r, []string{comment.ID})
+	resp := commentToResponse(comment, nil, groupedAtt[comment.ID])
+	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", comment.ID, "issue_id", issueID)...)
+	h.publish(protocol.EventCommentCreated, issue.WorkspaceID, authorType, authorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
-		"issue_assignee_type": textToPtr(issue.AssigneeType),
-		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
+		"issue_assignee_type": nullStringToPtr(issue.AssigneeType),
+		"issue_assignee_id":   nullStringToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
 	})
 
@@ -262,7 +263,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// Resolve thread root: if the comment is a reply, agent should reply
 		// to the thread root (matching frontend behavior where all replies
 		// in a thread share the same top-level parent).
-		replyTo := comment.ID
+		replyTo := sql.NullString{String: comment.ID, Valid: true}
 		if comment.ParentID.Valid {
 			replyTo = comment.ParentID
 		}
@@ -304,7 +305,7 @@ func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.I
 	if !issue.AssigneeID.Valid {
 		return true // No assignee — mentions target others
 	}
-	assigneeID := uuidToString(issue.AssigneeID)
+	assigneeID := issue.AssigneeID.String
 	for _, m := range mentions {
 		if m.ID == assigneeID {
 			return false // Assignee is mentioned — allow trigger
@@ -333,7 +334,7 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 	if !issue.AssigneeID.Valid {
 		return true // No assignee to mention
 	}
-	assigneeID := uuidToString(issue.AssigneeID)
+	assigneeID := issue.AssigneeID.String
 	// Check current comment mentions.
 	for _, m := range util.ParseMentions(content) {
 		if m.ID == assigneeID {
@@ -362,7 +363,7 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
-	wsID := uuidToString(issue.WorkspaceID)
+	wsID := issue.WorkspaceID
 	mentions := util.ParseMentions(comment.Content)
 	// When replying in a thread, also include mentions from the parent comment
 	// so that agents mentioned in the thread root are triggered by replies.
@@ -387,21 +388,21 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if authorType == "agent" && authorID == m.ID {
 			continue
 		}
-		agentUUID := parseUUID(m.ID)
+		agentUUID := m.ID
 		// Prevent duplicate: skip if this agent is the issue's assignee
 		// (already handled by the on_comment trigger above).
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" &&
-			issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == m.ID {
+			issue.AssigneeID.Valid && issue.AssigneeID.String == m.ID {
 			continue
 		}
 		// Load the agent to check visibility, archive status, and trigger config.
 		agent, err := h.Queries.GetAgent(ctx, agentUUID)
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		if err != nil || agent.RuntimeID == "" || agent.ArchivedAt.Valid {
 			continue
 		}
 		// Private agents can only be mentioned by the agent owner or workspace admin/owner.
 		if agent.Visibility == "private" && authorType == "member" {
-			isOwner := uuidToString(agent.OwnerID) == authorID
+			isOwner := agent.OwnerID.String == authorID
 			if !isOwner {
 				member, err := h.getWorkspaceMember(ctx, authorID, wsID)
 				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
@@ -422,12 +423,12 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		// Resolve thread root for reply threading.
-		replyTo := comment.ID
+		replyTo := sql.NullString{String: comment.ID, Valid: true}
 		if comment.ParentID.Valid {
 			replyTo = comment.ParentID
 		}
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, replyTo); err != nil {
-			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
+			slog.Warn("enqueue mention agent task failed", "issue_id", issue.ID, "agent_id", m.ID, "error", err)
 		}
 	}
 }
@@ -443,8 +444,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// Load comment scoped to current workspace.
 	workspaceID := resolveWorkspaceID(r)
 	existing, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentId,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -457,7 +458,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	isAuthor := existing.AuthorType == actorType && uuidToString(existing.AuthorID) == actorID
+	isAuthor := existing.AuthorType == actorType && existing.AuthorID == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	if !isAuthor && !isAdmin {
 		writeError(w, http.StatusForbidden, "only comment author or admin can edit")
@@ -477,7 +478,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
-		ID:      parseUUID(commentId),
+		ID:      commentId,
 		Content: req.Content,
 	})
 	if err != nil {
@@ -487,9 +488,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch reactions and attachments for the updated comment.
-	grouped := h.groupReactions(r, []pgtype.UUID{comment.ID})
-	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
-	cid := uuidToString(comment.ID)
+	grouped := h.groupReactions(r, []string{comment.ID})
+	groupedAtt := h.groupAttachments(r, []string{comment.ID})
+	cid := comment.ID
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
@@ -507,8 +508,8 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	// Load comment scoped to current workspace.
 	workspaceID := resolveWorkspaceID(r)
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentId,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -521,7 +522,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	isAuthor := comment.AuthorType == actorType && uuidToString(comment.AuthorID) == actorID
+	isAuthor := comment.AuthorType == actorType && comment.AuthorID == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	if !isAuthor && !isAdmin {
 		writeError(w, http.StatusForbidden, "only comment author or admin can delete")
@@ -529,19 +530,19 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect attachment URLs before CASCADE delete removes them.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), parseUUID(commentId))
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), sql.NullString{String: commentId, Valid: true})
 
-	if err := h.Queries.DeleteComment(r.Context(), parseUUID(commentId)); err != nil {
+	if err := h.Queries.DeleteComment(r.Context(), commentId); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
 	}
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
-	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
+	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", comment.IssueID)...)
 	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
 		"comment_id": commentId,
-		"issue_id":   uuidToString(comment.IssueID),
+		"issue_id":   comment.IssueID,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

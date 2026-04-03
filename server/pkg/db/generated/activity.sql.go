@@ -7,28 +7,29 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"database/sql"
 )
 
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details
-) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
+    id, workspace_id, issue_id, actor_type, actor_id, action, details
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, workspace_id, issue_id, actor_type, actor_id, "action", details, created_at
 `
 
 type CreateActivityParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	IssueID     pgtype.UUID `json:"issue_id"`
-	ActorType   pgtype.Text `json:"actor_type"`
-	ActorID     pgtype.UUID `json:"actor_id"`
-	Action      string      `json:"action"`
-	Details     []byte      `json:"details"`
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspace_id"`
+	IssueID     sql.NullString `json:"issue_id"`
+	ActorType   sql.NullString `json:"actor_type"`
+	ActorID     sql.NullString `json:"actor_id"`
+	Action      string         `json:"action"`
+	Details     string         `json:"details"`
 }
 
 func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (ActivityLog, error) {
-	row := q.db.QueryRow(ctx, createActivity,
+	row := q.db.QueryRowContext(ctx, createActivity,
+		arg.ID,
 		arg.WorkspaceID,
 		arg.IssueID,
 		arg.ActorType,
@@ -51,20 +52,20 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 }
 
 const listActivities = `-- name: ListActivities :many
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
-WHERE issue_id = $1
+SELECT id, workspace_id, issue_id, actor_type, actor_id, "action", details, created_at FROM activity_log
+WHERE issue_id = ?
 ORDER BY created_at ASC
-LIMIT $2 OFFSET $3
+LIMIT ? OFFSET ?
 `
 
 type ListActivitiesParams struct {
-	IssueID pgtype.UUID `json:"issue_id"`
-	Limit   int32       `json:"limit"`
-	Offset  int32       `json:"offset"`
+	IssueID sql.NullString `json:"issue_id"`
+	Limit   int64          `json:"limit"`
+	Offset  int64          `json:"offset"`
 }
 
 func (q *Queries) ListActivities(ctx context.Context, arg ListActivitiesParams) ([]ActivityLog, error) {
-	rows, err := q.db.Query(ctx, listActivities, arg.IssueID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listActivities, arg.IssueID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +86,9 @@ func (q *Queries) ListActivities(ctx context.Context, arg ListActivitiesParams) 
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

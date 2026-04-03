@@ -1,20 +1,20 @@
 -- name: GetUser :one
-SELECT * FROM "user"
-WHERE id = $1;
+SELECT * FROM user
+WHERE id = ?;
 
 -- name: GetUserByEmail :one
-SELECT * FROM "user"
-WHERE email = $1;
+SELECT * FROM user
+WHERE email = ?;
 
 -- name: CreateUser :one
-INSERT INTO "user" (name, email, avatar_url)
-VALUES ($1, $2, $3)
+INSERT INTO user (id, name, email, avatar_url)
+VALUES (?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateUser :one
-UPDATE "user" SET
-    name = COALESCE($2, name),
-    avatar_url = COALESCE($3, avatar_url),
-    updated_at = now()
-WHERE id = $1
+UPDATE user SET
+    name = COALESCE(?, name),
+    avatar_url = COALESCE(?, avatar_url),
+    updated_at = datetime('now')
+WHERE id = ?
 RETURNING *;

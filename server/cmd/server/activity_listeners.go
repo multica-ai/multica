@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -31,12 +33,13 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-			WorkspaceID: parseUUID(issue.WorkspaceID),
-			IssueID:     parseUUID(issue.ID),
-			ActorType:   util.StrToText(e.ActorType),
-			ActorID:     parseUUID(e.ActorID),
+			ID:          uuid.New().String(),
+			WorkspaceID: issue.WorkspaceID,
+			IssueID:     sql.NullString{String: issue.ID, Valid: true},
+			ActorType:   util.StrToNullString(e.ActorType),
+			ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 			Action:      "created",
-			Details:     []byte("{}"),
+			Details:     "{}",
 		})
 		if err != nil {
 			slog.Error("activity: failed to record issue created",
@@ -70,12 +73,12 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Status,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     sql.NullString{String: issue.ID, Valid: true},
+				ActorType:   util.StrToNullString(e.ActorType),
+				ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 				Action:      "status_changed",
-				Details:     details,
+				Details:     string(details),
 			})
 			if err != nil {
 				slog.Error("activity: failed to record status change",
@@ -92,12 +95,12 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Priority,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     sql.NullString{String: issue.ID, Valid: true},
+				ActorType:   util.StrToNullString(e.ActorType),
+				ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 				Action:      "priority_changed",
-				Details:     details,
+				Details:     string(details),
 			})
 			if err != nil {
 				slog.Error("activity: failed to record priority change",
@@ -127,12 +130,12 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 
 			details, _ := json.Marshal(detailsMap)
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     sql.NullString{String: issue.ID, Valid: true},
+				ActorType:   util.StrToNullString(e.ActorType),
+				ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 				Action:      "assignee_changed",
-				Details:     details,
+				Details:     string(details),
 			})
 			if err != nil {
 				slog.Error("activity: failed to record assignee change",
@@ -156,12 +159,12 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   newDueDate,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     sql.NullString{String: issue.ID, Valid: true},
+				ActorType:   util.StrToNullString(e.ActorType),
+				ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 				Action:      "due_date_changed",
-				Details:     details,
+				Details:     string(details),
 			})
 			if err != nil {
 				slog.Error("activity: failed to record due date change",
@@ -178,12 +181,12 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Title,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     sql.NullString{String: issue.ID, Valid: true},
+				ActorType:   util.StrToNullString(e.ActorType),
+				ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 				Action:      "title_changed",
-				Details:     details,
+				Details:     string(details),
 			})
 			if err != nil {
 				slog.Error("activity: failed to record title change",
@@ -195,12 +198,12 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 
 		if descriptionChanged {
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				WorkspaceID: issue.WorkspaceID,
+				IssueID:     sql.NullString{String: issue.ID, Valid: true},
+				ActorType:   util.StrToNullString(e.ActorType),
+				ActorID:     sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 				Action:      "description_updated",
-				Details:     []byte("{}"),
+				Details:     "{}",
 			})
 			if err != nil {
 				slog.Error("activity: failed to record description change",
@@ -235,7 +238,7 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 	}
 
 	// Look up issue to get workspace_id
-	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+	issue, err := queries.GetIssue(ctx, issueID)
 	if err != nil {
 		slog.Error("activity: failed to get issue for task event",
 			"issue_id", issueID, "action", action, "error", err)
@@ -244,11 +247,11 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 
 	activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 		WorkspaceID: issue.WorkspaceID,
-		IssueID:     parseUUID(issueID),
-		ActorType:   util.StrToText("agent"),
-		ActorID:     parseUUID(agentID),
+		IssueID:     sql.NullString{String: issueID, Valid: true},
+		ActorType:   util.StrToNullString("agent"),
+		ActorID:     sql.NullString{String: agentID, Valid: agentID != ""},
 		Action:      action,
-		Details:     []byte("{}"),
+		Details:     "{}",
 	})
 	if err != nil {
 		slog.Error("activity: failed to record task activity",
@@ -273,15 +276,15 @@ func publishActivityEvent(bus *events.Bus, original events.Event, activity db.Ac
 		ActorType:   original.ActorType,
 		ActorID:     original.ActorID,
 		Payload: map[string]any{
-			"issue_id": util.UUIDToString(activity.IssueID),
+			"issue_id": util.NullStringToString(activity.IssueID),
 			"entry": map[string]any{
 				"type":       "activity",
-				"id":         util.UUIDToString(activity.ID),
+				"id":         activity.ID,
 				"actor_type": actorType,
-				"actor_id":   util.UUIDToString(activity.ActorID),
+				"actor_id":   util.NullStringToString(activity.ActorID),
 				"action":     action,
 				"details":    json.RawMessage(activity.Details),
-				"created_at": util.TimestampToString(activity.CreatedAt),
+				"created_at": activity.CreatedAt,
 			},
 		},
 	})

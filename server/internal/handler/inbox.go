@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -33,51 +32,60 @@ type InboxItemResponse struct {
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
+	var details json.RawMessage
+	if i.Details.Valid {
+		details = json.RawMessage(i.Details.String)
+	}
 	return InboxItemResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
+		ID:            i.ID,
+		WorkspaceID:   i.WorkspaceID,
 		RecipientType: i.RecipientType,
-		RecipientID:   uuidToString(i.RecipientID),
+		RecipientID:   i.RecipientID,
 		Type:          i.Type,
 		Severity:      i.Severity,
-		IssueID:       uuidToPtr(i.IssueID),
+		IssueID:       nullStringToPtr(i.IssueID),
 		Title:         i.Title,
-		Body:          textToPtr(i.Body),
-		Read:          i.Read,
-		Archived:      i.Archived,
-		CreatedAt:     timestampToString(i.CreatedAt),
-		ActorType:     textToPtr(i.ActorType),
-		ActorID:       uuidToPtr(i.ActorID),
-		Details:       json.RawMessage(i.Details),
+		Body:          nullStringToPtr(i.Body),
+		Read:          i.Read != 0,
+		Archived:      i.Archived != 0,
+		CreatedAt:     i.CreatedAt,
+		ActorType:     nullStringToPtr(i.ActorType),
+		ActorID:       nullStringToPtr(i.ActorID),
+		Details:       details,
 	}
 }
 
 func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
+	var details json.RawMessage
+	if r.Details.Valid {
+		details = json.RawMessage(r.Details.String)
+	}
 	return InboxItemResponse{
-		ID:            uuidToString(r.ID),
-		WorkspaceID:   uuidToString(r.WorkspaceID),
+		ID:            r.ID,
+		WorkspaceID:   r.WorkspaceID,
 		RecipientType: r.RecipientType,
-		RecipientID:   uuidToString(r.RecipientID),
+		RecipientID:   r.RecipientID,
 		Type:          r.Type,
 		Severity:      r.Severity,
-		IssueID:       uuidToPtr(r.IssueID),
+		IssueID:       nullStringToPtr(r.IssueID),
 		Title:         r.Title,
-		Body:          textToPtr(r.Body),
-		Read:          r.Read,
-		Archived:      r.Archived,
-		CreatedAt:     timestampToString(r.CreatedAt),
-		IssueStatus:   textToPtr(r.IssueStatus),
-		ActorType:     textToPtr(r.ActorType),
-		ActorID:       uuidToPtr(r.ActorID),
-		Details:       json.RawMessage(r.Details),
+		Body:          nullStringToPtr(r.Body),
+		Read:          r.Read != 0,
+		Archived:      r.Archived != 0,
+		CreatedAt:     r.CreatedAt,
+		IssueStatus:   nullStringToPtr(r.IssueStatus),
+		ActorType:     nullStringToPtr(r.ActorType),
+		ActorID:       nullStringToPtr(r.ActorID),
+		Details:       details,
 	}
 }
 
-func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemResponse, issueID pgtype.UUID) InboxItemResponse {
-	if !issueID.Valid {
+func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemResponse, issueID string) InboxItemResponse {
+	if issueID == "" {
 		return resp
 	}
 	issue, err := h.Queries.GetIssue(ctx, issueID)
+
 	if err == nil {
 		s := issue.Status
 		resp.IssueStatus = &s
@@ -93,9 +101,9 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.Header.Get("X-Workspace-ID")
 
 	items, err := h.Queries.ListInboxItems(r.Context(), db.ListInboxItemsParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   workspaceID,
 		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		RecipientID:   userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list inbox")
@@ -115,20 +123,24 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
 		return
 	}
-	item, err := h.Queries.MarkInboxRead(r.Context(), parseUUID(id))
+	item, err := h.Queries.MarkInboxRead(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark read")
 		return
 	}
 
 	userID := requestUserID(r)
-	workspaceID := uuidToString(item.WorkspaceID)
+	workspaceID := item.WorkspaceID
 	h.publish(protocol.EventInboxRead, workspaceID, "member", userID, map[string]any{
-		"item_id":      uuidToString(item.ID),
-		"recipient_id": uuidToString(item.RecipientID),
+		"item_id":      item.ID,
+		"recipient_id": item.RecipientID,
 	})
 
-	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	issueIDStr := ""
+	if item.IssueID.Valid {
+		issueIDStr = item.IssueID.String
+	}
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), issueIDStr)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -137,7 +149,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
 		return
 	}
-	item, err := h.Queries.ArchiveInboxItem(r.Context(), parseUUID(id))
+	item, err := h.Queries.ArchiveInboxItem(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive")
 		return
@@ -154,14 +166,18 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := requestUserID(r)
-	workspaceID := uuidToString(item.WorkspaceID)
+	workspaceID := item.WorkspaceID
 	h.publish(protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
-		"item_id":      uuidToString(item.ID),
-		"issue_id":     uuidToPtr(item.IssueID),
-		"recipient_id": uuidToString(item.RecipientID),
+		"item_id":      item.ID,
+		"issue_id":     nullStringToPtr(item.IssueID),
+		"recipient_id": item.RecipientID,
 	})
 
-	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	issueIDStr2 := ""
+	if item.IssueID.Valid {
+		issueIDStr2 = item.IssueID.String
+	}
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), issueIDStr2)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -173,9 +189,9 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.Header.Get("X-Workspace-ID")
 
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   workspaceID,
 		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		RecipientID:   userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")
@@ -193,8 +209,8 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.Header.Get("X-Workspace-ID")
 
 	count, err := h.Queries.MarkAllInboxRead(r.Context(), db.MarkAllInboxReadParams{
-		WorkspaceID: parseUUID(workspaceID),
-		RecipientID: parseUUID(userID),
+		WorkspaceID: workspaceID,
+		RecipientID: userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark all inbox read")
@@ -218,8 +234,8 @@ func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.Header.Get("X-Workspace-ID")
 
 	count, err := h.Queries.ArchiveAllInbox(r.Context(), db.ArchiveAllInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
-		RecipientID: parseUUID(userID),
+		WorkspaceID: workspaceID,
+		RecipientID: userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive all inbox")
@@ -243,8 +259,8 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.Header.Get("X-Workspace-ID")
 
 	count, err := h.Queries.ArchiveAllReadInbox(r.Context(), db.ArchiveAllReadInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
-		RecipientID: parseUUID(userID),
+		WorkspaceID: workspaceID,
+		RecipientID: userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive all read inbox")
@@ -268,8 +284,8 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 	workspaceID := r.Header.Get("X-Workspace-ID")
 
 	count, err := h.Queries.ArchiveCompletedInbox(r.Context(), db.ArchiveCompletedInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
-		RecipientID: parseUUID(userID),
+		WorkspaceID: workspaceID,
+		RecipientID: userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive completed inbox")

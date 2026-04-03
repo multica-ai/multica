@@ -7,26 +7,27 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"database/sql"
 )
 
 const createWorkspace = `-- name: CreateWorkspace :one
-INSERT INTO workspace (name, slug, description, context, issue_prefix)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter
+INSERT INTO workspace (id, name, slug, description, context, issue_prefix)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, name, slug, description, context, settings, repos, issue_prefix, issue_counter, created_at, updated_at
 `
 
 type CreateWorkspaceParams struct {
-	Name        string      `json:"name"`
-	Slug        string      `json:"slug"`
-	Description pgtype.Text `json:"description"`
-	Context     pgtype.Text `json:"context"`
-	IssuePrefix string      `json:"issue_prefix"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Slug        string         `json:"slug"`
+	Description sql.NullString `json:"description"`
+	Context     sql.NullString `json:"context"`
+	IssuePrefix string         `json:"issue_prefix"`
 }
 
 func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams) (Workspace, error) {
-	row := q.db.QueryRow(ctx, createWorkspace,
+	row := q.db.QueryRowContext(ctx, createWorkspace,
+		arg.ID,
 		arg.Name,
 		arg.Slug,
 		arg.Description,
@@ -39,96 +40,96 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.Name,
 		&i.Slug,
 		&i.Description,
-		&i.Settings,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.Context,
+		&i.Settings,
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
-DELETE FROM workspace WHERE id = $1
+DELETE FROM workspace WHERE id = ?
 `
 
-func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteWorkspace, id)
+func (q *Queries) DeleteWorkspace(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteWorkspace, id)
 	return err
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
-WHERE id = $1
+SELECT id, name, slug, description, context, settings, repos, issue_prefix, issue_counter, created_at, updated_at FROM workspace
+WHERE id = ?
 `
 
-func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, error) {
-	row := q.db.QueryRow(ctx, getWorkspace, id)
+func (q *Queries) GetWorkspace(ctx context.Context, id string) (Workspace, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspace, id)
 	var i Workspace
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Slug,
 		&i.Description,
-		&i.Settings,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.Context,
+		&i.Settings,
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
-WHERE slug = $1
+SELECT id, name, slug, description, context, settings, repos, issue_prefix, issue_counter, created_at, updated_at FROM workspace
+WHERE slug = ?
 `
 
 func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspace, error) {
-	row := q.db.QueryRow(ctx, getWorkspaceBySlug, slug)
+	row := q.db.QueryRowContext(ctx, getWorkspaceBySlug, slug)
 	var i Workspace
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Slug,
 		&i.Description,
-		&i.Settings,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.Context,
+		&i.Settings,
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const incrementIssueCounter = `-- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
+WHERE id = ?
 RETURNING issue_counter
 `
 
-func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementIssueCounter, id)
-	var issue_counter int32
+func (q *Queries) IncrementIssueCounter(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, incrementIssueCounter, id)
+	var issue_counter int64
 	err := row.Scan(&issue_counter)
 	return issue_counter, err
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter FROM workspace w
+SELECT w.id, w.name, w.slug, w.description, w.context, w.settings, w.repos, w.issue_prefix, w.issue_counter, w.created_at, w.updated_at FROM workspace w
 JOIN member m ON m.workspace_id = w.id
-WHERE m.user_id = $1
+WHERE m.user_id = ?
 ORDER BY w.created_at ASC
 `
 
-func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
-	rows, err := q.db.Query(ctx, listWorkspaces, userID)
+func (q *Queries) ListWorkspaces(ctx context.Context, userID string) ([]Workspace, error) {
+	rows, err := q.db.QueryContext(ctx, listWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -141,17 +142,20 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.Name,
 			&i.Slug,
 			&i.Description,
-			&i.Settings,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.Context,
+			&i.Settings,
 			&i.Repos,
 			&i.IssuePrefix,
 			&i.IssueCounter,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -161,36 +165,36 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 
 const updateWorkspace = `-- name: UpdateWorkspace :one
 UPDATE workspace SET
-    name = COALESCE($2, name),
-    description = COALESCE($3, description),
-    context = COALESCE($4, context),
-    settings = COALESCE($5, settings),
-    repos = COALESCE($6, repos),
-    issue_prefix = COALESCE($7, issue_prefix),
-    updated_at = now()
-WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter
+    name = COALESCE(?2, name),
+    description = COALESCE(?3, description),
+    context = COALESCE(?4, context),
+    settings = COALESCE(?5, settings),
+    repos = COALESCE(?6, repos),
+    issue_prefix = COALESCE(?7, issue_prefix),
+    updated_at = datetime('now')
+WHERE id = ?
+RETURNING id, name, slug, description, context, settings, repos, issue_prefix, issue_counter, created_at, updated_at
 `
 
 type UpdateWorkspaceParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Name        pgtype.Text `json:"name"`
-	Description pgtype.Text `json:"description"`
-	Context     pgtype.Text `json:"context"`
-	Settings    []byte      `json:"settings"`
-	Repos       []byte      `json:"repos"`
-	IssuePrefix pgtype.Text `json:"issue_prefix"`
+	Name        sql.NullString `json:"name"`
+	Description sql.NullString `json:"description"`
+	Context     sql.NullString `json:"context"`
+	Settings    sql.NullString `json:"settings"`
+	Repos       sql.NullString `json:"repos"`
+	IssuePrefix sql.NullString `json:"issue_prefix"`
+	ID          string         `json:"id"`
 }
 
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
-	row := q.db.QueryRow(ctx, updateWorkspace,
-		arg.ID,
+	row := q.db.QueryRowContext(ctx, updateWorkspace,
 		arg.Name,
 		arg.Description,
 		arg.Context,
 		arg.Settings,
 		arg.Repos,
 		arg.IssuePrefix,
+		arg.ID,
 	)
 	var i Workspace
 	err := row.Scan(
@@ -198,13 +202,13 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.Name,
 		&i.Slug,
 		&i.Description,
-		&i.Settings,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.Context,
+		&i.Settings,
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

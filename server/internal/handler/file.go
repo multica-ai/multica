@@ -11,8 +11,9 @@ import (
 	"path"
 	"time"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -39,44 +40,46 @@ type AttachmentResponse struct {
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	resp := AttachmentResponse{
-		ID:           uuidToString(a.ID),
-		WorkspaceID:  uuidToString(a.WorkspaceID),
+		ID:           a.ID,
+		WorkspaceID:  a.WorkspaceID,
 		UploaderType: a.UploaderType,
-		UploaderID:   uuidToString(a.UploaderID),
+		UploaderID:   a.UploaderID,
 		Filename:     a.Filename,
 		URL:          a.Url,
 		DownloadURL:  a.Url,
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
-		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:    a.CreatedAt,
 	}
 	if h.CFSigner != nil {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
 	}
 	if a.IssueID.Valid {
-		s := uuidToString(a.IssueID)
-		resp.IssueID = &s
+		resp.IssueID = &a.IssueID.String
 	}
 	if a.CommentID.Valid {
-		s := uuidToString(a.CommentID)
-		resp.CommentID = &s
+		resp.CommentID = &a.CommentID.String
 	}
 	return resp
 }
 
 // groupAttachments loads attachments for multiple comments and groups them by comment ID.
-func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) map[string][]AttachmentResponse {
+func (h *Handler) groupAttachments(r *http.Request, commentIDs []string) map[string][]AttachmentResponse {
 	if len(commentIDs) == 0 {
 		return nil
 	}
-	attachments, err := h.Queries.ListAttachmentsByCommentIDs(r.Context(), commentIDs)
+	nsIDs := make([]sql.NullString, len(commentIDs))
+	for i, id := range commentIDs {
+		nsIDs[i] = sql.NullString{String: id, Valid: true}
+	}
+	attachments, err := h.Queries.ListAttachmentsByCommentIDs(r.Context(), nsIDs)
 	if err != nil {
 		slog.Error("failed to load attachments for comments", "error", err)
 		return nil
 	}
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
 	for _, a := range attachments {
-		cid := uuidToString(a.CommentID)
+		cid := a.CommentID.String
 		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
 	}
 	return grouped
@@ -154,9 +157,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		uploaderType, uploaderID := h.resolveActor(r, userID, workspaceID)
 
 		params := db.CreateAttachmentParams{
-			WorkspaceID:  parseUUID(workspaceID),
+			ID:           newUUID(),
+			WorkspaceID:  workspaceID,
 			UploaderType: uploaderType,
-			UploaderID:   parseUUID(uploaderID),
+			UploaderID:   uploaderID,
 			Filename:     header.Filename,
 			Url:          link,
 			ContentType:  contentType,
@@ -165,10 +169,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 		// Optional issue_id / comment_id from form fields
 		if issueID := r.FormValue("issue_id"); issueID != "" {
-			params.IssueID = parseUUID(issueID)
+			params.IssueID = sql.NullString{String: issueID, Valid: true}
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
-			params.CommentID = parseUUID(commentID)
+			params.CommentID = sql.NullString{String: commentID, Valid: true}
 		}
 
 		att, err := h.Queries.CreateAttachment(r.Context(), params)
@@ -201,7 +205,7 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	attachments, err := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
-		IssueID:     issue.ID,
+		IssueID:     sql.NullString{String: issue.ID, Valid: true},
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
@@ -230,8 +234,8 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          parseUUID(attachmentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          attachmentID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
@@ -259,8 +263,8 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          parseUUID(attachmentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          attachmentID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
@@ -268,7 +272,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Only the uploader (or workspace admin) can delete
-	uploaderID := uuidToString(att.UploaderID)
+	uploaderID := att.UploaderID
 	isUploader := att.UploaderType == "member" && uploaderID == userID
 	member, hasMember := ctxMember(r.Context())
 	isAdmin := hasMember && (member.Role == "admin" || member.Role == "owner")
@@ -297,18 +301,37 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 // linkAttachmentsByIDs links the given attachment IDs to a comment.
 // Only updates attachments that belong to the same issue and have no comment_id yet.
-func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []string) {
-	uuids := make([]pgtype.UUID, len(ids))
-	for i, id := range ids {
-		uuids[i] = parseUUID(id)
-	}
+func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID string, ids []string) {
 	if err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
-		CommentID: commentID,
-		IssueID:   issueID,
-		Column3:   uuids,
+		CommentID: sql.NullString{String: commentID, Valid: true},
+		IssueID:   sql.NullString{String: issueID, Valid: true},
+		AttachmentIds: ids,
 	}); err != nil {
 		slog.Error("failed to link attachments to comment", "error", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// ServeFile — GET /api/files/{id}
+// MULTICA-LOCAL: Serves locally stored files.
+// ---------------------------------------------------------------------------
+
+func (h *Handler) ServeFile(w http.ResponseWriter, r *http.Request) {
+	fileKey := chi.URLParam(r, "id")
+	if fileKey == "" {
+		writeError(w, http.StatusBadRequest, "file id is required")
+		return
+	}
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		return
+	}
+	filePath := h.Storage.FilePath(fileKey)
+	if filePath == "" {
+		writeError(w, http.StatusNotFound, "file not found")
+		return
+	}
+	http.ServeFile(w, r, filePath)
 }
 
 // deleteS3Object removes a single file from S3 by its CDN URL.

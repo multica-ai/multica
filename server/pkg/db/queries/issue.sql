@@ -1,32 +1,32 @@
 -- name: ListIssues :many
 SELECT * FROM issue
-WHERE workspace_id = $1
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
-  AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
-  AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
+WHERE workspace_id = ?
+  AND (sqlc.narg('status') IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('priority') IS NULL OR priority = sqlc.narg('priority'))
+  AND (sqlc.narg('assignee_id') IS NULL OR assignee_id = sqlc.narg('assignee_id'))
 ORDER BY position ASC, created_at DESC
-LIMIT $2 OFFSET $3;
+LIMIT ? OFFSET ?;
 
 -- name: GetIssue :one
 SELECT * FROM issue
-WHERE id = $1;
+WHERE id = ?;
 
 -- name: GetIssueInWorkspace :one
 SELECT * FROM issue
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = ? AND workspace_id = ?;
 
 -- name: CreateIssue :one
 INSERT INTO issue (
-    workspace_id, title, description, status, priority,
+    id, workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, due_date, number
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
 SELECT * FROM issue
-WHERE workspace_id = $1 AND number = $2;
+WHERE workspace_id = ? AND number = ?;
 
 -- name: UpdateIssue :one
 UPDATE issue SET
@@ -38,16 +38,16 @@ UPDATE issue SET
     assignee_id = sqlc.narg('assignee_id'),
     position = COALESCE(sqlc.narg('position'), position),
     due_date = sqlc.narg('due_date'),
-    updated_at = now()
-WHERE id = $1
+    updated_at = datetime('now')
+WHERE id = ?
 RETURNING *;
 
 -- name: UpdateIssueStatus :one
 UPDATE issue SET
-    status = $2,
-    updated_at = now()
-WHERE id = $1
+    status = ?,
+    updated_at = datetime('now')
+WHERE id = ?
 RETURNING *;
 
 -- name: DeleteIssue :exec
-DELETE FROM issue WHERE id = $1;
+DELETE FROM issue WHERE id = ?;

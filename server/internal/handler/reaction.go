@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -23,12 +22,12 @@ type ReactionResponse struct {
 
 func reactionToResponse(r db.CommentReaction) ReactionResponse {
 	return ReactionResponse{
-		ID:        uuidToString(r.ID),
-		CommentID: uuidToString(r.CommentID),
+		ID:        r.ID,
+		CommentID: r.CommentID,
 		ActorType: r.ActorType,
-		ActorID:   uuidToString(r.ActorID),
+		ActorID:   r.ActorID,
 		Emoji:     r.Emoji,
-		CreatedAt: timestampToString(r.CreatedAt),
+		CreatedAt: r.CreatedAt,
 	}
 }
 
@@ -42,8 +41,8 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := resolveWorkspaceID(r)
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentId,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -65,10 +64,11 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	reaction, err := h.Queries.AddReaction(r.Context(), db.AddReactionParams{
+		ID:          newUUID(),
 		CommentID:   comment.ID,
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: workspaceID,
 		ActorType:   actorType,
-		ActorID:     parseUUID(actorID),
+		ActorID:     actorID,
 		Emoji:       req.Emoji,
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	resp := reactionToResponse(reaction)
 
 	// Look up issue title for inbox notifications.
-	issueID := uuidToString(comment.IssueID)
+	issueID := comment.IssueID
 	var issueTitle, issueStatus string
 	if issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID); err == nil {
 		issueTitle = issue.Title
@@ -92,9 +92,9 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 		"issue_id":            issueID,
 		"issue_title":         issueTitle,
 		"issue_status":        issueStatus,
-		"comment_id":          uuidToString(comment.ID),
+		"comment_id":          comment.ID,
 		"comment_author_type": comment.AuthorType,
-		"comment_author_id":   uuidToString(comment.AuthorID),
+		"comment_author_id":   comment.AuthorID,
 	})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -109,8 +109,8 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := resolveWorkspaceID(r)
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentId,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -134,7 +134,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	if err := h.Queries.RemoveReaction(r.Context(), db.RemoveReactionParams{
 		CommentID: comment.ID,
 		ActorType: actorType,
-		ActorID:   parseUUID(actorID),
+		ActorID:   actorID,
 		Emoji:     req.Emoji,
 	}); err != nil {
 		slog.Warn("remove reaction failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
@@ -144,7 +144,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 
 	h.publish(protocol.EventReactionRemoved, workspaceID, actorType, actorID, map[string]any{
 		"comment_id": commentId,
-		"issue_id":   uuidToString(comment.IssueID),
+		"issue_id":   comment.IssueID,
 		"emoji":      req.Emoji,
 		"actor_type": actorType,
 		"actor_id":   actorID,
@@ -153,7 +153,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 }
 
 // groupReactions fetches reactions for the given comment IDs and groups them by comment_id.
-func (h *Handler) groupReactions(r *http.Request, commentIDs []pgtype.UUID) map[string][]ReactionResponse {
+func (h *Handler) groupReactions(r *http.Request, commentIDs []string) map[string][]ReactionResponse {
 	if len(commentIDs) == 0 {
 		return nil
 	}
@@ -163,7 +163,7 @@ func (h *Handler) groupReactions(r *http.Request, commentIDs []pgtype.UUID) map[
 	}
 	grouped := make(map[string][]ReactionResponse, len(commentIDs))
 	for _, rx := range reactions {
-		cid := uuidToString(rx.CommentID)
+		cid := rx.CommentID
 		grouped[cid] = append(grouped[cid], reactionToResponse(rx))
 	}
 	return grouped

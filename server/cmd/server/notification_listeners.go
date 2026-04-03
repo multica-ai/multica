@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -53,7 +55,11 @@ func priorityLabel(p string) string {
 	return p
 }
 
-var emptyDetails = []byte("{}")
+var emptyDetails = sql.NullString{String: "{}", Valid: true}
+
+func detailsFromJSON(b []byte) sql.NullString {
+	return sql.NullString{String: string(b), Valid: true}
+}
 
 // parseMentions extracts mentions from markdown content.
 // Delegates to the shared util.ParseMentions and converts to the local type.
@@ -82,9 +88,9 @@ func notifySubscribers(
 	severity string,
 	title string,
 	body string,
-	details []byte,
+	details sql.NullString,
 ) {
-	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(issueID))
+	subs, err := queries.ListIssueSubscribers(ctx, issueID)
 	if err != nil {
 		slog.Error("failed to list subscribers for notification",
 			"issue_id", issueID, "error", err)
@@ -97,7 +103,7 @@ func notifySubscribers(
 			continue
 		}
 
-		subID := util.UUIDToString(sub.UserID)
+		subID := sub.UserID
 
 		// Skip the actor
 		if subID == e.ActorID {
@@ -110,16 +116,17 @@ func notifySubscribers(
 		}
 
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   parseUUID(workspaceID),
+			ID:            uuid.New().String(),
+			WorkspaceID:   workspaceID,
 			RecipientType: "member",
 			RecipientID:   sub.UserID,
 			Type:          notifType,
 			Severity:      severity,
-			IssueID:       parseUUID(issueID),
+			IssueID:       sql.NullString{String: issueID, Valid: issueID != ""},
 			Title:         title,
-			Body:          util.StrToText(body),
-			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			Body:          util.StrToNullString(body),
+			ActorType:     util.StrToNullString(e.ActorType),
+			ActorID:       sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 			Details:       details,
 		})
 		if err != nil {
@@ -156,7 +163,7 @@ func notifyDirect(
 	severity string,
 	title string,
 	body string,
-	details []byte,
+	details sql.NullString,
 ) {
 	// Skip if recipient is the actor
 	if recipientID == e.ActorID {
@@ -164,16 +171,17 @@ func notifyDirect(
 	}
 
 	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		ID:            uuid.New().String(),
+		WorkspaceID:   workspaceID,
 		RecipientType: recipientType,
-		RecipientID:   parseUUID(recipientID),
+		RecipientID:   recipientID,
 		Type:          notifType,
 		Severity:      severity,
-		IssueID:       parseUUID(issueID),
+		IssueID:       sql.NullString{String: issueID, Valid: issueID != ""},
 		Title:         title,
-		Body:          util.StrToText(body),
-		ActorType:     util.StrToText(e.ActorType),
-		ActorID:       parseUUID(e.ActorID),
+		Body:          util.StrToNullString(body),
+		ActorType:     util.StrToNullString(e.ActorType),
+		ActorID:       sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 		Details:       details,
 	})
 	if err != nil {
@@ -206,7 +214,7 @@ func notifyMentionedMembers(
 	issueStatus string,
 	title string,
 	skip map[string]bool,
-	details []byte,
+	details sql.NullString,
 ) {
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
@@ -224,12 +232,12 @@ func notifyMentionedMembers(
 
 	// If @all is present, expand to all workspace members.
 	if hasAll {
-		members, err := queries.ListMembers(context.Background(), parseUUID(e.WorkspaceID))
+		members, err := queries.ListMembers(context.Background(), e.WorkspaceID)
 		if err != nil {
 			slog.Error("failed to list members for @all mention", "workspace_id", e.WorkspaceID, "error", err)
 		} else {
 			for _, m := range members {
-				recipientIDs[util.UUIDToString(m.UserID)] = true
+				recipientIDs[m.UserID] = true
 			}
 		}
 	}
@@ -239,15 +247,16 @@ func notifyMentionedMembers(
 			continue
 		}
 		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
-			WorkspaceID:   parseUUID(e.WorkspaceID),
+			ID:            uuid.New().String(),
+			WorkspaceID:   e.WorkspaceID,
 			RecipientType: "member",
-			RecipientID:   parseUUID(id),
+			RecipientID:   id,
 			Type:          "mentioned",
 			Severity:      "info",
-			IssueID:       parseUUID(issueID),
+			IssueID:       sql.NullString{String: issueID, Valid: issueID != ""},
 			Title:         title,
-			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorType:     util.StrToNullString(e.ActorType),
+			ActorID:       sql.NullString{String: e.ActorID, Valid: e.ActorID != ""},
 			Details:       details,
 		})
 		if err != nil {
@@ -343,7 +352,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			if issue.AssigneeID != nil {
 				detailsMap["new_assignee_id"] = *issue.AssigneeID
 			}
-			assigneeDetails, _ := json.Marshal(detailsMap)
+			assigneeDetailsJSON, _ := json.Marshal(detailsMap)
+			assigneeDetails := detailsFromJSON(assigneeDetailsJSON)
 
 			// Direct: notify new assignee about assignment
 			if issue.AssigneeType != nil && issue.AssigneeID != nil {
@@ -386,26 +396,26 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		if statusChanged {
 			prevStatus, _ := payload["prev_status"].(string)
-			statusDetails, _ := json.Marshal(map[string]string{
+			statusDetailsJSON, _ := json.Marshal(map[string]string{
 				"from": prevStatus,
 				"to":   issue.Status,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",
 				issue.Title, "",
-				statusDetails)
+				detailsFromJSON(statusDetailsJSON))
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {
 			prevPriority, _ := payload["prev_priority"].(string)
-			priorityDetails, _ := json.Marshal(map[string]string{
+			priorityDetailsJSON, _ := json.Marshal(map[string]string{
 				"from": prevPriority,
 				"to":   issue.Priority,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "priority_changed", "info",
 				issue.Title, "",
-				priorityDetails)
+				detailsFromJSON(priorityDetailsJSON))
 		}
 
 		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
@@ -417,14 +427,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			if issue.DueDate != nil {
 				newDueDateStr = *issue.DueDate
 			}
-			dueDateDetails, _ := json.Marshal(map[string]string{
+			dueDateDetailsJSON, _ := json.Marshal(map[string]string{
 				"from": prevDueDateStr,
 				"to":   newDueDateStr,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "due_date_changed", "info",
 				issue.Title, "",
-				dueDateDetails)
+				detailsFromJSON(dueDateDetailsJSON))
 		}
 
 		// Notify NEW @mentions in description
@@ -479,9 +489,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		commentDetails := emptyDetails
 		if commentID != "" {
-			commentDetails, _ = json.Marshal(map[string]string{
+			b, _ := json.Marshal(map[string]string{
 				"comment_id": commentID,
 			})
+			commentDetails = detailsFromJSON(b)
 		}
 
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
@@ -520,7 +531,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		details, _ := json.Marshal(map[string]string{
+		detailsJSON, _ := json.Marshal(map[string]string{
 			"emoji": reaction.Emoji,
 		})
 
@@ -529,7 +540,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			e.WorkspaceID, e, issueID, issueStatus,
 			"reaction_added", "info",
 			issueTitle, "",
-			details,
+			detailsFromJSON(detailsJSON),
 		)
 	})
 
@@ -562,14 +573,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if commentID != "" {
 			detailsMap["comment_id"] = commentID
 		}
-		details, _ := json.Marshal(detailsMap)
+		detailsJSON, _ := json.Marshal(detailsMap)
 
 		notifyDirect(ctx, queries, bus,
 			commentAuthorType, commentAuthorID,
 			e.WorkspaceID, e, issueID, issueStatus,
 			"reaction_added", "info",
 			issueTitle, "",
-			details,
+			detailsFromJSON(detailsJSON),
 		)
 	})
 
@@ -587,7 +598,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+		issue, err := queries.GetIssue(ctx, issueID)
 		if err != nil {
 			slog.Error("task:failed notification: failed to get issue", "issue_id", issueID, "error", err)
 			return
@@ -614,21 +625,25 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 // inboxItemToResponse converts a db.InboxItem into a map suitable for
 // JSON-serializable event payloads (mirrors handler.inboxToResponse fields).
 func inboxItemToResponse(item db.InboxItem) map[string]any {
+	var details json.RawMessage
+	if item.Details.Valid {
+		details = json.RawMessage(item.Details.String)
+	}
 	return map[string]any{
-		"id":             util.UUIDToString(item.ID),
-		"workspace_id":   util.UUIDToString(item.WorkspaceID),
+		"id":             item.ID,
+		"workspace_id":   item.WorkspaceID,
 		"recipient_type": item.RecipientType,
-		"recipient_id":   util.UUIDToString(item.RecipientID),
+		"recipient_id":   item.RecipientID,
 		"type":           item.Type,
 		"severity":       item.Severity,
-		"issue_id":       util.UUIDToPtr(item.IssueID),
+		"issue_id":       util.NullStringToPtr(item.IssueID),
 		"title":          item.Title,
-		"body":           util.TextToPtr(item.Body),
-		"read":           item.Read,
-		"archived":       item.Archived,
-		"created_at":     util.TimestampToString(item.CreatedAt),
-		"actor_type":     util.TextToPtr(item.ActorType),
-		"actor_id":       util.UUIDToPtr(item.ActorID),
-		"details":        json.RawMessage(item.Details),
+		"body":           util.NullStringToPtr(item.Body),
+		"read":           item.Read != 0,
+		"archived":       item.Archived != 0,
+		"created_at":     item.CreatedAt,
+		"actor_type":     util.NullStringToPtr(item.ActorType),
+		"actor_id":       util.NullStringToPtr(item.ActorID),
+		"details":        details,
 	}
 }

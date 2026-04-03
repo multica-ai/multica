@@ -1,16 +1,19 @@
 package handler
 
+// MULTICA-LOCAL: Rewritten for SQLite (database/sql) instead of pgx.
+
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/google/uuid"
+
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -21,49 +24,35 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-type txStarter interface {
-	Begin(ctx context.Context) (pgx.Tx, error)
-}
-
-type dbExecutor interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
 type Handler struct {
 	Queries      *db.Queries
-	DB           dbExecutor
-	TxStarter    txStarter
+	DB           *sql.DB
 	Hub          *realtime.Hub
 	Bus          *events.Bus
 	TaskService  *service.TaskService
-	EmailService *service.EmailService
 	PingStore    *PingStore
 	UpdateStore  *UpdateStore
-	Storage      *storage.S3Storage
-	CFSigner     *auth.CloudFrontSigner
+	Storage      storage.Storage
+	CFSigner     *auth.CloudFrontSigner // nil in local mode
+	EmailService *service.EmailService  // nil in local mode
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 *storage.S3Storage, cfSigner *auth.CloudFrontSigner) *Handler {
-	var executor dbExecutor
-	if candidate, ok := txStarter.(dbExecutor); ok {
-		executor = candidate
-	}
-
+func New(queries *db.Queries, sqlDB *sql.DB, hub *realtime.Hub, bus *events.Bus, stor storage.Storage) *Handler {
 	return &Handler{
-		Queries:      queries,
-		DB:           executor,
-		TxStarter:    txStarter,
-		Hub:          hub,
-		Bus:          bus,
-		TaskService:  service.NewTaskService(queries, hub, bus),
-		EmailService: emailService,
-		PingStore:    NewPingStore(),
-		UpdateStore:  NewUpdateStore(),
-		Storage:      s3,
-		CFSigner:     cfSigner,
+		Queries:     queries,
+		DB:          sqlDB,
+		Hub:         hub,
+		Bus:         bus,
+		TaskService: service.NewTaskService(queries, hub, bus),
+		PingStore:   NewPingStore(),
+		UpdateStore: NewUpdateStore(),
+		Storage:     stor,
 	}
+}
+
+// newUUID generates a new UUID v4 string.
+func newUUID() string {
+	return uuid.New().String()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -76,15 +65,12 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// Thin wrappers around util functions (preserve existing handler code unchanged).
-func parseUUID(s string) pgtype.UUID       { return util.ParseUUID(s) }
-func uuidToString(u pgtype.UUID) string    { return util.UUIDToString(u) }
-func textToPtr(t pgtype.Text) *string      { return util.TextToPtr(t) }
-func ptrToText(s *string) pgtype.Text      { return util.PtrToText(s) }
-func strToText(s string) pgtype.Text       { return util.StrToText(s) }
-func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
-func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func uuidToPtr(u pgtype.UUID) *string      { return util.UUIDToPtr(u) }
+// SQLite type helpers — UUIDs and timestamps are plain strings, so most pgtype
+// wrappers are replaced by trivial pass-through or sql.NullString helpers.
+
+func nullStringToPtr(ns sql.NullString) *string { return util.NullStringToPtr(ns) }
+func ptrToNullString(s *string) sql.NullString   { return util.PtrToNullString(s) }
+func strToNullString(s string) sql.NullString     { return util.StrToNullString(s) }
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
@@ -98,12 +84,15 @@ func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, pay
 }
 
 func isNotFound(err error) bool {
-	return errors.Is(err, pgx.ErrNoRows)
+	return errors.Is(err, sql.ErrNoRows)
 }
 
 func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	if err == nil {
+		return false
+	}
+	// SQLite returns "UNIQUE constraint failed" for unique violations.
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func requestUserID(r *http.Request) string {
@@ -111,28 +100,22 @@ func requestUserID(r *http.Request) string {
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// If X-Agent-ID and X-Task-ID headers are both set, validates that the task
-// belongs to the claimed agent (defense-in-depth against manual header spoofing).
-// If only X-Agent-ID is set, validates that the agent belongs to the workspace.
-// Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID
 	}
 
-	// Validate the agent exists in the target workspace.
-	agent, err := h.Queries.GetAgent(r.Context(), parseUUID(agentID))
-	if err != nil || uuidToString(agent.WorkspaceID) != workspaceID {
-		slog.Debug("resolveActor: X-Agent-ID rejected, agent not found or workspace mismatch", "agent_id", agentID, "workspace_id", workspaceID)
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
+	if err != nil || agent.WorkspaceID != workspaceID {
+		slog.Debug("resolveActor: X-Agent-ID rejected", "agent_id", agentID, "workspace_id", workspaceID)
 		return "member", userID
 	}
 
-	// When X-Task-ID is provided, cross-check that the task belongs to this agent.
 	if taskID := r.Header.Get("X-Task-ID"); taskID != "" {
-		task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
-		if err != nil || uuidToString(task.AgentID) != agentID {
-			slog.Debug("resolveActor: X-Task-ID rejected, task not found or agent mismatch", "agent_id", agentID, "task_id", taskID)
+		task, err := h.Queries.GetAgentTask(r.Context(), taskID)
+		if err != nil || task.AgentID != agentID {
+			slog.Debug("resolveActor: X-Task-ID rejected", "agent_id", agentID, "task_id", taskID)
 			return "member", userID
 		}
 	}
@@ -150,7 +133,6 @@ func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func resolveWorkspaceID(r *http.Request) string {
-	// Prefer context value set by workspace middleware.
 	if id := middleware.WorkspaceIDFromContext(r.Context()); id != "" {
 		return id
 	}
@@ -161,17 +143,14 @@ func resolveWorkspaceID(r *http.Request) string {
 	return r.Header.Get("X-Workspace-ID")
 }
 
-// ctxMember returns the workspace member from context (set by workspace middleware).
 func ctxMember(ctx context.Context) (db.Member, bool) {
 	return middleware.MemberFromContext(ctx)
 }
 
-// ctxWorkspaceID returns the workspace ID from context (set by workspace middleware).
 func ctxWorkspaceID(ctx context.Context) string {
 	return middleware.WorkspaceIDFromContext(ctx)
 }
 
-// workspaceIDFromURL returns the workspace ID from context (preferred) or chi URL param (fallback).
 func workspaceIDFromURL(r *http.Request, param string) string {
 	if id := middleware.WorkspaceIDFromContext(r.Context()); id != "" {
 		return id
@@ -179,8 +158,6 @@ func workspaceIDFromURL(r *http.Request, param string) string {
 	return chi.URLParam(r, param)
 }
 
-// workspaceMember returns the member from middleware context, or falls back to a DB
-// lookup when the handler is called directly (e.g. in tests).
 func (h *Handler) workspaceMember(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
 	if m, ok := ctxMember(r.Context()); ok {
 		return m, true
@@ -209,8 +186,8 @@ func countOwners(members []db.Member) int {
 
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
 	return h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      parseUUID(userID),
-		WorkspaceID: parseUUID(workspaceID),
+		UserID:      userID,
+		WorkspaceID: workspaceID,
 	})
 }
 
@@ -257,14 +234,13 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		return db.Issue{}, false
 	}
 
-	// Try identifier format first (e.g., "JIA-42").
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
 		return issue, true
 	}
 
 	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-		ID:          parseUUID(issueID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          issueID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
@@ -273,7 +249,6 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	return issue, true
 }
 
-// resolveIssueByIdentifier tries to look up an issue by "PREFIX-NUMBER" format.
 func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID string) (db.Issue, bool) {
 	parts := splitIdentifier(id)
 	if parts == nil {
@@ -283,7 +258,7 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 		return db.Issue{}, false
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: workspaceID,
 		Number:      parts.number,
 	})
 	if err != nil {
@@ -294,7 +269,7 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 
 type identifierParts struct {
 	prefix string
-	number int32
+	number int64
 }
 
 func splitIdentifier(id string) *identifierParts {
@@ -319,13 +294,10 @@ func splitIdentifier(id string) *identifierParts {
 	if num <= 0 {
 		return nil
 	}
-	return &identifierParts{prefix: id[:idx], number: int32(num)}
+	return &identifierParts{prefix: id[:idx], number: int64(num)}
 }
 
-// getIssuePrefix fetches the issue_prefix for a workspace.
-// Falls back to generating a prefix from the workspace name if the stored
-// prefix is empty (e.g. workspaces created before the prefix was introduced).
-func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID string) string {
 	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ""
@@ -348,8 +320,8 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 	}
 
 	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          parseUUID(agentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          agentID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "agent not found")
@@ -371,15 +343,15 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	}
 
 	item, err := h.Queries.GetInboxItemInWorkspace(r.Context(), db.GetInboxItemInWorkspaceParams{
-		ID:          parseUUID(itemID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          itemID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "inbox item not found")
 		return db.InboxItem{}, false
 	}
 
-	if item.RecipientType != "member" || uuidToString(item.RecipientID) != userID {
+	if item.RecipientType != "member" || item.RecipientID != userID {
 		writeError(w, http.StatusNotFound, "inbox item not found")
 		return db.InboxItem{}, false
 	}

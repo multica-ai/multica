@@ -5,8 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -38,50 +39,50 @@ type AgentResponse struct {
 
 func agentToResponse(a db.Agent) AgentResponse {
 	var rc any
-	if a.RuntimeConfig != nil {
-		json.Unmarshal(a.RuntimeConfig, &rc)
+	if a.RuntimeConfig != "" {
+		json.Unmarshal([]byte(a.RuntimeConfig), &rc)
 	}
 	if rc == nil {
 		rc = map[string]any{}
 	}
 
 	var tools any
-	if a.Tools != nil {
-		json.Unmarshal(a.Tools, &tools)
+	if a.Tools != "" {
+		json.Unmarshal([]byte(a.Tools), &tools)
 	}
 	if tools == nil {
 		tools = []any{}
 	}
 
 	var triggers any
-	if a.Triggers != nil {
-		json.Unmarshal(a.Triggers, &triggers)
+	if a.Triggers != "" {
+		json.Unmarshal([]byte(a.Triggers), &triggers)
 	}
 	if triggers == nil {
 		triggers = []any{}
 	}
 
 	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
+		ID:                 a.ID,
+		WorkspaceID:        a.WorkspaceID,
+		RuntimeID:          a.RuntimeID,
 		Name:               a.Name,
 		Description:        a.Description,
 		Instructions:       a.Instructions,
-		AvatarURL:          textToPtr(a.AvatarUrl),
+		AvatarURL:          nullStringToPtr(a.AvatarUrl),
 		RuntimeMode:        a.RuntimeMode,
 		RuntimeConfig:      rc,
 		Visibility:         a.Visibility,
 		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		OwnerID:            uuidToPtr(a.OwnerID),
+		MaxConcurrentTasks: int32(a.MaxConcurrentTasks),
+		OwnerID:            nullStringToPtr(a.OwnerID),
 		Skills:             []SkillResponse{},
 		Tools:              tools,
 		Triggers:           triggers,
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		CreatedAt:          a.CreatedAt,
+		UpdatedAt:          a.UpdatedAt,
+		ArchivedAt:         nullStringToPtr(a.ArchivedAt),
+		ArchivedBy:         nullStringToPtr(a.ArchivedBy),
 	}
 }
 
@@ -124,23 +125,23 @@ type TaskAgentData struct {
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	var result any
-	if t.Result != nil {
-		json.Unmarshal(t.Result, &result)
+	if t.Result.Valid {
+		json.Unmarshal([]byte(t.Result.String), &result)
 	}
 	return AgentTaskResponse{
-		ID:           uuidToString(t.ID),
-		AgentID:      uuidToString(t.AgentID),
-		RuntimeID:    uuidToString(t.RuntimeID),
-		IssueID:      uuidToString(t.IssueID),
+		ID:           t.ID,
+		AgentID:      t.AgentID,
+		RuntimeID:    t.RuntimeID,
+		IssueID:      t.IssueID,
 		Status:       t.Status,
-		Priority:     t.Priority,
-		DispatchedAt: timestampToPtr(t.DispatchedAt),
-		StartedAt:    timestampToPtr(t.StartedAt),
-		CompletedAt:  timestampToPtr(t.CompletedAt),
+		Priority:     int32(t.Priority),
+		DispatchedAt: nullStringToPtr(t.DispatchedAt),
+		StartedAt:    nullStringToPtr(t.StartedAt),
+		CompletedAt:  nullStringToPtr(t.CompletedAt),
 		Result:       result,
-		Error:            textToPtr(t.Error),
-		CreatedAt:        timestampToString(t.CreatedAt),
-		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		Error:            nullStringToPtr(t.Error),
+		CreatedAt:        t.CreatedAt,
+		TriggerCommentID: nullStringToPtr(t.TriggerCommentID),
 	}
 }
 
@@ -153,9 +154,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	var agents []db.Agent
 	var err error
 	if r.URL.Query().Get("include_archived") == "true" {
-		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
+		agents, err = h.Queries.ListAllAgents(r.Context(), workspaceID)
 	} else {
-		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
+		agents, err = h.Queries.ListAgents(r.Context(), workspaceID)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
@@ -163,16 +164,16 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Batch-load skills for all agents to avoid N+1.
-	skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
 	skillMap := map[string][]SkillResponse{}
 	for _, row := range skillRows {
-		agentID := uuidToString(row.AgentID)
+		agentID := row.AgentID
 		skillMap[agentID] = append(skillMap[agentID], SkillResponse{
-			ID:          uuidToString(row.ID),
+			ID:          row.ID,
 			Name:        row.Name,
 			Description: row.Description,
 		})
@@ -255,8 +256,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          parseUUID(req.RuntimeID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          req.RuntimeID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
@@ -279,26 +280,27 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        parseUUID(workspaceID),
+		ID:                 newUUID(),
+		WorkspaceID:        workspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
 		Instructions:       req.Instructions,
-		AvatarUrl:          ptrToText(req.AvatarURL),
+		AvatarUrl:          ptrToNullString(req.AvatarURL),
 		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeConfig:      rc,
+		RuntimeConfig:      string(rc),
 		RuntimeID:          runtime.ID,
 		Visibility:         req.Visibility,
-		MaxConcurrentTasks: req.MaxConcurrentTasks,
-		OwnerID:            parseUUID(ownerID),
-		Tools:              tools,
-		Triggers:           triggers,
+		MaxConcurrentTasks: int64(req.MaxConcurrentTasks),
+		OwnerID:            sql.NullString{String: ownerID, Valid: true},
+		Tools:              string(tools),
+		Triggers:           string(triggers),
 	})
 	if err != nil {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(agent.ID), "name", agent.Name, "workspace_id", workspaceID)...)
+	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", agent.ID, "name", agent.Name, "workspace_id", workspaceID)...)
 
 	if runtime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), agent.ID)
@@ -331,13 +333,13 @@ type UpdateAgentRequest struct {
 // Only the agent owner or workspace owner/admin can manage any agent,
 // regardless of whether it is public or private.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
-	wsID := uuidToString(agent.WorkspaceID)
+	wsID := agent.WorkspaceID
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return false
 	}
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
+	isAgentOwner := agent.OwnerID.String == requestUserID(r)
 	if !isAdmin && !isAgentOwner {
 		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
 		return false
@@ -362,52 +364,52 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := db.UpdateAgentParams{
-		ID: parseUUID(id),
+		ID: id,
 	}
 	if req.Name != nil {
-		params.Name = pgtype.Text{String: *req.Name, Valid: true}
+		params.Name = sql.NullString{String: *req.Name, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = sql.NullString{String: *req.Description, Valid: true}
 	}
 	if req.Instructions != nil {
-		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
+		params.Instructions = sql.NullString{String: *req.Instructions, Valid: true}
 	}
 	if req.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
+		params.AvatarUrl = sql.NullString{String: *req.AvatarURL, Valid: true}
 	}
 	if req.RuntimeConfig != nil {
 		rc, _ := json.Marshal(req.RuntimeConfig)
-		params.RuntimeConfig = rc
+		params.RuntimeConfig = sql.NullString{String: string(rc), Valid: true}
 	}
 	if req.RuntimeID != nil {
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-			ID:          parseUUID(*req.RuntimeID),
+			ID:          *req.RuntimeID,
 			WorkspaceID: agent.WorkspaceID,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
-		params.RuntimeID = runtime.ID
-		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
+		params.RuntimeID = sql.NullString{String: runtime.ID, Valid: true}
+		params.RuntimeMode = sql.NullString{String: runtime.RuntimeMode, Valid: true}
 	}
 	if req.Visibility != nil {
-		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
+		params.Visibility = sql.NullString{String: *req.Visibility, Valid: true}
 	}
 	if req.Status != nil {
-		params.Status = pgtype.Text{String: *req.Status, Valid: true}
+		params.Status = sql.NullString{String: *req.Status, Valid: true}
 	}
 	if req.MaxConcurrentTasks != nil {
-		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
+		params.MaxConcurrentTasks = sql.NullInt64{Int64: int64(*req.MaxConcurrentTasks), Valid: true}
 	}
 	if req.Tools != nil {
 		tools, _ := json.Marshal(req.Tools)
-		params.Tools = tools
+		params.Tools = sql.NullString{String: string(tools), Valid: true}
 	}
 	if req.Triggers != nil {
 		triggers, _ := json.Marshal(req.Triggers)
-		params.Triggers = triggers
+		params.Triggers = sql.NullString{String: string(triggers), Valid: true}
 	}
 
 	agent, err := h.Queries.UpdateAgent(r.Context(), params)
@@ -418,10 +420,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(agent)
-	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(agent.WorkspaceID))...)
+	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", agent.WorkspaceID)...)
 	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
-	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
+	actorType, actorID := h.resolveActor(r, userID, agent.WorkspaceID)
+	h.publish(protocol.EventAgentStatus, agent.WorkspaceID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -441,8 +443,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	archived, err := h.Queries.ArchiveAgent(r.Context(), db.ArchiveAgentParams{
-		ID:         parseUUID(id),
-		ArchivedBy: parseUUID(userID),
+		ID:         id,
+		ArchivedBy: sql.NullString{String: userID, Valid: true},
 	})
 	if err != nil {
 		slog.Warn("archive agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -451,11 +453,11 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cancel all pending/active tasks for this agent.
-	if err := h.Queries.CancelAgentTasksByAgent(r.Context(), parseUUID(id)); err != nil {
+	if err := h.Queries.CancelAgentTasksByAgent(r.Context(), id); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 	}
 
-	wsID := uuidToString(archived.WorkspaceID)
+	wsID := archived.WorkspaceID
 	slog.Info("agent archived", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(archived)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
@@ -477,14 +479,14 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	restored, err := h.Queries.RestoreAgent(r.Context(), parseUUID(id))
+	restored, err := h.Queries.RestoreAgent(r.Context(), id)
 	if err != nil {
 		slog.Warn("restore agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to restore agent")
 		return
 	}
 
-	wsID := uuidToString(restored.WorkspaceID)
+	wsID := restored.WorkspaceID
 	slog.Info("agent restored", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(restored)
 	userID := requestUserID(r)
@@ -499,7 +501,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListAgentTasks(r.Context(), parseUUID(id))
+	tasks, err := h.Queries.ListAgentTasks(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return

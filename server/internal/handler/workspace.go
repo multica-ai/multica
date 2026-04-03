@@ -7,8 +7,9 @@ import (
 	"regexp"
 	"strings"
 
+	"database/sql"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -45,30 +46,30 @@ type WorkspaceResponse struct {
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	var settings any
-	if w.Settings != nil {
-		json.Unmarshal(w.Settings, &settings)
+	if w.Settings != "" {
+		json.Unmarshal([]byte(w.Settings), &settings)
 	}
 	if settings == nil {
 		settings = map[string]any{}
 	}
 	var repos any
-	if w.Repos != nil {
-		json.Unmarshal(w.Repos, &repos)
+	if w.Repos != "" {
+		json.Unmarshal([]byte(w.Repos), &repos)
 	}
 	if repos == nil {
 		repos = []any{}
 	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
+		ID:          w.ID,
 		Name:        w.Name,
 		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
+		Description: nullStringToPtr(w.Description),
+		Context:     nullStringToPtr(w.Context),
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		CreatedAt:   w.CreatedAt,
+		UpdatedAt:   w.UpdatedAt,
 	}
 }
 
@@ -82,11 +83,11 @@ type MemberResponse struct {
 
 func memberToResponse(m db.Member) MemberResponse {
 	return MemberResponse{
-		ID:          uuidToString(m.ID),
-		WorkspaceID: uuidToString(m.WorkspaceID),
-		UserID:      uuidToString(m.UserID),
+		ID:          m.ID,
+		WorkspaceID: m.WorkspaceID,
+		UserID:      m.UserID,
 		Role:        m.Role,
-		CreatedAt:   timestampToString(m.CreatedAt),
+		CreatedAt:   m.CreatedAt,
 	}
 }
 
@@ -96,7 +97,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaces, err := h.Queries.ListWorkspaces(r.Context(), parseUUID(userID))
+	workspaces, err := h.Queries.ListWorkspaces(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list workspaces")
 		return
@@ -113,7 +114,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := workspaceIDFromURL(r, "id")
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(id))
+	ws, err := h.Queries.GetWorkspace(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
@@ -148,12 +149,12 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer tx.Rollback()
 
 	issuePrefix := generateIssuePrefix(req.Name)
 	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
@@ -162,10 +163,11 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	qtx := h.Queries.WithTx(tx)
 	ws, err := qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
+		ID:          newUUID(),
 		Name:        req.Name,
 		Slug:        req.Slug,
-		Description: ptrToText(req.Description),
-		Context:     ptrToText(req.Context),
+		Description: ptrToNullString(req.Description),
+		Context:     ptrToNullString(req.Context),
 		IssuePrefix: issuePrefix,
 	})
 	if err != nil {
@@ -178,8 +180,9 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = qtx.CreateMember(r.Context(), db.CreateMemberParams{
+		ID:          newUUID(),
 		WorkspaceID: ws.ID,
-		UserID:      parseUUID(userID),
+		UserID:      userID,
 		Role:        "owner",
 	})
 	if err != nil {
@@ -187,12 +190,12 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
+	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
 
-	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
+	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", ws.ID, "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
 }
 
@@ -215,7 +218,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := db.UpdateWorkspaceParams{
-		ID: parseUUID(id),
+		ID: id,
 	}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -223,26 +226,26 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "name is required")
 			return
 		}
-		params.Name = pgtype.Text{String: name, Valid: true}
+		params.Name = sql.NullString{String: name, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = sql.NullString{String: *req.Description, Valid: true}
 	}
 	if req.Context != nil {
-		params.Context = pgtype.Text{String: *req.Context, Valid: true}
+		params.Context = sql.NullString{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
 		s, _ := json.Marshal(req.Settings)
-		params.Settings = s
+		params.Settings = sql.NullString{String: string(s), Valid: true}
 	}
 	if req.Repos != nil {
 		reposJSON, _ := json.Marshal(req.Repos)
-		params.Repos = reposJSON
+		params.Repos = sql.NullString{String: string(reposJSON), Valid: true}
 	}
 	if req.IssuePrefix != nil {
 		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
 		if prefix != "" {
-			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
+			params.IssuePrefix = sql.NullString{String: prefix, Valid: true}
 		}
 	}
 
@@ -266,7 +269,7 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	members, err := h.Queries.ListMembers(r.Context(), parseUUID(workspaceID))
+	members, err := h.Queries.ListMembers(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
@@ -294,7 +297,7 @@ type MemberWithUserResponse struct {
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
-	members, err := h.Queries.ListMembersWithUser(r.Context(), parseUUID(workspaceID))
+	members, err := h.Queries.ListMembersWithUser(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
@@ -303,14 +306,14 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	resp := make([]MemberWithUserResponse, len(members))
 	for i, m := range members {
 		resp[i] = MemberWithUserResponse{
-			ID:          uuidToString(m.ID),
-			WorkspaceID: uuidToString(m.WorkspaceID),
-			UserID:      uuidToString(m.UserID),
+			ID:          m.ID,
+			WorkspaceID: m.WorkspaceID,
+			UserID:      m.UserID,
 			Role:        m.Role,
-			CreatedAt:   timestampToString(m.CreatedAt),
+			CreatedAt:   m.CreatedAt,
 			Name:        m.UserName,
 			Email:       m.UserEmail,
-			AvatarURL:   textToPtr(m.UserAvatarUrl),
+			AvatarURL:   nullStringToPtr(m.UserAvatarUrl),
 		}
 	}
 
@@ -324,14 +327,14 @@ type CreateMemberRequest struct {
 
 func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
 	return MemberWithUserResponse{
-		ID:          uuidToString(member.ID),
-		WorkspaceID: uuidToString(member.WorkspaceID),
-		UserID:      uuidToString(member.UserID),
+		ID:          member.ID,
+		WorkspaceID: member.WorkspaceID,
+		UserID:      member.UserID,
 		Role:        member.Role,
-		CreatedAt:   timestampToString(member.CreatedAt),
+		CreatedAt:   member.CreatedAt,
 		Name:        user.Name,
 		Email:       user.Email,
-		AvatarURL:   textToPtr(user.AvatarUrl),
+		AvatarURL:   nullStringToPtr(user.AvatarUrl),
 	}
 }
 
@@ -383,6 +386,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		if isNotFound(err) {
 			// Auto-create user with email so they can be invited before signing up
 			user, err = h.Queries.CreateUser(r.Context(), db.CreateUserParams{
+				ID:    newUUID(),
 				Name:  email,
 				Email: email,
 			})
@@ -397,7 +401,8 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	member, err := h.Queries.CreateMember(r.Context(), db.CreateMemberParams{
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          newUUID(),
+		WorkspaceID: workspaceID,
 		UserID:      user.ID,
 		Role:        role,
 	})
@@ -411,10 +416,10 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
+	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", member.ID, "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)
 	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
-	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
+	if ws, err := h.Queries.GetWorkspace(r.Context(), workspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
 	h.publish(protocol.EventMemberAdded, workspaceID, "member", userID, eventPayload)
@@ -434,8 +439,8 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	memberID := chi.URLParam(r, "memberId")
-	target, err := h.Queries.GetMember(r.Context(), parseUUID(memberID))
-	if err != nil || uuidToString(target.WorkspaceID) != workspaceID {
+	target, err := h.Queries.GetMember(r.Context(), memberID)
+	if err != nil || target.WorkspaceID != workspaceID {
 		writeError(w, http.StatusNotFound, "member not found")
 		return
 	}
@@ -504,8 +509,8 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	memberID := chi.URLParam(r, "memberId")
-	target, err := h.Queries.GetMember(r.Context(), parseUUID(memberID))
-	if err != nil || uuidToString(target.WorkspaceID) != workspaceID {
+	target, err := h.Queries.GetMember(r.Context(), memberID)
+	if err != nil || target.WorkspaceID != workspaceID {
 		writeError(w, http.StatusNotFound, "member not found")
 		return
 	}
@@ -533,12 +538,12 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(target.ID), "workspace_id", workspaceID, "user_id", uuidToString(target.UserID))...)
+	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", target.ID, "workspace_id", workspaceID, "user_id", target.UserID)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
-		"member_id":    uuidToString(target.ID),
+		"member_id":    target.ID,
 		"workspace_id": workspaceID,
-		"user_id":      uuidToString(target.UserID),
+		"user_id":      target.UserID,
 	})
 
 	w.WriteHeader(http.StatusNoContent)
@@ -569,12 +574,12 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
+	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", member.ID, "workspace_id", workspaceID, "user_id", member.UserID)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
-		"member_id":    uuidToString(member.ID),
+		"member_id":    member.ID,
 		"workspace_id": workspaceID,
-		"user_id":      uuidToString(member.UserID),
+		"user_id":      member.UserID,
 	})
 
 	w.WriteHeader(http.StatusNoContent)
@@ -583,7 +588,7 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
-	if err := h.Queries.DeleteWorkspace(r.Context(), parseUUID(workspaceID)); err != nil {
+	if err := h.Queries.DeleteWorkspace(r.Context(), workspaceID); err != nil {
 		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return

@@ -7,45 +7,46 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"database/sql"
 )
 
 const countComments = `-- name: CountComments :one
 SELECT count(*) FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = ? AND workspace_id = ?
 `
 
 type CountCommentsParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countComments, arg.IssueID, arg.WorkspaceID)
+	row := q.db.QueryRowContext(ctx, countComments, arg.IssueID, arg.WorkspaceID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const createComment = `-- name: CreateComment :one
-INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id
+INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?8)
+RETURNING id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at
 `
 
 type CreateCommentParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AuthorType  string      `json:"author_type"`
-	AuthorID    pgtype.UUID `json:"author_id"`
-	Content     string      `json:"content"`
-	Type        string      `json:"type"`
-	ParentID    pgtype.UUID `json:"parent_id"`
+	ID          string         `json:"id"`
+	IssueID     string         `json:"issue_id"`
+	WorkspaceID string         `json:"workspace_id"`
+	AuthorType  string         `json:"author_type"`
+	AuthorID    string         `json:"author_id"`
+	Content     string         `json:"content"`
+	Type        string         `json:"type"`
+	ParentID    sql.NullString `json:"parent_id"`
 }
 
 func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error) {
-	row := q.db.QueryRow(ctx, createComment,
+	row := q.db.QueryRowContext(ctx, createComment,
+		arg.ID,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.AuthorType,
@@ -58,91 +59,91 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
+		&i.WorkspaceID,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Content,
 		&i.Type,
+		&i.ParentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.ParentID,
-		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const deleteComment = `-- name: DeleteComment :exec
-DELETE FROM comment WHERE id = $1
+DELETE FROM comment WHERE id = ?
 `
 
-func (q *Queries) DeleteComment(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteComment, id)
+func (q *Queries) DeleteComment(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteComment, id)
 	return err
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE id = $1
+SELECT id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at FROM comment
+WHERE id = ?
 `
 
-func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, error) {
-	row := q.db.QueryRow(ctx, getComment, id)
+func (q *Queries) GetComment(ctx context.Context, id string) (Comment, error) {
+	row := q.db.QueryRowContext(ctx, getComment, id)
 	var i Comment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
+		&i.WorkspaceID,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Content,
 		&i.Type,
+		&i.ParentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.ParentID,
-		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE id = $1 AND workspace_id = $2
+SELECT id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at FROM comment
+WHERE id = ? AND workspace_id = ?
 `
 
 type GetCommentInWorkspaceParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWorkspaceParams) (Comment, error) {
-	row := q.db.QueryRow(ctx, getCommentInWorkspace, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRowContext(ctx, getCommentInWorkspace, arg.ID, arg.WorkspaceID)
 	var i Comment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
+		&i.WorkspaceID,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Content,
 		&i.Type,
+		&i.ParentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.ParentID,
-		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const listComments = `-- name: ListComments :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+SELECT id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at FROM comment
+WHERE issue_id = ? AND workspace_id = ?
 ORDER BY created_at ASC
 `
 
 type ListCommentsParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 func (q *Queries) ListComments(ctx context.Context, arg ListCommentsParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listComments, arg.IssueID, arg.WorkspaceID)
+	rows, err := q.db.QueryContext(ctx, listComments, arg.IssueID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,18 +154,21 @@ func (q *Queries) ListComments(ctx context.Context, arg ListCommentsParams) ([]C
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
+			&i.WorkspaceID,
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.Content,
 			&i.Type,
+			&i.ParentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -173,21 +177,21 @@ func (q *Queries) ListComments(ctx context.Context, arg ListCommentsParams) ([]C
 }
 
 const listCommentsPaginated = `-- name: ListCommentsPaginated :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+SELECT id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at FROM comment
+WHERE issue_id = ? AND workspace_id = ?
 ORDER BY created_at ASC
-LIMIT $3 OFFSET $4
+LIMIT ? OFFSET ?
 `
 
 type ListCommentsPaginatedParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Limit       int32       `json:"limit"`
-	Offset      int32       `json:"offset"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Limit       int64  `json:"limit"`
+	Offset      int64  `json:"offset"`
 }
 
 func (q *Queries) ListCommentsPaginated(ctx context.Context, arg ListCommentsPaginatedParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsPaginated,
+	rows, err := q.db.QueryContext(ctx, listCommentsPaginated,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.Limit,
@@ -203,18 +207,21 @@ func (q *Queries) ListCommentsPaginated(ctx context.Context, arg ListCommentsPag
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
+			&i.WorkspaceID,
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.Content,
 			&i.Type,
+			&i.ParentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -223,19 +230,19 @@ func (q *Queries) ListCommentsPaginated(ctx context.Context, arg ListCommentsPag
 }
 
 const listCommentsSince = `-- name: ListCommentsSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
+SELECT id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at FROM comment
+WHERE issue_id = ? AND workspace_id = ? AND created_at > ?
 ORDER BY created_at ASC
 `
 
 type ListCommentsSinceParams struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func (q *Queries) ListCommentsSince(ctx context.Context, arg ListCommentsSinceParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsSince, arg.IssueID, arg.WorkspaceID, arg.CreatedAt)
+	rows, err := q.db.QueryContext(ctx, listCommentsSince, arg.IssueID, arg.WorkspaceID, arg.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -246,18 +253,21 @@ func (q *Queries) ListCommentsSince(ctx context.Context, arg ListCommentsSincePa
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
+			&i.WorkspaceID,
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.Content,
 			&i.Type,
+			&i.ParentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -266,22 +276,22 @@ func (q *Queries) ListCommentsSince(ctx context.Context, arg ListCommentsSincePa
 }
 
 const listCommentsSincePaginated = `-- name: ListCommentsSincePaginated :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
+SELECT id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at FROM comment
+WHERE issue_id = ? AND workspace_id = ? AND created_at > ?
 ORDER BY created_at ASC
-LIMIT $4 OFFSET $5
+LIMIT ? OFFSET ?
 `
 
 type ListCommentsSincePaginatedParams struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	Limit       int32              `json:"limit"`
-	Offset      int32              `json:"offset"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
+	CreatedAt   string `json:"created_at"`
+	Limit       int64  `json:"limit"`
+	Offset      int64  `json:"offset"`
 }
 
 func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommentsSincePaginatedParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsSincePaginated,
+	rows, err := q.db.QueryContext(ctx, listCommentsSincePaginated,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.CreatedAt,
@@ -298,18 +308,21 @@ func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommen
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
+			&i.WorkspaceID,
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.Content,
 			&i.Type,
+			&i.ParentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -319,31 +332,31 @@ func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommen
 
 const updateComment = `-- name: UpdateComment :one
 UPDATE comment SET
-    content = $2,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id
+    content = ?,
+    updated_at = datetime('now')
+WHERE id = ?
+RETURNING id, issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at, updated_at
 `
 
 type UpdateCommentParams struct {
-	ID      pgtype.UUID `json:"id"`
-	Content string      `json:"content"`
+	Content string `json:"content"`
+	ID      string `json:"id"`
 }
 
 func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error) {
-	row := q.db.QueryRow(ctx, updateComment, arg.ID, arg.Content)
+	row := q.db.QueryRowContext(ctx, updateComment, arg.Content, arg.ID)
 	var i Comment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
+		&i.WorkspaceID,
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.Content,
 		&i.Type,
+		&i.ParentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.ParentID,
-		&i.WorkspaceID,
 	)
 	return i, err
 }

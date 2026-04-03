@@ -7,25 +7,23 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addIssueSubscriber = `-- name: AddIssueSubscriber :exec
 INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason)
-VALUES ($1, $2, $3, $4)
+VALUES (?, ?, ?, ?)
 ON CONFLICT (issue_id, user_type, user_id) DO NOTHING
 `
 
 type AddIssueSubscriberParams struct {
-	IssueID  pgtype.UUID `json:"issue_id"`
-	UserType string      `json:"user_type"`
-	UserID   pgtype.UUID `json:"user_id"`
-	Reason   string      `json:"reason"`
+	IssueID  string `json:"issue_id"`
+	UserType string `json:"user_type"`
+	UserID   string `json:"user_id"`
+	Reason   string `json:"reason"`
 }
 
 func (q *Queries) AddIssueSubscriber(ctx context.Context, arg AddIssueSubscriberParams) error {
-	_, err := q.db.Exec(ctx, addIssueSubscriber,
+	_, err := q.db.ExecContext(ctx, addIssueSubscriber,
 		arg.IssueID,
 		arg.UserType,
 		arg.UserID,
@@ -37,31 +35,31 @@ func (q *Queries) AddIssueSubscriber(ctx context.Context, arg AddIssueSubscriber
 const isIssueSubscriber = `-- name: IsIssueSubscriber :one
 SELECT EXISTS(
     SELECT 1 FROM issue_subscriber
-    WHERE issue_id = $1 AND user_type = $2 AND user_id = $3
+    WHERE issue_id = ? AND user_type = ? AND user_id = ?
 ) AS subscribed
 `
 
 type IsIssueSubscriberParams struct {
-	IssueID  pgtype.UUID `json:"issue_id"`
-	UserType string      `json:"user_type"`
-	UserID   pgtype.UUID `json:"user_id"`
+	IssueID  string `json:"issue_id"`
+	UserType string `json:"user_type"`
+	UserID   string `json:"user_id"`
 }
 
-func (q *Queries) IsIssueSubscriber(ctx context.Context, arg IsIssueSubscriberParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isIssueSubscriber, arg.IssueID, arg.UserType, arg.UserID)
-	var subscribed bool
+func (q *Queries) IsIssueSubscriber(ctx context.Context, arg IsIssueSubscriberParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isIssueSubscriber, arg.IssueID, arg.UserType, arg.UserID)
+	var subscribed int64
 	err := row.Scan(&subscribed)
 	return subscribed, err
 }
 
 const listIssueSubscribers = `-- name: ListIssueSubscribers :many
 SELECT issue_id, user_type, user_id, reason, created_at FROM issue_subscriber
-WHERE issue_id = $1
+WHERE issue_id = ?
 ORDER BY created_at
 `
 
-func (q *Queries) ListIssueSubscribers(ctx context.Context, issueID pgtype.UUID) ([]IssueSubscriber, error) {
-	rows, err := q.db.Query(ctx, listIssueSubscribers, issueID)
+func (q *Queries) ListIssueSubscribers(ctx context.Context, issueID string) ([]IssueSubscriber, error) {
+	rows, err := q.db.QueryContext(ctx, listIssueSubscribers, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +78,9 @@ func (q *Queries) ListIssueSubscribers(ctx context.Context, issueID pgtype.UUID)
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -88,16 +89,16 @@ func (q *Queries) ListIssueSubscribers(ctx context.Context, issueID pgtype.UUID)
 
 const removeIssueSubscriber = `-- name: RemoveIssueSubscriber :exec
 DELETE FROM issue_subscriber
-WHERE issue_id = $1 AND user_type = $2 AND user_id = $3
+WHERE issue_id = ? AND user_type = ? AND user_id = ?
 `
 
 type RemoveIssueSubscriberParams struct {
-	IssueID  pgtype.UUID `json:"issue_id"`
-	UserType string      `json:"user_type"`
-	UserID   pgtype.UUID `json:"user_id"`
+	IssueID  string `json:"issue_id"`
+	UserType string `json:"user_type"`
+	UserID   string `json:"user_id"`
 }
 
 func (q *Queries) RemoveIssueSubscriber(ctx context.Context, arg RemoveIssueSubscriberParams) error {
-	_, err := q.db.Exec(ctx, removeIssueSubscriber, arg.IssueID, arg.UserType, arg.UserID)
+	_, err := q.db.ExecContext(ctx, removeIssueSubscriber, arg.IssueID, arg.UserType, arg.UserID)
 	return err
 }

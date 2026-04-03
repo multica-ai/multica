@@ -7,28 +7,29 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"database/sql"
 )
 
 const createTaskMessage = `-- name: CreateTaskMessage :one
-INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, task_id, seq, type, tool, content, input, output, created_at
 `
 
 type CreateTaskMessageParams struct {
-	TaskID  pgtype.UUID `json:"task_id"`
-	Seq     int32       `json:"seq"`
-	Type    string      `json:"type"`
-	Tool    pgtype.Text `json:"tool"`
-	Content pgtype.Text `json:"content"`
-	Input   []byte      `json:"input"`
-	Output  pgtype.Text `json:"output"`
+	ID      string         `json:"id"`
+	TaskID  string         `json:"task_id"`
+	Seq     int64          `json:"seq"`
+	Type    string         `json:"type"`
+	Tool    sql.NullString `json:"tool"`
+	Content sql.NullString `json:"content"`
+	Input   sql.NullString `json:"input"`
+	Output  sql.NullString `json:"output"`
 }
 
 func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (TaskMessage, error) {
-	row := q.db.QueryRow(ctx, createTaskMessage,
+	row := q.db.QueryRowContext(ctx, createTaskMessage,
+		arg.ID,
 		arg.TaskID,
 		arg.Seq,
 		arg.Type,
@@ -54,22 +55,22 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 
 const deleteTaskMessages = `-- name: DeleteTaskMessages :exec
 DELETE FROM task_message
-WHERE task_id = $1
+WHERE task_id = ?
 `
 
-func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteTaskMessages, taskID)
+func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID string) error {
+	_, err := q.db.ExecContext(ctx, deleteTaskMessages, taskID)
 	return err
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
 SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
-WHERE task_id = $1
+WHERE task_id = ?
 ORDER BY seq ASC
 `
 
-func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]TaskMessage, error) {
-	rows, err := q.db.Query(ctx, listTaskMessages, taskID)
+func (q *Queries) ListTaskMessages(ctx context.Context, taskID string) ([]TaskMessage, error) {
+	rows, err := q.db.QueryContext(ctx, listTaskMessages, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +92,9 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -100,17 +104,17 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
 SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
-WHERE task_id = $1 AND seq > $2
+WHERE task_id = ? AND seq > ?
 ORDER BY seq ASC
 `
 
 type ListTaskMessagesSinceParams struct {
-	TaskID pgtype.UUID `json:"task_id"`
-	Seq    int32       `json:"seq"`
+	TaskID string `json:"task_id"`
+	Seq    int64  `json:"seq"`
 }
 
 func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessagesSinceParams) ([]TaskMessage, error) {
-	rows, err := q.db.Query(ctx, listTaskMessagesSince, arg.TaskID, arg.Seq)
+	rows, err := q.db.QueryContext(ctx, listTaskMessagesSince, arg.TaskID, arg.Seq)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +136,9 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

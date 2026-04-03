@@ -22,12 +22,12 @@ type IssueReactionResponse struct {
 
 func issueReactionToResponse(r db.IssueReaction) IssueReactionResponse {
 	return IssueReactionResponse{
-		ID:        uuidToString(r.ID),
-		IssueID:   uuidToString(r.IssueID),
+		ID:        r.ID,
+		IssueID:   r.IssueID,
 		ActorType: r.ActorType,
-		ActorID:   uuidToString(r.ActorID),
+		ActorID:   r.ActorID,
 		Emoji:     r.Emoji,
-		CreatedAt: timestampToString(r.CreatedAt),
+		CreatedAt: r.CreatedAt,
 	}
 }
 
@@ -55,14 +55,15 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
+	workspaceID := issue.WorkspaceID
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	reaction, err := h.Queries.AddIssueReaction(r.Context(), db.AddIssueReactionParams{
+		ID:          newUUID(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		ActorType:   actorType,
-		ActorID:     parseUUID(actorID),
+		ActorID:     actorID,
 		Emoji:       req.Emoji,
 	})
 	if err != nil {
@@ -74,11 +75,11 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 	resp := issueReactionToResponse(reaction)
 	h.publish(protocol.EventIssueReactionAdded, workspaceID, actorType, actorID, map[string]any{
 		"reaction":     resp,
-		"issue_id":     uuidToString(issue.ID),
+		"issue_id":     issue.ID,
 		"issue_title":  issue.Title,
 		"issue_status": issue.Status,
 		"creator_type": issue.CreatorType,
-		"creator_id":   uuidToString(issue.CreatorID),
+		"creator_id":   issue.CreatorID,
 	})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -107,13 +108,13 @@ func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
+	workspaceID := issue.WorkspaceID
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	if err := h.Queries.RemoveIssueReaction(r.Context(), db.RemoveIssueReactionParams{
 		IssueID:   issue.ID,
 		ActorType: actorType,
-		ActorID:   parseUUID(actorID),
+		ActorID:   actorID,
 		Emoji:     req.Emoji,
 	}); err != nil {
 		slog.Warn("remove issue reaction failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
@@ -122,7 +123,7 @@ func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publish(protocol.EventIssueReactionRemoved, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(issue.ID),
+		"issue_id":   issue.ID,
 		"emoji":      req.Emoji,
 		"actor_type": actorType,
 		"actor_id":   actorID,

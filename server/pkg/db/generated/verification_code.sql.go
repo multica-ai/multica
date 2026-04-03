@@ -7,24 +7,28 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createVerificationCode = `-- name: CreateVerificationCode :one
-INSERT INTO verification_code (email, code, expires_at)
-VALUES ($1, $2, $3)
-RETURNING id, email, code, expires_at, used, created_at, attempts
+INSERT INTO verification_code (id, email, code, expires_at)
+VALUES (?, ?, ?, ?)
+RETURNING id, email, code, expires_at, used, attempts, created_at
 `
 
 type CreateVerificationCodeParams struct {
-	Email     string             `json:"email"`
-	Code      string             `json:"code"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	ID        string `json:"id"`
+	Email     string `json:"email"`
+	Code      string `json:"code"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 func (q *Queries) CreateVerificationCode(ctx context.Context, arg CreateVerificationCodeParams) (VerificationCode, error) {
-	row := q.db.QueryRow(ctx, createVerificationCode, arg.Email, arg.Code, arg.ExpiresAt)
+	row := q.db.QueryRowContext(ctx, createVerificationCode,
+		arg.ID,
+		arg.Email,
+		arg.Code,
+		arg.ExpiresAt,
+	)
 	var i VerificationCode
 	err := row.Scan(
 		&i.ID,
@@ -32,31 +36,31 @@ func (q *Queries) CreateVerificationCode(ctx context.Context, arg CreateVerifica
 		&i.Code,
 		&i.ExpiresAt,
 		&i.Used,
-		&i.CreatedAt,
 		&i.Attempts,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const deleteExpiredVerificationCodes = `-- name: DeleteExpiredVerificationCodes :exec
 DELETE FROM verification_code
-WHERE expires_at < now() - interval '1 hour'
+WHERE expires_at < datetime('now', '-1 hour')
 `
 
 func (q *Queries) DeleteExpiredVerificationCodes(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredVerificationCodes)
+	_, err := q.db.ExecContext(ctx, deleteExpiredVerificationCodes)
 	return err
 }
 
 const getLatestCodeByEmail = `-- name: GetLatestCodeByEmail :one
-SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code
-WHERE email = $1
+SELECT id, email, code, expires_at, used, attempts, created_at FROM verification_code
+WHERE email = ?
 ORDER BY created_at DESC
 LIMIT 1
 `
 
 func (q *Queries) GetLatestCodeByEmail(ctx context.Context, email string) (VerificationCode, error) {
-	row := q.db.QueryRow(ctx, getLatestCodeByEmail, email)
+	row := q.db.QueryRowContext(ctx, getLatestCodeByEmail, email)
 	var i VerificationCode
 	err := row.Scan(
 		&i.ID,
@@ -64,24 +68,24 @@ func (q *Queries) GetLatestCodeByEmail(ctx context.Context, email string) (Verif
 		&i.Code,
 		&i.ExpiresAt,
 		&i.Used,
-		&i.CreatedAt,
 		&i.Attempts,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getLatestVerificationCode = `-- name: GetLatestVerificationCode :one
-SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code
-WHERE email = $1
-  AND used = FALSE
-  AND expires_at > now()
+SELECT id, email, code, expires_at, used, attempts, created_at FROM verification_code
+WHERE email = ?
+  AND used = 0
+  AND expires_at > datetime('now')
   AND attempts < 5
 ORDER BY created_at DESC
 LIMIT 1
 `
 
 func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (VerificationCode, error) {
-	row := q.db.QueryRow(ctx, getLatestVerificationCode, email)
+	row := q.db.QueryRowContext(ctx, getLatestVerificationCode, email)
 	var i VerificationCode
 	err := row.Scan(
 		&i.ID,
@@ -89,8 +93,8 @@ func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (
 		&i.Code,
 		&i.ExpiresAt,
 		&i.Used,
-		&i.CreatedAt,
 		&i.Attempts,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -98,21 +102,21 @@ func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (
 const incrementVerificationCodeAttempts = `-- name: IncrementVerificationCodeAttempts :exec
 UPDATE verification_code
 SET attempts = attempts + 1
-WHERE id = $1
+WHERE id = ?
 `
 
-func (q *Queries) IncrementVerificationCodeAttempts(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, incrementVerificationCodeAttempts, id)
+func (q *Queries) IncrementVerificationCodeAttempts(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, incrementVerificationCodeAttempts, id)
 	return err
 }
 
 const markVerificationCodeUsed = `-- name: MarkVerificationCodeUsed :exec
 UPDATE verification_code
-SET used = TRUE
-WHERE id = $1
+SET used = 1
+WHERE id = ?
 `
 
-func (q *Queries) MarkVerificationCodeUsed(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markVerificationCodeUsed, id)
+func (q *Queries) MarkVerificationCodeUsed(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, markVerificationCodeUsed, id)
 	return err
 }
