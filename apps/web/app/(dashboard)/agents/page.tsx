@@ -1688,7 +1688,7 @@ export default function AgentsPage() {
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived ? "No archived agents" : "No agents yet"}
+                {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
               </p>
               {!showArchived && (
                 <Button
