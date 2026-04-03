@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   Bot,
@@ -29,6 +29,7 @@ import {
   Lock,
   Settings,
   Camera,
+  Archive,
 } from "lucide-react";
 import type {
   Agent,
@@ -1546,6 +1547,7 @@ export default function AgentsPage() {
   const agents = useWorkspaceStore((s) => s.agents);
   const refreshAgents = useWorkspaceStore((s) => s.refreshAgents);
   const [selectedId, setSelectedId] = useState<string>("");
+  const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const runtimes = useRuntimeStore((s) => s.runtimes);
   const fetchRuntimes = useRuntimeStore((s) => s.fetchRuntimes);
@@ -1557,12 +1559,19 @@ export default function AgentsPage() {
     if (workspace) fetchRuntimes();
   }, [workspace, fetchRuntimes]);
 
-  // Select first agent on initial load
+  const filteredAgents = useMemo(
+    () => showArchived ? agents.filter((a) => !!a.archived_at) : agents.filter((a) => !a.archived_at),
+    [agents, showArchived],
+  );
+
+  const archivedCount = useMemo(() => agents.filter((a) => !!a.archived_at).length, [agents]);
+
+  // Select first agent on initial load or when filter changes
   useEffect(() => {
-    if (agents.length > 0 && !selectedId) {
-      setSelectedId(agents[0]!.id);
+    if (filteredAgents.length > 0 && !filteredAgents.some((a) => a.id === selectedId)) {
+      setSelectedId(filteredAgents[0]!.id);
     }
-  }, [agents, selectedId]);
+  }, [filteredAgents, selectedId]);
 
   const handleCreate = async (data: CreateAgentRequest) => {
     const agent = await api.createAgent(data);
@@ -1655,30 +1664,46 @@ export default function AgentsPage() {
         <div className="overflow-y-auto h-full border-r">
           <div className="flex h-12 items-center justify-between border-b px-4">
             <h1 className="text-sm font-semibold">Agents</h1>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => setShowCreate(true)}
-            >
-              <Plus className="h-4 w-4 text-muted-foreground" />
-            </Button>
+            <div className="flex items-center gap-1">
+              {archivedCount > 0 && (
+                <Button
+                  variant={showArchived ? "secondary" : "ghost"}
+                  size="icon-xs"
+                  onClick={() => setShowArchived(!showArchived)}
+                  title={showArchived ? "Show active agents" : "Show archived agents"}
+                >
+                  <Archive className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setShowCreate(true)}
+              >
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
           </div>
-          {agents.length === 0 ? (
+          {filteredAgents.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No agents yet</p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Agent
-              </Button>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {showArchived ? "No archived agents" : "No agents yet"}
+              </p>
+              {!showArchived && (
+                <Button
+                  onClick={() => setShowCreate(true)}
+                  size="xs"
+                  className="mt-3"
+                >
+                  <Plus className="h-3 w-3" />
+                  Create Agent
+                </Button>
+              )}
             </div>
           ) : (
             <div className="divide-y">
-              {agents.map((agent) => (
+              {filteredAgents.map((agent) => (
                 <AgentListItem
                   key={agent.id}
                   agent={agent}
