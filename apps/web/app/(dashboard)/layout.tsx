@@ -7,6 +7,7 @@ import { useNavigationStore } from "@/features/navigation";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
+import { SearchCommand } from "@/features/search";
 import { AppSidebar } from "./_components/app-sidebar";
 
 export default function DashboardLayout({
@@ -52,6 +53,7 @@ export default function DashboardLayout({
           </div>
         )}
       </SidebarInset>
+      <SearchCommand />
     </SidebarProvider>
   );
 }

@@ -35,6 +35,8 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  SearchParams,
+  SearchResponse,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -203,6 +205,14 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds }),
     });
+  }
+
+  // Search
+  async search(params: SearchParams): Promise<SearchResponse> {
+    const search = new URLSearchParams();
+    search.set("q", params.q);
+    if (params.limit) search.set("limit", String(params.limit));
+    return this.fetch(`/api/search?${search}`);
   }
 
   // Comments

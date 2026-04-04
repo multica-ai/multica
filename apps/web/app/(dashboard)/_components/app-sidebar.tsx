@@ -15,6 +15,7 @@ import {
   BookOpenText,
   SquarePen,
   CircleUser,
+  Search,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
@@ -44,6 +45,7 @@ import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useInboxStore } from "@/features/inbox";
 import { useModalStore } from "@/features/modals";
+import { useSearchCommandStore } from "@/features/search";
 
 const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
@@ -173,6 +175,18 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => useSearchCommandStore.getState().toggle()}
+                    className="text-muted-foreground hover:bg-sidebar-accent/70"
+                  >
+                    <Search />
+                    <span>Search</span>
+                    <kbd className="ml-auto inline-flex h-5 items-center gap-0.5 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+                      <span className="text-xs">⌘</span>K
+                    </kbd>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
                 {primaryNav.map((item) => {
                   const isActive = pathname === item.href;
                   return (

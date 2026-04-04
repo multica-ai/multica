@@ -76,3 +76,24 @@ export interface PaginationParams {
   limit?: number;
   offset?: number;
 }
+
+// Search
+export interface SearchParams {
+  q: string;
+  limit?: number;
+}
+
+export interface SearchIssueResult {
+  id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  assignee_type: string | null;
+  assignee_id: string | null;
+}
+
+export interface SearchResponse {
+  issues: SearchIssueResult[];
+}
