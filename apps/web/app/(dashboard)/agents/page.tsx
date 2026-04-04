@@ -1437,7 +1437,7 @@ function AgentDetail({
             >
               <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="w-auto">
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={() => setConfirmArchive(true)}
