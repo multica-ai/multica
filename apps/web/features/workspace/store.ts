@@ -5,6 +5,7 @@ import type { Workspace, MemberWithUser, Agent, Skill } from "@/shared/types";
 import { useIssueStore } from "@/features/issues";
 import { useInboxStore } from "@/features/inbox";
 import { useRuntimeStore } from "@/features/runtimes";
+import { useProjectStore } from "@/features/projects";
 import { toast } from "sonner";
 import { api } from "@/shared/api";
 import { createLogger } from "@/shared/logger";
@@ -90,6 +91,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       api.listSkills().catch(() => [] as Skill[]),
       useIssueStore.getState().fetch().catch(() => {}),
       useInboxStore.getState().fetch().catch(() => {}),
+      useProjectStore.getState().fetch().catch(() => {}),
     ]);
     logger.info("hydrate complete", "members:", nextMembers.length, "agents:", nextAgents.length);
     set({ members: nextMembers, agents: nextAgents, skills: nextSkills });
@@ -114,6 +116,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     useIssueStore.getState().setIssues([]);
     useInboxStore.getState().setItems([]);
     useRuntimeStore.getState().setRuntimes([]);
+    useProjectStore.setState({ projects: [], loading: true });
     set({ workspace: ws, members: [], agents: [], skills: [] });
 
     await hydrateWorkspace(workspaces, ws.id);

@@ -31,6 +31,7 @@ type IssueResponse struct {
 	CreatorType        string                  `json:"creator_type"`
 	CreatorID          string                  `json:"creator_id"`
 	ParentIssueID      *string                 `json:"parent_issue_id"`
+	ProjectID          *string                 `json:"project_id"`
 	Position           float64                 `json:"position"`
 	DueDate            *string                 `json:"due_date"`
 	CreatedAt          string                  `json:"created_at"`
@@ -72,6 +73,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorType:   i.CreatorType,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
+		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
@@ -110,6 +112,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
 		assigneeFilter = parseUUID(a)
 	}
+	var projectFilter pgtype.UUID
+	if p := r.URL.Query().Get("project_id"); p != "" {
+		projectFilter = parseUUID(p)
+	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -118,6 +124,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -177,6 +184,7 @@ type CreateIssueRequest struct {
 	AssigneeType       *string `json:"assignee_type"`
 	AssigneeID         *string `json:"assignee_id"`
 	ParentIssueID      *string `json:"parent_issue_id"`
+	ProjectID          *string `json:"project_id"`
 	DueDate            *string `json:"due_date"`
 }
 
@@ -231,6 +239,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueID = parseUUID(*req.ParentIssueID)
 	}
 
+	var projectID pgtype.UUID
+	if req.ProjectID != nil {
+		projectID = parseUUID(*req.ProjectID)
+	}
+
 	var dueDate pgtype.Timestamptz
 	if req.DueDate != nil && *req.DueDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.DueDate)
@@ -275,6 +288,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Position:           0,
 		DueDate:            dueDate,
 		Number:             issueNumber,
+		ProjectID:          projectID,
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -309,6 +323,7 @@ type UpdateIssueRequest struct {
 	Priority           *string  `json:"priority"`
 	AssigneeType       *string  `json:"assignee_type"`
 	AssigneeID         *string  `json:"assignee_id"`
+	ProjectID          *string  `json:"project_id"`
 	Position           *float64 `json:"position"`
 	DueDate            *string  `json:"due_date"`
 }
@@ -345,6 +360,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		AssigneeType: prevIssue.AssigneeType,
 		AssigneeID:   prevIssue.AssigneeID,
 		DueDate:      prevIssue.DueDate,
+		ProjectID:    prevIssue.ProjectID,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -388,6 +404,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
 		} else {
 			params.DueDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+		}
+	}
+	if _, ok := rawFields["project_id"]; ok {
+		if req.ProjectID != nil {
+			params.ProjectID = parseUUID(*req.ProjectID)
+		} else {
+			params.ProjectID = pgtype.UUID{Valid: false} // explicit null = remove from project
 		}
 	}
 
@@ -649,6 +672,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeType: prevIssue.AssigneeType,
 			AssigneeID:   prevIssue.AssigneeID,
 			DueDate:      prevIssue.DueDate,
+			ProjectID:    prevIssue.ProjectID,
 		}
 
 		if req.Updates.Title != nil {
@@ -689,6 +713,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
 			} else {
 				params.DueDate = pgtype.Timestamptz{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["project_id"]; ok {
+			if req.Updates.ProjectID != nil {
+				params.ProjectID = parseUUID(*req.Updates.ProjectID)
+			} else {
+				params.ProjectID = pgtype.UUID{Valid: false}
 			}
 		}
 

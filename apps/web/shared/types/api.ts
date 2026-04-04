@@ -10,6 +10,7 @@ export interface CreateIssueRequest {
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
+  project_id?: string;
   due_date?: string;
 }
 
@@ -20,6 +21,7 @@ export interface UpdateIssueRequest {
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
+  project_id?: string | null;
   position?: number;
   due_date?: string | null;
 }

@@ -64,6 +64,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
 import { api } from "@/shared/api";
+import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
@@ -1015,6 +1016,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <DueDatePicker
                   dueDate={issue.due_date}
                   onUpdate={handleUpdateField}
+                />
+              </PropRow>
+
+              {/* Project */}
+              <PropRow label="Project">
+                <ProjectPicker
+                  projectId={issue.project_id}
+                  onUpdate={handleUpdateField}
+                  align="start"
                 />
               </PropRow>
             </div>}

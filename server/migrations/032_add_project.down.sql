@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS idx_issue_project;
+ALTER TABLE issue DROP COLUMN IF EXISTS project_id;
+DROP TABLE IF EXISTS project;

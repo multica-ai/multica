@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useIssueStore } from "@/features/issues";
 import { useInboxStore } from "@/features/inbox";
 import { useWorkspaceStore } from "@/features/workspace";
+import { useProjectStore } from "@/features/projects";
 import { useAuthStore } from "@/features/auth";
 import { createLogger } from "@/shared/logger";
 import { api } from "@/shared/api";
@@ -60,6 +61,7 @@ export function useRealtimeSync(ws: WSClient | null) {
         });
       },
       skill: () => void useWorkspaceStore.getState().refreshSkills(),
+      project: () => void useProjectStore.getState().fetch(),
     };
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -173,6 +175,7 @@ export function useRealtimeSync(ws: WSClient | null) {
           useWorkspaceStore.getState().refreshAgents(),
           useWorkspaceStore.getState().refreshMembers(),
           useWorkspaceStore.getState().refreshSkills(),
+          useProjectStore.getState().fetch(),
         ]);
       } catch (e) {
         logger.error("reconnect refetch failed", e);

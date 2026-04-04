@@ -15,6 +15,7 @@ import {
   BookOpenText,
   SquarePen,
   CircleUser,
+  FolderKanban,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
@@ -49,6 +50,7 @@ const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/my-issues", label: "My Issues", icon: CircleUser },
   { href: "/issues", label: "Issues", icon: ListTodo },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
 ];
 
 const workspaceNav = [
