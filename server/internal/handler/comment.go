@@ -262,7 +262,9 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 // enqueues a task for each mentioned agent. When parentComment is non-nil
 // (i.e. the comment is a reply), mentions from the parent (thread root) are
 // also included so that agents mentioned in the top-level comment are
-// re-triggered by subsequent replies in the same thread.
+// re-triggered by subsequent replies in the same thread — unless the reply
+// explicitly @mentions only non-agent entities (members, issues), which
+// signals the user is talking to other people and not the agent.
 // Skips self-mentions, agents that are already the issue's assignee (handled
 // by on_comment), agents with on_mention trigger disabled, and private agents
 // mentioned by non-owner members (only the agent owner or workspace
@@ -274,16 +276,30 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	mentions := util.ParseMentions(comment.Content)
 	// When replying in a thread, also include mentions from the parent comment
 	// so that agents mentioned in the thread root are triggered by replies.
+	// However, skip inheritance when the reply explicitly @mentions only
+	// non-agent entities (members, issues) — the user is directing the reply
+	// at other people, not requesting work from agents in the parent thread.
 	if parentComment != nil {
-		parentMentions := util.ParseMentions(parentComment.Content)
-		seen := make(map[string]bool, len(mentions))
+		hasAgentMention := false
+		hasNonAgentMention := false
 		for _, m := range mentions {
-			seen[m.Type+":"+m.ID] = true
+			if m.Type == "agent" {
+				hasAgentMention = true
+			} else {
+				hasNonAgentMention = true
+			}
 		}
-		for _, m := range parentMentions {
-			if !seen[m.Type+":"+m.ID] {
-				mentions = append(mentions, m)
+		if hasAgentMention || !hasNonAgentMention {
+			parentMentions := util.ParseMentions(parentComment.Content)
+			seen := make(map[string]bool, len(mentions))
+			for _, m := range mentions {
 				seen[m.Type+":"+m.ID] = true
+			}
+			for _, m := range parentMentions {
+				if !seen[m.Type+":"+m.ID] {
+					mentions = append(mentions, m)
+					seen[m.Type+":"+m.ID] = true
+				}
 			}
 		}
 	}

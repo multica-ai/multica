@@ -381,6 +381,34 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 			t.Errorf("expected 1 pending task (no duplicate), got %d", n)
 		}
 	})
+
+	t.Run("reply mentioning only a member does not inherit agent mention", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Top-level comment @mentions the agent.
+		content := fmt.Sprintf("[@Agent](mention://agent/%s) can you help?", agentID)
+		threadID := postComment(t, issueID, content, nil)
+		clearTasks(t, issueID)
+		// Reply mentions only a member — should NOT inherit parent's agent mention.
+		reply := fmt.Sprintf("cc [@Someone](mention://member/%s)", testUserID)
+		postComment(t, issueID, reply, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (member-only reply should not inherit agent mention), got %d", n)
+		}
+	})
+
+	t.Run("reply mentioning agent and member still inherits", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Top-level comment @mentions the agent.
+		content := fmt.Sprintf("[@Agent](mention://agent/%s) review this", agentID)
+		threadID := postComment(t, issueID, content, nil)
+		clearTasks(t, issueID)
+		// Reply mentions both agent and member — should still trigger.
+		reply := fmt.Sprintf("[@Agent](mention://agent/%s) and cc [@Someone](mention://member/%s)", agentID, testUserID)
+		postComment(t, issueID, reply, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (reply mentions agent explicitly), got %d", n)
+		}
+	})
 }
 
 // TestCommentTriggerCoalescing verifies that rapid-fire comments don't create
