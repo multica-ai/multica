@@ -656,11 +656,11 @@ func TestResolveActor(t *testing.T) {
 	})
 
 	tests := []struct {
-		name            string
-		agentIDHeader   string
-		taskIDHeader    string
-		wantActorType   string
-		wantIsAgent     bool
+		name          string
+		agentIDHeader string
+		taskIDHeader  string
+		wantActorType string
+		wantIsAgent   bool
 	}{
 		{
 			name:          "no headers returns member",
@@ -737,5 +737,61 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "workspace not found") {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
+	}
+}
+
+func TestExtractModelFromRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  []byte
+		want string
+	}{
+		{
+			name: "extracts model from valid config",
+			raw:  []byte(`{"model":"claude-sonnet-4-20250514"}`),
+			want: "claude-sonnet-4-20250514",
+		},
+		{
+			name: "returns empty for nil",
+			raw:  nil,
+			want: "",
+		},
+		{
+			name: "returns empty for empty object",
+			raw:  []byte(`{}`),
+			want: "",
+		},
+		{
+			name: "returns empty for invalid JSON",
+			raw:  []byte(`not-json`),
+			want: "",
+		},
+		{
+			name: "returns empty when model is not a string",
+			raw:  []byte(`{"model":123}`),
+			want: "",
+		},
+		{
+			name: "preserves other keys",
+			raw:  []byte(`{"model":"gpt-5.4","other":"value"}`),
+			want: "gpt-5.4",
+		},
+		{
+			name: "returns empty for empty string model",
+			raw:  []byte(`{"model":""}`),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractModelFromRuntimeConfig(tt.raw)
+			if got != tt.want {
+				t.Fatalf("extractModelFromRuntimeConfig() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

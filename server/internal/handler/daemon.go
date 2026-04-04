@@ -243,6 +243,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Name:         agent.Name,
 			Instructions: agent.Instructions,
 			Skills:       skills,
+			Model:        extractModelFromRuntimeConfig(agent.RuntimeConfig),
 		}
 	}
 

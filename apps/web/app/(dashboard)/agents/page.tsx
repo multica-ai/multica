@@ -1193,6 +1193,7 @@ function SettingsTab({
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
+  const [model, setModel] = useState<string>((agent.runtime_config?.model as string) ?? "");
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1215,7 +1216,8 @@ function SettingsTab({
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
-    maxTasks !== agent.max_concurrent_tasks;
+    maxTasks !== agent.max_concurrent_tasks ||
+    model !== ((agent.runtime_config?.model as string) ?? "");
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -1224,7 +1226,7 @@ function SettingsTab({
     }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
+      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks, runtime_config: { ...agent.runtime_config, model: model || undefined } });
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
@@ -1332,6 +1334,19 @@ function SettingsTab({
           value={maxTasks}
           onChange={(e) => setMaxTasks(Number(e.target.value))}
           className="mt-1 w-24"
+        />
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Model</Label>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Override the default model. Leave empty to use the daemon default.
+        </p>
+        <Input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="Default (from daemon)"
+          className="mt-1"
         />
       </div>
 
