@@ -1,0 +1,41 @@
+/* =============================================================================
+ * Multica Web — Custom styles (non-shadcn)
+ * ============================================================================= */
+
+/* Shiki dual themes: CSS-only light/dark switching via CSS variables */
+/* @see https://shiki.style/guide/dual-themes */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+}
+
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Multica icon: entrance spin animation */
+@keyframes entrance-spin {
+  0% { transform: rotate(0deg); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: rotate(360deg); opacity: 1; }
+}
+
+.animate-entrance-spin {
+  animation: entrance-spin 0.6s ease-out forwards;
+}
+
+/* Sidebar: open triggers (dropdown/popover) get active background */
+[data-sidebar="menu-button"][data-popup-open] {
+  background-color: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+
+/* Sonner toast: align icon to first line of text, not vertically centered */
+[data-sonner-toast] {
+  align-items: flex-start !important;
+}
+
+[data-sonner-toast] [data-icon] {
+  margin-top: 2.5px;
+}

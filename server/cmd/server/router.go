@@ -245,6 +245,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		})
 	})
 
+	r.NotFound(newFrontendHandler().ServeHTTP)
+
 	return r
 }
 

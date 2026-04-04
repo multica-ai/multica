@@ -14,11 +14,14 @@ POSTGRES_PASSWORD ?= multica
 POSTGRES_PORT ?= 5432
 PORT ?= 8080
 FRONTEND_PORT ?= 3000
+MARKETING_PORT ?= 3001
 FRONTEND_ORIGIN ?= http://localhost:$(FRONTEND_PORT)
+MARKETING_SITE_ORIGIN ?= http://localhost:$(MARKETING_PORT)
 MULTICA_APP_URL ?= $(FRONTEND_ORIGIN)
 DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 NEXT_PUBLIC_API_URL ?= http://localhost:$(PORT)
 NEXT_PUBLIC_WS_URL ?= ws://localhost:$(PORT)/ws
+WORKSPACE_DIST_DIR ?= ../apps/workspace/dist
 GOOGLE_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/auth/callback
 MULTICA_SERVER_URL ?= ws://localhost:$(PORT)/ws
 
@@ -54,13 +57,15 @@ setup:
 start:
 	$(REQUIRE_ENV)
 	@echo "Using env file: $(ENV_FILE)"
-	@echo "Backend: http://localhost:$(PORT)"
-	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
+	@echo "Backend/API: http://localhost:$(PORT)"
+	@echo "Workspace: http://localhost:$(FRONTEND_PORT)"
+	@echo "Marketing: http://localhost:$(MARKETING_PORT)"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	@echo "Starting backend and frontend..."
+	@echo "Starting backend, workspace SPA, and marketing site..."
 	@trap 'kill 0' EXIT; \
 		(cd server && go run ./cmd/server) & \
-		pnpm dev:web & \
+		pnpm dev:marketing & \
+		pnpm dev:workspace & \
 		wait
 
 # Stop all services
@@ -69,6 +74,7 @@ stop:
 	@echo "Stopping services..."
 	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
 	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
+	@-lsof -ti:$(MARKETING_PORT) | xargs kill -9 2>/dev/null
 	@echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:5432."
 
 # Full verification: typecheck + unit tests + Go tests + E2E

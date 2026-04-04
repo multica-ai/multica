@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:web": "pnpm --filter @multica/web dev",
-    "build": "pnpm --filter @multica/web build",
-    "typecheck": "pnpm --filter @multica/web typecheck",
-    "test": "pnpm --filter @multica/web test",
-    "lint": "pnpm --filter @multica/web lint",
-    "clean": "pnpm --filter @multica/web clean && rm -rf node_modules"
+    "dev:web": "pnpm --filter @multica/workspace dev",
+    "dev:workspace": "pnpm --filter @multica/workspace dev",
+    "dev:marketing": "pnpm --filter @multica/web dev",
+    "build": "pnpm --filter @multica/web build && pnpm --filter @multica/workspace build",
+    "typecheck": "pnpm --filter @multica/web typecheck && pnpm --filter @multica/workspace typecheck",
+    "test": "pnpm --filter @multica/web test && pnpm --filter @multica/workspace test",
+    "lint": "pnpm --filter @multica/web lint && pnpm --filter @multica/workspace lint",
+    "clean": "rm -rf apps/web/.next apps/workspace/dist node_modules"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {

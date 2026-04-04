@@ -23,13 +23,16 @@ POSTGRES_USER="${POSTGRES_USER:-multica}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 PORT="${PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+MARKETING_PORT="${MARKETING_PORT:-3001}"
 PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-http://localhost:${FRONTEND_PORT}}"
 export PLAYWRIGHT_BASE_URL
 
 BACKEND_PID=""
 FRONTEND_PID=""
+MARKETING_PID=""
 STARTED_BACKEND=false
 STARTED_FRONTEND=false
+STARTED_MARKETING=false
 EXIT_CODE=0
 
 # --------------------------------------------------------------------------
@@ -44,6 +47,10 @@ cleanup() {
   if [ "$STARTED_FRONTEND" = true ] && [ -n "$FRONTEND_PID" ]; then
     kill "$FRONTEND_PID" 2>/dev/null && wait "$FRONTEND_PID" 2>/dev/null || true
     echo "    Stopped frontend (PID $FRONTEND_PID)"
+  fi
+  if [ "$STARTED_MARKETING" = true ] && [ -n "$MARKETING_PID" ]; then
+    kill "$MARKETING_PID" 2>/dev/null && wait "$MARKETING_PID" 2>/dev/null || true
+    echo "    Stopped marketing (PID $MARKETING_PID)"
   fi
   echo ""
   if [ "$EXIT_CODE" -eq 0 ]; then
@@ -118,11 +125,21 @@ else
   wait_for_port "$PORT" "Backend" 90 "/health"
 fi
 
+if curl -sf "http://localhost:${MARKETING_PORT}" > /dev/null 2>&1; then
+  echo "    Marketing already running on :$MARKETING_PORT"
+else
+  echo "    Starting marketing..."
+  pnpm dev:marketing > /tmp/multica-check-marketing.log 2>&1 &
+  MARKETING_PID=$!
+  STARTED_MARKETING=true
+  wait_for_port "$MARKETING_PORT" "Marketing" 120 "/"
+fi
+
 if curl -sf "http://localhost:${FRONTEND_PORT}" > /dev/null 2>&1; then
   echo "    Frontend already running on :$FRONTEND_PORT"
 else
-  echo "    Starting frontend..."
-  pnpm dev:web > /tmp/multica-check-frontend.log 2>&1 &
+  echo "    Starting workspace frontend..."
+  pnpm dev:workspace > /tmp/multica-check-frontend.log 2>&1 &
   FRONTEND_PID=$!
   STARTED_FRONTEND=true
   wait_for_port "$FRONTEND_PORT" "Frontend" 120 "/"
