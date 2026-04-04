@@ -458,6 +458,7 @@ function CommentCard({
                     reactions={reactions}
                     currentUserId={currentUserId}
                     onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+                    hideAddButton
                     className="mt-1.5 pl-10"
                   />
                 )}
