@@ -148,6 +148,8 @@ function CommentRow({
   };
 
   const reactions = entry.reactions ?? [];
+  const contentText = entry.content ?? "";
+  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
@@ -252,7 +254,7 @@ function CommentRow({
               reactions={reactions}
               currentUserId={currentUserId}
               onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-              hideAddButton
+              hideAddButton={!isLongContent}
               className="mt-1.5 pl-8"
             />
           )}
@@ -330,6 +332,8 @@ function CommentCard({
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
+  const contentText = entry.content ?? "";
+  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -458,7 +462,7 @@ function CommentCard({
                     reactions={reactions}
                     currentUserId={currentUserId}
                     onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-                    hideAddButton
+                    hideAddButton={!isLongContent}
                     className="mt-1.5 pl-10"
                   />
                 )}
