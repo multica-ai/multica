@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -65,6 +66,41 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
+}
+
+func TestNormalizeCodexSandboxMode(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "default empty", in: "", want: codexSandboxWorkspaceWrite},
+		{name: "workspace write", in: codexSandboxWorkspaceWrite, want: codexSandboxWorkspaceWrite},
+		{name: "danger full access", in: codexSandboxDangerFullAccess, want: codexSandboxDangerFullAccess},
+		{name: "read only", in: codexSandboxReadOnly, want: codexSandboxReadOnly},
+		{name: "unknown falls back", in: "yolo", want: codexSandboxWorkspaceWrite},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeCodexSandboxMode(tc.in); got != tc.want {
+				t.Fatalf("normalizeCodexSandboxMode(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	allowed := []string{
+		codexSandboxReadOnly,
+		codexSandboxWorkspaceWrite,
+		codexSandboxDangerFullAccess,
+	}
+	if !slices.Contains(allowed, normalizeCodexSandboxMode(codexSandboxDangerFullAccess)) {
+		t.Fatal("expected danger-full-access to remain an allowed sandbox mode")
+	}
 }
 
 func TestCodexHandleResponseSuccess(t *testing.T) {

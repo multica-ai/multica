@@ -238,11 +238,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp := taskToResponse(*task)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		var runtimeConfig any = map[string]any{}
+		if agent.RuntimeConfig != nil {
+			if err := json.Unmarshal(agent.RuntimeConfig, &runtimeConfig); err != nil {
+				runtimeConfig = map[string]any{}
+			}
+		}
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			RuntimeConfig: runtimeConfig,
+			Skills:        skills,
 		}
 	}
 

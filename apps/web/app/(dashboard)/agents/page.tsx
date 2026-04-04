@@ -111,6 +111,53 @@ function getRuntimeDevice(agent: Agent, runtimes: RuntimeDevice[]): RuntimeDevic
   return runtimes.find((runtime) => runtime.id === agent.runtime_id);
 }
 
+type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+const codexSandboxOptions: Array<{
+  value: CodexSandboxMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "read-only",
+    label: "Read Only",
+    description: "Can only read files. Best for review and read-only analysis.",
+  },
+  {
+    value: "workspace-write",
+    label: "Workspace Write",
+    description: "Default mode. Can only write inside the task workspace.",
+  },
+  {
+    value: "danger-full-access",
+    label: "Danger Full Access",
+    description: "Runs directly on the host environment for trusted self-hosted setups.",
+  },
+];
+
+function isCodexSandboxMode(value: unknown): value is CodexSandboxMode {
+  return (
+    value === "read-only" ||
+    value === "workspace-write" ||
+    value === "danger-full-access"
+  );
+}
+
+function getCodexSandboxMode(runtimeConfig: Record<string, unknown> | undefined): CodexSandboxMode {
+  const value = runtimeConfig?.codex_sandbox_mode;
+  return isCodexSandboxMode(value) ? value : "workspace-write";
+}
+
+function withCodexSandboxMode(
+  runtimeConfig: Record<string, unknown> | undefined,
+  mode: CodexSandboxMode,
+): Record<string, unknown> {
+  return {
+    ...(runtimeConfig ?? {}),
+    codex_sandbox_mode: mode,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Create Agent Dialog
 // ---------------------------------------------------------------------------
@@ -128,6 +175,7 @@ function CreateAgentDialog({
   const [description, setDescription] = useState("");
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimes[0]?.id ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
+  const [codexSandboxMode, setCodexSandboxMode] = useState<CodexSandboxMode>("workspace-write");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
 
@@ -147,6 +195,10 @@ function CreateAgentDialog({
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
+        runtime_config:
+          selectedRuntime.provider === "codex"
+            ? withCodexSandboxMode(undefined, codexSandboxMode)
+            : undefined,
         visibility,
         triggers: [
           { id: generateId(), type: "on_assign", enabled: true, config: {} },
@@ -298,6 +350,40 @@ function CreateAgentDialog({
               </PopoverContent>
             </Popover>
           </div>
+
+          {selectedRuntime?.provider === "codex" && (
+            <div>
+              <Label className="text-xs text-muted-foreground">Sandbox Mode</Label>
+              <div className="mt-1.5 space-y-2">
+                {codexSandboxOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setCodexSandboxMode(option.value)}
+                    className={`flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                      codexSandboxMode === option.value
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    <span
+                      className={`mt-0.5 h-2.5 w-2.5 rounded-full ${
+                        codexSandboxMode === option.value
+                          ? "bg-primary"
+                          : "bg-muted-foreground/40"
+                      }`}
+                    />
+                    <div>
+                      <div className="text-sm font-medium">{option.label}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {option.description}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -1193,6 +1279,9 @@ function SettingsTab({
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
+  const [runtimeConfig, setRuntimeConfig] = useState<Record<string, unknown>>(
+    agent.runtime_config ?? {},
+  );
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1215,7 +1304,16 @@ function SettingsTab({
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
-    maxTasks !== agent.max_concurrent_tasks;
+    maxTasks !== agent.max_concurrent_tasks ||
+    JSON.stringify(runtimeConfig) !== JSON.stringify(agent.runtime_config ?? {});
+
+  useEffect(() => {
+    setName(agent.name);
+    setDescription(agent.description ?? "");
+    setVisibility(agent.visibility);
+    setMaxTasks(agent.max_concurrent_tasks);
+    setRuntimeConfig(agent.runtime_config ?? {});
+  }, [agent]);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -1224,7 +1322,13 @@ function SettingsTab({
     }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
+      await onSave({
+        name: name.trim(),
+        description,
+        visibility,
+        max_concurrent_tasks: maxTasks,
+        runtime_config: runtimeConfig,
+      });
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
@@ -1234,6 +1338,8 @@ function SettingsTab({
   };
 
   const runtimeDevice = runtimes.find((r) => r.id === agent.runtime_id);
+  const isCodexRuntime = runtimeDevice?.provider === "codex";
+  const selectedSandboxMode = getCodexSandboxMode(runtimeConfig);
 
   return (
     <div className="max-w-lg space-y-6">
@@ -1346,6 +1452,42 @@ function SettingsTab({
           {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
         </div>
       </div>
+
+      {isCodexRuntime && (
+        <div>
+          <Label className="text-xs text-muted-foreground">Sandbox Mode</Label>
+          <div className="mt-1.5 space-y-2">
+            {codexSandboxOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() =>
+                  setRuntimeConfig((prev) => withCodexSandboxMode(prev, option.value))
+                }
+                className={`flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                  selectedSandboxMode === option.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 h-2.5 w-2.5 rounded-full ${
+                    selectedSandboxMode === option.value
+                      ? "bg-primary"
+                      : "bg-muted-foreground/40"
+                  }`}
+                />
+                <div>
+                  <div className="text-sm font-medium">{option.label}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {option.description}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
