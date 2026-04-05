@@ -6,7 +6,8 @@
   "scripts": {
     "dev:web": "pnpm --filter @multica/workspace dev",
     "dev:workspace": "pnpm --filter @multica/workspace dev",
-    "dev:marketing": "pnpm --filter @multica/web dev",
+    "dev:marketing": "bash scripts/dev-marketing.sh",
+    "dev:air": "bash scripts/dev-air.sh",
     "build": "pnpm --filter @multica/web build && pnpm --filter @multica/workspace build",
     "typecheck": "pnpm --filter @multica/web typecheck && pnpm --filter @multica/workspace typecheck",
     "test": "pnpm --filter @multica/web test && pnpm --filter @multica/workspace test",

@@ -145,6 +145,12 @@ pnpm install
 cp .env.example .env
 make setup
 make start
+
+# 可选：用 air 启动后端热重载，并一并拉起所有本地服务
+go install github.com/air-verse/air@latest
+pnpm dev:air
+# 或者
+make start-air
 ```
 
 完整的开发流程、worktree 支持、测试和问题排查请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。

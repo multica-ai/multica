@@ -6,8 +6,10 @@ import { resolve } from "path";
 config({ path: resolve(__dirname, "../../.env") });
 
 const remoteApiUrl = process.env.REMOTE_API_URL || "http://localhost:8080";
+const distDir = process.env.NEXT_DIST_DIR?.trim() || ".next";
 
 const nextConfig: NextConfig = {
+  distDir,
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],

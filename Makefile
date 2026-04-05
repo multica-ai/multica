@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -16,6 +16,7 @@ PORT ?= 8080
 FRONTEND_PORT ?= 3000
 MARKETING_PORT ?= 3001
 FRONTEND_ORIGIN ?= http://localhost:$(FRONTEND_PORT)
+WORKSPACE_SITE_ORIGIN ?= $(FRONTEND_ORIGIN)
 MARKETING_SITE_ORIGIN ?= http://localhost:$(MARKETING_PORT)
 MULTICA_APP_URL ?= $(FRONTEND_ORIGIN)
 DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
@@ -61,12 +62,17 @@ start:
 	@echo "Workspace: http://localhost:$(FRONTEND_PORT)"
 	@echo "Marketing: http://localhost:$(MARKETING_PORT)"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@bash scripts/check-dev-ports.sh "$(ENV_FILE)"
 	@echo "Starting backend, workspace SPA, and marketing site..."
 	@trap 'kill 0' EXIT; \
 		(cd server && go run ./cmd/server) & \
 		pnpm dev:marketing & \
 		pnpm dev:workspace & \
 		wait
+
+start-air:
+	$(REQUIRE_ENV)
+	@ENV_FILE="$(ENV_FILE)" bash scripts/dev-air.sh
 
 # Stop all services
 stop:
@@ -97,6 +103,9 @@ setup-main:
 start-main:
 	@$(MAKE) start ENV_FILE=$(MAIN_ENV_FILE)
 
+start-air-main:
+	@$(MAKE) start-air ENV_FILE=$(MAIN_ENV_FILE)
+
 stop-main:
 	@$(MAKE) stop ENV_FILE=$(MAIN_ENV_FILE)
 
@@ -114,6 +123,9 @@ setup-worktree:
 
 start-worktree:
 	@$(MAKE) start ENV_FILE=$(WORKTREE_ENV_FILE)
+
+start-air-worktree:
+	@$(MAKE) start-air ENV_FILE=$(WORKTREE_ENV_FILE)
 
 stop-worktree:
 	@$(MAKE) stop ENV_FILE=$(WORKTREE_ENV_FILE)
