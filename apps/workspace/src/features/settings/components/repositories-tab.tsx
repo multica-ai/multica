@@ -67,7 +67,7 @@ export function RepositoriesTab() {
             </p>
 
             {repos.map((repo, index) => (
-              <div key={index} className="flex gap-2">
+              <div key={index} className="flex flex-col gap-2 sm:flex-row">
                 <div className="flex-1 space-y-1.5">
                   <Input
                     type="url"
@@ -90,7 +90,7 @@ export function RepositoriesTab() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
+                    className="mt-0.5 shrink-0 self-end text-muted-foreground hover:text-destructive sm:self-auto"
                     onClick={() => handleRemoveRepo(index)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -100,8 +100,13 @@ export function RepositoriesTab() {
             ))}
 
             {canManageWorkspace && (
-              <div className="flex items-center justify-between pt-1">
-                <Button variant="outline" size="sm" onClick={handleAddRepo}>
+              <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddRepo}
+                  className="w-full sm:w-auto"
+                >
                   <Plus className="h-3 w-3" />
                   Add repository
                 </Button>
@@ -109,6 +114,7 @@ export function RepositoriesTab() {
                   size="sm"
                   onClick={handleSave}
                   disabled={saving}
+                  className="w-full sm:w-auto"
                 >
                   <Save className="h-3 w-3" />
                   {saving ? "Saving..." : "Save"}

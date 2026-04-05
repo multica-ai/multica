@@ -35,4 +35,22 @@ test.describe("Settings", () => {
       timeout: 5000,
     });
   });
+
+  test("mobile settings uses top tabs above content", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await loginAsDefault(page, test.info().parallelIndex);
+
+    await page.goto("/settings");
+    await page.waitForURL(/\/settings$/);
+
+    const tabsList = page.locator('[data-slot="tabs-list"]').first();
+    const contentHeading = page.getByRole("heading", { name: "Profile" });
+
+    const tabsBox = await tabsList.boundingBox();
+    const headingBox = await contentHeading.boundingBox();
+
+    expect(tabsBox).not.toBeNull();
+    expect(headingBox).not.toBeNull();
+    expect(headingBox!.y).toBeGreaterThan((tabsBox!.y + tabsBox!.height) - 1);
+  });
 });

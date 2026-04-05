@@ -80,6 +80,8 @@ import { useIssueStore } from "@/features/issues";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { useRouter } from "@/shared/router";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
 
 
 // ---------------------------------------------------------------------------
@@ -1452,12 +1454,12 @@ function AgentDetail({
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b px-6">
+      <div className="flex gap-1 overflow-x-auto border-b px-4 md:px-6">
         {detailTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+            className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
               activeTab === tab.id
                 ? "border-primary text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -1551,6 +1553,7 @@ export default function AgentsPage({
   selectedAgentId,
   syncSelectionToPath = false,
 }: AgentsPageProps = {}) {
+  const isMobile = useIsMobile();
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const agents = useWorkspaceStore((s) => s.agents);
@@ -1598,6 +1601,10 @@ export default function AgentsPage({
 
   const selectAgent = (id: string) => {
     setSelectedId(id);
+    if (isMobile) {
+      router.push(`/agents/${id}`);
+      return;
+    }
     if (syncSelectionToPath) {
       router.replace(`/agents/${id}`);
     }
@@ -1678,6 +1685,109 @@ export default function AgentsPage({
             <Skeleton className="h-8 w-3/4 rounded-lg" />
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    if (selectedAgentId) {
+      return (
+        <div className="flex flex-1 min-h-0 flex-col">
+          <MobileDetailHeader
+            title="Agents"
+            subtitle={selected?.name ?? "Back to agent list"}
+            onBack={() => router.replace("/agents")}
+          />
+          <div className="min-h-0 flex-1">
+            {selected ? (
+              <AgentDetail
+                key={selected.id}
+                agent={selected}
+                runtimes={runtimes}
+                onUpdate={handleUpdate}
+                onArchive={handleArchive}
+                onRestore={handleRestore}
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center px-6 text-center text-muted-foreground">
+                <Bot className="h-10 w-10 text-muted-foreground/30" />
+                <p className="mt-3 text-sm">Agent not found</p>
+              </div>
+            )}
+          </div>
+          {showCreate && (
+            <CreateAgentDialog
+              runtimes={runtimes}
+              onClose={() => setShowCreate(false)}
+              onCreate={handleCreate}
+            />
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-1 min-h-0 flex-col">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+          <h1 className="text-sm font-semibold">Agents</h1>
+          <div className="flex items-center gap-1">
+            {archivedCount > 0 && (
+              <Button
+                variant={showArchived ? "secondary" : "ghost"}
+                size="icon-xs"
+                onClick={() => setShowArchived(!showArchived)}
+                title={showArchived ? "Show active agents" : "Show archived agents"}
+              >
+                <Archive className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setShowCreate(true)}
+            >
+              <Plus className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {filteredAgents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-4 py-12">
+              <Bot className="h-8 w-8 text-muted-foreground/40" />
+              <p className="mt-3 text-sm text-muted-foreground">
+                {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
+              </p>
+              {!showArchived && (
+                <Button
+                  onClick={() => setShowCreate(true)}
+                  size="xs"
+                  className="mt-3"
+                >
+                  <Plus className="h-3 w-3" />
+                  Create Agent
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y">
+              {filteredAgents.map((agent) => (
+                <AgentListItem
+                  key={agent.id}
+                  agent={agent}
+                  isSelected={false}
+                  onClick={() => selectAgent(agent.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {showCreate && (
+          <CreateAgentDialog
+            runtimes={runtimes}
+            onClose={() => setShowCreate(false)}
+            onCreate={handleCreate}
+          />
+        )}
       </div>
     );
   }

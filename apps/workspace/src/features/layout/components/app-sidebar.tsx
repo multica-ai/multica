@@ -1,18 +1,11 @@
 "use client";
 
 import {
-  Inbox,
-  ListTodo,
-  Bot,
-  Monitor,
   ChevronDown,
-  Settings,
   LogOut,
   Plus,
   Check,
-  BookOpenText,
   SquarePen,
-  CircleUser,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
@@ -20,6 +13,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
+  SidebarGroupLabel,
   SidebarGroupContent,
   SidebarHeader,
   SidebarFooter,
@@ -27,6 +21,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -43,19 +38,11 @@ import { useWorkspaceStore } from "@/features/workspace";
 import { useInboxStore } from "@/features/inbox";
 import { useModalStore } from "@/features/modals";
 import { Link, usePathname, useRouter } from "@/shared/router";
-
-const primaryNav = [
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/my-issues", label: "My Issues", icon: CircleUser },
-  { href: "/issues", label: "Issues", icon: ListTodo },
-];
-
-const workspaceNav = [
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/runtimes", label: "Runtimes", icon: Monitor },
-  { href: "/skills", label: "Skills", icon: BookOpenText },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+import {
+  isWorkspaceNavActive,
+  primaryNav,
+  workspaceNav,
+} from "../navigation";
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
@@ -66,6 +53,7 @@ function DraftDot() {
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
   const user = useAuthStore((s) => s.user);
   const authLogout = useAuthStore((s) => s.logout);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -75,30 +63,34 @@ export function AppSidebar() {
   const unreadCount = useInboxStore((s) => s.unreadCount());
 
   const logout = () => {
+    if (isMobile) setOpenMobile(false);
     router.push("/login");
     authLogout();
     useWorkspaceStore.getState().clearWorkspace();
   };
 
+  const closeMobileSidebar = () => {
+    if (isMobile) setOpenMobile(false);
+  };
+
   return (
-      <Sidebar variant="inset">
-        {/* Workspace Switcher */}
-        <SidebarHeader className="py-3">
-          <div className="flex items-center gap-4">
-            <SidebarMenu className="min-w-0 flex-1">
-              <SidebarMenuItem>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <SidebarMenuButton aria-label="Workspace menu">
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
-                        <span className="flex-1 truncate font-medium">
-                          {workspace?.name ?? "Multica"}
-                        </span>
-                        <ChevronDown className="size-3 text-muted-foreground" />
-                      </SidebarMenuButton>
-                    }
-                  />
+    <Sidebar variant="inset">
+      <SidebarHeader className="py-3">
+        <div className="flex items-center gap-4">
+          <SidebarMenu className="min-w-0 flex-1">
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <SidebarMenuButton aria-label="Workspace menu">
+                      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                      <span className="flex-1 truncate font-medium">
+                        {workspace?.name ?? "Multica"}
+                      </span>
+                      <ChevronDown className="size-3 text-muted-foreground" />
+                    </SidebarMenuButton>
+                  }
+                />
                 <DropdownMenuContent
                   className="w-52"
                   align="start"
@@ -130,6 +122,7 @@ export function AppSidebar() {
                       <DropdownMenuItem
                         key={ws.id}
                         onClick={() => {
+                          closeMobileSidebar();
                           if (ws.id !== workspace?.id) {
                             switchWorkspace(ws.id);
                           }
@@ -143,84 +136,95 @@ export function AppSidebar() {
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem variant="destructive" onClick={logout}>
-                      <LogOut className="h-3.5 w-3.5" />
-                      Log out
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
                 </DropdownMenuContent>
-                </DropdownMenu>
-              </SidebarMenuItem>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          </SidebarMenu>
+          <Tooltip>
+            <TooltipTrigger
+              className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
+              aria-label="New issue"
+              onClick={() => {
+                closeMobileSidebar();
+                useModalStore.getState().open("create-issue");
+              }}
+            >
+              <SquarePen className="size-3.5" />
+              <DraftDot />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New issue</TooltipContent>
+          </Tooltip>
+        </div>
+      </SidebarHeader>
+
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-0.5">
+              {primaryNav.map((item) => {
+                const isActive = isWorkspaceNavActive(pathname, item.href);
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      render={<Link href={item.href} />}
+                      className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                      onClick={closeMobileSidebar}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                      {item.label === "Inbox" && unreadCount > 0 && (
+                        <span className="ml-auto text-xs">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
-            <Tooltip>
-              <TooltipTrigger
-                className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
-                aria-label="New issue"
-                onClick={() => useModalStore.getState().open("create-issue")}
-              >
-                <SquarePen className="size-3.5" />
-                <DraftDot />
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New issue</TooltipContent>
-            </Tooltip>
-          </div>
-        </SidebarHeader>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-        {/* Navigation */}
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {primaryNav.map((item) => {
-                  const isActive = pathname === item.href;
-                  return (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<Link href={item.href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
-                            {unreadCount > 99 ? "99+" : unreadCount}
-                          </span>
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
-                  const isActive = pathname === item.href;
-                  return (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<Link href={item.href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-        <SidebarFooter />
-        <SidebarRail />
-      </Sidebar>
+        <SidebarGroup>
+          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-0.5">
+              {workspaceNav.map((item) => {
+                const isActive = isWorkspaceNavActive(pathname, item.href);
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      render={<Link href={item.href} />}
+                      className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                      onClick={closeMobileSidebar}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="text-muted-foreground hover:text-destructive"
+              onClick={logout}
+            >
+              <LogOut />
+              <span>Log out</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
   );
 }

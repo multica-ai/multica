@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { loginAsDefault } from "./helpers";
 
 test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
@@ -32,8 +32,7 @@ test.describe("Authentication", () => {
   test("logout redirects to /login", async ({ page }) => {
     await loginAsDefault(page, test.info().parallelIndex);
 
-    await openWorkspaceMenu(page);
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("button", { name: "Log out" }).click();
 
     await page.waitForURL(/\/login(?:\?|$)/, { timeout: 10000 });
     await expect(page).toHaveURL(/\/login/);

@@ -8,6 +8,7 @@ import { useNavigationStore } from "@/features/navigation";
 import { useWorkspaceStore } from "@/features/workspace";
 import { usePathname, useRouter } from "@/shared/router";
 import { AppSidebar } from "./app-sidebar";
+import { MobileWorkspaceToolbar } from "./mobile-workspace-toolbar";
 
 export function DashboardLayout({
   children,
@@ -44,13 +45,16 @@ export function DashboardLayout({
     <SidebarProvider className="h-svh">
       <AppSidebar />
       <SidebarInset className="overflow-hidden">
-        {workspace ? (
-          children
-        ) : (
-          <div className="flex flex-1 items-center justify-center">
-            <MulticaIcon className="size-6 animate-pulse" />
-          </div>
-        )}
+        <MobileWorkspaceToolbar />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {workspace ? (
+            children
+          ) : (
+            <div className="flex flex-1 items-center justify-center">
+              <MulticaIcon className="size-6 animate-pulse" />
+            </div>
+          )}
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

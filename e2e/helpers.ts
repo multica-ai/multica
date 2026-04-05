@@ -39,10 +39,57 @@ export async function loginAsDefault(page: Page, scope?: string | number) {
   }, { token, workspaceId: workspace.id });
   await page.goto("/issues");
   await page.waitForURL("**/issues", { timeout: 10000 });
-  await page.getByRole("button", { name: "Workspace menu" }).waitFor({
-    state: "visible",
-    timeout: 10000,
-  });
+  if (/\/login(?:\?|$)/.test(page.url())) {
+    await page.goto("/issues");
+    await page.waitForURL("**/issues", { timeout: 10000 });
+  }
+  const desktopMenu = page.getByRole("button", { name: "Workspace menu" });
+  const mobileMenu = page.getByRole("button", { name: "Open navigation" });
+  const issuesHeading = page.getByRole("heading", { name: "Issues" }).first();
+
+  const desktopReady = desktopMenu
+    .waitFor({ state: "visible", timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const mobileReady = mobileMenu
+    .waitFor({ state: "visible", timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  const pageReady = issuesHeading
+    .waitFor({ state: "visible", timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+
+  const [hasDesktopMenu, hasMobileMenu, hasPageHeading] = await Promise.all([
+    desktopReady,
+    mobileReady,
+    pageReady,
+  ]);
+
+  if (!hasDesktopMenu && !hasMobileMenu && !hasPageHeading) {
+    if (/\/login(?:\?|$)/.test(page.url())) {
+      await page.goto("/issues");
+      await page.waitForURL("**/issues", { timeout: 10000 });
+
+      const retriedDesktop = await desktopMenu
+        .waitFor({ state: "visible", timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      const retriedMobile = await mobileMenu
+        .waitFor({ state: "visible", timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      const retriedHeading = await issuesHeading
+        .waitFor({ state: "visible", timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (retriedDesktop || retriedMobile || retriedHeading) {
+        return;
+      }
+    }
+    throw new Error("Workspace navigation did not appear");
+  }
 }
 
 /**

@@ -129,9 +129,8 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
     SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Manual";
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons */}
-      <div className="flex items-center gap-1">
+    <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3 md:h-12 md:flex-row md:items-center md:justify-between md:py-0">
+      <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
         {SCOPES.map((s) => (
           <Tooltip key={s.value}>
             <TooltipTrigger
@@ -155,9 +154,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
         ))}
       </div>
 
-      {/* Right: filter + display + view toggle */}
-      <div className="flex items-center gap-1">
-        {/* Filter */}
+      <div className="flex items-center gap-1 self-start md:self-auto">
         <DropdownMenu>
           <Tooltip>
             <DropdownMenuTrigger

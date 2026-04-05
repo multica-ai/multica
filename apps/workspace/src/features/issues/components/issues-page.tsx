@@ -134,8 +134,14 @@ export function IssuesPage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Header 1: Workspace breadcrumb */}
-      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-4">
+      <div className="border-b px-4 py-4 md:hidden">
+        <h1 className="text-base font-semibold">{breadcrumbLabel}</h1>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {workspace?.name ?? "Workspace"}
+        </p>
+      </div>
+
+      <div className="hidden h-12 shrink-0 items-center gap-1.5 border-b px-4 md:flex">
         <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
         <span className="text-sm text-muted-foreground">
           {workspace?.name ?? "Workspace"}
@@ -144,13 +150,11 @@ export function IssuesPage({
         <span className="text-sm font-medium">{breadcrumbLabel}</span>
       </div>
 
-      {/* Header 2: Scope tabs + filters */}
       <IssuesHeader
         scopedIssues={scopedIssues}
         hideViewToggle={hideViewToggle || !!forcedViewMode}
       />
 
-      {/* Content: scrollable */}
       <ViewStoreProvider store={useIssueViewStore}>
         {scopedIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">

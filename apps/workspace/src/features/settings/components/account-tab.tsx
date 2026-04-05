@@ -61,14 +61,14 @@ export function AccountTab() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">Profile</h2>
 
         <Card>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 sm:space-y-5">
             {/* Avatar upload */}
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 type="button"
                 className="group relative h-16 w-16 shrink-0 rounded-full bg-muted overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -101,7 +101,7 @@ export function AccountTab() {
                 className="hidden"
                 onChange={handleAvatarUpload}
               />
-              <div className="text-xs text-muted-foreground">
+              <div className="max-w-xs text-xs text-muted-foreground">
                 Click to upload avatar
               </div>
             </div>
@@ -115,11 +115,12 @@ export function AccountTab() {
                 className="mt-1"
               />
             </div>
-            <div className="flex items-center justify-end gap-2 pt-1">
+            <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
               <Button
                 size="sm"
                 onClick={handleProfileSave}
                 disabled={profileSaving || !profileName.trim()}
+                className="w-full sm:w-auto"
               >
                 <Save className="h-3 w-3" />
                 {profileSaving ? "Updating..." : "Update Profile"}

@@ -12,11 +12,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useWSEvent } from "@/features/realtime";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useRouter, useSearchParams } from "@/shared/router";
+import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
 import { useRuntimeStore } from "../store";
 import { RuntimeList } from "./runtime-list";
 import { RuntimeDetail } from "./runtime-detail";
 
 export default function RuntimesPage() {
+  const isMobile = useIsMobile();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const runtimes = useRuntimeStore((s) => s.runtimes);
@@ -41,7 +47,15 @@ export default function RuntimesPage() {
 
   useWSEvent("daemon:register", handleDaemonEvent);
 
-  const selected = runtimes.find((r) => r.id === selectedId) ?? null;
+  const runtimeParam = searchParams.get("runtime") ?? "";
+
+  useEffect(() => {
+    if (runtimeParam) {
+      setSelectedId(runtimeParam);
+    }
+  }, [runtimeParam, setSelectedId]);
+
+  const selected = runtimes.find((r) => r.id === (isMobile ? runtimeParam : selectedId)) ?? null;
 
   if (isLoading || fetching) {
     return (
@@ -75,6 +89,36 @@ export default function RuntimesPage() {
             ))}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    if (selected) {
+      return (
+        <div className="flex flex-1 min-h-0 flex-col">
+          <MobileDetailHeader
+            title="Runtimes"
+            subtitle={selected.name}
+            onBack={() => router.replace("/runtimes")}
+          />
+          <div className="min-h-0 flex-1">
+            <RuntimeDetail key={selected.id} runtime={selected} />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-1 min-h-0 flex-col">
+        <RuntimeList
+          runtimes={runtimes}
+          selectedId=""
+          onSelect={(id) => {
+            setSelectedId(id);
+            router.push(`/runtimes?runtime=${id}`);
+          }}
+        />
       </div>
     );
   }

@@ -64,4 +64,32 @@ test.describe("Navigation", () => {
     await expect(page.getByText(issueTitle).first()).toBeVisible();
     await expect(page.getByLabel("Leave a comment...")).toBeVisible();
   });
+
+  test("mobile navigation opens from the top toolbar", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("link", { name: "Settings" }).click();
+    await page.waitForURL("**/settings");
+
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Profile" })).toBeVisible();
+  });
+
+  test("mobile inbox drills into detail and returns to list", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+
+    const issueTitle = "Mobile Inbox Route " + Date.now();
+    const issue = await api.createIssue(issueTitle);
+    await api.createInboxItem(issue.id, issueTitle);
+
+    await page.goto(`/inbox?issue=${issue.id}`);
+    await expect(page).toHaveURL(new RegExp(`/inbox\\?issue=${issue.id}$`));
+    await expect(page.getByRole("button", { name: "Back to Inbox" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Back to Inbox" }).click();
+    await expect(page).toHaveURL(/\/inbox$/);
+  });
 });
