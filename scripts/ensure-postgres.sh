@@ -21,16 +21,49 @@ DATABASE_URL="${DATABASE_URL:-}"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
-# Extract host from DATABASE_URL to decide local vs remote.
-# Supports formats: postgres://user:pass@host:port/db and similar.
 db_host=""
+db_port="${POSTGRES_PORT:-5432}"
+db_name="$POSTGRES_DB"
+
+parse_database_url() {
+  local rest authority hostport path port_part
+
+  rest="${DATABASE_URL#*://}"
+  rest="${rest%%\?*}"
+  authority="${rest%%/*}"
+  path="${rest#*/}"
+
+  if [ "$authority" = "$rest" ]; then
+    path=""
+  fi
+
+  hostport="${authority##*@}"
+
+  if [[ "$hostport" == \[* ]]; then
+    db_host="${hostport#\[}"
+    db_host="${db_host%%]*}"
+    port_part="${hostport#*\]}"
+    if [[ "$port_part" == :* ]] && [ -n "${port_part#:}" ]; then
+      db_port="${port_part#:}"
+    fi
+  else
+    db_host="${hostport%%:*}"
+    if [[ "$hostport" == *:* ]] && [ -n "${hostport##*:}" ]; then
+      db_port="${hostport##*:}"
+    fi
+  fi
+
+  if [ -n "$path" ]; then
+    db_name="${path%%/*}"
+  fi
+}
+
 if [ -n "$DATABASE_URL" ]; then
-  # Strip scheme, userinfo, port, path — keep just the host
-  db_host="$(echo "$DATABASE_URL" | sed -E 's|^[^:]+://([^@]+@)?([^/:]+).*|\2|')"
+  parse_database_url
 fi
 
 is_local() {
-  [ -z "$db_host" ] || [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ] || [ "$db_host" = "::1" ]
+  [ -z "$DATABASE_URL" ] || [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ] || [ "$db_host" = "::1" ]
 }
 
 if is_local; then
@@ -57,11 +90,15 @@ if is_local; then
   echo "✓ PostgreSQL ready (local Docker). Database: $POSTGRES_DB"
 else
   # ---------- Remote: skip Docker, verify connectivity ----------
-  db_port="${POSTGRES_PORT:-5432}"
   echo "==> Remote database detected (host: $db_host). Skipping Docker."
-  echo "==> Waiting for PostgreSQL at $db_host:$db_port to be ready..."
-  until pg_isready -h "$db_host" -p "$db_port" -U "$POSTGRES_USER" -d "$POSTGRES_DB" > /dev/null 2>&1; do
-    sleep 1
-  done
-  echo "✓ PostgreSQL ready (remote: $db_host:$db_port). Database: $POSTGRES_DB"
+  if command -v pg_isready > /dev/null 2>&1; then
+    echo "==> Waiting for PostgreSQL at $db_host:$db_port to be ready..."
+    until pg_isready -d "$DATABASE_URL" > /dev/null 2>&1; do
+      sleep 1
+    done
+    echo "✓ PostgreSQL ready (remote: $db_host:$db_port). Database: $db_name"
+  else
+    echo "==> pg_isready not found. Skipping remote connectivity preflight."
+    echo "✓ PostgreSQL configured (remote: $db_host:$db_port). Database: $db_name"
+  fi
 fi
