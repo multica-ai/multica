@@ -257,8 +257,14 @@ Each team member who wants to run AI agents locally needs to:
 
    ```bash
    # Point CLI to your server
+   #
+   # For production deployments with TLS:
    export MULTICA_APP_URL=https://app.example.com
    export MULTICA_SERVER_URL=wss://api.example.com/ws
+   #
+   # For local deployments without TLS:
+   # export MULTICA_APP_URL=http://localhost:3000
+   # export MULTICA_SERVER_URL=ws://localhost:8080/ws
 
    # Login (opens browser)
    multica login
@@ -266,6 +272,8 @@ Each team member who wants to run AI agents locally needs to:
    # Start the daemon
    multica daemon start
    ```
+
+   > **Note:** Use `https://` and `wss://` for production deployments behind a TLS-terminating reverse proxy. For local or development deployments without TLS, use `http://` and `ws://` instead.
 
 The daemon auto-detects installed agent CLIs and registers itself with the server. When an agent is assigned a task in Multica, the daemon picks it up, creates an isolated workspace, runs the agent, and reports results back.
 
