@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -43,6 +44,7 @@ type Handler struct {
 	UpdateStore  *UpdateStore
 	Storage      *storage.S3Storage
 	CFSigner     *auth.CloudFrontSigner
+	IsProduction bool
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 *storage.S3Storage, cfSigner *auth.CloudFrontSigner) *Handler {
@@ -63,6 +65,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:  NewUpdateStore(),
 		Storage:      s3,
 		CFSigner:     cfSigner,
+		IsProduction: os.Getenv("APP_ENV") == "production",
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -239,8 +238,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to send verification code")
-		return
+		// In non-production environments, log the error but don't block login
+		// so developers can use the master code (888888) without email configured.
+		if !h.IsProduction {
+			slog.Warn("failed to send verification code (non-production, continuing)", "email", email, "error", err)
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to send verification code")
+			return
+		}
 	}
 
 	// Best-effort cleanup of expired codes
@@ -270,7 +275,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMasterCode := code == "888888" && os.Getenv("APP_ENV") != "production"
+	isMasterCode := code == "888888" && !h.IsProduction
 	if !isMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
