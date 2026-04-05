@@ -38,6 +38,16 @@ import type {
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
+const hasCryptoUUID =
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function";
+
+function generateRequestId(): string {
+  if (hasCryptoUUID) {
+    return crypto.randomUUID().slice(0, 8);
+  }
+  return Math.random().toString(36).slice(2, 10);
+}
+
 export interface LoginResponse {
   token: string;
   user: User;
@@ -91,8 +101,8 @@ export class ApiClient {
     return fallback;
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const rid = crypto.randomUUID().slice(0, 8);
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const rid = generateRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
@@ -105,7 +115,7 @@ export class ApiClient {
 
     this.logger.info(`→ ${method} ${path}`, { rid });
 
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await globalThis.fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers,
       credentials: "include",
@@ -130,25 +140,25 @@ export class ApiClient {
 
   // Auth
   async sendCode(email: string): Promise<void> {
-    await this.fetch("/auth/send-code", {
+    await this.request("/auth/send-code", {
       method: "POST",
       body: JSON.stringify({ email }),
     });
   }
 
   async verifyCode(email: string, code: string): Promise<LoginResponse> {
-    return this.fetch("/auth/verify-code", {
+    return this.request("/auth/verify-code", {
       method: "POST",
       body: JSON.stringify({ email, code }),
     });
   }
 
   async getMe(): Promise<User> {
-    return this.fetch("/api/me");
+    return this.request("/api/me");
   }
 
   async updateMe(data: UpdateMeRequest): Promise<User> {
-    return this.fetch("/api/me", {
+    return this.request("/api/me", {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -164,42 +174,42 @@ export class ApiClient {
     if (params?.status) search.set("status", params.status);
     if (params?.priority) search.set("priority", params.priority);
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
-    return this.fetch(`/api/issues?${search}`);
+    return this.request(`/api/issues?${search}`);
   }
 
   async getIssue(id: string): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`);
+    return this.request(`/api/issues/${id}`);
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     const search = new URLSearchParams();
     if (this.workspaceId) search.set("workspace_id", this.workspaceId);
-    return this.fetch(`/api/issues?${search}`, {
+    return this.request(`/api/issues?${search}`, {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`, {
+    return this.request(`/api/issues/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteIssue(id: string): Promise<void> {
-    await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+    await this.request(`/api/issues/${id}`, { method: "DELETE" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {
-    return this.fetch("/api/issues/batch-update", {
+    return this.request("/api/issues/batch-update", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds, updates }),
     });
   }
 
   async batchDeleteIssues(issueIds: string[]): Promise<{ deleted: number }> {
-    return this.fetch("/api/issues/batch-delete", {
+    return this.request("/api/issues/batch-delete", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds }),
     });
@@ -207,11 +217,11 @@ export class ApiClient {
 
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
-    return this.fetch(`/api/issues/${issueId}/comments`);
+    return this.request(`/api/issues/${issueId}/comments`);
   }
 
   async createComment(issueId: string, content: string, type?: string, parentId?: string, attachmentIds?: string[]): Promise<Comment> {
-    return this.fetch(`/api/issues/${issueId}/comments`, {
+    return this.request(`/api/issues/${issueId}/comments`, {
       method: "POST",
       body: JSON.stringify({
         content,
@@ -223,43 +233,43 @@ export class ApiClient {
   }
 
   async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    return this.fetch(`/api/issues/${issueId}/timeline`);
+    return this.request(`/api/issues/${issueId}/timeline`);
   }
 
   async updateComment(commentId: string, content: string): Promise<Comment> {
-    return this.fetch(`/api/comments/${commentId}`, {
+    return this.request(`/api/comments/${commentId}`, {
       method: "PUT",
       body: JSON.stringify({ content }),
     });
   }
 
   async deleteComment(commentId: string): Promise<void> {
-    await this.fetch(`/api/comments/${commentId}`, { method: "DELETE" });
+    await this.request(`/api/comments/${commentId}`, { method: "DELETE" });
   }
 
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {
-    return this.fetch(`/api/comments/${commentId}/reactions`, {
+    return this.request(`/api/comments/${commentId}/reactions`, {
       method: "POST",
       body: JSON.stringify({ emoji }),
     });
   }
 
   async removeReaction(commentId: string, emoji: string): Promise<void> {
-    await this.fetch(`/api/comments/${commentId}/reactions`, {
+    await this.request(`/api/comments/${commentId}/reactions`, {
       method: "DELETE",
       body: JSON.stringify({ emoji }),
     });
   }
 
   async addIssueReaction(issueId: string, emoji: string): Promise<IssueReaction> {
-    return this.fetch(`/api/issues/${issueId}/reactions`, {
+    return this.request(`/api/issues/${issueId}/reactions`, {
       method: "POST",
       body: JSON.stringify({ emoji }),
     });
   }
 
   async removeIssueReaction(issueId: string, emoji: string): Promise<void> {
-    await this.fetch(`/api/issues/${issueId}/reactions`, {
+    await this.request(`/api/issues/${issueId}/reactions`, {
       method: "DELETE",
       body: JSON.stringify({ emoji }),
     });
@@ -267,14 +277,14 @@ export class ApiClient {
 
   // Subscribers
   async listIssueSubscribers(issueId: string): Promise<IssueSubscriber[]> {
-    return this.fetch(`/api/issues/${issueId}/subscribers`);
+    return this.request(`/api/issues/${issueId}/subscribers`);
   }
 
   async subscribeToIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
     const body: Record<string, string> = {};
     if (userId) body.user_id = userId;
     if (userType) body.user_type = userType;
-    await this.fetch(`/api/issues/${issueId}/subscribe`, {
+    await this.request(`/api/issues/${issueId}/subscribe`, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -284,7 +294,7 @@ export class ApiClient {
     const body: Record<string, string> = {};
     if (userId) body.user_id = userId;
     if (userType) body.user_type = userType;
-    await this.fetch(`/api/issues/${issueId}/unsubscribe`, {
+    await this.request(`/api/issues/${issueId}/unsubscribe`, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -296,65 +306,65 @@ export class ApiClient {
     const wsId = params?.workspace_id ?? this.workspaceId;
     if (wsId) search.set("workspace_id", wsId);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    return this.request(`/api/agents?${search}`);
   }
 
   async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+    return this.request(`/api/agents/${id}`);
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
-    return this.fetch("/api/agents", {
+    return this.request("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`, {
+    return this.request(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async archiveAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
+    return this.request(`/api/agents/${id}/archive`, { method: "POST" });
   }
 
   async restoreAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
+    return this.request(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
   async listRuntimes(params?: { workspace_id?: string }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     const wsId = params?.workspace_id ?? this.workspaceId;
     if (wsId) search.set("workspace_id", wsId);
-    return this.fetch(`/api/runtimes?${search}`);
+    return this.request(`/api/runtimes?${search}`);
   }
 
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage?${search}`);
+    return this.request(`/api/runtimes/${runtimeId}/usage?${search}`);
   }
 
   async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
-    return this.fetch(`/api/runtimes/${runtimeId}/activity`);
+    return this.request(`/api/runtimes/${runtimeId}/activity`);
   }
 
   async pingRuntime(runtimeId: string): Promise<RuntimePing> {
-    return this.fetch(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
+    return this.request(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
   }
 
   async getPingResult(runtimeId: string, pingId: string): Promise<RuntimePing> {
-    return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
+    return this.request(`/api/runtimes/${runtimeId}/ping/${pingId}`);
   }
 
   async initiateUpdate(
     runtimeId: string,
     targetVersion: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update`, {
+    return this.request(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
       body: JSON.stringify({ target_version: targetVersion }),
     });
@@ -364,82 +374,82 @@ export class ApiClient {
     runtimeId: string,
     updateId: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+    return this.request(`/api/runtimes/${runtimeId}/update/${updateId}`);
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
-    return this.fetch(`/api/agents/${agentId}/tasks`);
+    return this.request(`/api/agents/${agentId}/tasks`);
   }
 
   async getActiveTaskForIssue(issueId: string): Promise<{ task: AgentTask | null }> {
-    return this.fetch(`/api/issues/${issueId}/active-task`);
+    return this.request(`/api/issues/${issueId}/active-task`);
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
-    return this.fetch(`/api/daemon/tasks/${taskId}/messages`);
+    return this.request(`/api/daemon/tasks/${taskId}/messages`);
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
-    return this.fetch(`/api/issues/${issueId}/task-runs`);
+    return this.request(`/api/issues/${issueId}/task-runs`);
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
-    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
+    return this.request(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
     });
   }
 
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
-    return this.fetch("/api/inbox");
+    return this.request("/api/inbox");
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {
-    return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
+    return this.request(`/api/inbox/${id}/read`, { method: "POST" });
   }
 
   async archiveInbox(id: string): Promise<InboxItem> {
-    return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
+    return this.request(`/api/inbox/${id}/archive`, { method: "POST" });
   }
 
   async getUnreadInboxCount(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/unread-count");
+    return this.request("/api/inbox/unread-count");
   }
 
   async markAllInboxRead(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
+    return this.request("/api/inbox/mark-all-read", { method: "POST" });
   }
 
   async archiveAllInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-all", { method: "POST" });
+    return this.request("/api/inbox/archive-all", { method: "POST" });
   }
 
   async archiveAllReadInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-all-read", { method: "POST" });
+    return this.request("/api/inbox/archive-all-read", { method: "POST" });
   }
 
   async archiveCompletedInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+    return this.request("/api/inbox/archive-completed", { method: "POST" });
   }
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+    return this.request("/api/workspaces");
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`);
+    return this.request(`/api/workspaces/${id}`);
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
-    return this.fetch("/api/workspaces", {
+    return this.request("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`, {
+    return this.request(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -447,81 +457,81 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    return this.request(`/api/workspaces/${workspaceId}/members`);
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`, {
+    return this.request(`/api/workspaces/${workspaceId}/members`, {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+    return this.request(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
   }
 
   async deleteMember(workspaceId: string, memberId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+    await this.request(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "DELETE",
     });
   }
 
   async leaveWorkspace(workspaceId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/leave`, {
+    await this.request(`/api/workspaces/${workspaceId}/leave`, {
       method: "POST",
     });
   }
 
   async deleteWorkspace(workspaceId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}`, {
+    await this.request(`/api/workspaces/${workspaceId}`, {
       method: "DELETE",
     });
   }
 
   // Skills
   async listSkills(): Promise<Skill[]> {
-    return this.fetch("/api/skills");
+    return this.request("/api/skills");
   }
 
   async getSkill(id: string): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`);
+    return this.request(`/api/skills/${id}`);
   }
 
   async createSkill(data: CreateSkillRequest): Promise<Skill> {
-    return this.fetch("/api/skills", {
+    return this.request("/api/skills", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateSkill(id: string, data: UpdateSkillRequest): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`, {
+    return this.request(`/api/skills/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteSkill(id: string): Promise<void> {
-    await this.fetch(`/api/skills/${id}`, { method: "DELETE" });
+    await this.request(`/api/skills/${id}`, { method: "DELETE" });
   }
 
   async importSkill(data: { url: string }): Promise<Skill> {
-    return this.fetch("/api/skills/import", {
+    return this.request("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async listAgentSkills(agentId: string): Promise<Skill[]> {
-    return this.fetch(`/api/agents/${agentId}/skills`);
+    return this.request(`/api/agents/${agentId}/skills`);
   }
 
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
-    await this.fetch(`/api/agents/${agentId}/skills`, {
+    await this.request(`/api/agents/${agentId}/skills`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
@@ -529,18 +539,18 @@ export class ApiClient {
 
   // Personal Access Tokens
   async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
-    return this.fetch("/api/tokens");
+    return this.request("/api/tokens");
   }
 
   async createPersonalAccessToken(data: CreatePersonalAccessTokenRequest): Promise<CreatePersonalAccessTokenResponse> {
-    return this.fetch("/api/tokens", {
+    return this.request("/api/tokens", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async revokePersonalAccessToken(id: string): Promise<void> {
-    await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+    await this.request(`/api/tokens/${id}`, { method: "DELETE" });
   }
 
   // File Upload & Attachments
@@ -550,11 +560,11 @@ export class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = generateRequestId();
     const start = Date.now();
     this.logger.info("→ POST /api/upload-file", { rid });
 
-    const res = await fetch(`${this.baseUrl}/api/upload-file`, {
+    const res = await globalThis.fetch(`${this.baseUrl}/api/upload-file`, {
       method: "POST",
       headers: this.authHeaders(),
       body: formData,
@@ -573,10 +583,10 @@ export class ApiClient {
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
-    return this.fetch(`/api/issues/${issueId}/attachments`);
+    return this.request(`/api/issues/${issueId}/attachments`);
   }
 
   async deleteAttachment(id: string): Promise<void> {
-    await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+    await this.request(`/api/attachments/${id}`, { method: "DELETE" });
   }
 }
