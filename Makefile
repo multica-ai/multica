@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down start-prod restart-prod caddy caddy-stop docker-up docker-down docker-build docker-restart
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -69,7 +69,60 @@ stop:
 	@echo "Stopping services..."
 	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
 	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
-	@echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:5432."
+	@-ss -tlnp | grep ':$(FRONTEND_PORT) ' | grep -oP 'pid=\K[0-9]+' | xargs kill -9 2>/dev/null
+	@echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:$(POSTGRES_PORT)."
+
+# Start from compiled binaries (production mode)
+start-prod:
+	$(REQUIRE_ENV)
+	@test -f server/bin/server || (echo "Error: server/bin/server not found. Run 'make build' first." && exit 1)
+	@echo "Using env file: $(ENV_FILE)"
+	@echo "Backend: http://localhost:$(PORT)"
+	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
+	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@echo "Starting backend and frontend (production mode)..."
+	@trap 'kill 0' EXIT; \
+		./server/bin/server & \
+		(cd apps/web && PORT=$(FRONTEND_PORT) node .next/standalone/apps/web/server.js) & \
+		wait
+
+# Stop, rebuild, and restart everything (local mode: backend + frontend + caddy)
+restart-prod:
+	@$(MAKE) stop
+	@-caddy stop 2>/dev/null
+	@$(MAKE) build
+	@pnpm build
+	@$(MAKE) start-prod &
+	@sleep 5
+	@$(MAKE) caddy
+
+CADDY_PORT ?= 33080
+
+# Start Caddy reverse proxy (single entry point for frontend + backend)
+caddy:
+	@echo "Starting Caddy on http://localhost:$(CADDY_PORT)..."
+	@caddy start --config Caddyfile
+
+# Stop Caddy
+caddy-stop:
+	@caddy stop 2>/dev/null || true
+	@echo "✓ Caddy stopped."
+
+# Docker Compose (full stack: postgres + backend + frontend + caddy)
+docker-build:
+	docker compose --profile full build
+
+docker-up:
+	docker compose --profile full up -d
+	@echo "✓ All services running. Open http://localhost:$(CADDY_PORT:-33080)"
+
+docker-down:
+	docker compose --profile full down
+
+# Rebuild images and restart all containers
+docker-restart:
+	docker compose --profile full up -d --build --force-recreate
+	@echo "✓ All services rebuilt and running. Open http://localhost:$(CADDY_PORT:-33080)"
 
 # Full verification: typecheck + unit tests + Go tests + E2E
 check:

@@ -1,0 +1,26 @@
+:80 {
+	# Backend API, auth, health, and WebSocket
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+	handle /auth/* {
+		reverse_proxy backend:8080
+	}
+	handle /health {
+		reverse_proxy backend:8080
+	}
+	handle /ws {
+		reverse_proxy backend:8080
+	}
+
+	# MinIO file storage
+	handle /storage/* {
+		uri strip_prefix /storage
+		reverse_proxy minio:9000
+	}
+
+	# Frontend (everything else)
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

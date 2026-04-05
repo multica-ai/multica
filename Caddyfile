@@ -1,0 +1,26 @@
+:33080 {
+	# Backend API, auth, health, and WebSocket
+	handle /api/* {
+		reverse_proxy localhost:38080
+	}
+	handle /auth/* {
+		reverse_proxy localhost:38080
+	}
+	handle /health {
+		reverse_proxy localhost:38080
+	}
+	handle /ws {
+		reverse_proxy localhost:38080
+	}
+
+	# MinIO file storage
+	handle /storage/* {
+		uri strip_prefix /storage
+		reverse_proxy localhost:39000
+	}
+
+	# Frontend (everything else)
+	handle {
+		reverse_proxy localhost:33000
+	}
+}
