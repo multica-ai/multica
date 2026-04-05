@@ -23,12 +23,17 @@ import (
 )
 
 func allowedOrigins() []string {
+	defaultOrigin := "http://localhost:3000"
+	if frontendPort := strings.TrimSpace(os.Getenv("FRONTEND_PORT")); frontendPort != "" {
+		defaultOrigin = "http://localhost:" + frontendPort
+	}
+
 	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	if raw == "" {
 		raw = strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	}
 	if raw == "" {
-		return []string{"http://localhost:3000"}
+		return []string{defaultOrigin}
 	}
 
 	parts := strings.Split(raw, ",")
@@ -40,7 +45,7 @@ func allowedOrigins() []string {
 		}
 	}
 	if len(origins) == 0 {
-		return []string{"http://localhost:3000"}
+		return []string{defaultOrigin}
 	}
 	return origins
 }

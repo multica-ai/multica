@@ -18,7 +18,7 @@ hash_value="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
 offset=$((hash_value % 1000))
 
 postgres_db="multica_${slug}_${offset}"
-postgres_port=5432
+postgres_port=35432
 backend_port=$((18080 + offset))
 frontend_port=$((13000 + offset))
 frontend_origin="http://localhost:${frontend_port}"

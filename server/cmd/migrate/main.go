@@ -29,7 +29,11 @@ func main() {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		postgresPort := os.Getenv("POSTGRES_PORT")
+		if postgresPort == "" {
+			postgresPort = "5432"
+		}
+		dbURL = "postgres://multica:multica@localhost:" + postgresPort + "/multica?sslmode=disable"
 	}
 
 	ctx := context.Background()
