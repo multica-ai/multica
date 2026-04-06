@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build release-build release-package test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -156,6 +156,12 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 build:
 	cd server && go build -o bin/server ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/multica ./cmd/multica
+
+release-build:
+	bash scripts/build-release.sh
+
+release-package:
+	bash scripts/package-release.sh $(RELEASE_OUTPUT_DIR)
 
 test:
 	$(REQUIRE_ENV)
