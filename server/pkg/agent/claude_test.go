@@ -8,6 +8,83 @@ import (
 	"testing"
 )
 
+func containsFlag(args []string, flag, value string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func containsArg(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildClaudeArgsEffortIncluded(t *testing.T) {
+	t.Parallel()
+
+	for _, effort := range []string{"low", "medium", "high", "max"} {
+		args := buildClaudeArgs(ExecOptions{Effort: effort}, "do something")
+		if !containsFlag(args, "--effort", effort) {
+			t.Errorf("effort=%q: expected --effort %s in args %v", effort, effort, args)
+		}
+	}
+}
+
+func TestBuildClaudeArgsEffortOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{}, "do something")
+	if containsArg(args, "--effort") {
+		t.Errorf("expected no --effort flag when Effort is empty, got %v", args)
+	}
+}
+
+func TestBuildClaudeArgsModelAndEffort(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{Model: "claude-opus-4-6", Effort: "high"}, "prompt")
+	if !containsFlag(args, "--model", "claude-opus-4-6") {
+		t.Errorf("expected --model flag in args %v", args)
+	}
+	if !containsFlag(args, "--effort", "high") {
+		t.Errorf("expected --effort high in args %v", args)
+	}
+}
+
+func TestBuildClaudeArgsPromptAlwaysLast(t *testing.T) {
+	t.Parallel()
+
+	prompt := "hello world"
+	args := buildClaudeArgs(ExecOptions{Effort: "max", Model: "claude-sonnet-4-6"}, prompt)
+	if len(args) < 2 {
+		t.Fatalf("expected at least 2 args, got %d", len(args))
+	}
+	if args[len(args)-1] != prompt {
+		t.Errorf("expected prompt as last arg, got %q", args[len(args)-1])
+	}
+	if args[len(args)-2] != "-p" {
+		t.Errorf("expected -p before prompt, got %q", args[len(args)-2])
+	}
+}
+
+func TestBuildClaudeArgsBaseFlags(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{}, "test")
+	for _, flag := range []string{"--output-format", "--verbose", "--permission-mode"} {
+		if !containsArg(args, flag) {
+			t.Errorf("expected base flag %q in args %v", flag, args)
+		}
+	}
+}
+
 func TestClaudeHandleAssistantText(t *testing.T) {
 	t.Parallel()
 

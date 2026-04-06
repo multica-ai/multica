@@ -33,24 +33,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := []string{
-		"--output-format", "stream-json",
-		"--verbose",
-		"--permission-mode", "bypassPermissions",
-	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
-	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.SystemPrompt)
-	}
-	if opts.ResumeSessionID != "" {
-		args = append(args, "--resume", opts.ResumeSessionID)
-	}
-	args = append(args, "-p", prompt)
+	args := buildClaudeArgs(opts, prompt)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	if opts.Cwd != "" {
@@ -166,6 +149,31 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func buildClaudeArgs(opts ExecOptions, prompt string) []string {
+	args := []string{
+		"--output-format", "stream-json",
+		"--verbose",
+		"--permission-mode", "bypassPermissions",
+	}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
+	}
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
+	}
+	if opts.SystemPrompt != "" {
+		args = append(args, "--append-system-prompt", opts.SystemPrompt)
+	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--resume", opts.ResumeSessionID)
+	}
+	args = append(args, "-p", prompt)
+	return args
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder) {

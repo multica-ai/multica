@@ -66,6 +66,67 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	}
 }
 
+func TestResolveModelAndEffort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		entry        AgentEntry
+		agentData    *AgentData
+		wantModel    string
+		wantEffort   string
+	}{
+		{
+			name:       "no agent data uses entry model, empty effort",
+			entry:      AgentEntry{Model: "claude-sonnet-4-6"},
+			agentData:  nil,
+			wantModel:  "claude-sonnet-4-6",
+			wantEffort: "",
+		},
+		{
+			name:       "agent data effort is passed through",
+			entry:      AgentEntry{Model: "claude-sonnet-4-6"},
+			agentData:  &AgentData{Effort: "high"},
+			wantModel:  "claude-sonnet-4-6",
+			wantEffort: "high",
+		},
+		{
+			name:       "agent data model overrides entry model",
+			entry:      AgentEntry{Model: "claude-sonnet-4-6"},
+			agentData:  &AgentData{Model: "claude-opus-4-6", Effort: "max"},
+			wantModel:  "claude-opus-4-6",
+			wantEffort: "max",
+		},
+		{
+			name:       "empty agent model keeps entry model",
+			entry:      AgentEntry{Model: "claude-haiku-4-5"},
+			agentData:  &AgentData{Effort: "low"},
+			wantModel:  "claude-haiku-4-5",
+			wantEffort: "low",
+		},
+		{
+			name:       "all effort values accepted",
+			entry:      AgentEntry{},
+			agentData:  &AgentData{Effort: "medium"},
+			wantModel:  "",
+			wantEffort: "medium",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotModel, gotEffort := resolveModelAndEffort(tt.entry, tt.agentData)
+			if gotModel != tt.wantModel {
+				t.Errorf("model = %q, want %q", gotModel, tt.wantModel)
+			}
+			if gotEffort != tt.wantEffort {
+				t.Errorf("effort = %q, want %q", gotEffort, tt.wantEffort)
+			}
+		})
+	}
+}
+
 func TestIsWorkspaceNotFoundError(t *testing.T) {
 	t.Parallel()
 

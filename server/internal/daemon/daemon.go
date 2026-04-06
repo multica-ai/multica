@@ -935,11 +935,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
+	// Per-agent model and effort override the global default
+	model, effort := resolveModelAndEffort(entry, task.Agent)
+
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
-		"model", entry.Model,
+		"model", model,
 		"reused", reused,
 	)
 	if task.PriorSessionID != "" {
@@ -950,7 +953,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{
 		Cwd:             env.WorkDir,
-		Model:           entry.Model,
+		Model:           model,
+		Effort:          effort,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 	})
@@ -1156,6 +1160,19 @@ func truncateLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+// resolveModelAndEffort returns the effective model and effort for a task,
+// preferring per-agent overrides from AgentData over the entry defaults.
+func resolveModelAndEffort(entry AgentEntry, agentData *AgentData) (model, effort string) {
+	model = entry.Model
+	if agentData != nil {
+		if agentData.Model != "" {
+			model = agentData.Model
+		}
+		effort = agentData.Effort
+	}
+	return
 }
 
 func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
