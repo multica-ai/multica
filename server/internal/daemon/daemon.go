@@ -1123,7 +1123,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
 	for i, r := range repos {
-		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description}
+		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description, DefaultBranch: r.DefaultBranch}
 	}
 	return info
 }
@@ -1134,7 +1134,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, DefaultBranch: r.DefaultBranch}
 	}
 	return result
 }

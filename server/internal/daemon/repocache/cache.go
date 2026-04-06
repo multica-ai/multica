@@ -16,8 +16,9 @@ import (
 
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
-	URL         string
-	Description string
+	URL           string
+	Description   string
+	DefaultBranch string // user-configured merge target branch (empty = auto-detect)
 }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
@@ -29,14 +30,22 @@ type CachedRepo struct {
 
 // Cache manages bare git clones for workspace repositories.
 type Cache struct {
-	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
-	logger *slog.Logger
-	mu     sync.Mutex
+	root            string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
+	logger          *slog.Logger
+	mu              sync.Mutex
+	defaultBranches map[string]string // key: "workspaceID:repoURL" → default branch
 }
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
-	return &Cache{root: root, logger: logger}
+	return &Cache{root: root, logger: logger, defaultBranches: make(map[string]string)}
+}
+
+// LookupDefaultBranch returns the user-configured default branch for a repo (empty if not set).
+func (c *Cache) LookupDefaultBranch(workspaceID, repoURL string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.defaultBranches[workspaceID+":"+repoURL]
 }
 
 // Sync ensures all repos for a workspace are cloned (or fetched if already cached).
@@ -55,6 +64,12 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 	for _, repo := range repos {
 		if repo.URL == "" {
 			continue
+		}
+		// Remember the configured default branch for this repo.
+		if repo.DefaultBranch != "" {
+			c.defaultBranches[workspaceID+":"+repo.URL] = repo.DefaultBranch
+		} else {
+			delete(c.defaultBranches, workspaceID+":"+repo.URL)
 		}
 		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
 
@@ -153,11 +168,12 @@ func gitFetch(barePath string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
-	WorkDir     string // parent directory for the worktree (e.g. task workdir)
-	AgentName   string // for branch naming
-	TaskID      string // for branch naming uniqueness
+	WorkspaceID   string // workspace that owns the repo
+	RepoURL       string // remote URL to look up in the cache
+	WorkDir       string // parent directory for the worktree (e.g. task workdir)
+	AgentName     string // for branch naming
+	TaskID        string // for branch naming uniqueness
+	DefaultBranch string // user-configured branch to base worktree on (empty = auto-detect)
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -179,8 +195,14 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		c.logger.Warn("repo checkout: fetch failed (continuing with cached state)", "url", params.RepoURL, "error", err)
 	}
 
-	// Determine the default branch to base the worktree on.
-	baseRef := getRemoteDefaultBranch(barePath)
+	// Determine the base branch for the worktree.
+	// Use user-configured branch if set, otherwise auto-detect from remote.
+	var baseRef string
+	if params.DefaultBranch != "" {
+		baseRef = params.DefaultBranch
+	} else {
+		baseRef = getRemoteDefaultBranch(barePath)
+	}
 
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))

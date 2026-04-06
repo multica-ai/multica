@@ -29,6 +29,15 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
+func reposHaveConfiguredBranch(repos []RepoContextForEnv) bool {
+	for _, r := range repos {
+		if r.DefaultBranch != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
@@ -64,14 +73,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
-		b.WriteString("| URL | Description |\n")
-		b.WriteString("|-----|-------------|\n")
-		for _, repo := range ctx.Repos {
-			desc := repo.Description
-			if desc == "" {
-				desc = "—"
+		// Include Default Branch column only if any repo has one configured.
+		if reposHaveConfiguredBranch(ctx.Repos) {
+			b.WriteString("| URL | Description | PR Target Branch |\n")
+			b.WriteString("|-----|-------------|------------------|\n")
+			for _, repo := range ctx.Repos {
+				desc := repo.Description
+				if desc == "" {
+					desc = "—"
+				}
+				branch := repo.DefaultBranch
+				if branch == "" {
+					branch = "auto-detect"
+				}
+				fmt.Fprintf(&b, "| %s | %s | `%s` |\n", repo.URL, desc, branch)
 			}
-			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+		} else {
+			b.WriteString("| URL | Description |\n")
+			b.WriteString("|-----|-------------|\n")
+			for _, repo := range ctx.Repos {
+				desc := repo.Description
+				if desc == "" {
+					desc = "—"
+				}
+				fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			}
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
 	}
@@ -104,7 +130,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("   b. Implement the changes and commit\n")
 		}
 		b.WriteString("   c. Push the branch to the remote\n")
-		b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
+		// If any repo has a configured default branch, instruct the agent to use it.
+		if len(ctx.Repos) == 1 && ctx.Repos[0].DefaultBranch != "" {
+			fmt.Fprintf(&b, "   d. Create a pull request targeting the `%s` branch\n", ctx.Repos[0].DefaultBranch)
+		} else if reposHaveConfiguredBranch(ctx.Repos) {
+			b.WriteString("   d. Create a pull request targeting the configured PR target branch (see Repositories table above)\n")
+		} else {
+			b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
+		}
 		fmt.Fprintf(&b, "   e. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
 		b.WriteString("5. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
 		fmt.Fprintf(&b, "6. Run `multica issue status %s in_review`\n", ctx.IssueID)

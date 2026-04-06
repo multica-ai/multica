@@ -110,11 +110,12 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		}
 
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
-			WorkspaceID: req.WorkspaceID,
-			RepoURL:     req.URL,
-			WorkDir:     req.WorkDir,
-			AgentName:   req.AgentName,
-			TaskID:      req.TaskID,
+			WorkspaceID:   req.WorkspaceID,
+			RepoURL:       req.URL,
+			WorkDir:       req.WorkDir,
+			AgentName:     req.AgentName,
+			TaskID:        req.TaskID,
+			DefaultBranch: d.repoCache.LookupDefaultBranch(req.WorkspaceID, req.URL),
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
