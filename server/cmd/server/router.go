@@ -80,6 +80,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	})
 
 	// Auth (public)
+	r.Get("/auth/config", h.AuthConfig)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Get("/auth/callback", h.OAuthCallback)

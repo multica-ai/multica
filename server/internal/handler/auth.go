@@ -377,3 +377,20 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, userToResponse(updatedUser))
 }
+
+// AuthConfig handles GET /auth/config — returns which authentication methods are available.
+func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
+	isDev := os.Getenv("APP_ENV") != "production"
+
+	// Email login is available in dev (codes print to stdout) or when Resend is configured.
+	emailEnabled := isDev || os.Getenv("RESEND_API_KEY") != ""
+
+	googleEnabled := os.Getenv("GOOGLE_CLIENT_ID") != "" && os.Getenv("GOOGLE_CLIENT_SECRET") != ""
+	githubEnabled := os.Getenv("GITHUB_CLIENT_ID") != "" && os.Getenv("GITHUB_CLIENT_SECRET") != ""
+
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"email":  emailEnabled,
+		"google": googleEnabled,
+		"github": githubEnabled,
+	})
+}
