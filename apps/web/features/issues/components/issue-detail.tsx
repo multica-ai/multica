@@ -44,6 +44,9 @@ import {
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef } from "@/features/editor";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { TitleEditor } from "@/features/editor";
@@ -172,6 +175,7 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
+  const isMobile = useIsMobile();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -191,6 +195,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   });
   const sidebarRef = usePanelRef();
   const [sidebarOpen, setSidebarOpen] = useState(defaultSidebarOpen);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
@@ -372,16 +377,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     );
   }
 
-  return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="content" minSize="50%">
-      {/* LEFT: Content area */}
+  const contentPanel = (
+      /* LEFT: Content area */
       <div className="flex h-full flex-col">
         {/* Header bar */}
         <div className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-4 text-sm">
           <div className="flex items-center gap-1.5 min-w-0">
+            <SidebarTrigger className="md:hidden shrink-0" />
             {workspace && (
-              <>
+              <span className="hidden md:contents">
                 <Link
                   href="/issues"
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
@@ -389,18 +393,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   {workspace.name}
                 </Link>
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
+              </span>
             )}
-            <span className="truncate text-muted-foreground">
+            <span className="truncate text-muted-foreground shrink-0">
               {issue.identifier}
             </span>
             <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
             <span className="truncate">{issue.title}</span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {/* Issue navigation */}
+            {/* Issue navigation — hidden on mobile */}
             {allIssues.length > 1 && (
-              <div className="flex items-center gap-0.5 mr-1">
+              <div className="hidden md:flex items-center gap-0.5 mr-1">
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -586,10 +590,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               <TooltipTrigger
                 render={
                   <Button
-                    variant={sidebarOpen ? "secondary" : "ghost"}
+                    variant={(isMobile ? mobileSidebarOpen : sidebarOpen) ? "secondary" : "ghost"}
                     size="icon-xs"
-                    className={sidebarOpen ? "" : "text-muted-foreground"}
+                    className={(isMobile ? mobileSidebarOpen : sidebarOpen) ? "" : "text-muted-foreground"}
                     onClick={() => {
+                      if (isMobile) {
+                        setMobileSidebarOpen(true);
+                        return;
+                      }
                       const panel = sidebarRef.current;
                       if (!panel) return;
                       if (panel.isCollapsed()) panel.expand();
@@ -600,7 +608,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+              <TooltipContent side="bottom">Properties</TooltipContent>
             </Tooltip>
           </div>
 
@@ -934,6 +942,132 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         )}
         </div>
       </div>
+  );
+
+  const sidebarContent = (
+          <div className="overflow-y-auto h-full">
+            <div className="p-4 space-y-5">
+              {/* Properties section */}
+              <div>
+                <button
+                  className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setPropertiesOpen(!propertiesOpen)}
+                >
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+                  Properties
+                </button>
+
+                {propertiesOpen && <div className="space-y-0.5 pl-2">
+                  {/* Status */}
+                  <PropRow label="Status">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
+                        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-44">
+                        {ALL_STATUSES.map((s) => (
+                          <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s })}>
+                            <StatusIcon status={s} className="h-3.5 w-3.5" />
+                            {STATUS_CONFIG[s].label}
+                            {s === issue.status && <Check className="ml-auto h-3.5 w-3.5" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </PropRow>
+
+                  {/* Priority */}
+                  <PropRow label="Priority">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
+                        <PriorityIcon priority={issue.priority} className="shrink-0" />
+                        <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-44">
+                        {PRIORITY_ORDER.map((p) => (
+                          <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p })}>
+                            <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
+                              <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
+                              {PRIORITY_CONFIG[p].label}
+                            </span>
+                            {p === issue.priority && <Check className="ml-auto h-3.5 w-3.5" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </PropRow>
+
+                  {/* Assignee */}
+                  <PropRow label="Assignee">
+                    <AssigneePicker
+                      assigneeType={issue.assignee_type}
+                      assigneeId={issue.assignee_id}
+                      onUpdate={handleUpdateField}
+                      align="start"
+                    />
+                  </PropRow>
+
+                  {/* Due date */}
+                  <PropRow label="Due date">
+                    <DueDatePicker
+                      dueDate={issue.due_date}
+                      onUpdate={handleUpdateField}
+                    />
+                  </PropRow>
+                </div>}
+              </div>
+
+              {/* Details section */}
+              <div>
+                <button
+                  className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setDetailsOpen(!detailsOpen)}
+                >
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
+                  Details
+                </button>
+
+                {detailsOpen && <div className="space-y-0.5 pl-2">
+                  <PropRow label="Created by">
+                    <ActorAvatar
+                      actorType={issue.creator_type}
+                      actorId={issue.creator_id}
+                      size={18}
+                    />
+                    <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+                  </PropRow>
+                  <PropRow label="Created">
+                    <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
+                  </PropRow>
+                  <PropRow label="Updated">
+                    <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
+                  </PropRow>
+                </div>}
+              </div>
+
+            </div>
+          </div>
+        );
+
+  if (isMobile) {
+    return (
+      <>
+        {contentPanel}
+        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+          <SheetContent side="bottom" className="max-h-[70vh] overflow-y-auto" showCloseButton>
+            <SheetTitle className="sr-only">Issue Properties</SheetTitle>
+            {sidebarContent}
+          </SheetContent>
+        </Sheet>
+      </>
+    );
+  }
+
+  return (
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+      <ResizablePanel id="content" minSize="50%">
+        {contentPanel}
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel
@@ -946,110 +1080,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         panelRef={sidebarRef}
         onResize={(size) => setSidebarOpen(size.inPixels > 0)}
       >
-      {/* RIGHT: Properties sidebar */}
-      <div className="overflow-y-auto border-l h-full">
-        <div className="p-4 space-y-5">
-          {/* Properties section */}
-          <div>
-            <button
-              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setPropertiesOpen(!propertiesOpen)}
-            >
-              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-              Properties
-            </button>
-
-            {propertiesOpen && <div className="space-y-0.5 pl-2">
-              {/* Status */}
-              <PropRow label="Status">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {ALL_STATUSES.map((s) => (
-                      <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s })}>
-                        <StatusIcon status={s} className="h-3.5 w-3.5" />
-                        {STATUS_CONFIG[s].label}
-                        {s === issue.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </PropRow>
-
-              {/* Priority */}
-              <PropRow label="Priority">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <PriorityIcon priority={issue.priority} className="shrink-0" />
-                    <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {PRIORITY_ORDER.map((p) => (
-                      <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p })}>
-                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                          <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                          {PRIORITY_CONFIG[p].label}
-                        </span>
-                        {p === issue.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </PropRow>
-
-              {/* Assignee */}
-              <PropRow label="Assignee">
-                <AssigneePicker
-                  assigneeType={issue.assignee_type}
-                  assigneeId={issue.assignee_id}
-                  onUpdate={handleUpdateField}
-                  align="start"
-                />
-              </PropRow>
-
-              {/* Due date */}
-              <PropRow label="Due date">
-                <DueDatePicker
-                  dueDate={issue.due_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-            </div>}
-          </div>
-
-          {/* Details section */}
-          <div>
-            <button
-              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setDetailsOpen(!detailsOpen)}
-            >
-              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
-              Details
-            </button>
-
-            {detailsOpen && <div className="space-y-0.5 pl-2">
-              <PropRow label="Created by">
-                <ActorAvatar
-                  actorType={issue.creator_type}
-                  actorId={issue.creator_id}
-                  size={18}
-                />
-                <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-              </PropRow>
-              <PropRow label="Created">
-                <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
-              </PropRow>
-              <PropRow label="Updated">
-                <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
-              </PropRow>
-            </div>}
-          </div>
-
-        </div>
-      </div>
+        <div className="border-l h-full">{sidebarContent}</div>
       </ResizablePanel>
     </ResizablePanelGroup>
   );

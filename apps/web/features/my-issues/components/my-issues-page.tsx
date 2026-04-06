@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import { toast } from "sonner";
-import { ChevronRight, ListTodo } from "lucide-react";
+import { ChevronRight, ListTodo, Plus } from "lucide-react";
 import type { IssueStatus } from "@/shared/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, WorkspaceAvatar } from "@/features/workspace";
+import { Button } from "@/components/ui/button";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useModalStore } from "@/features/modals";
 import { useIssueStore } from "@/features/issues/store";
 import { filterIssues } from "@/features/issues/utils/filter";
 import { BOARD_STATUSES } from "@/features/issues/config";
@@ -157,13 +160,24 @@ export function MyIssuesPage() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* Header 1: Workspace breadcrumb */}
-      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-4">
-        <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
-        <span className="text-sm text-muted-foreground">
-          {workspace?.name ?? "Workspace"}
-        </span>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">My Issues</span>
+      <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+        <div className="flex items-center gap-1.5">
+          <SidebarTrigger className="md:hidden" />
+          <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" className="hidden md:flex" />
+          <span className="text-sm text-muted-foreground hidden md:inline">
+            {workspace?.name ?? "Workspace"}
+          </span>
+          <ChevronRight className="h-3 w-3 text-muted-foreground hidden md:inline" />
+          <span className="text-sm font-medium">My Issues</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="md:hidden text-muted-foreground"
+          onClick={() => useModalStore.getState().open("create-issue")}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Header: scope tabs (left) + controls (right) */}

@@ -38,6 +38,9 @@ import { useWorkspaceStore } from "@/features/workspace";
 
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileListDetail } from "@/components/layout/mobile-list-detail";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 // ---------------------------------------------------------------------------
 // Create Skill Dialog
@@ -609,6 +612,7 @@ function SkillDetail({
 // ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
+  const isMobile = useIsMobile();
   const isLoading = useAuthStore((s) => s.isLoading);
   const skills = useWorkspaceStore((s) => s.skills);
   const refreshSkills = useWorkspaceStore((s) => s.refreshSkills);
@@ -711,6 +715,108 @@ export default function SkillsPage() {
     );
   }
 
+  const skillListContent = (
+    <div className="overflow-y-auto h-full border-r">
+      <div className="flex h-12 items-center justify-between border-b px-4">
+        <div className="flex items-center gap-2">
+            <SidebarTrigger className="md:hidden" />
+            <h1 className="text-sm font-semibold">Skills</h1>
+          </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setShowCreate(true)}
+              >
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom">Create skill</TooltipContent>
+        </Tooltip>
+      </div>
+      {skills.length === 0 ? (
+        <div className="flex flex-col items-center justify-center px-4 py-12">
+          <Sparkles className="h-8 w-8 text-muted-foreground/40" />
+          <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
+          <p className="mt-1 text-xs text-muted-foreground text-center">
+            Skills define reusable instructions for agents.
+          </p>
+          <Button
+            onClick={() => setShowCreate(true)}
+            size="xs"
+            className="mt-3"
+          >
+            <Plus className="h-3 w-3" />
+            Create Skill
+          </Button>
+        </div>
+      ) : (
+        <div className="divide-y">
+          {skills.map((skill) => (
+            <SkillListItem
+              key={skill.id}
+              skill={skill}
+              isSelected={skill.id === selectedId}
+              onClick={() => setSelectedId(skill.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const skillDetailContent = (
+    <div className="flex-1 overflow-hidden h-full">
+      {selected ? (
+        <SkillDetail
+          key={selected.id}
+          skill={selected}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+        />
+      ) : (
+        <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+          <Sparkles className="h-10 w-10 text-muted-foreground/30" />
+          <p className="mt-3 text-sm">Select a skill to view details</p>
+          <Button
+            onClick={() => setShowCreate(true)}
+            size="xs"
+            className="mt-3"
+          >
+            <Plus className="h-3 w-3" />
+            Create Skill
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  const createDialog = showCreate ? (
+    <CreateSkillDialog
+      onClose={() => setShowCreate(false)}
+      onCreate={handleCreate}
+      onImport={handleImport}
+    />
+  ) : null;
+
+  if (isMobile) {
+    return (
+      <>
+        <MobileListDetail
+          showDetail={!!selectedId}
+          onBack={() => setSelectedId("")}
+          headerTitle={selected?.name ?? "Skill"}
+          list={skillListContent}
+          detail={skillDetailContent}
+        />
+        {createDialog}
+      </>
+    );
+  }
+
   return (
     <ResizablePanelGroup
       orientation="horizontal"
@@ -719,92 +825,16 @@ export default function SkillsPage() {
       onLayoutChanged={onLayoutChanged}
     >
       <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
-        {/* Left column — skill list */}
-        <div className="overflow-y-auto h-full border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <h1 className="text-sm font-semibold">Skills</h1>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Create skill</TooltipContent>
-            </Tooltip>
-          </div>
-          {skills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12">
-              <Sparkles className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
-              <p className="mt-1 text-xs text-muted-foreground text-center">
-                Skills define reusable instructions for agents.
-              </p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {skills.map((skill) => (
-                <SkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  isSelected={skill.id === selectedId}
-                  onClick={() => setSelectedId(skill.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        {skillListContent}
       </ResizablePanel>
 
       <ResizableHandle />
 
       <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — skill detail */}
-        <div className="flex-1 overflow-hidden h-full">
-          {selected ? (
-            <SkillDetail
-              key={selected.id}
-              skill={selected}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-              <Sparkles className="h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm">Select a skill to view details</p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          )}
-        </div>
+        {skillDetailContent}
       </ResizablePanel>
 
-      {showCreate && (
-        <CreateSkillDialog
-          onClose={() => setShowCreate(false)}
-          onCreate={handleCreate}
-          onImport={handleImport}
-        />
-      )}
+      {createDialog}
     </ResizablePanelGroup>
   );
 }

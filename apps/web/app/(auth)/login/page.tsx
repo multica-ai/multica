@@ -183,7 +183,7 @@ function LoginPageContent() {
   // CLI confirm step: user is already logged in, just authorize.
   if (step === "cli_confirm" && existingUser) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Authorize CLI</CardTitle>
@@ -222,7 +222,7 @@ function LoginPageContent() {
 
   if (step === "code") {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Check your email</CardTitle>
@@ -283,7 +283,7 @@ function LoginPageContent() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Multica</CardTitle>

@@ -55,6 +55,7 @@ import {
   useIssuesScopeStore,
   type IssuesScope,
 } from "@/features/issues/stores/issues-scope-store";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { filterIssues } from "@/features/issues/utils/filter";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import type { Issue } from "@/shared/types";
@@ -273,6 +274,7 @@ function ActorSubContent({
 // ---------------------------------------------------------------------------
 
 export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
+  const isMobile = useIsMobile();
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
 
@@ -302,30 +304,51 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
     SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Manual";
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
+    <div className="flex h-12 shrink-0 items-center justify-between px-4 gap-2">
       {/* Left: scope buttons */}
       <div className="flex items-center gap-1">
-        {SCOPES.map((s) => (
-          <Tooltip key={s.value}>
-            <TooltipTrigger
+        {isMobile ? (
+          /* Mobile: compact dropdown for scope */
+          <DropdownMenu>
+            <DropdownMenuTrigger
               render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={
-                    scope === s.value
-                      ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "text-muted-foreground"
-                  }
-                  onClick={() => setScope(s.value)}
-                >
-                  {s.label}
+                <Button variant="outline" size="xs">
+                  {SCOPES.find((s) => s.value === scope)?.label ?? "All"}
+                  <ChevronDown className="size-3 ml-1 text-muted-foreground" />
                 </Button>
               }
             />
-            <TooltipContent side="bottom">{s.description}</TooltipContent>
-          </Tooltip>
-        ))}
+            <DropdownMenuContent align="start" className="w-auto">
+              {SCOPES.map((s) => (
+                <DropdownMenuItem key={s.value} onClick={() => setScope(s.value)}>
+                  {s.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          SCOPES.map((s) => (
+            <Tooltip key={s.value}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={
+                      scope === s.value
+                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                        : "text-muted-foreground"
+                    }
+                    onClick={() => setScope(s.value)}
+                  >
+                    {s.label}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{s.description}</TooltipContent>
+            </Tooltip>
+          ))
+        )}
       </div>
 
       {/* Right: filter + display + view toggle */}

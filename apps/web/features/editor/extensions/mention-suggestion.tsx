@@ -125,7 +125,7 @@ const MentionList = forwardRef<MentionListRef, MentionListProps>(
     let globalIndex = 0;
 
     return (
-      <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
+      <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-w-[calc(100vw-2rem)] max-h-[300px] overflow-y-auto">
         {groups.map((group) => (
           <div key={group.label}>
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">

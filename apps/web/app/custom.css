@@ -39,3 +39,49 @@
 [data-sonner-toast] [data-icon] {
   margin-top: 2.5px;
 }
+
+/* =============================================================================
+ * Mobile / Touch device optimizations
+ * ============================================================================= */
+
+@media (pointer: coarse) {
+  /* Icon buttons: minimum 44×44px touch target */
+  [data-slot="button"]:is(
+    .size-6,
+    .size-7,
+    .size-8,
+    .size-9
+  ) {
+    position: relative;
+  }
+
+  [data-slot="button"]:is(
+    .size-6,
+    .size-7,
+    .size-8
+  )::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Text inputs: minimum 44px height */
+  [data-slot="input"] {
+    min-height: 44px;
+  }
+
+  /* Hover-only actions: always visible on touch */
+  .touch\:visible {
+    display: inline-flex !important;
+  }
+}
+
+/* Safe area padding for fixed-bottom elements on notched devices */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  [data-slot="drawer-content"],
+  [data-slot="sheet-content"][data-side="bottom"] {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

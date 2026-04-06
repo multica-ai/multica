@@ -100,7 +100,7 @@ function TreeNodeItem({
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex w-full items-center gap-1.5 py-1 text-left text-xs hover:bg-accent/50 rounded-sm"
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          style={{ paddingLeft: `${Math.min(depth, 5) * 12 + 8}px` }}
         >
           <ChevronIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
           <FolderIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -134,7 +134,7 @@ function TreeNodeItem({
           ? "bg-accent text-accent-foreground"
           : "hover:bg-accent/50",
       )}
-      style={{ paddingLeft: `${depth * 12 + 8 + 16}px` }}
+      style={{ paddingLeft: `${Math.min(depth, 5) * 12 + 8 + 16}px` }}
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="truncate">{node.name}</span>

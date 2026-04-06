@@ -48,6 +48,7 @@ import {
 import { filterIssues } from "@/features/issues/utils/filter";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import type { Issue } from "@/shared/types";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { myIssuesViewStore, type MyIssuesScope } from "../stores/my-issues-view-store";
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,7 @@ const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
 // ---------------------------------------------------------------------------
 
 export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
+  const isMobile = useIsMobile();
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
@@ -129,30 +131,50 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
     SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Manual";
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
+    <div className="flex h-12 shrink-0 items-center justify-between px-4 gap-2">
       {/* Left: scope buttons */}
       <div className="flex items-center gap-1">
-        {SCOPES.map((s) => (
-          <Tooltip key={s.value}>
-            <TooltipTrigger
+        {isMobile ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
               render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={
-                    scope === s.value
-                      ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "text-muted-foreground"
-                  }
-                  onClick={() => act.setScope(s.value)}
-                >
-                  {s.label}
+                <Button variant="outline" size="xs">
+                  {SCOPES.find((s) => s.value === scope)?.label ?? "Assigned"}
+                  <ChevronDown className="size-3 ml-1 text-muted-foreground" />
                 </Button>
               }
             />
-            <TooltipContent side="bottom">{s.description}</TooltipContent>
-          </Tooltip>
-        ))}
+            <DropdownMenuContent align="start" className="w-auto">
+              {SCOPES.map((s) => (
+                <DropdownMenuItem key={s.value} onClick={() => act.setScope(s.value)}>
+                  {s.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          SCOPES.map((s) => (
+            <Tooltip key={s.value}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={
+                      scope === s.value
+                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                        : "text-muted-foreground"
+                    }
+                    onClick={() => act.setScope(s.value)}
+                  >
+                    {s.label}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{s.description}</TooltipContent>
+            </Tooltip>
+          ))
+        )}
       </div>
 
       {/* Right: filter + display + view toggle */}

@@ -83,7 +83,7 @@ export function BatchActionToolbar() {
 
   return (
     <>
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg mobile:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] mobile:px-3 mobile:gap-0.5">
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
           <span className="text-sm font-medium">{count} selected</span>
           <button
