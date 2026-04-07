@@ -138,6 +138,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 build:
 	cd server && go build -o bin/server ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/multica ./cmd/multica
+	cd server && go build -o bin/migrate ./cmd/migrate
 
 test:
 	$(REQUIRE_ENV)
