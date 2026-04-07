@@ -194,3 +194,45 @@ export interface RuntimeUpdate {
   created_at: string;
   updated_at: string;
 }
+
+// MULTICA-LOCAL: Stage 4 — Direct Agent Integration types
+
+export interface LocalDetectedAgent {
+  provider: string;
+  path: string;
+  version: string;
+  status: "available" | "unavailable" | "unknown";
+  error?: string;
+  is_custom_path: boolean;
+}
+
+export interface RunAgentResponse {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  status: string;
+}
+
+export interface IssueDiffResponse {
+  diff: string;
+  has_changes: boolean;
+  work_dir?: string;
+}
+
+export interface CommitResponse {
+  status: string;
+  message: string;
+  output: string;
+}
+
+export interface LocalSkill {
+  id: string;
+  workspace_id: string | null;
+  project_path: string | null;
+  name: string;
+  description: string;
+  content: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}

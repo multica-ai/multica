@@ -63,6 +63,8 @@ import { StatusIcon, PriorityIcon, DueDatePicker, AssigneePicker, canAssignAgent
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
+import { RunAgentButton } from "./run-agent-button";
+import { AgentDiffPreview } from "./agent-diff-preview";
 import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
@@ -448,6 +450,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 </Tooltip>
               </div>
             )}
+            {/* MULTICA-LOCAL: Run Agent button */}
+            <RunAgentButton issue={issue} agents={agents} />
+
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -790,6 +795,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             {/* Agent execution history */}
             <div className="mt-3">
               <TaskRunHistory issueId={id} />
+            </div>
+
+            {/* MULTICA-LOCAL: Agent diff preview */}
+            <div className="mt-3 px-4">
+              <AgentDiffPreview issueId={id} issueTitle={issue.title} />
             </div>
 
             {/* Timeline entries */}

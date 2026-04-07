@@ -35,6 +35,11 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  LocalDetectedAgent,
+  RunAgentResponse,
+  IssueDiffResponse,
+  CommitResponse,
+  LocalSkill,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -388,6 +393,71 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
     });
+  }
+
+  // MULTICA-LOCAL: Stage 4 — Direct Agent Integration
+
+  // Local Agent Runtime
+  async detectLocalAgents(): Promise<{ agents: LocalDetectedAgent[] }> {
+    return this.fetch("/api/local/agents/detect", { method: "POST" });
+  }
+
+  async listLocalAgents(): Promise<{ agents: LocalDetectedAgent[] }> {
+    return this.fetch("/api/local/agents");
+  }
+
+  async setLocalAgentPath(provider: string, path: string): Promise<LocalDetectedAgent> {
+    return this.fetch(`/api/local/agents/${provider}/path`, {
+      method: "PUT",
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async healthCheckLocalAgents(): Promise<{ agents: LocalDetectedAgent[] }> {
+    return this.fetch("/api/local/agents/health-check", { method: "POST" });
+  }
+
+  // Local Task Execution
+  async runAgentOnIssue(issueId: string, agentId?: string, provider?: string): Promise<RunAgentResponse> {
+    return this.fetch(`/api/issues/${issueId}/run-agent`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId, provider }),
+    });
+  }
+
+  async getIssueDiff(issueId: string): Promise<IssueDiffResponse> {
+    return this.fetch(`/api/issues/${issueId}/agent-diff`);
+  }
+
+  async commitAgentChanges(issueId: string, message?: string, workDir?: string): Promise<CommitResponse> {
+    return this.fetch(`/api/issues/${issueId}/agent-commit`, {
+      method: "POST",
+      body: JSON.stringify({ message, work_dir: workDir }),
+    });
+  }
+
+  // Local Skills
+  async listLocalSkills(projectPath?: string): Promise<{ skills: LocalSkill[] }> {
+    const params = projectPath ? `?project_path=${encodeURIComponent(projectPath)}` : "";
+    return this.fetch(`/api/local/skills${params}`);
+  }
+
+  async createLocalSkill(data: { name: string; description?: string; content?: string; project_path?: string }): Promise<LocalSkill> {
+    return this.fetch("/api/local/skills", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLocalSkill(id: string, data: { name?: string; description?: string; content?: string }): Promise<LocalSkill> {
+    return this.fetch(`/api/local/skills/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLocalSkill(id: string): Promise<void> {
+    return this.fetch(`/api/local/skills/${id}`, { method: "DELETE" });
   }
 
   // Inbox
