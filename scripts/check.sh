@@ -100,6 +100,8 @@ pnpm test || { EXIT_CODE=1; exit 1; }
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [3/5] Go tests..."
+echo "==> Running database migrations..."
+(cd server && go run ./cmd/migrate up) || { EXIT_CODE=1; exit 1; }
 (cd server && go test ./...) || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
