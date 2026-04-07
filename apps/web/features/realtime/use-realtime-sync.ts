@@ -14,9 +14,6 @@ import type {
   WorkspaceDeletedPayload,
   MemberRemovedPayload,
   IssueUpdatedPayload,
-  IssueCreatedPayload,
-  IssueDeletedPayload,
-  InboxNewPayload,
 } from "@/shared/types";
 
 const logger = createLogger("realtime-sync");
@@ -37,12 +34,8 @@ export function useRealtimeSync(ws: WSClient | null) {
   useEffect(() => {
     if (!ws) return;
 
-    // Event types handled by specific handlers below — skip generic refresh
-    const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:deleted", "inbox:new",
-    ]);
-
     const refreshMap: Record<string, () => void> = {
+      issue: () => void useIssueStore.getState().fetch(),
       inbox: () => void useInboxStore.getState().fetch(),
       agent: () => void useWorkspaceStore.getState().refreshAgents(),
       member: () => void useWorkspaceStore.getState().refreshMembers(),
@@ -81,39 +74,20 @@ export function useRealtimeSync(ws: WSClient | null) {
         logger.debug("skipping self-event", msg.type);
         return;
       }
-      if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);
     });
 
-    // --- Specific event handlers (granular updates, no full refetch) ---
+    // --- Side-effect handlers (toast, navigation, cross-store sync) ---
 
+    // Keep inbox issue_status in sync when issues change
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const { issue } = p as IssueUpdatedPayload;
-      if (!issue?.id) return;
-      useIssueStore.getState().updateIssue(issue.id, issue);
-      if (issue.status) {
+      if (issue?.id && issue?.status) {
         useInboxStore.getState().updateIssueStatus(issue.id, issue.status);
       }
     });
-
-    const unsubIssueCreated = ws.on("issue:created", (p) => {
-      const { issue } = p as IssueCreatedPayload;
-      if (issue) useIssueStore.getState().addIssue(issue);
-    });
-
-    const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
-      const { issue_id } = p as IssueDeletedPayload;
-      if (issue_id) useIssueStore.getState().removeIssue(issue_id);
-    });
-
-    const unsubInboxNew = ws.on("inbox:new", (p) => {
-      const { item } = p as InboxNewPayload;
-      if (item) useInboxStore.getState().addItem(item);
-    });
-
-    // --- Side-effect handlers (toast, navigation) ---
 
     const unsubWsDeleted = ws.on("workspace:deleted", (p) => {
       const { workspace_id } = p as WorkspaceDeletedPayload;
@@ -149,9 +123,6 @@ export function useRealtimeSync(ws: WSClient | null) {
     return () => {
       unsubAny();
       unsubIssueUpdated();
-      unsubIssueCreated();
-      unsubIssueDeleted();
-      unsubInboxNew();
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
