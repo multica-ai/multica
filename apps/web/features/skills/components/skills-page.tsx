@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   Sparkles,
@@ -43,21 +44,206 @@ import { FileViewer } from "./file-viewer";
 // Create Skill Dialog
 // ---------------------------------------------------------------------------
 
+type LocalFolderFile = {
+  path: string;
+  file: File;
+};
+
+interface LocalDataTransferItem extends DataTransferItem {
+  webkitGetAsEntry?: () => LocalFileSystemEntry | null;
+}
+
+interface LocalFileSystemEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  fullPath: string;
+}
+
+interface LocalFileSystemFileEntry extends LocalFileSystemEntry {
+  file: (
+    successCallback: (file: File) => void,
+    errorCallback?: (error: DOMException) => void,
+  ) => void;
+}
+
+interface LocalFileSystemDirectoryEntry extends LocalFileSystemEntry {
+  createReader: () => LocalFileSystemDirectoryReader;
+}
+
+interface LocalFileSystemDirectoryReader {
+  readEntries: (
+    successCallback: (entries: LocalFileSystemEntry[]) => void,
+    errorCallback?: (error: DOMException) => void,
+  ) => void;
+}
+
+function normalizePath(path: string): string {
+  return path
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/")
+    .trim();
+}
+
+function inferRootFolderName(files: LocalFolderFile[]): string {
+  const firstSegments = files
+    .map((f) => normalizePath(f.path).split("/").filter(Boolean)[0] ?? "")
+    .filter(Boolean);
+
+  if (firstSegments.length === 0) return "imported-skill";
+
+  const candidate = firstSegments[0]!;
+  if (firstSegments.every((segment) => segment === candidate)) return candidate;
+
+  return "imported-skill";
+}
+
+function toDefaultSkillName(folderName: string): string {
+  return folderName
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripRoot(path: string, root: string): string {
+  const normalized = normalizePath(path);
+  if (!root) return normalized;
+  const prefix = `${root}/`;
+  if (normalized === root) return "";
+  if (normalized.startsWith(prefix)) return normalized.slice(prefix.length);
+  return normalized;
+}
+
+function fileListToLocalFolderFiles(fileList: FileList): LocalFolderFile[] {
+  return Array.from(fileList).map((file) => ({
+    path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+    file,
+  }));
+}
+
+function readFileEntry(entry: LocalFileSystemFileEntry): Promise<LocalFolderFile> {
+  return new Promise((resolve, reject) => {
+    entry.file(
+      (file) => {
+        resolve({
+          path: normalizePath(entry.fullPath || file.name),
+          file,
+        });
+      },
+      (error) => reject(error),
+    );
+  });
+}
+
+function readDirectoryEntries(entry: LocalFileSystemDirectoryEntry): Promise<LocalFileSystemEntry[]> {
+  const reader = entry.createReader();
+  return new Promise((resolve, reject) => {
+    const collected: LocalFileSystemEntry[] = [];
+    const readNext = () => {
+      reader.readEntries(
+        (entries) => {
+          if (!entries.length) {
+            resolve(collected);
+            return;
+          }
+          collected.push(...entries);
+          readNext();
+        },
+        (error) => reject(error),
+      );
+    };
+    readNext();
+  });
+}
+
+async function readEntryRecursive(entry: LocalFileSystemEntry): Promise<LocalFolderFile[]> {
+  if (entry.isFile) {
+    return [await readFileEntry(entry as LocalFileSystemFileEntry)];
+  }
+  if (entry.isDirectory) {
+    const children = await readDirectoryEntries(entry as LocalFileSystemDirectoryEntry);
+    const nested = await Promise.all(children.map((child) => readEntryRecursive(child)));
+    return nested.flat();
+  }
+  return [];
+}
+
+async function extractDroppedFolderFiles(event: DragEvent<HTMLDivElement>): Promise<LocalFolderFile[]> {
+  const items = Array.from(event.dataTransfer.items ?? []);
+  const entries = items
+    .map((item) => (item as LocalDataTransferItem).webkitGetAsEntry?.() ?? null)
+    .filter((entry): entry is LocalFileSystemEntry => Boolean(entry));
+
+  if (entries.length > 0) {
+    const nested = await Promise.all(entries.map((entry) => readEntryRecursive(entry)));
+    return nested.flat();
+  }
+
+  return Array.from(event.dataTransfer.files).map((file) => ({
+    path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+    file,
+  }));
+}
+
+async function buildSkillFromLocalFolder(
+  files: LocalFolderFile[],
+  name: string,
+  description: string,
+): Promise<CreateSkillRequest> {
+  if (files.length === 0) {
+    throw new Error("Please drop or select a skill folder first.");
+  }
+
+  const root = inferRootFolderName(files);
+  const contentByPath = await Promise.all(
+    files.map(async ({ path, file }) => {
+      const relativePath = normalizePath(stripRoot(path, root));
+      return { path: relativePath, content: await file.text() };
+    }),
+  );
+
+  const normalizedFiles = contentByPath.filter((f) => f.path !== "");
+  const skillMainFile = normalizedFiles.find((f) => f.path.toLowerCase() === "skill.md");
+  if (!skillMainFile) {
+    throw new Error("The folder must include a SKILL.md file.");
+  }
+
+  const supportingFiles = normalizedFiles.filter((f) => f.path.toLowerCase() !== "skill.md");
+  const skillName = name.trim() || toDefaultSkillName(root) || "imported-skill";
+
+  return {
+    name: skillName,
+    description: description.trim(),
+    content: skillMainFile.content,
+    files: supportingFiles,
+  };
+}
+
 function CreateSkillDialog({
   onClose,
   onCreate,
   onImport,
+  onImportFolder,
 }: {
   onClose: () => void;
   onCreate: (data: CreateSkillRequest) => Promise<void>;
   onImport: (url: string) => Promise<void>;
+  onImportFolder: (data: CreateSkillRequest) => Promise<void>;
 }) {
   const [tab, setTab] = useState<"create" | "import">("create");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [importUrl, setImportUrl] = useState("");
+  const [importMode, setImportMode] = useState<"url" | "folder">("url");
+  const [folderSkillName, setFolderSkillName] = useState("");
+  const [folderDescription, setFolderDescription] = useState("");
+  const [folderLabel, setFolderLabel] = useState("");
+  const [folderFiles, setFolderFiles] = useState<LocalFolderFile[]>([]);
+  const [draggingFolder, setDraggingFolder] = useState(false);
   const [loading, setLoading] = useState(false);
   const [importError, setImportError] = useState("");
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   const detectedSource = (() => {
     const url = importUrl.trim().toLowerCase();
@@ -77,12 +263,70 @@ function CreateSkillDialog({
     }
   };
 
+  const handleFolderFilesSelected = (files: LocalFolderFile[]) => {
+    if (files.length === 0) {
+      setFolderFiles([]);
+      setFolderLabel("");
+      return;
+    }
+
+    const deduped = Array.from(
+      new Map(files.map((entry) => [normalizePath(entry.path), entry])).values(),
+    );
+    const root = inferRootFolderName(deduped);
+    setFolderFiles(deduped);
+    setFolderLabel(root);
+    setImportError("");
+
+    if (!folderSkillName.trim()) {
+      setFolderSkillName(toDefaultSkillName(root));
+    }
+  };
+
+  const handleFolderInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const list = event.target.files;
+    if (!list || list.length === 0) return;
+    handleFolderFilesSelected(fileListToLocalFolderFiles(list));
+    event.target.value = "";
+  };
+
+  const handleFolderDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDraggingFolder(false);
+    try {
+      const files = await extractDroppedFolderFiles(event);
+      if (files.length === 0) {
+        setImportError("No files detected. Please drop a folder.");
+        return;
+      }
+      handleFolderFilesSelected(files);
+    } catch (error) {
+      setImportError(
+        error instanceof Error ? error.message : "Failed to read dropped folder.",
+      );
+    }
+  };
+
+  const canImport =
+    importMode === "url"
+      ? importUrl.trim().length > 0
+      : folderFiles.length > 0 && folderSkillName.trim().length > 0;
+
   const handleImport = async () => {
-    if (!importUrl.trim()) return;
+    if (!canImport) return;
     setLoading(true);
     setImportError("");
     try {
-      await onImport(importUrl.trim());
+      if (importMode === "url") {
+        await onImport(importUrl.trim());
+      } else {
+        const payload = await buildSkillFromLocalFolder(
+          folderFiles,
+          folderSkillName,
+          folderDescription,
+        );
+        await onImportFolder(payload);
+      }
       onClose();
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Import failed");
@@ -96,7 +340,7 @@ function CreateSkillDialog({
         <DialogHeader>
           <DialogTitle>Add Skill</DialogTitle>
           <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh.
+            Create a new skill or import from URL or local folder.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,45 +382,129 @@ function CreateSkillDialog({
           </TabsContent>
 
           <TabsContent value="import" className="space-y-4 mt-4 min-h-[180px]">
-            <div>
-              <Label className="text-xs text-muted-foreground">Skill URL</Label>
-              <Input
-                autoFocus
-                type="text"
-                value={importUrl}
-                onChange={(e) => { setImportUrl(e.target.value); setImportError(""); }}
-                placeholder="Paste a skill URL..."
-                className="mt-1"
-                onKeyDown={(e) => e.key === "Enter" && handleImport()}
-              />
-            </div>
+            <Tabs value={importMode} onValueChange={(v) => setImportMode(v as "url" | "folder")}>
+              <TabsList className="w-full">
+                <TabsTrigger value="url" className="flex-1">
+                  URL
+                </TabsTrigger>
+                <TabsTrigger value="folder" className="flex-1">
+                  Local Folder
+                </TabsTrigger>
+              </TabsList>
 
-            {/* Supported sources — highlight on detection */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2">Supported sources</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                  detectedSource === "clawhub"
-                    ? "border-primary bg-primary/5"
-                    : ""
-                }`}>
-                  <div className="text-xs font-medium">ClawHub</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
-                    clawhub.ai/owner/skill
+              <TabsContent value="url" className="space-y-4 mt-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Skill URL</Label>
+                  <Input
+                    autoFocus
+                    type="text"
+                    value={importUrl}
+                    onChange={(e) => { setImportUrl(e.target.value); setImportError(""); }}
+                    placeholder="Paste a skill URL..."
+                    className="mt-1"
+                    onKeyDown={(e) => e.key === "Enter" && handleImport()}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">Supported sources</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
+                      detectedSource === "clawhub"
+                        ? "border-primary bg-primary/5"
+                        : ""
+                    }`}>
+                      <div className="text-xs font-medium">ClawHub</div>
+                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
+                        clawhub.ai/owner/skill
+                      </div>
+                    </div>
+                    <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
+                      detectedSource === "skills.sh"
+                        ? "border-primary bg-primary/5"
+                        : ""
+                    }`}>
+                      <div className="text-xs font-medium">Skills.sh</div>
+                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
+                        skills.sh/owner/repo/skill
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                  detectedSource === "skills.sh"
-                    ? "border-primary bg-primary/5"
-                    : ""
-                }`}>
-                  <div className="text-xs font-medium">Skills.sh</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
-                    skills.sh/owner/repo/skill
+              </TabsContent>
+
+              <TabsContent value="folder" className="space-y-4 mt-4">
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFolderInputChange}
+                  {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                />
+
+                <div
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDraggingFolder(true);
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault();
+                    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                    setDraggingFolder(false);
+                  }}
+                  onDrop={handleFolderDrop}
+                  className={`rounded-lg border border-dashed p-4 transition-colors ${
+                    draggingFolder ? "border-primary bg-primary/5" : "border-border"
+                  }`}
+                >
+                  <p className="text-sm font-medium">Drop skill folder here</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    The folder should include a <span className="font-mono">SKILL.md</span> file.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
+                    className="mt-3"
+                    onClick={() => folderInputRef.current?.click()}
+                  >
+                    Choose Folder
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Skill Name</Label>
+                    <Input
+                      type="text"
+                      value={folderSkillName}
+                      onChange={(event) => setFolderSkillName(event.target.value)}
+                      placeholder="Name for imported skill"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Description (optional)</Label>
+                    <Input
+                      type="text"
+                      value={folderDescription}
+                      onChange={(event) => setFolderDescription(event.target.value)}
+                      placeholder="Brief description"
+                      className="mt-1"
+                    />
                   </div>
                 </div>
-              </div>
-            </div>
+
+                {folderFiles.length > 0 && (
+                  <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Selected: <span className="font-medium text-foreground">{folderLabel}</span>
+                    {" · "}
+                    {folderFiles.length} files
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
 
             {importError && (
               <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -194,13 +522,15 @@ function CreateSkillDialog({
               {loading ? "Creating..." : "Create"}
             </Button>
           ) : (
-            <Button onClick={handleImport} disabled={loading || !importUrl.trim()}>
+            <Button onClick={handleImport} disabled={loading || !canImport}>
               {loading ? (
-                detectedSource === "clawhub"
-                  ? "Importing from ClawHub..."
-                  : detectedSource === "skills.sh"
-                    ? "Importing from Skills.sh..."
-                    : "Importing..."
+                importMode === "folder"
+                  ? "Importing folder..."
+                  : detectedSource === "clawhub"
+                    ? "Importing from ClawHub..."
+                    : detectedSource === "skills.sh"
+                      ? "Importing from Skills.sh..."
+                      : "Importing..."
               ) : (
                 <>
                   <Download className="mr-1.5 h-3 w-3" />
@@ -640,6 +970,13 @@ export default function SkillsPage() {
     toast.success("Skill imported");
   };
 
+  const handleImportFolder = async (data: CreateSkillRequest) => {
+    const skill = await api.createSkill(data);
+    upsertSkill(skill);
+    setSelectedId(skill.id);
+    toast.success("Skill imported from folder");
+  };
+
   const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
     try {
       const updated = await api.updateSkill(id, data);
@@ -803,6 +1140,7 @@ export default function SkillsPage() {
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
           onImport={handleImport}
+          onImportFolder={handleImportFolder}
         />
       )}
     </ResizablePanelGroup>
