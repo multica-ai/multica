@@ -3,6 +3,7 @@ export type MemberRole = "owner" | "admin" | "member";
 export interface WorkspaceRepo {
   url: string;
   description: string;
+  default_branch?: string;
 }
 
 export interface Workspace {

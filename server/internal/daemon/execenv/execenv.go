@@ -12,8 +12,9 @@ import (
 
 // RepoContextForEnv describes a workspace repo available for checkout.
 type RepoContextForEnv struct {
-	URL         string // remote URL
-	Description string // human-readable description
+	URL           string // remote URL
+	Description   string // human-readable description
+	DefaultBranch string // user-configured merge target branch (empty = auto-detect)
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.

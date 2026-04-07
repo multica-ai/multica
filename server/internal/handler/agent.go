@@ -88,8 +88,9 @@ func agentToResponse(a db.Agent) AgentResponse {
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
-	URL         string `json:"url"`
-	Description string `json:"description"`
+	URL           string `json:"url"`
+	Description   string `json:"description"`
+	DefaultBranch string `json:"default_branch,omitempty"`
 }
 
 type AgentTaskResponse struct {
