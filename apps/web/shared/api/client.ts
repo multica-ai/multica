@@ -144,6 +144,13 @@ export class ApiClient {
     });
   }
 
+  async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
+    return this.fetch("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
   async getMe(): Promise<User> {
     return this.fetch("/api/me");
   }

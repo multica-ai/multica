@@ -7,8 +7,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -332,6 +334,162 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 type UpdateMeRequest struct {
 	Name      *string `json:"name"`
 	AvatarURL *string `json:"avatar_url"`
+}
+
+type GoogleLoginRequest struct {
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+type googleTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	IDToken     string `json:"id_token"`
+	TokenType   string `json:"token_type"`
+}
+
+type googleUserInfo struct {
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+}
+
+func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req GoogleLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+		return
+	}
+
+	redirectURI := req.RedirectURI
+	if redirectURI == "" {
+		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
+	}
+
+	// Exchange authorization code for tokens.
+	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
+		"code":          {req.Code},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"redirect_uri":  {redirectURI},
+		"grant_type":    {"authorization_code"},
+	})
+	if err != nil {
+		slog.Error("google oauth token exchange failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
+		return
+	}
+	defer tokenResp.Body.Close()
+
+	tokenBody, err := io.ReadAll(tokenResp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to read Google token response")
+		return
+	}
+
+	if tokenResp.StatusCode != http.StatusOK {
+		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
+		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+		return
+	}
+
+	var gToken googleTokenResponse
+	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
+		return
+	}
+
+	// Fetch user info from Google.
+	userInfoReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
+
+	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
+	if err != nil {
+		slog.Error("google userinfo fetch failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
+		return
+	}
+	defer userInfoResp.Body.Close()
+
+	var gUser googleUserInfo
+	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
+		return
+	}
+
+	if gUser.Email == "" {
+		writeError(w, http.StatusBadRequest, "Google account has no email")
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(gUser.Email))
+
+	user, err := h.findOrCreateUser(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	// Update name and avatar from Google profile if the user was just created
+	// (default name is email prefix) or has no avatar yet.
+	needsUpdate := false
+	newName := user.Name
+	newAvatar := user.AvatarUrl
+
+	if gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
+		newName = gUser.Name
+		needsUpdate = true
+	}
+	if gUser.Picture != "" && !user.AvatarUrl.Valid {
+		newAvatar = pgtype.Text{String: gUser.Picture, Valid: true}
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		updated, err := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
+			ID:        user.ID,
+			Name:      newName,
+			AvatarUrl: newAvatar,
+		})
+		if err == nil {
+			user = updated
+		}
+	}
+
+	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(72 * time.Hour)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(user),
+	})
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
