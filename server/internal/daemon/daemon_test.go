@@ -83,3 +83,55 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 		t.Fatal("did not expect 500 to be treated as workspace not found")
 	}
 }
+
+func TestResolveModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry AgentEntry
+		agent *AgentData
+		want  string
+	}{
+		{
+			name:  "agent model overrides entry model",
+			entry: AgentEntry{Model: "env-model"},
+			agent: &AgentData{Model: "agent-model"},
+			want:  "agent-model",
+		},
+		{
+			name:  "falls back to entry model when agent model empty",
+			entry: AgentEntry{Model: "env-model"},
+			agent: &AgentData{Model: ""},
+			want:  "env-model",
+		},
+		{
+			name:  "falls back to entry model when agent nil",
+			entry: AgentEntry{Model: "env-model"},
+			agent: nil,
+			want:  "env-model",
+		},
+		{
+			name:  "both empty returns empty",
+			entry: AgentEntry{Model: ""},
+			agent: &AgentData{Model: ""},
+			want:  "",
+		},
+		{
+			name:  "agent model with no entry model",
+			entry: AgentEntry{Model: ""},
+			agent: &AgentData{Model: "agent-model"},
+			want:  "agent-model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveModel(tt.entry, tt.agent)
+			if got != tt.want {
+				t.Fatalf("resolveModel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
