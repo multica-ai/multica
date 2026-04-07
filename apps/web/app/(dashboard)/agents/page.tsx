@@ -849,14 +849,27 @@ function TriggersTab({
   agent: Agent;
   onSave: (triggers: AgentTrigger[]) => Promise<void>;
 }) {
-  const [triggers, setTriggers] = useState<AgentTrigger[]>(agent.triggers ?? []);
+  const normalizeTriggers = (input?: AgentTrigger[]): AgentTrigger[] =>
+    (input ?? []).map((trigger, index) => ({
+      ...trigger,
+      // Older trigger payloads may miss id/config; normalize for stable rendering and editing.
+      id: trigger.id || `${trigger.type}-${index}`,
+      config: (trigger.config ?? {}) as Record<string, unknown>,
+    }));
+
+  const normalizedAgentTriggers = useMemo(
+    () => normalizeTriggers(agent.triggers),
+    [agent.triggers],
+  );
+
+  const [triggers, setTriggers] = useState<AgentTrigger[]>(normalizedAgentTriggers);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setTriggers(agent.triggers ?? []);
-  }, [agent.id, agent.triggers]);
+    setTriggers(normalizedAgentTriggers);
+  }, [agent.id, normalizedAgentTriggers]);
 
-  const isDirty = JSON.stringify(triggers) !== JSON.stringify(agent.triggers ?? []);
+  const isDirty = JSON.stringify(triggers) !== JSON.stringify(normalizedAgentTriggers);
 
   const handleSave = async () => {
     setSaving(true);
