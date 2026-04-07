@@ -108,6 +108,41 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return task, nil
 }
 
+// EnqueueTaskForAgentflow creates a queued task for an agentflow run.
+// The task has no issue_id — the agent may or may not create one during execution.
+func (s *TaskService) EnqueueTaskForAgentflow(ctx context.Context, af db.Agentflow, run db.AgentflowRun) error {
+	agent, err := s.Queries.GetAgent(ctx, af.AgentID)
+	if err != nil {
+		slog.Error("agentflow task enqueue failed: agent not found", "agentflow_id", util.UUIDToString(af.ID), "agent_id", util.UUIDToString(af.AgentID), "error", err)
+		return fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return fmt.Errorf("agent has no runtime")
+	}
+
+	task, err := s.Queries.CreateAgentflowTask(ctx, db.CreateAgentflowTaskParams{
+		AgentID:        af.AgentID,
+		RuntimeID:      agent.RuntimeID,
+		Priority:       1, // default priority for agentflow tasks
+		AgentflowRunID: run.ID,
+	})
+	if err != nil {
+		slog.Error("agentflow task enqueue failed", "agentflow_id", util.UUIDToString(af.ID), "error", err)
+		return fmt.Errorf("create task: %w", err)
+	}
+
+	slog.Info("agentflow task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agentflow_id", util.UUIDToString(af.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"agent_id", util.UUIDToString(af.AgentID),
+	)
+	return nil
+}
+
 // CancelTasksForIssue cancels all active tasks for an issue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	return s.Queries.CancelAgentTasksByIssue(ctx, issueID)
@@ -402,12 +437,9 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	payload["task_id"] = util.UUIDToString(task.ID)
 	payload["runtime_id"] = util.UUIDToString(task.RuntimeID)
 
-	workspaceID := ""
-	if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-		workspaceID = util.UUIDToString(issue.WorkspaceID)
-	}
+	workspaceID := s.resolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
-		return // Issue deleted; skip broadcast to avoid global leak
+		return
 	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventTaskDispatch,
@@ -419,12 +451,9 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 }
 
 func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue) {
-	workspaceID := ""
-	if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-		workspaceID = util.UUIDToString(issue.WorkspaceID)
-	}
+	workspaceID := s.resolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
-		return // Issue deleted; skip broadcast to avoid global leak
+		return
 	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
@@ -432,12 +461,37 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"task_id":  util.UUIDToString(task.ID),
-			"agent_id": util.UUIDToString(task.AgentID),
-			"issue_id": util.UUIDToString(task.IssueID),
-			"status":   task.Status,
+			"task_id":          util.UUIDToString(task.ID),
+			"agent_id":         util.UUIDToString(task.AgentID),
+			"issue_id":         util.UUIDToPtr(task.IssueID),
+			"agentflow_run_id": util.UUIDToPtr(task.AgentflowRunID),
+			"status":           task.Status,
 		},
 	})
+}
+
+// resolveTaskWorkspaceID derives the workspace ID for a task, which may be
+// associated with an issue (normal task) or an agentflow run (agentflow task).
+func (s *TaskService) resolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
+	// Try issue first (most common path)
+	if task.IssueID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			return util.UUIDToString(issue.WorkspaceID)
+		}
+	}
+	// Fallback: look up via agentflow run → agentflow → workspace
+	if task.AgentflowRunID.Valid {
+		if run, err := s.Queries.GetAgentflowRun(ctx, task.AgentflowRunID); err == nil {
+			if af, err := s.Queries.GetAgentflow(ctx, run.AgentflowID); err == nil {
+				return util.UUIDToString(af.WorkspaceID)
+			}
+		}
+	}
+	// Last resort: look up via agent
+	if agent, err := s.Queries.GetAgent(ctx, task.AgentID); err == nil {
+		return util.UUIDToString(agent.WorkspaceID)
+	}
+	return ""
 }
 
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {

@@ -84,7 +84,19 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("### Workflow\n\n")
 
-	if ctx.TriggerCommentID != "" {
+	if ctx.IsAgentflow {
+		// Agentflow-triggered: execute the prompt template
+		fmt.Fprintf(&b, "**This task was triggered by Agentflow: %s**\n\n", ctx.AgentflowTitle)
+		if ctx.AgentflowDescription != "" {
+			b.WriteString("## Instructions\n\n")
+			b.WriteString(ctx.AgentflowDescription)
+			b.WriteString("\n\n")
+		}
+		b.WriteString("Execute the instructions above.\n")
+		b.WriteString("- If the work requires tracking, create an issue using `multica issue create --title \"...\" --description \"...\"`\n")
+		b.WriteString("- If the work involves code changes, use `multica repo checkout <url>` to check out a repository\n")
+		b.WriteString("- Post results as appropriate (comments on related issues, new issues, etc.)\n\n")
+	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)

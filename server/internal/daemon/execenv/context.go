@@ -114,18 +114,29 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv) error {
 func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
-	b.WriteString("# Task Assignment\n\n")
-	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
-
-	if ctx.TriggerCommentID != "" {
-		b.WriteString("**Trigger:** Comment Reply\n")
-		b.WriteString("**Triggering comment ID:** `" + ctx.TriggerCommentID + "`\n\n")
+	if ctx.IsAgentflow {
+		b.WriteString("# Agentflow Task\n\n")
+		fmt.Fprintf(&b, "**Agentflow:** %s\n\n", ctx.AgentflowTitle)
+		if ctx.AgentflowDescription != "" {
+			b.WriteString("## Instructions\n\n")
+			b.WriteString(ctx.AgentflowDescription)
+			b.WriteString("\n\n")
+		}
+		b.WriteString("Execute the instructions above. If the work requires tracking, create an issue using `multica issue create`.\n\n")
 	} else {
-		b.WriteString("**Trigger:** New Assignment\n\n")
-	}
+		b.WriteString("# Task Assignment\n\n")
+		fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
 
-	b.WriteString("## Quick Start\n\n")
-	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+		if ctx.TriggerCommentID != "" {
+			b.WriteString("**Trigger:** Comment Reply\n")
+			b.WriteString("**Triggering comment ID:** `" + ctx.TriggerCommentID + "`\n\n")
+		} else {
+			b.WriteString("**Trigger:** New Assignment\n\n")
+		}
+
+		b.WriteString("## Quick Start\n\n")
+		fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	}
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

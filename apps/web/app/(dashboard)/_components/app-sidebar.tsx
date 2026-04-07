@@ -15,6 +15,7 @@ import {
   BookOpenText,
   SquarePen,
   CircleUser,
+  Zap,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
@@ -53,6 +54,7 @@ const primaryNav = [
 
 const workspaceNav = [
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/agentflows", label: "Agentflows", icon: Zap },
   { href: "/runtimes", label: "Runtimes", icon: Monitor },
   { href: "/skills", label: "Skills", icon: BookOpenText },
   { href: "/settings", label: "Settings", icon: Settings },

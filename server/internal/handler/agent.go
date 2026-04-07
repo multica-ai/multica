@@ -96,7 +96,7 @@ type AgentTaskResponse struct {
 	ID             string         `json:"id"`
 	AgentID        string         `json:"agent_id"`
 	RuntimeID      string         `json:"runtime_id"`
-	IssueID        string         `json:"issue_id"`
+	IssueID        *string        `json:"issue_id"`
 	WorkspaceID    string         `json:"workspace_id"`
 	Status         string         `json:"status"`
 	Priority       int32          `json:"priority"`
@@ -111,6 +111,18 @@ type AgentTaskResponse struct {
 	PriorSessionID   string         `json:"prior_session_id,omitempty"`    // session ID from a previous task on same issue
 	PriorWorkDir     string         `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
 	TriggerCommentID *string        `json:"trigger_comment_id,omitempty"` // comment that triggered this task
+	AgentflowRunID   *string        `json:"agentflow_run_id,omitempty"`   // agentflow run that triggered this task
+	Agentflow        *TaskAgentflowData `json:"agentflow,omitempty"`      // agentflow context for agentflow-triggered tasks
+}
+
+// TaskAgentflowData holds agentflow info included in claim responses so the
+// daemon can build the prompt for agentflow-triggered tasks.
+type TaskAgentflowData struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`    // prompt template
+	RunID       string  `json:"run_id"`
+	SourceKind  string  `json:"source_kind"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -128,19 +140,20 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		json.Unmarshal(t.Result, &result)
 	}
 	return AgentTaskResponse{
-		ID:           uuidToString(t.ID),
-		AgentID:      uuidToString(t.AgentID),
-		RuntimeID:    uuidToString(t.RuntimeID),
-		IssueID:      uuidToString(t.IssueID),
-		Status:       t.Status,
-		Priority:     t.Priority,
-		DispatchedAt: timestampToPtr(t.DispatchedAt),
-		StartedAt:    timestampToPtr(t.StartedAt),
-		CompletedAt:  timestampToPtr(t.CompletedAt),
-		Result:       result,
+		ID:               uuidToString(t.ID),
+		AgentID:          uuidToString(t.AgentID),
+		RuntimeID:        uuidToString(t.RuntimeID),
+		IssueID:          uuidToPtr(t.IssueID),
+		Status:           t.Status,
+		Priority:         t.Priority,
+		DispatchedAt:     timestampToPtr(t.DispatchedAt),
+		StartedAt:        timestampToPtr(t.StartedAt),
+		CompletedAt:      timestampToPtr(t.CompletedAt),
+		Result:           result,
 		Error:            textToPtr(t.Error),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		AgentflowRunID:   uuidToPtr(t.AgentflowRunID),
 	}
 }
 

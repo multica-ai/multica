@@ -34,6 +34,11 @@ type TaskContextForEnv struct {
 	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
+
+	// Agentflow fields (set when task is triggered by an agentflow)
+	IsAgentflow          bool
+	AgentflowTitle       string
+	AgentflowDescription string // prompt template
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

@@ -69,6 +69,9 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 
+	// Start agentflow scheduler to dispatch due scheduled triggers.
+	go runAgentflowScheduler(sweepCtx, queries, bus)
+
 	// Graceful shutdown
 	go func() {
 		slog.Info("server starting", "port", port)

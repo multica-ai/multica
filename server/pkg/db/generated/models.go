@@ -79,6 +79,51 @@ type AgentTaskQueue struct {
 	SessionID        pgtype.Text        `json:"session_id"`
 	WorkDir          pgtype.Text        `json:"work_dir"`
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	AgentflowRunID   pgtype.UUID        `json:"agentflow_run_id"`
+}
+
+type Agentflow struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Title             string             `json:"title"`
+	Description       pgtype.Text        `json:"description"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	Status            string             `json:"status"`
+	ConcurrencyPolicy string             `json:"concurrency_policy"`
+	Variables         []byte             `json:"variables"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentflowRun struct {
+	ID             pgtype.UUID        `json:"id"`
+	AgentflowID    pgtype.UUID        `json:"agentflow_id"`
+	TriggerID      pgtype.UUID        `json:"trigger_id"`
+	SourceKind     string             `json:"source_kind"`
+	Status         string             `json:"status"`
+	LinkedIssueID  pgtype.UUID        `json:"linked_issue_id"`
+	Payload        []byte             `json:"payload"`
+	AgentOutput    pgtype.Text        `json:"agent_output"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	IdempotencyKey pgtype.Text        `json:"idempotency_key"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentflowTrigger struct {
+	ID             pgtype.UUID        `json:"id"`
+	AgentflowID    pgtype.UUID        `json:"agentflow_id"`
+	Kind           string             `json:"kind"`
+	Enabled        bool               `json:"enabled"`
+	CronExpression pgtype.Text        `json:"cron_expression"`
+	Timezone       pgtype.Text        `json:"timezone"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	PublicID       pgtype.Text        `json:"public_id"`
+	SecretHash     pgtype.Text        `json:"secret_hash"`
+	SigningMode    pgtype.Text        `json:"signing_mode"`
+	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type Attachment struct {

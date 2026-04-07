@@ -23,7 +23,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	prompt := BuildPrompt(Task{
-		IssueID: issueID,
+		IssueID: &issueID,
 		Agent: &AgentData{
 			Name: "Local Codex",
 			Skills: []SkillData{
@@ -53,8 +53,9 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 func TestBuildPromptNoIssueDetails(t *testing.T) {
 	t.Parallel()
 
+	testID := "test-id"
 	prompt := BuildPrompt(Task{
-		IssueID: "test-id",
+		IssueID: &testID,
 		Agent:   &AgentData{Name: "Test"},
 	})
 

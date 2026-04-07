@@ -728,7 +728,7 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 				continue
 			}
 			if task != nil {
-				d.logger.Info("task received", "task", shortID(task.ID), "issue", task.IssueID)
+				d.logger.Info("task received", "task", shortID(task.ID), "issue", task.EffectiveIssueID())
 				wg.Add(1)
 				go func(t Task) {
 					defer wg.Done()
@@ -772,7 +772,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 	}
-	taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
+	taskLog.Info("picked task", "issue", task.EffectiveIssueID(), "agent", agentName, "provider", provider, "agentflow", task.IsAgentflow())
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
@@ -872,12 +872,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:           task.IssueID,
+		IssueID:           task.EffectiveIssueID(),
 		TriggerCommentID:  task.TriggerCommentID,
 		AgentName:         agentName,
 		AgentInstructions: instructions,
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
+	}
+	if task.IsAgentflow() {
+		taskCtx.IsAgentflow = true
+		taskCtx.AgentflowTitle = task.Agentflow.Title
+		if task.Agentflow.Description != nil {
+			taskCtx.AgentflowDescription = *task.Agentflow.Description
+		}
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.

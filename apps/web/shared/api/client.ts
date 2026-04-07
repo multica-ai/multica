@@ -35,6 +35,13 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  Agentflow,
+  AgentflowTrigger,
+  AgentflowRun,
+  CreateAgentflowRequest,
+  UpdateAgentflowRequest,
+  CreateAgentflowTriggerRequest,
+  UpdateAgentflowTriggerRequest,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -587,5 +594,70 @@ export class ApiClient {
 
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  // ── Agentflows ──────────────────────────────────────────────────
+
+  async listAgentflows(): Promise<Agentflow[]> {
+    return this.fetch("/api/agentflows");
+  }
+
+  async getAgentflow(id: string): Promise<Agentflow> {
+    return this.fetch(`/api/agentflows/${id}`);
+  }
+
+  async createAgentflow(data: CreateAgentflowRequest): Promise<Agentflow> {
+    return this.fetch("/api/agentflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateAgentflow(id: string, data: UpdateAgentflowRequest): Promise<Agentflow> {
+    return this.fetch(`/api/agentflows/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveAgentflow(id: string): Promise<Agentflow> {
+    return this.fetch(`/api/agentflows/${id}/archive`, { method: "POST" });
+  }
+
+  async listAgentflowTriggers(agentflowId: string): Promise<AgentflowTrigger[]> {
+    return this.fetch(`/api/agentflows/${agentflowId}/triggers`);
+  }
+
+  async createAgentflowTrigger(agentflowId: string, data: CreateAgentflowTriggerRequest): Promise<AgentflowTrigger> {
+    return this.fetch(`/api/agentflows/${agentflowId}/triggers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateAgentflowTrigger(triggerId: string, data: UpdateAgentflowTriggerRequest): Promise<AgentflowTrigger> {
+    return this.fetch(`/api/agentflow-triggers/${triggerId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAgentflowTrigger(triggerId: string): Promise<void> {
+    await this.fetch(`/api/agentflow-triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  async listAgentflowRuns(agentflowId: string, params?: { limit?: number; offset?: number }): Promise<AgentflowRun[]> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.offset) search.set("offset", String(params.offset));
+    return this.fetch(`/api/agentflows/${agentflowId}/runs?${search}`);
+  }
+
+  async runAgentflow(id: string): Promise<AgentflowRun> {
+    return this.fetch(`/api/agentflows/${id}/run`, { method: "POST" });
   }
 }

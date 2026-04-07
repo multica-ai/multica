@@ -26,13 +26,37 @@ type Task struct {
 	ID             string     `json:"id"`
 	AgentID        string     `json:"agent_id"`
 	RuntimeID      string     `json:"runtime_id"`
-	IssueID        string     `json:"issue_id"`
+	IssueID        *string    `json:"issue_id"`           // nil for agentflow tasks
 	WorkspaceID    string     `json:"workspace_id"`
 	Agent          *AgentData `json:"agent,omitempty"`
 	Repos          []RepoData `json:"repos,omitempty"`
-	PriorSessionID   string     `json:"prior_session_id,omitempty"`    // Claude session ID from a previous task on this issue
-	PriorWorkDir     string     `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on this issue
-	TriggerCommentID string     `json:"trigger_comment_id,omitempty"` // comment that triggered this task
+	PriorSessionID   string         `json:"prior_session_id,omitempty"`
+	PriorWorkDir     string         `json:"prior_work_dir,omitempty"`
+	TriggerCommentID string         `json:"trigger_comment_id,omitempty"`
+	AgentflowRunID   *string        `json:"agentflow_run_id,omitempty"`
+	Agentflow        *AgentflowData `json:"agentflow,omitempty"`
+}
+
+// AgentflowData holds agentflow context for agentflow-triggered tasks.
+type AgentflowData struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"` // prompt template
+	RunID       string  `json:"run_id"`
+	SourceKind  string  `json:"source_kind"`
+}
+
+// IsAgentflow returns true if this task was triggered by an agentflow.
+func (t Task) IsAgentflow() bool {
+	return t.Agentflow != nil
+}
+
+// EffectiveIssueID returns the issue ID or empty string if nil.
+func (t Task) EffectiveIssueID() string {
+	if t.IssueID != nil {
+		return *t.IssueID
+	}
+	return ""
 }
 
 // AgentData holds agent details returned by the claim endpoint.

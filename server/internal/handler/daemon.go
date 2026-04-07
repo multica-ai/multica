@@ -246,10 +246,34 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include workspace ID and repos so the daemon can set up worktrees.
-	if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-		if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
+	// Resolve workspace ID and repos.
+	var workspaceID pgtype.UUID
+	if task.IssueID.Valid {
+		// Standard issue-triggered task
+		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
+			workspaceID = issue.WorkspaceID
+			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+		}
+	} else if task.AgentflowRunID.Valid {
+		// Agentflow-triggered task: resolve workspace via agentflow
+		if run, err := h.Queries.GetAgentflowRun(r.Context(), task.AgentflowRunID); err == nil {
+			if af, err := h.Queries.GetAgentflow(r.Context(), run.AgentflowID); err == nil {
+				workspaceID = af.WorkspaceID
+				resp.WorkspaceID = uuidToString(af.WorkspaceID)
+				resp.Agentflow = &TaskAgentflowData{
+					ID:          uuidToString(af.ID),
+					Title:       af.Title,
+					Description: textToPtr(af.Description),
+					RunID:       uuidToString(run.ID),
+					SourceKind:  run.SourceKind,
+				}
+			}
+		}
+	}
+
+	// Include repos so the daemon can set up worktrees.
+	if workspaceID.Valid {
+		if ws, err := h.Queries.GetWorkspace(r.Context(), workspaceID); err == nil && ws.Repos != nil {
 			var repos []RepoData
 			if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 				resp.Repos = repos
@@ -259,13 +283,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Look up the prior session for this (agent, issue) pair so the daemon
 	// can resume the Claude Code conversation context.
-	if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-		AgentID: task.AgentID,
-		IssueID: task.IssueID,
-	}); err == nil && prior.SessionID.Valid {
-		resp.PriorSessionID = prior.SessionID.String
-		if prior.WorkDir.Valid {
-			resp.PriorWorkDir = prior.WorkDir.String
+	if task.IssueID.Valid {
+		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
+			AgentID: task.AgentID,
+			IssueID: task.IssueID,
+		}); err == nil && prior.SessionID.Valid {
+			resp.PriorSessionID = prior.SessionID.String
+			if prior.WorkDir.Valid {
+				resp.PriorWorkDir = prior.WorkDir.String
+			}
 		}
 	}
 
