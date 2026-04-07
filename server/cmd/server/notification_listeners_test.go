@@ -675,3 +675,137 @@ func TestNotification_DueDateChanged(t *testing.T) {
 		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
 	}
 }
+
+// TestNotification_CommentMention_SubscriberNotDuplicated verifies that when a
+// comment @mentions a user who is already a subscriber, only ONE inbox item is
+// created (new_comment), not two (new_comment + mentioned).
+func TestNotification_CommentMention_SubscriberNotDuplicated(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	commenterEmail := "notif-commenter-mention@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	// sub1 is a subscriber who will also be @mentioned in the comment
+	sub1Email := "notif-sub1-mention@multica.ai"
+	sub1ID := createTestUser(t, sub1Email)
+	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// Pre-add subscribers: creator and sub1
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
+
+	// Comment content @mentions sub1 (who is already a subscriber)
+	mentionContent := "hey [@Sub1](mention://member/" + sub1ID + ") check this out"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    mentionContent,
+				Type:       "comment",
+			},
+			"issue_title":  "mention dedup test",
+			"issue_status": "todo",
+		},
+	})
+
+	// sub1 should get exactly 1 inbox item (new_comment), NOT 2
+	sub1Items := inboxItemsForRecipient(t, queries, sub1ID)
+	if len(sub1Items) != 1 {
+		var types []string
+		for _, item := range sub1Items {
+			types = append(types, item.Type)
+		}
+		t.Fatalf("expected 1 inbox item for mentioned subscriber, got %d (types: %v)",
+			len(sub1Items), types)
+	}
+	if sub1Items[0].Type != "new_comment" {
+		t.Fatalf("expected type 'new_comment', got %q", sub1Items[0].Type)
+	}
+
+	// Creator (subscriber, not mentioned) should also get exactly 1
+	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(creatorItems) != 1 {
+		t.Fatalf("expected 1 inbox item for creator, got %d", len(creatorItems))
+	}
+}
+
+// TestNotification_CommentMention_NonSubscriberStillNotified verifies that when
+// a comment @mentions a user who is NOT a subscriber, they still receive a
+// "mentioned" inbox item.
+func TestNotification_CommentMention_NonSubscriberStillNotified(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	commenterEmail := "notif-commenter-nonsub@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	// outsider is NOT a subscriber but will be @mentioned
+	outsiderEmail := "notif-outsider-mention@multica.ai"
+	outsiderID := createTestUser(t, outsiderEmail)
+	t.Cleanup(func() { cleanupTestUser(t, outsiderEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// Only creator is a subscriber; outsider is NOT
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	mentionContent := "hey [@Outsider](mention://member/" + outsiderID + ") take a look"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    mentionContent,
+				Type:       "comment",
+			},
+			"issue_title":  "nonsub mention test",
+			"issue_status": "todo",
+		},
+	})
+
+	// Outsider (non-subscriber, mentioned) should get exactly 1 "mentioned" item
+	outsiderItems := inboxItemsForRecipient(t, queries, outsiderID)
+	if len(outsiderItems) != 1 {
+		t.Fatalf("expected 1 inbox item for mentioned non-subscriber, got %d", len(outsiderItems))
+	}
+	if outsiderItems[0].Type != "mentioned" {
+		t.Fatalf("expected type 'mentioned', got %q", outsiderItems[0].Type)
+	}
+
+	// Creator (subscriber, not mentioned) should get exactly 1 "new_comment" item
+	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(creatorItems) != 1 {
+		t.Fatalf("expected 1 inbox item for creator, got %d", len(creatorItems))
+	}
+	if creatorItems[0].Type != "new_comment" {
+		t.Fatalf("expected type 'new_comment', got %q", creatorItems[0].Type)
+	}
+}

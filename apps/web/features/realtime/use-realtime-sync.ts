@@ -77,12 +77,14 @@ export function useRealtimeSync(ws: WSClient | null) {
 
     const unsubAny = ws.onAny((msg) => {
       const myUserId = useAuthStore.getState().user?.id;
-      if (msg.actor_id && msg.actor_id === myUserId) {
+      const prefix = msg.type.split(":")[0] ?? "";
+      // Inbox events are personal (actor === recipient) — don't skip them,
+      // other tabs need the refresh to stay in sync.
+      if (prefix !== "inbox" && msg.actor_id && msg.actor_id === myUserId) {
         logger.debug("skipping self-event", msg.type);
         return;
       }
       if (specificEvents.has(msg.type)) return;
-      const prefix = msg.type.split(":")[0] ?? "";
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);
     });

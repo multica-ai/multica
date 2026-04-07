@@ -489,10 +489,19 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issueTitle, commentContent,
 			commentDetails)
 
-		// Notify @mentions in comment content.
+		// Notify @mentions in comment content, skipping subscribers who
+		// already received a new_comment notification above.
 		mentions := parseMentions(commentContent)
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
+			subs, err := queries.ListIssueSubscribers(ctx, parseUUID(issueID))
+			if err == nil {
+				for _, sub := range subs {
+					if sub.UserType == "member" {
+						skip[util.UUIDToString(sub.UserID)] = true
+					}
+				}
+			}
 			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
 				issueTitle, skip, commentDetails)
 		}
