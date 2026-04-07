@@ -333,6 +333,13 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
+  async updateRuntime(runtimeId: string, data: { visibility?: string }): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));

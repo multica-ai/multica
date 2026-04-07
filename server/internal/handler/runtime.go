@@ -21,6 +21,8 @@ type AgentRuntimeResponse struct {
 	Status      string  `json:"status"`
 	DeviceInfo  string  `json:"device_info"`
 	Metadata    any     `json:"metadata"`
+	OwnerID     *string `json:"owner_id"`
+	Visibility  string  `json:"visibility"`
 	LastSeenAt  *string `json:"last_seen_at"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
@@ -45,6 +47,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Status:      rt.Status,
 		DeviceInfo:  rt.DeviceInfo,
 		Metadata:    metadata,
+		OwnerID:     uuidToPtr(rt.OwnerID),
+		Visibility:  rt.Visibility,
 		LastSeenAt:  timestampToPtr(rt.LastSeenAt),
 		CreatedAt:   timestampToString(rt.CreatedAt),
 		UpdatedAt:   timestampToString(rt.UpdatedAt),
@@ -194,6 +198,7 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
+	currentUserID := requestUserID(r)
 
 	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
 	if err != nil {
@@ -201,10 +206,61 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]AgentRuntimeResponse, len(runtimes))
-	for i, rt := range runtimes {
-		resp[i] = runtimeToResponse(rt)
+	resp := make([]AgentRuntimeResponse, 0, len(runtimes))
+	for _, rt := range runtimes {
+		// Hide private runtimes from non-owners
+		if rt.Visibility == "private" && uuidToString(rt.OwnerID) != currentUserID {
+			continue
+		}
+		resp = append(resp, runtimeToResponse(rt))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+type UpdateRuntimeRequest struct {
+	Visibility *string `json:"visibility"`
+}
+
+func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	runtime, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	// Only the runtime owner can update
+	if uuidToString(runtime.OwnerID) != userID {
+		writeError(w, http.StatusForbidden, "only the runtime owner can update this runtime")
+		return
+	}
+
+	var req UpdateRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Visibility != nil {
+		if *req.Visibility != "workspace" && *req.Visibility != "private" {
+			writeError(w, http.StatusBadRequest, "visibility must be 'workspace' or 'private'")
+			return
+		}
+		runtime, err = h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
+			ID:         parseUUID(runtimeID),
+			Visibility: *req.Visibility,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(runtime))
 }
