@@ -14,6 +14,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { Eye, MoreHorizontal } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { Issue, IssueStatus } from "@/shared/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,7 +71,9 @@ export function BoardView({
     newPosition?: number
   ) => void;
 }) {
+  const isMobile = useIsMobile();
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
+  const [mobileActiveStatus, setMobileActiveStatus] = useState<IssueStatus>(visibleStatuses[0]!);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -162,6 +165,62 @@ export function BoardView({
     },
     [issues, issuesByStatus, onMoveIssue, visibleStatuses]
   );
+
+  if (isMobile) {
+    return (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={kanbanCollision}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* Status tab bar */}
+          <div className="flex shrink-0 gap-1 overflow-x-auto px-3 py-2 border-b">
+            {visibleStatuses.map((status) => {
+              const cfg = STATUS_CONFIG[status];
+              const count = issues.filter((i) => i.status === status).length;
+              const isActive = status === mobileActiveStatus;
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setMobileActiveStatus(status)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    isActive
+                      ? `${cfg.badgeBg} ${cfg.badgeText}`
+                      : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <StatusIcon status={status} className="h-3 w-3" inheritColor={isActive} />
+                  {cfg.label}
+                  <span className="text-[10px] opacity-60">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Single full-width column */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-3">
+            <BoardColumn
+              key={mobileActiveStatus}
+              status={mobileActiveStatus}
+              issues={issues.filter((i) => i.status === mobileActiveStatus)}
+              fullWidth
+            />
+          </div>
+        </div>
+
+        <DragOverlay>
+          {activeIssue ? (
+            <div className="w-full max-w-sm rotate-1 cursor-grabbing opacity-95 shadow-md">
+              <BoardCardContent issue={activeIssue} />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    );
+  }
 
   return (
     <DndContext

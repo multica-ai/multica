@@ -1,5 +1,6 @@
 import { Server } from "lucide-react";
 import type { AgentRuntime } from "@/shared/types";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { RuntimeModeIcon } from "./shared";
 
 function RuntimeListItem({
@@ -52,7 +53,10 @@ export function RuntimeList({
   return (
     <div className="overflow-y-auto h-full border-r">
       <div className="flex h-12 items-center justify-between border-b px-4">
-        <h1 className="text-sm font-semibold">Runtimes</h1>
+        <div className="flex items-center gap-2">
+          <SidebarTrigger className="md:hidden" />
+          <h1 className="text-sm font-semibold">Runtimes</h1>
+        </div>
         <span className="text-xs text-muted-foreground">
           {runtimes.filter((r) => r.status === "online").length}/
           {runtimes.length} online

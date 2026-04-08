@@ -9,6 +9,8 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileListDetail } from "@/components/layout/mobile-list-detail";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useWSEvent } from "@/features/realtime";
@@ -17,6 +19,7 @@ import { RuntimeList } from "./runtime-list";
 import { RuntimeDetail } from "./runtime-detail";
 
 export default function RuntimesPage() {
+  const isMobile = useIsMobile();
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const runtimes = useRuntimeStore((s) => s.runtimes);
@@ -79,6 +82,37 @@ export default function RuntimesPage() {
     );
   }
 
+  const emptyDetail = (
+    <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+      <Server className="h-10 w-10 text-muted-foreground/30" />
+      <p className="mt-3 text-sm">Select a runtime to view details</p>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileListDetail
+        showDetail={!!selectedId}
+        onBack={() => setSelectedId("")}
+        headerTitle={selected?.name ?? "Runtime"}
+        list={
+          <RuntimeList
+            runtimes={runtimes}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+        }
+        detail={
+          selected ? (
+            <RuntimeDetail key={selected.id} runtime={selected} />
+          ) : (
+            emptyDetail
+          )
+        }
+      />
+    );
+  }
+
   return (
     <ResizablePanelGroup
       orientation="horizontal"
@@ -106,10 +140,7 @@ export default function RuntimesPage() {
         {selected ? (
           <RuntimeDetail key={selected.id} runtime={selected} />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Server className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select a runtime to view details</p>
-          </div>
+          emptyDetail
         )}
       </ResizablePanel>
     </ResizablePanelGroup>

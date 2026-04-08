@@ -4,6 +4,8 @@
 @import "./custom.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant coarse (@media (pointer: coarse));
+@custom-variant mobile (@media (max-width: 767px));
 
 @theme inline {
     --font-heading: var(--font-sans);

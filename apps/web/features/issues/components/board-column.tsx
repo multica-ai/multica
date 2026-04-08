@@ -23,9 +23,11 @@ import { DraggableBoardCard } from "./board-card";
 export function BoardColumn({
   status,
   issues,
+  fullWidth,
 }: {
   status: IssueStatus;
   issues: Issue[];
+  fullWidth?: boolean;
 }) {
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -44,7 +46,7 @@ export function BoardColumn({
   );
 
   return (
-    <div className={`flex w-[280px] shrink-0 flex-col rounded-xl ${cfg.columnBg} p-2`}>
+    <div className={`flex ${fullWidth ? "w-full" : "w-[280px] shrink-0"} flex-col rounded-xl ${cfg.columnBg} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
         {/* Left: status badge + count */}
         <div className="flex items-center gap-2">

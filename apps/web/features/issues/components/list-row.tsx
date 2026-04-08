@@ -20,21 +20,21 @@ export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
 
   return (
     <div
-      className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:bg-accent/50 ${
+      className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:bg-accent/50 coarse:h-11 ${
         selected ? "bg-accent/30" : ""
       }`}
     >
       <div className="relative flex shrink-0 items-center justify-center w-4 h-4">
         <PriorityIcon
           priority={issue.priority}
-          className={selected ? "hidden" : "group-hover/row:hidden"}
+          className={selected ? "hidden" : "group-hover/row:hidden coarse:hidden"}
         />
         <input
           type="checkbox"
           checked={selected}
           onChange={() => toggle(issue.id)}
           className={`absolute inset-0 cursor-pointer accent-primary ${
-            selected ? "" : "hidden group-hover/row:block"
+            selected ? "" : "hidden group-hover/row:block coarse:block"
           }`}
         />
       </div>

@@ -12,6 +12,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -67,6 +73,7 @@ function PillButton({
 
 export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?: Record<string, unknown> | null }) {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
@@ -173,6 +180,271 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     }
   };
 
+  const modalContent = (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">{workspaceName}</span>
+          <ChevronRight className="size-3 text-muted-foreground/50" />
+          <span className="font-medium">New issue</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                  >
+                    {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  </button>
+                }
+              />
+              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+            </Tooltip>
+          )}
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={onClose}
+                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                  >
+                    <XIcon className="size-4" />
+                  </button>
+                }
+              />
+              <TooltipContent side="bottom">Close</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      {/* Title */}
+      <div className="px-5 pb-2 shrink-0">
+        <TitleEditor
+          autoFocus
+          defaultValue={draft.title}
+          placeholder="Issue title"
+          className="text-lg font-semibold"
+          onChange={(v) => updateTitle(v)}
+          onSubmit={handleSubmit}
+        />
+      </div>
+
+      {/* Description — takes remaining space */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-5">
+        <ContentEditor
+          ref={descEditorRef}
+          defaultValue={draft.description}
+          placeholder="Add description..."
+          onUpdate={(md) => setDraft({ description: md })}
+          onUploadFile={handleUpload}
+          debounceMs={500}
+        />
+      </div>
+
+      {/* Property toolbar */}
+      <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
+        {/* Status */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <PillButton>
+                <StatusIcon status={status} className="size-3.5" />
+                <span>{STATUS_CONFIG[status].label}</span>
+              </PillButton>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-44">
+            {ALL_STATUSES.map((s) => (
+              <DropdownMenuItem key={s} onClick={() => updateStatus(s)}>
+                <StatusIcon status={s} className="size-3.5" />
+                <span>{STATUS_CONFIG[s].label}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Priority */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <PillButton>
+                <PriorityIcon priority={priority} />
+                <span>{PRIORITY_CONFIG[priority].label}</span>
+              </PillButton>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-44">
+            {PRIORITY_ORDER.map((p) => (
+              <DropdownMenuItem key={p} onClick={() => updatePriority(p)}>
+                <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
+                  <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
+                  {PRIORITY_CONFIG[p].label}
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Assignee — Popover for search support */}
+        <Popover open={assigneeOpen} onOpenChange={(v) => { setAssigneeOpen(v); if (!v) setAssigneeFilter(""); }}>
+          <PopoverTrigger
+            render={
+              <PillButton>
+                {assigneeType && assigneeId ? (
+                  <>
+                    <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={16} />
+                    <span>{assigneeLabel}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">Assignee</span>
+                )}
+              </PillButton>
+            }
+          />
+          <PopoverContent align="start" className="w-52 p-0">
+            <div className="px-2 py-1.5 border-b">
+              <input
+                type="text"
+                value={assigneeFilter}
+                onChange={(e) => setAssigneeFilter(e.target.value)}
+                placeholder="Assign to..."
+                className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+              />
+            </div>
+            <div className="p-1 max-h-60 overflow-y-auto">
+              {/* Unassigned */}
+              <button
+                type="button"
+                onClick={() => {
+                  updateAssignee(undefined, undefined);
+                  setAssigneeOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+              >
+                <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Unassigned</span>
+              </button>
+
+              {/* Members */}
+              {filteredMembers.length > 0 && (
+                <>
+                  <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
+                  {filteredMembers.map((m) => (
+                    <button
+                      type="button"
+                      key={m.user_id}
+                      onClick={() => {
+                        updateAssignee("member", m.user_id);
+                        setAssigneeOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                    >
+                      <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                      <span>{m.name}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {/* Agents */}
+              {filteredAgents.length > 0 && (
+                <>
+                  <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
+                  {filteredAgents.map((a) => (
+                    <button
+                      type="button"
+                      key={a.id}
+                      onClick={() => {
+                        updateAssignee("agent", a.id);
+                        setAssigneeOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                    >
+                      <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                      <span>{a.name}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {filteredMembers.length === 0 && filteredAgents.length === 0 && assigneeFilter && (
+                <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* Due date */}
+        <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+          <PopoverTrigger
+            render={
+              <PillButton>
+                <CalendarDays className="size-3.5 text-muted-foreground" />
+                {dueDateObj ? (
+                  <span>{dueDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                ) : (
+                  <span className="text-muted-foreground">Due date</span>
+                )}
+              </PillButton>
+            }
+          />
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={dueDateObj}
+              onSelect={(d: Date | undefined) => {
+                updateDueDate(d ? d.toISOString() : null);
+                setDueDateOpen(false);
+              }}
+            />
+            {dueDateObj && (
+              <div className="border-t px-3 py-2">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    updateDueDate(null);
+                    setDueDateOpen(false);
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  Clear date
+                </Button>
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between px-4 py-3 border-t shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <FileUploadButton
+          onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+        />
+        <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+          {submitting ? "Creating..." : "Create Issue"}
+        </Button>
+      </div>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open onOpenChange={(v) => { if (!v) onClose(); }}>
+        <DrawerContent className="max-h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
+          <DrawerTitle className="sr-only">New Issue</DrawerTitle>
+          {modalContent}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
@@ -187,252 +459,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         )}
       >
         <DialogTitle className="sr-only">New Issue</DialogTitle>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">New issue</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                  >
-                    {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                  </button>
-                }
-              />
-              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={onClose}
-                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                  >
-                    <XIcon className="size-4" />
-                  </button>
-                }
-              />
-              <TooltipContent side="bottom">Close</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-
-        {/* Title */}
-        <div className="px-5 pb-2 shrink-0">
-          <TitleEditor
-            autoFocus
-            defaultValue={draft.title}
-            placeholder="Issue title"
-            className="text-lg font-semibold"
-            onChange={(v) => updateTitle(v)}
-            onSubmit={handleSubmit}
-          />
-        </div>
-
-        {/* Description — takes remaining space */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5">
-          <ContentEditor
-            ref={descEditorRef}
-            defaultValue={draft.description}
-            placeholder="Add description..."
-            onUpdate={(md) => setDraft({ description: md })}
-            onUploadFile={handleUpload}
-            debounceMs={500}
-          />
-        </div>
-
-        {/* Property toolbar */}
-        <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
-          {/* Status */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <PillButton>
-                  <StatusIcon status={status} className="size-3.5" />
-                  <span>{STATUS_CONFIG[status].label}</span>
-                </PillButton>
-              }
-            />
-            <DropdownMenuContent align="start" className="w-44">
-              {ALL_STATUSES.map((s) => (
-                <DropdownMenuItem key={s} onClick={() => updateStatus(s)}>
-                  <StatusIcon status={s} className="size-3.5" />
-                  <span>{STATUS_CONFIG[s].label}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Priority */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <PillButton>
-                  <PriorityIcon priority={priority} />
-                  <span>{PRIORITY_CONFIG[priority].label}</span>
-                </PillButton>
-              }
-            />
-            <DropdownMenuContent align="start" className="w-44">
-              {PRIORITY_ORDER.map((p) => (
-                <DropdownMenuItem key={p} onClick={() => updatePriority(p)}>
-                  <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                    <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                    {PRIORITY_CONFIG[p].label}
-                  </span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Assignee — Popover for search support */}
-          <Popover open={assigneeOpen} onOpenChange={(v) => { setAssigneeOpen(v); if (!v) setAssigneeFilter(""); }}>
-            <PopoverTrigger
-              render={
-                <PillButton>
-                  {assigneeType && assigneeId ? (
-                    <>
-                      <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={16} />
-                      <span>{assigneeLabel}</span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">Assignee</span>
-                  )}
-                </PillButton>
-              }
-            />
-            <PopoverContent align="start" className="w-52 p-0">
-              <div className="px-2 py-1.5 border-b">
-                <input
-                  type="text"
-                  value={assigneeFilter}
-                  onChange={(e) => setAssigneeFilter(e.target.value)}
-                  placeholder="Assign to..."
-                  className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-                />
-              </div>
-              <div className="p-1 max-h-60 overflow-y-auto">
-                {/* Unassigned */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    updateAssignee(undefined, undefined);
-                    setAssigneeOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                >
-                  <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">Unassigned</span>
-                </button>
-
-                {/* Members */}
-                {filteredMembers.length > 0 && (
-                  <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
-                    {filteredMembers.map((m) => (
-                      <button
-                        type="button"
-                        key={m.user_id}
-                        onClick={() => {
-                          updateAssignee("member", m.user_id);
-                          setAssigneeOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                      >
-                        <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
-                        <span>{m.name}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-
-                {/* Agents */}
-                {filteredAgents.length > 0 && (
-                  <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
-                    {filteredAgents.map((a) => (
-                      <button
-                        type="button"
-                        key={a.id}
-                        onClick={() => {
-                          updateAssignee("agent", a.id);
-                          setAssigneeOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                      >
-                        <ActorAvatar actorType="agent" actorId={a.id} size={16} />
-                        <span>{a.name}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-
-                {filteredMembers.length === 0 && filteredAgents.length === 0 && assigneeFilter && (
-                  <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* Due date */}
-          <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
-            <PopoverTrigger
-              render={
-                <PillButton>
-                  <CalendarDays className="size-3.5 text-muted-foreground" />
-                  {dueDateObj ? (
-                    <span>{dueDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                  ) : (
-                    <span className="text-muted-foreground">Due date</span>
-                  )}
-                </PillButton>
-              }
-            />
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={dueDateObj}
-                onSelect={(d: Date | undefined) => {
-                  updateDueDate(d ? d.toISOString() : null);
-                  setDueDateOpen(false);
-                }}
-              />
-              {dueDateObj && (
-                <div className="border-t px-3 py-2">
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => {
-                      updateDueDate(null);
-                      setDueDateOpen(false);
-                    }}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    Clear date
-                  </Button>
-                </div>
-              )}
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-          <FileUploadButton
-            onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-          />
-          <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-            {submitting ? "Creating..." : "Create Issue"}
-          </Button>
-        </div>
+        {modalContent}
       </DialogContent>
     </Dialog>
   );

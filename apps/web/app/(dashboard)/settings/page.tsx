@@ -3,6 +3,8 @@
 import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useWorkspaceStore } from "@/features/workspace";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { AccountTab } from "./_components/account-tab";
 import { AppearanceTab } from "./_components/general-tab";
 import { TokensTab } from "./_components/tokens-tab";
@@ -23,7 +25,54 @@ const workspaceTabs = [
 ];
 
 export default function SettingsPage() {
+  const isMobile = useIsMobile();
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+
+  const tabContent = (
+    <>
+      <TabsContent value="profile"><AccountTab /></TabsContent>
+      <TabsContent value="appearance"><AppearanceTab /></TabsContent>
+      <TabsContent value="tokens"><TokensTab /></TabsContent>
+      <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
+      <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+      <TabsContent value="members"><MembersTab /></TabsContent>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <Tabs defaultValue="profile" className="flex flex-col flex-1 min-h-0 gap-0">
+        {/* Top: scrollable horizontal tabs */}
+        <div className="shrink-0 border-b px-3 pt-3 pb-0">
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <SidebarTrigger className="md:hidden" />
+            <h1 className="text-sm font-semibold">Settings</h1>
+          </div>
+          <TabsList variant="line" className="overflow-x-auto whitespace-nowrap w-full justify-start gap-0">
+            {accountTabs.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value} className="text-xs px-2.5 py-1.5">
+                <tab.icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </TabsTrigger>
+            ))}
+            {workspaceTabs.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value} className="text-xs px-2.5 py-1.5">
+                <tab.icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="w-full p-4">
+            {tabContent}
+          </div>
+        </div>
+      </Tabs>
+    );
+  }
 
   return (
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
@@ -58,12 +107,7 @@ export default function SettingsPage() {
       {/* Right content */}
       <div className="flex-1 min-w-0 overflow-y-auto">
         <div className="w-full max-w-3xl mx-auto p-6">
-          <TabsContent value="profile"><AccountTab /></TabsContent>
-          <TabsContent value="appearance"><AppearanceTab /></TabsContent>
-          <TabsContent value="tokens"><TokensTab /></TabsContent>
-          <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
-          <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
-          <TabsContent value="members"><MembersTab /></TabsContent>
+          {tabContent}
         </div>
       </div>
     </Tabs>

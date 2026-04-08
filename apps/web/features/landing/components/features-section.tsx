@@ -882,7 +882,7 @@ function RuntimesVisual() {
             </div>
 
             {/* Token summary cards — same as real TokenCard */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { label: "Input", value: formatTokens(totals.input) },
                 { label: "Output", value: formatTokens(totals.output) },
