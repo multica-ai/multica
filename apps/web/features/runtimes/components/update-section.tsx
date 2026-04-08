@@ -160,7 +160,7 @@ export function UpdateSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground">CLI Version:</span>
+        <span className="text-xs text-muted-foreground">Current version:</span>
         <span className="text-xs font-mono">
           {currentVersion ?? "unknown"}
         </span>

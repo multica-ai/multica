@@ -4,21 +4,13 @@ import { RuntimeModeIcon, StatusBadge, InfoField } from "./shared";
 import { PingSection } from "./ping-section";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
-
-function getCliVersion(metadata: Record<string, unknown>): string | null {
-  if (
-    metadata &&
-    typeof metadata.cli_version === "string" &&
-    metadata.cli_version
-  ) {
-    return metadata.cli_version;
-  }
-  return null;
-}
+import { getMulticaCliVersion, getRuntimeCliVersion } from "./runtime-metadata";
 
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
-  const cliVersion =
-    runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
+  const runtimeCliVersion =
+    runtime.runtime_mode === "local" ? getRuntimeCliVersion(runtime.metadata) : null;
+  const multicaCliVersion =
+    runtime.runtime_mode === "local" ? getMulticaCliVersion(runtime.metadata) : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -60,15 +52,28 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
 
         {/* CLI Version & Update */}
         {runtime.runtime_mode === "local" && (
-          <div>
-            <h3 className="text-xs font-medium text-muted-foreground mb-3">
-              CLI Version
-            </h3>
-            <UpdateSection
-              runtimeId={runtime.id}
-              currentVersion={cliVersion}
-              isOnline={runtime.status === "online"}
-            />
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground mb-3">
+                Runtime CLI
+              </h3>
+              <InfoField
+                label={`${runtime.provider} version`}
+                value={runtimeCliVersion ?? "unknown"}
+                mono
+              />
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground mb-3">
+                Multica CLI
+              </h3>
+              <UpdateSection
+                runtimeId={runtime.id}
+                currentVersion={multicaCliVersion}
+                isOnline={runtime.status === "online"}
+              />
+            </div>
           </div>
         )}
 

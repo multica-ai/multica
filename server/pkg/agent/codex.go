@@ -25,6 +25,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
 	}
+	if err := ensureCodexAppServer(ctx, execPath); err != nil {
+		return nil, err
+	}
 
 	timeout := opts.Timeout
 	if timeout == 0 {
