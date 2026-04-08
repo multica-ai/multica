@@ -30,6 +30,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -56,7 +57,6 @@ import { useQuery } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@core/inbox/queries";
 import { api } from "@/shared/api";
 import { useModalStore } from "@/features/modals";
-import { useIsMobile } from "@/hooks/use-mobile";
 
 const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
@@ -168,8 +168,10 @@ function DesktopWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
 function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
   return (
     <Drawer>
-      <DrawerTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-sidebar-accent">
-        <WorkspaceSwitcherTrigger workspace={props.workspace} />
+      <DrawerTrigger asChild>
+        <SidebarMenuButton>
+          <WorkspaceSwitcherTrigger workspace={props.workspace} />
+        </SidebarMenuButton>
       </DrawerTrigger>
       <DrawerContent>
         <DrawerHeader className="sr-only">
@@ -183,7 +185,7 @@ function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
           <div className="my-2 h-px bg-border" />
           <DrawerClose asChild>
             <button
-              className="mb-2 flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+              className="mb-2 flex w-full items-center gap-2 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring outline-none"
               onClick={() => {
                 useModalStore.getState().open("create-workspace");
               }}
@@ -200,7 +202,7 @@ function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
             {props.workspaces.map((ws) => (
               <DrawerClose key={ws.id} asChild>
                 <button
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring outline-none"
                   onClick={() => {
                     if (ws.id !== props.workspace?.id) {
                       props.onSwitch(ws.id);
@@ -218,7 +220,7 @@ function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
             <div className="my-1 h-px bg-border" />
             <DrawerClose asChild>
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring outline-none"
                 onClick={props.onLogout}
               >
                 <LogOut className="h-3.5 w-3.5" />
@@ -235,7 +237,7 @@ function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const isMobile = useIsMobile();
+  const { isMobile } = useSidebar();
   const user = useAuthStore((s) => s.user);
   const authLogout = useAuthStore((s) => s.logout);
   const workspace = useWorkspaceStore((s) => s.workspace);
