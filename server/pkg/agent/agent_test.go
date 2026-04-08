@@ -27,6 +27,17 @@ func TestNewReturnsCodexBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsCopilotBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("copilot", Config{ExecutablePath: "/nonexistent/copilot"})
+	if err != nil {
+		t.Fatalf("New(copilot) error: %v", err)
+	}
+	if _, ok := b.(*copilotBackend); !ok {
+		t.Fatalf("expected *copilotBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})

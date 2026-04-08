@@ -1,6 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, OpenCode, OpenClaw, Hermes). It mirrors the happy-cli AgentBackend
-// pattern, translated to idiomatic Go.
+// coding agents (Claude Code, Codex, OpenCode, OpenClaw, Hermes, and GitHub
+// Copilot). It mirrors the happy-cli AgentBackend pattern, translated to
+// idiomatic Go.
 package agent
 
 import (
@@ -82,13 +83,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, opencode, openclaw, or hermes)
+	ExecutablePath string            // path to CLI binary (claude, codex, opencode, openclaw, hermes, or copilot)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "opencode", "openclaw", "hermes".
+// Supported types: "claude", "codex", "opencode", "openclaw", "hermes", "copilot".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -105,8 +106,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
+	case "copilot":
+		return &copilotBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw, hermes)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw, hermes, copilot)", agentType)
 	}
 }
 
