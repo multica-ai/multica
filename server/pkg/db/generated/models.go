@@ -138,6 +138,17 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type GithubInstallation struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID int64              `json:"installation_id"`
+	AccountLogin   string             `json:"account_login"`
+	AccountType    string             `json:"account_type"`
+	AppID          int64              `json:"app_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -189,6 +200,22 @@ type IssueLabel struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
 	Color       string      `json:"color"`
+}
+
+type IssuePullRequest struct {
+	ID          pgtype.UUID        `json:"id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	PrNumber    int32              `json:"pr_number"`
+	Title       string             `json:"title"`
+	Status      string             `json:"status"`
+	Author      string             `json:"author"`
+	Url         string             `json:"url"`
+	Branch      pgtype.Text        `json:"branch"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IssueReaction struct {

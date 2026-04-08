@@ -84,6 +84,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
 
+	// GitHub webhooks (public — verified via HMAC signature)
+	r.Post("/webhooks/github", h.GitHubWebhook)
+
 	// Daemon API routes (all require a valid token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.Auth(queries))
@@ -116,6 +119,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Post("/api/upload-file", h.UploadFile)
+
+		// GitHub App installation callback (redirected from GitHub after install)
+		r.Get("/api/github/callback", h.GitHubInstallationCallback)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -230,6 +236,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/{runtimeId}/ping/{pingId}", h.GetPing)
 				r.Post("/{runtimeId}/update", h.InitiateUpdate)
 				r.Get("/{runtimeId}/update/{updateId}", h.GetUpdate)
+			})
+
+			// GitHub integration
+			r.Route("/api/github", func(r chi.Router) {
+				r.Get("/installations", h.ListGitHubInstallations)
+				r.Delete("/installations", h.DeleteGitHubInstallation)
+				r.Get("/pull-requests", h.ListIssuePullRequests)
 			})
 
 			// Inbox

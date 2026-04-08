@@ -35,6 +35,8 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  PullRequest,
+  GitHubInstallation,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -587,5 +589,22 @@ export class ApiClient {
 
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  // GitHub Integration
+  async listGitHubInstallations(): Promise<GitHubInstallation[]> {
+    const data = await this.fetch<{ installations: GitHubInstallation[] }>("/api/github/installations");
+    return data.installations;
+  }
+
+  async deleteGitHubInstallation(installationId: number): Promise<void> {
+    await this.fetch(`/api/github/installations?installation_id=${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listIssuePullRequests(issueId: string): Promise<PullRequest[]> {
+    const data = await this.fetch<{ pull_requests: PullRequest[] }>(`/api/github/pull-requests?issue_id=${issueId}`);
+    return data.pull_requests;
   }
 }

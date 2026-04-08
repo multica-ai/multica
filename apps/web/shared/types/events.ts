@@ -44,7 +44,11 @@ export type WSEventType =
   | "reaction:added"
   | "reaction:removed"
   | "issue_reaction:added"
-  | "issue_reaction:removed";
+  | "issue_reaction:removed"
+  | "pull_request:linked"
+  | "pull_request:updated"
+  | "github_installation:created"
+  | "github_installation:deleted";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

@@ -63,6 +63,7 @@ import { StatusIcon, PriorityIcon, DueDatePicker, AssigneePicker, canAssignAgent
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
+import { PRStatusCard } from "./pr-status-card";
 import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
@@ -1029,6 +1030,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </PropRow>
             </div>}
           </div>
+
+          {/* Pull Requests section */}
+          <PRStatusCard issueId={id} />
 
           {/* Details section */}
           <div>
