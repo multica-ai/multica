@@ -49,9 +49,9 @@ func allowedOrigins() []string {
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
-	s3 := storage.NewS3StorageFromEnv()
+	fileStorage := storage.NewFromEnv()
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
+	h := handler.New(queries, pool, hub, bus, emailSvc, fileStorage, cfSigner)
 
 	r := chi.NewRouter()
 
@@ -72,6 +72,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	if localStorage, ok := fileStorage.(*storage.LocalStorage); ok {
+		r.Handle("/files/*", http.StripPrefix("/files/", localStorage.FileHandler()))
+	}
 
 	// WebSocket
 	mc := &membershipChecker{queries: queries}

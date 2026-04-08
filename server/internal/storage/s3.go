@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 
@@ -31,7 +32,7 @@ type S3Storage struct {
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
-		slog.Info("S3_BUCKET not set, file upload disabled")
+		slog.Info("S3_BUCKET not set, skipping S3 storage")
 		return nil
 	}
 
@@ -66,6 +67,13 @@ func NewS3StorageFromEnv() *S3Storage {
 		bucket:    bucket,
 		cdnDomain: cdnDomain,
 	}
+}
+
+func NewFromEnv() Storage {
+	if strings.TrimSpace(os.Getenv("S3_BUCKET")) != "" {
+		return NewS3StorageFromEnv()
+	}
+	return NewLocalStorageFromEnv()
 }
 
 // sanitizeFilename removes characters that could cause header injection in Content-Disposition.
@@ -123,7 +131,7 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	}
 }
 
-func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
+func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) error {
 	safe := sanitizeFilename(filename)
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
@@ -135,13 +143,15 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		StorageClass:       types.StorageClassIntelligentTiering,
 	})
 	if err != nil {
-		return "", fmt.Errorf("s3 PutObject: %w", err)
+		return fmt.Errorf("s3 PutObject: %w", err)
 	}
+	return nil
+}
 
+func (s *S3Storage) PublicURL(_ *http.Request, key string) string {
 	domain := s.bucket
 	if s.cdnDomain != "" {
 		domain = s.cdnDomain
 	}
-	link := fmt.Sprintf("https://%s/%s", domain, key)
-	return link, nil
+	return fmt.Sprintf("https://%s/%s", domain, key)
 }

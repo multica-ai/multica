@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -50,7 +51,9 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if h.CFSigner != nil {
-		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
+		if _, ok := h.Storage.(*storage.S3Storage); ok {
+			resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
+		}
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
@@ -142,12 +145,12 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	key := id.String() + path.Ext(header.Filename)
 
-	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
-	if err != nil {
+	if err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename); err != nil {
 		slog.Error("file upload failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload failed")
 		return
 	}
+	link := h.Storage.PublicURL(r, key)
 
 	// If workspace context is available, create an attachment record.
 	if workspaceID != "" {
@@ -288,7 +291,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.deleteS3Object(r.Context(), att.Url)
+	h.deleteStoredObject(r.Context(), att.Url)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -328,16 +331,16 @@ func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID p
 	}
 }
 
-// deleteS3Object removes a single file from S3 by its CDN URL.
-func (h *Handler) deleteS3Object(ctx context.Context, url string) {
+// deleteStoredObject removes a single file from the configured storage backend.
+func (h *Handler) deleteStoredObject(ctx context.Context, url string) {
 	if h.Storage == nil || url == "" {
 		return
 	}
 	h.Storage.Delete(ctx, h.Storage.KeyFromURL(url))
 }
 
-// deleteS3Objects removes multiple files from S3 by their CDN URLs.
-func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
+// deleteStoredObjects removes multiple files from the configured storage backend.
+func (h *Handler) deleteStoredObjects(ctx context.Context, urls []string) {
 	if h.Storage == nil || len(urls) == 0 {
 		return
 	}
