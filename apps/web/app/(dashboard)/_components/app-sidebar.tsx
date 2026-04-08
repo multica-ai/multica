@@ -99,46 +99,6 @@ function WorkspaceSwitcherTrigger({
   );
 }
 
-function WorkspaceList({
-  workspace,
-  workspaces,
-  onSwitch,
-  onLogout,
-}: WorkspaceSwitcherProps) {
-  return (
-    <>
-      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-        Workspaces
-      </div>
-      {workspaces.map((ws) => (
-        <button
-          key={ws.id}
-          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
-          onClick={() => {
-            if (ws.id !== workspace?.id) {
-              onSwitch(ws.id);
-            }
-          }}
-        >
-          <WorkspaceAvatar name={ws.name} size="sm" />
-          <span className="flex-1 truncate">{ws.name}</span>
-          {ws.id === workspace?.id && (
-            <Check className="h-3.5 w-3.5 text-primary" />
-          )}
-        </button>
-      ))}
-      <div className="my-1 h-px bg-border" />
-      <button
-        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-accent"
-        onClick={onLogout}
-      >
-        <LogOut className="h-3.5 w-3.5" />
-        Log out
-      </button>
-    </>
-  );
-}
-
 function DesktopWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
   return (
     <DropdownMenu>
@@ -221,19 +181,52 @@ function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
             {props.user?.email}
           </div>
           <div className="my-2 h-px bg-border" />
-          <button
-            className="mb-2 flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              useModalStore.getState().open("create-workspace");
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Create workspace
-          </button>
+          <DrawerClose asChild>
+            <button
+              className="mb-2 flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                useModalStore.getState().open("create-workspace");
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Create workspace
+            </button>
+          </DrawerClose>
           <div className="my-2 h-px bg-border" />
-          <WorkspaceList {...props} />
+          <div className="max-h-[60vh] overflow-y-auto pr-1">
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+              Workspaces
+            </div>
+            {props.workspaces.map((ws) => (
+              <DrawerClose key={ws.id} asChild>
+                <button
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                  onClick={() => {
+                    if (ws.id !== props.workspace?.id) {
+                      props.onSwitch(ws.id);
+                    }
+                  }}
+                >
+                  <WorkspaceAvatar name={ws.name} size="sm" />
+                  <span className="flex-1 truncate">{ws.name}</span>
+                  {ws.id === props.workspace?.id && (
+                    <Check className="h-3.5 w-3.5 text-primary" />
+                  )}
+                </button>
+              </DrawerClose>
+            ))}
+            <div className="my-1 h-px bg-border" />
+            <DrawerClose asChild>
+              <button
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-accent"
+                onClick={props.onLogout}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Log out
+              </button>
+            </DrawerClose>
+          </div>
         </div>
-        <DrawerClose className="sr-only">Close</DrawerClose>
       </DrawerContent>
     </Drawer>
   );
