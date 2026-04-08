@@ -40,6 +40,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Drawer,
+  DrawerTrigger,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerClose,
+} from "@/components/ui/drawer";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -47,6 +56,7 @@ import { useQuery } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@core/inbox/queries";
 import { api } from "@/shared/api";
 import { useModalStore } from "@/features/modals";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
@@ -67,9 +77,172 @@ function DraftDot() {
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
 }
 
+interface WorkspaceSwitcherProps {
+  workspace: { id: string; name: string } | null;
+  workspaces: readonly { id: string; name: string }[];
+  user: { email?: string } | null;
+  onSwitch: (id: string) => void;
+  onLogout: () => void;
+}
+
+function WorkspaceSwitcherTrigger({
+  workspace,
+}: Pick<WorkspaceSwitcherProps, "workspace">) {
+  return (
+    <>
+      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+      <span className="flex-1 truncate font-medium">
+        {workspace?.name ?? "Multica"}
+      </span>
+      <ChevronDown className="size-3 text-muted-foreground" />
+    </>
+  );
+}
+
+function WorkspaceList({
+  workspace,
+  workspaces,
+  onSwitch,
+  onLogout,
+}: WorkspaceSwitcherProps) {
+  return (
+    <>
+      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+        Workspaces
+      </div>
+      {workspaces.map((ws) => (
+        <button
+          key={ws.id}
+          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+          onClick={() => {
+            if (ws.id !== workspace?.id) {
+              onSwitch(ws.id);
+            }
+          }}
+        >
+          <WorkspaceAvatar name={ws.name} size="sm" />
+          <span className="flex-1 truncate">{ws.name}</span>
+          {ws.id === workspace?.id && (
+            <Check className="h-3.5 w-3.5 text-primary" />
+          )}
+        </button>
+      ))}
+      <div className="my-1 h-px bg-border" />
+      <button
+        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-accent"
+        onClick={onLogout}
+      >
+        <LogOut className="h-3.5 w-3.5" />
+        Log out
+      </button>
+    </>
+  );
+}
+
+function DesktopWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <SidebarMenuButton>
+            <WorkspaceSwitcherTrigger workspace={props.workspace} />
+          </SidebarMenuButton>
+        }
+      />
+      <DropdownMenuContent
+        className="w-52"
+        align="start"
+        side="bottom"
+        sideOffset={4}
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            {props.user?.email}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup className="group/ws-section">
+          <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
+            Workspaces
+            <Tooltip>
+              <TooltipTrigger
+                className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
+                onClick={() => useModalStore.getState().open("create-workspace")}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                Create workspace
+              </TooltipContent>
+            </Tooltip>
+          </DropdownMenuLabel>
+          {props.workspaces.map((ws) => (
+            <DropdownMenuItem
+              key={ws.id}
+              onClick={() => {
+                if (ws.id !== props.workspace?.id) {
+                  props.onSwitch(ws.id);
+                }
+              }}
+            >
+              <WorkspaceAvatar name={ws.name} size="sm" />
+              <span className="flex-1 truncate">{ws.name}</span>
+              {ws.id === props.workspace?.id && (
+                <Check className="h-3.5 w-3.5 text-primary" />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem variant="destructive" onClick={props.onLogout}>
+            <LogOut className="h-3.5 w-3.5" />
+            Log out
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function MobileWorkspaceSwitcher(props: WorkspaceSwitcherProps) {
+  return (
+    <Drawer>
+      <DrawerTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-sidebar-accent">
+        <WorkspaceSwitcherTrigger workspace={props.workspace} />
+      </DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader className="sr-only">
+          <DrawerTitle>Switch workspace</DrawerTitle>
+          <DrawerDescription>Choose a workspace to switch to</DrawerDescription>
+        </DrawerHeader>
+        <div className="px-4 pb-6">
+          <div className="mb-2 text-xs text-muted-foreground">
+            {props.user?.email}
+          </div>
+          <div className="my-2 h-px bg-border" />
+          <button
+            className="mb-2 flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              useModalStore.getState().open("create-workspace");
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Create workspace
+          </button>
+          <div className="my-2 h-px bg-border" />
+          <WorkspaceList {...props} />
+        </div>
+        <DrawerClose className="sr-only">Close</DrawerClose>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const isMobile = useIsMobile();
   const user = useAuthStore((s) => s.user);
   const authLogout = useAuthStore((s) => s.logout);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -93,6 +266,21 @@ export function AppSidebar() {
     useWorkspaceStore.getState().clearWorkspace();
   };
 
+  const handleSwitchWorkspace = (id: string) => {
+    router.push("/issues");
+    switchWorkspace(id);
+  };
+
+  const switcherProps: WorkspaceSwitcherProps = {
+    workspace: workspace
+      ? { id: workspace.id, name: workspace.name }
+      : null,
+    workspaces,
+    user,
+    onSwitch: handleSwitchWorkspace,
+    onLogout: logout,
+  };
+
   return (
       <Sidebar variant="inset">
         {/* Workspace Switcher */}
@@ -100,72 +288,11 @@ export function AppSidebar() {
           <div className="flex items-center gap-4">
             <SidebarMenu className="min-w-0 flex-1">
               <SidebarMenuItem>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <SidebarMenuButton>
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
-                        <span className="flex-1 truncate font-medium">
-                          {workspace?.name ?? "Multica"}
-                        </span>
-                        <ChevronDown className="size-3 text-muted-foreground" />
-                      </SidebarMenuButton>
-                    }
-                  />
-                <DropdownMenuContent
-                  className="w-52"
-                  align="start"
-                  side="bottom"
-                  sideOffset={4}
-                >
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      {user?.email}
-                    </DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup className="group/ws-section">
-                    <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
-                      Workspaces
-                      <Tooltip>
-                        <TooltipTrigger
-                          className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
-                          onClick={() => useModalStore.getState().open("create-workspace")}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          Create workspace
-                        </TooltipContent>
-                      </Tooltip>
-                    </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
-                      <DropdownMenuItem
-                        key={ws.id}
-                        onClick={() => {
-                          if (ws.id !== workspace?.id) {
-                            router.push("/issues");
-                            switchWorkspace(ws.id);
-                          }
-                        }}
-                      >
-                        <WorkspaceAvatar name={ws.name} size="sm" />
-                        <span className="flex-1 truncate">{ws.name}</span>
-                        {ws.id === workspace?.id && (
-                          <Check className="h-3.5 w-3.5 text-primary" />
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem variant="destructive" onClick={logout}>
-                      <LogOut className="h-3.5 w-3.5" />
-                      Log out
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-                </DropdownMenu>
+                {isMobile ? (
+                  <MobileWorkspaceSwitcher {...switcherProps} />
+                ) : (
+                  <DesktopWorkspaceSwitcher {...switcherProps} />
+                )}
               </SidebarMenuItem>
             </SidebarMenu>
             <Tooltip>
