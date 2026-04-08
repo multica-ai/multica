@@ -95,6 +95,7 @@ import {
   type IssueTemplateDraft,
 } from "@/features/issues/utils/template";
 import type { Issue } from "@/shared/types/issue";
+import { api } from "@/shared/api";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
