@@ -256,7 +256,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -317,23 +316,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       });
     }
   }, [highlightCommentId, timeline.length]);
-
-  // Track scroll position for jump-to-bottom button
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    const onScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      setShowScrollBottom(scrollHeight - scrollTop - clientHeight > 200);
-    };
-    container.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => container.removeEventListener("scroll", onScroll);
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "smooth" });
-  }, []);
 
   // Issue field updates via TQ mutation (optimistic update + rollback in mutation hook)
   const updateIssueMutation = useUpdateIssue();
@@ -784,7 +766,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <div className="mt-6">
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() =>
                   useModalStore.getState().open("create-issue", {
                     parent_issue_id: issue.id,
@@ -1141,20 +1123,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </div>
           </div>
         </div>
-        {/* Jump to bottom button */}
-        {showScrollBottom && (
-          <div className="sticky bottom-4 flex justify-center pointer-events-none">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="pointer-events-auto shadow-md"
-              onClick={scrollToBottom}
-            >
-              <ChevronDown className="mr-1 h-3.5 w-3.5" />
-              Jump to bottom
-            </Button>
-          </div>
-        )}
         </div>
       </div>
       </ResizablePanel>
