@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env
+.env.*
+*.md
+e2e
+scripts
+server/bin
+**/.DS_Store

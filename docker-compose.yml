@@ -8,9 +8,76 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-multica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multica}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build: .
+    entrypoint: ["./migrate", "up"]
+    profiles: [self-host]
+    environment:
+      - DATABASE_URL
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  server:
+    build: .
+    profiles: [self-host]
+    environment:
+      - PORT
+      - DATABASE_URL
+      - JWT_SECRET
+      - MULTICA_APP_URL
+      - MULTICA_SERVER_URL=ws://server:8080/ws
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GOOGLE_REDIRECT_URI
+      - RESEND_API_KEY
+      - RESEND_FROM_EMAIL
+      - S3_BUCKET
+      - S3_REGION
+      - CLOUDFRONT_KEY_PAIR_ID
+      - CLOUDFRONT_PRIVATE_KEY
+      - CLOUDFRONT_DOMAIN
+      - COOKIE_DOMAIN
+      - FRONTEND_ORIGIN
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+    profiles: [self-host]
+    environment:
+      - REMOTE_API_URL=http://server:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    profiles: [tunnel]
+    environment:
+      - TUNNEL_TOKEN
+    depends_on:
+      - server
+      - web
 
 volumes:
   pgdata:

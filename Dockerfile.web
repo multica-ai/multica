@@ -1,0 +1,43 @@
+# --- Dependencies stage ---
+FROM node:22-alpine AS deps
+
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json ./apps/web/
+
+RUN pnpm install --frozen-lockfile
+
+# --- Build stage ---
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY apps/web/ ./apps/web/
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+ENV DOCKER_BUILD=1
+
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+
+RUN pnpm --filter @multica/web build
+
+# --- Runtime stage ---
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public ./apps/web/public
+
+EXPOSE 3000
+
+CMD ["node", "apps/web/server.js"]
