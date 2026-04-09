@@ -35,12 +35,8 @@ function RuntimeListItem({
         isSelected ? "bg-accent" : "hover:bg-accent/50"
       }`}
     >
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-          runtime.status === "online" ? "bg-success/10" : "bg-muted"
-        }`}
-      >
-        <ProviderLogo provider={runtime.provider} className="h-4 w-4" />
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+        <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{runtime.name}</div>
