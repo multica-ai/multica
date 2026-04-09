@@ -1,8 +1,15 @@
-import { Server, ArrowUpCircle } from "lucide-react";
+import { Server, ArrowUpCircle, ChevronDown, Check } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { RuntimeModeIcon } from "./shared";
 
@@ -102,10 +109,18 @@ export function RuntimeList({
         .filter(Boolean) as MemberWithUser[]
     : [];
 
+  // Count runtimes per owner
+  const ownerCounts = new Map<string, number>();
+  for (const r of runtimes) {
+    if (r.owner_id) ownerCounts.set(r.owner_id, (ownerCounts.get(r.owner_id) ?? 0) + 1);
+  }
+
   // Apply client-side owner filter when in "all" mode
   const filteredRuntimes = filter === "all" && ownerFilter
     ? runtimes.filter((r) => r.owner_id === ownerFilter)
     : runtimes;
+
+  const selectedOwner = ownerFilter ? getOwnerMember(ownerFilter) : null;
 
   return (
     <div className="overflow-y-auto h-full border-r">
@@ -117,53 +132,75 @@ export function RuntimeList({
         </span>
       </div>
 
-      {/* Filter toggle */}
-      <div className="flex items-center gap-1 border-b px-4 py-2">
-        <button
-          onClick={() => { onFilterChange("mine"); onOwnerFilterChange(null); }}
-          className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-            filter === "mine"
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Mine
-        </button>
-        <button
-          onClick={() => { onFilterChange("all"); onOwnerFilterChange(null); }}
-          className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-            filter === "all" && !ownerFilter
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          All
-        </button>
+      {/* Filter bar */}
+      <div className="flex items-center justify-between border-b px-4 py-2">
+        {/* Scope toggle */}
+        <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+          <button
+            onClick={() => { onFilterChange("mine"); onOwnerFilterChange(null); }}
+            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+              filter === "mine"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Mine
+          </button>
+          <button
+            onClick={() => { onFilterChange("all"); onOwnerFilterChange(null); }}
+            className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+              filter === "all"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            All
+          </button>
+        </div>
 
-        {/* Owner filter pills (shown in "all" mode when there are multiple owners) */}
+        {/* Owner dropdown (only in All mode with multiple owners) */}
         {filter === "all" && uniqueOwners.length > 1 && (
-          <>
-            <div className="mx-1 h-4 w-px bg-border" />
-            {uniqueOwners.map((m) => (
-              <button
-                key={m.user_id}
-                onClick={() => onOwnerFilterChange(ownerFilter === m.user_id ? null : m.user_id)}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                  ownerFilter === m.user_id
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-                title={m.name}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-accent" />
+              }
+            >
+              {selectedOwner ? (
+                <>
+                  <ActorAvatar actorType="member" actorId={selectedOwner.user_id} size={16} />
+                  <span className="max-w-20 truncate">{selectedOwner.name}</span>
+                </>
+              ) : (
+                <span>Owner</span>
+              )}
+              <ChevronDown className="h-3 w-3 opacity-50" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem
+                onClick={() => onOwnerFilterChange(null)}
+                className="flex items-center justify-between"
               >
-                <ActorAvatar
-                  actorType="member"
-                  actorId={m.user_id}
-                  size={14}
-                />
-                <span className="max-w-16 truncate">{m.name}</span>
-              </button>
-            ))}
-          </>
+                <span className="text-xs">All owners</span>
+                {!ownerFilter && <Check className="h-3.5 w-3.5 text-foreground" />}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {uniqueOwners.map((m) => (
+                <DropdownMenuItem
+                  key={m.user_id}
+                  onClick={() => onOwnerFilterChange(ownerFilter === m.user_id ? null : m.user_id)}
+                  className="flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                    <span className="text-xs truncate">{m.name}</span>
+                    <span className="text-xs text-muted-foreground">{ownerCounts.get(m.user_id) ?? 0}</span>
+                  </div>
+                  {ownerFilter === m.user_id && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
 
