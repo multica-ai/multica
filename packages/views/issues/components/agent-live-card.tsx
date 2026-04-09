@@ -501,7 +501,9 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
         <span className={cn("ml-auto capitalize", task.status === "completed" ? "text-success" : "text-destructive")}>
           {task.status}
         </span>
-        <button
+        <span
+          role="button"
+          tabIndex={0}
           onClick={(e) => {
             e.stopPropagation();
             // Load messages before opening the transcript dialog
@@ -514,11 +516,18 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
               setTranscriptOpen(true);
             }
           }}
-          className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget.click();
+            }
+          }}
+          className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
           title="Expand transcript"
         >
           <Maximize2 className="h-3 w-3" />
-        </button>
+        </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-5 mt-1 max-h-64 overflow-y-auto rounded border bg-muted/30 px-3 py-2 space-y-0.5">
