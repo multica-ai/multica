@@ -35,6 +35,7 @@ export interface AgentTask {
   result: unknown;
   error: string | null;
   created_at: string;
+  chat_session_id?: string;
 }
 
 export interface Agent {

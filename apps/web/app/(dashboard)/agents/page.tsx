@@ -25,6 +25,7 @@ import {
   Settings,
   Camera,
   Archive,
+  MessageCircle,
 } from "lucide-react";
 import type {
   Agent,
@@ -644,7 +645,7 @@ function TasksTab({ agent }: { agent: Agent }) {
       <div>
         <h3 className="text-sm font-semibold">Task Queue</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Issues assigned to this agent and their execution status.
+          Tasks assigned to this agent and their execution status.
         </p>
       </div>
 
@@ -661,7 +662,8 @@ function TasksTab({ agent }: { agent: Agent }) {
           {sortedTasks.map((task) => {
             const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
             const Icon = config.icon;
-            const issue = issueMap.get(task.issue_id);
+            const isChat = !!task.chat_session_id;
+            const issue = isChat ? undefined : issueMap.get(task.issue_id);
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
 
@@ -683,13 +685,20 @@ function TasksTab({ agent }: { agent: Agent }) {
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    {issue && (
+                    {isChat ? (
+                      <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                        <MessageCircle className="h-3 w-3" />
+                        Chat
+                      </span>
+                    ) : issue ? (
                       <span className="shrink-0 text-xs font-mono text-muted-foreground">
                         {issue.identifier}
                       </span>
-                    )}
+                    ) : null}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
+                      {isChat
+                        ? "Chat session"
+                        : (issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`)}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
