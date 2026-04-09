@@ -194,6 +194,101 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{})
+	expected := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+		"--verbose",
+		"--strict-mcp-config",
+		"--permission-mode", "bypassPermissions",
+	}
+
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
+		}
+	}
+}
+
+func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
+	t.Parallel()
+
+	data, err := buildClaudeInput("say pong")
+	if err != nil {
+		t.Fatalf("buildClaudeInput: %v", err)
+	}
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		t.Fatalf("expected newline-terminated payload, got %q", data)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["type"] != "user" {
+		t.Fatalf("expected type user, got %v", payload["type"])
+	}
+
+	message, ok := payload["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected message object, got %T", payload["message"])
+	}
+	if message["role"] != "user" {
+		t.Fatalf("expected role user, got %v", message["role"])
+	}
+
+	content, ok := message["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected one content block, got %v", message["content"])
+	}
+	block, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected content block object, got %T", content[0])
+	}
+	if block["type"] != "text" || block["text"] != "say pong" {
+		t.Fatalf("unexpected content block: %v", block)
+	}
+}
+
+func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
+	t.Parallel()
+
+	env := mergeEnv([]string{
+		"PATH=/usr/bin",
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDECODEX=keep-me",
+	}, map[string]string{"FOO": "bar"})
+
+	for _, entry := range env {
+		if entry == "CLAUDECODE=1" || entry == "CLAUDE_CODE_ENTRYPOINT=cli" {
+			t.Fatalf("expected CLAUDECODE vars to be filtered, got %v", env)
+		}
+	}
+
+	found := map[string]bool{}
+	for _, entry := range env {
+		found[entry] = true
+	}
+
+	if !found["PATH=/usr/bin"] {
+		t.Fatalf("expected PATH to be preserved, got %v", env)
+	}
+	if !found["CLAUDECODEX=keep-me"] {
+		t.Fatalf("expected unrelated env vars to be preserved, got %v", env)
+	}
+	if !found["FOO=bar"] {
+		t.Fatalf("expected extra env var to be appended, got %v", env)
+	}
+}
+
 func TestBuildEnvAppendsExtras(t *testing.T) {
 	t.Parallel()
 
@@ -217,7 +312,6 @@ func TestBuildEnvNilExtras(t *testing.T) {
 		t.Fatal("expected at least system env vars")
 	}
 }
-
 
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
