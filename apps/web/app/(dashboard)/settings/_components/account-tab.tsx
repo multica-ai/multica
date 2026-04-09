@@ -10,10 +10,12 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/platform/auth";
 import { api } from "@/platform/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useDashboardLocale } from "@/features/dashboard/i18n";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const { t } = useDashboardLocale();
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -41,9 +43,9 @@ export function AccountTab() {
       if (!result) return;
       const updated = await api.updateMe({ avatar_url: result.link });
       setUser(updated);
-      toast.success("Avatar updated");
+      toast.success(t.account.avatarUpdated);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+      toast.error(err instanceof Error ? err.message : t.account.failedUploadAvatar);
     }
   };
 
@@ -52,9 +54,9 @@ export function AccountTab() {
     try {
       const updated = await api.updateMe({ name: profileName });
       setUser(updated);
-      toast.success("Profile updated");
+      toast.success(t.account.profileUpdated);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update profile");
+      toast.error(e instanceof Error ? e.message : t.account.failedUpdateProfile);
     } finally {
       setProfileSaving(false);
     }
@@ -63,7 +65,7 @@ export function AccountTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Profile</h2>
+        <h2 className="text-sm font-semibold">{t.account.profile}</h2>
 
         <Card>
           <CardContent className="space-y-4">
@@ -107,7 +109,7 @@ export function AccountTab() {
             </div>
 
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label className="text-xs text-muted-foreground">{t.account.displayName}</Label>
               <Input
                 type="search"
                 value={profileName}
@@ -122,7 +124,7 @@ export function AccountTab() {
                 disabled={profileSaving || !profileName.trim()}
               >
                 <Save className="h-3 w-3" />
-                {profileSaving ? "Updating..." : "Update Profile"}
+                {profileSaving ? t.account.updating : t.account.updateProfile}
               </Button>
             </div>
           </CardContent>

@@ -17,6 +17,7 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  Languages,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@multica/views/workspace/workspace-avatar";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -49,20 +50,7 @@ import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@/platform/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
-
-const primaryNav = [
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/my-issues", label: "My Issues", icon: CircleUser },
-  { href: "/issues", label: "Issues", icon: ListTodo },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-];
-
-const workspaceNav = [
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/runtimes", label: "Runtimes", icon: Monitor },
-  { href: "/skills", label: "Skills", icon: BookOpenText },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+import { useDashboardLocale, locales, localeLabels } from "@/features/dashboard/i18n";
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
@@ -78,6 +66,21 @@ export function AppSidebar() {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const { t, locale, setLocale } = useDashboardLocale();
+
+  const primaryNav = [
+    { href: "/inbox", label: t.sidebar.inbox, key: "inbox", icon: Inbox },
+    { href: "/my-issues", label: t.sidebar.myIssues, key: "my-issues", icon: CircleUser },
+    { href: "/issues", label: t.sidebar.issues, key: "issues", icon: ListTodo },
+    { href: "/projects", label: t.sidebar.projects, key: "projects", icon: FolderKanban },
+  ];
+
+  const workspaceNav = [
+    { href: "/agents", label: t.sidebar.agents, key: "agents", icon: Bot },
+    { href: "/runtimes", label: t.sidebar.runtimes, key: "runtimes", icon: Monitor },
+    { href: "/skills", label: t.sidebar.skills, key: "skills", icon: BookOpenText },
+    { href: "/settings", label: t.sidebar.settings, key: "settings", icon: Settings },
+  ];
 
   const wsId = workspace?.id;
   const { data: inboxItems = [] } = useQuery({
@@ -130,7 +133,7 @@ export function AppSidebar() {
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup className="group/ws-section">
                     <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
-                      Workspaces
+                      {t.sidebar.workspaces}
                       <Tooltip>
                         <TooltipTrigger
                           className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
@@ -139,7 +142,7 @@ export function AppSidebar() {
                           <Plus className="h-3.5 w-3.5" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          Create workspace
+                          {t.sidebar.createWorkspace}
                         </TooltipContent>
                       </Tooltip>
                     </DropdownMenuLabel>
@@ -163,9 +166,25 @@ export function AppSidebar() {
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
+                    <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
+                      <Languages className="h-3.5 w-3.5 mr-1" />
+                      {t.appearance.language}
+                    </DropdownMenuLabel>
+                    {locales.map((l) => (
+                      <DropdownMenuItem
+                        key={l}
+                        onClick={() => setLocale(l)}
+                      >
+                        <span className="flex-1">{localeLabels[l]}</span>
+                        {locale === l && <Check className="h-3.5 w-3.5 text-primary" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
-                      Log out
+                      {t.sidebar.logOut}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
@@ -180,7 +199,7 @@ export function AppSidebar() {
                 <SquarePen className="size-3.5" />
                 <DraftDot />
               </TooltipTrigger>
-              <TooltipContent side="bottom">New issue</TooltipContent>
+              <TooltipContent side="bottom">{t.sidebar.newIssue}</TooltipContent>
             </Tooltip>
           </div>
         </SidebarHeader>
@@ -201,7 +220,7 @@ export function AppSidebar() {
                       >
                         <item.icon />
                         <span>{item.label}</span>
-                        {item.label === "Inbox" && unreadCount > 0 && (
+                        {item.key === "inbox" && unreadCount > 0 && (
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
@@ -228,7 +247,7 @@ export function AppSidebar() {
                       >
                         <item.icon />
                         <span>{item.label}</span>
-                        {item.label === "Runtimes" && hasRuntimeUpdates && (
+                        {item.key === "runtimes" && hasRuntimeUpdates && (
                           <span className="ml-auto size-1.5 rounded-full bg-destructive" />
                         )}
                       </SidebarMenuButton>

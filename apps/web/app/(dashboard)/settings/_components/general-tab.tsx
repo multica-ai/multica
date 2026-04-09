@@ -2,6 +2,7 @@
 
 import { useTheme } from "next-themes";
 import { cn } from "@multica/ui/lib/utils";
+import { useDashboardLocale, locales, localeLabels } from "@/features/dashboard/i18n";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
@@ -78,20 +79,21 @@ function WindowMockup({
   );
 }
 
-const themeOptions = [
-  { value: "light" as const, label: "Light" },
-  { value: "dark" as const, label: "Dark" },
-  { value: "system" as const, label: "System" },
-];
-
 export function AppearanceTab() {
   const { theme, setTheme } = useTheme();
+  const { t, locale, setLocale } = useDashboardLocale();
+
+  const themeOptions = [
+    { value: "light" as const, label: t.appearance.light },
+    { value: "dark" as const, label: t.appearance.dark },
+    { value: "system" as const, label: t.appearance.system },
+  ];
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Theme</h2>
-        <div className="flex gap-6" role="radiogroup" aria-label="Theme">
+        <h2 className="text-sm font-semibold">{t.appearance.theme}</h2>
+        <div className="flex gap-6" role="radiogroup" aria-label={t.appearance.theme}>
           {themeOptions.map((opt) => {
             const active = theme === opt.value;
             return (
@@ -139,6 +141,26 @@ export function AppearanceTab() {
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t.appearance.language}</h2>
+        <div className="flex gap-3">
+          {locales.map((l) => (
+            <button
+              key={l}
+              onClick={() => setLocale(l)}
+              className={cn(
+                "px-4 py-1.5 rounded-md text-sm border transition-all",
+                locale === l
+                  ? "border-brand bg-brand/10 text-brand font-medium"
+                  : "border-border text-muted-foreground hover:border-foreground/30"
+              )}
+            >
+              {localeLabels[l]}
+            </button>
+          ))}
         </div>
       </section>
     </div>
