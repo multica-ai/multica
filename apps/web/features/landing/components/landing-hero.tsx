@@ -7,6 +7,8 @@ import { useLocale } from "../i18n";
 import {
   ClaudeCodeLogo,
   CodexLogo,
+  OpenClawLogo,
+  OpenCodeLogo,
   GitHubMark,
   githubUrl,
   heroButtonClassName,
@@ -64,6 +66,14 @@ export function LandingHero() {
               <div className="flex items-center gap-2.5 text-white/80">
                 <CodexLogo className="size-5" />
                 <span className="text-[15px] font-medium">Codex</span>
+              </div>
+              <div className="flex items-center gap-2.5 text-white/80">
+                <OpenClawLogo className="size-5" />
+                <span className="text-[15px] font-medium">OpenClaw</span>
+              </div>
+              <div className="flex items-center gap-2.5 text-white/80">
+                <OpenCodeLogo className="size-5" />
+                <span className="text-[15px] font-medium">OpenCode</span>
               </div>
             </div>
           </div>

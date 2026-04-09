@@ -75,6 +75,81 @@ export function CodexLogo({ className }: { className?: string }) {
   );
 }
 
+export function OpenClawLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+    >
+      <g fill="#3a0a0d">
+        <rect x="1" y="5" width="1" height="3" />
+        <rect x="2" y="4" width="1" height="1" />
+        <rect x="2" y="8" width="1" height="1" />
+        <rect x="3" y="3" width="1" height="1" />
+        <rect x="3" y="9" width="1" height="1" />
+        <rect x="4" y="2" width="1" height="1" />
+        <rect x="4" y="10" width="1" height="1" />
+        <rect x="5" y="2" width="6" height="1" />
+        <rect x="11" y="2" width="1" height="1" />
+        <rect x="12" y="3" width="1" height="1" />
+        <rect x="12" y="9" width="1" height="1" />
+        <rect x="13" y="4" width="1" height="1" />
+        <rect x="13" y="8" width="1" height="1" />
+        <rect x="14" y="5" width="1" height="3" />
+        <rect x="5" y="11" width="6" height="1" />
+        <rect x="4" y="12" width="1" height="1" />
+        <rect x="11" y="12" width="1" height="1" />
+        <rect x="3" y="13" width="1" height="1" />
+        <rect x="12" y="13" width="1" height="1" />
+        <rect x="5" y="14" width="6" height="1" />
+      </g>
+      <g fill="#ff4f40">
+        <rect x="5" y="3" width="6" height="1" />
+        <rect x="4" y="4" width="8" height="1" />
+        <rect x="3" y="5" width="10" height="1" />
+        <rect x="3" y="6" width="10" height="1" />
+        <rect x="3" y="7" width="10" height="1" />
+        <rect x="4" y="8" width="8" height="1" />
+        <rect x="5" y="9" width="6" height="1" />
+        <rect x="5" y="12" width="6" height="1" />
+        <rect x="6" y="13" width="4" height="1" />
+      </g>
+      <g fill="#ff775f">
+        <rect x="1" y="6" width="2" height="1" />
+        <rect x="2" y="5" width="1" height="1" />
+        <rect x="2" y="7" width="1" height="1" />
+        <rect x="13" y="6" width="2" height="1" />
+        <rect x="13" y="5" width="1" height="1" />
+        <rect x="13" y="7" width="1" height="1" />
+      </g>
+      <g fill="#081016">
+        <rect x="6" y="5" width="1" height="1" />
+        <rect x="9" y="5" width="1" height="1" />
+      </g>
+      <g fill="#f5fbff">
+        <rect x="6" y="4" width="1" height="1" />
+        <rect x="9" y="4" width="1" height="1" />
+      </g>
+    </svg>
+  );
+}
+
+export function OpenCodeLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+    >
+      <path d="M18 18H6V6H18V18Z" fill="#CFCECD" />
+      <path d="M18 3H6V18H18V3ZM24 24H0V0H24V24Z" fill="#656363" />
+    </svg>
+  );
+}
+
 export function headerButtonClassName(
   tone: "ghost" | "solid",
   variant: "dark" | "light" = "dark",
