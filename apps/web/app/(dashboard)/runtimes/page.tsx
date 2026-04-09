@@ -1,1 +1,1 @@
-export { RuntimesPage as default } from "@/features/runtimes";
+export { RuntimesPage as default } from "@multica/views/runtimes";

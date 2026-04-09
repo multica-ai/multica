@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { useAuthStore } from "./store";
-import { useWorkspaceStore } from "@/features/workspace";
-import { api } from "@/shared/api";
-import { createLogger } from "@/shared/logger";
+import { useAuthStore } from "@/platform/auth";
+import { useWorkspaceStore } from "@/platform/workspace";
+import { api } from "@/platform/api";
+import { createLogger } from "@multica/core/logger";
 import { setLoggedInCookie, clearLoggedInCookie } from "./auth-cookie";
 
 const logger = createLogger("auth");

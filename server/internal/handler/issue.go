@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -31,6 +32,7 @@ type IssueResponse struct {
 	CreatorType        string                  `json:"creator_type"`
 	CreatorID          string                  `json:"creator_id"`
 	ParentIssueID      *string                 `json:"parent_issue_id"`
+	ProjectID          *string                 `json:"project_id"`
 	Position           float64                 `json:"position"`
 	DueDate            *string                 `json:"due_date"`
 	CreatedAt          string                  `json:"created_at"`
@@ -55,10 +57,216 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorType:   i.CreatorType,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
+		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+	}
+}
+
+// issueListRowToResponse converts a list-query row (no description) to an IssueResponse.
+func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
+	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	return IssueResponse{
+		ID:            uuidToString(i.ID),
+		WorkspaceID:   uuidToString(i.WorkspaceID),
+		Number:        i.Number,
+		Identifier:    identifier,
+		Title:         i.Title,
+		Status:        i.Status,
+		Priority:      i.Priority,
+		AssigneeType:  textToPtr(i.AssigneeType),
+		AssigneeID:    uuidToPtr(i.AssigneeID),
+		CreatorType:   i.CreatorType,
+		CreatorID:     uuidToString(i.CreatorID),
+		ParentIssueID: uuidToPtr(i.ParentIssueID),
+		ProjectID:     uuidToPtr(i.ProjectID),
+		Position:      i.Position,
+		DueDate:       timestampToPtr(i.DueDate),
+		CreatedAt:     timestampToString(i.CreatedAt),
+		UpdatedAt:     timestampToString(i.UpdatedAt),
+	}
+}
+
+func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
+	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	return IssueResponse{
+		ID:            uuidToString(i.ID),
+		WorkspaceID:   uuidToString(i.WorkspaceID),
+		Number:        i.Number,
+		Identifier:    identifier,
+		Title:         i.Title,
+		Status:        i.Status,
+		Priority:      i.Priority,
+		AssigneeType:  textToPtr(i.AssigneeType),
+		AssigneeID:    uuidToPtr(i.AssigneeID),
+		CreatorType:   i.CreatorType,
+		CreatorID:     uuidToString(i.CreatorID),
+		ParentIssueID: uuidToPtr(i.ParentIssueID),
+		ProjectID:     uuidToPtr(i.ProjectID),
+		Position:      i.Position,
+		DueDate:       timestampToPtr(i.DueDate),
+		CreatedAt:     timestampToString(i.CreatedAt),
+		UpdatedAt:     timestampToString(i.UpdatedAt),
+	}
+}
+
+// SearchIssueResponse extends IssueResponse with search metadata.
+type SearchIssueResponse struct {
+	IssueResponse
+	MatchSource    string  `json:"match_source"`
+	MatchedSnippet *string `json:"matched_snippet,omitempty"`
+}
+
+// extractSnippet extracts a snippet of text around the first occurrence of query.
+// Returns up to ~120 runes centered on the match. Uses rune-based slicing to
+// avoid splitting multi-byte UTF-8 characters (important for CJK content).
+func extractSnippet(content, query string) string {
+	runes := []rune(content)
+	lowerRunes := []rune(strings.ToLower(content))
+	queryRunes := []rune(strings.ToLower(query))
+
+	idx := -1
+	for i := 0; i <= len(lowerRunes)-len(queryRunes); i++ {
+		match := true
+		for j := range queryRunes {
+			if lowerRunes[i+j] != queryRunes[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			idx = i
+			break
+		}
+	}
+
+	if idx < 0 {
+		if len(runes) > 120 {
+			return string(runes[:120]) + "..."
+		}
+		return content
+	}
+	start := idx - 40
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(queryRunes) + 80
+	if end > len(runes) {
+		end = len(runes)
+	}
+	snippet := string(runes[start:end])
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(runes) {
+		snippet = snippet + "..."
+	}
+	return snippet
+}
+
+// escapeLike escapes LIKE special characters (%, _, \) in user input.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
+func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workspaceID := resolveWorkspaceID(r)
+
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q parameter is required")
+		return
+	}
+
+	limit := 20
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+
+	includeClosed := r.URL.Query().Get("include_closed") == "true"
+
+	wsUUID := parseUUID(workspaceID)
+	queryText := strToText(escapeLike(q))
+
+	rows, err := h.Queries.SearchIssues(ctx, db.SearchIssuesParams{
+		WorkspaceID:   wsUUID,
+		Query:         queryText,
+		SearchLimit:   int32(limit),
+		SearchOffset:  int32(offset),
+		IncludeClosed: includeClosed,
+	})
+	if err != nil {
+		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
+		writeError(w, http.StatusInternalServerError, "failed to search issues")
+		return
+	}
+
+	var total int64
+	if len(rows) > 0 {
+		total = rows[0].TotalCount
+	}
+
+	prefix := h.getIssuePrefix(ctx, wsUUID)
+	resp := make([]SearchIssueResponse, len(rows))
+	for i, row := range rows {
+		sir := SearchIssueResponse{
+			IssueResponse: issueToResponse(searchRowToIssue(row), prefix),
+			MatchSource:   row.MatchSource,
+		}
+		if row.MatchSource == "comment" {
+			if content, ok := row.MatchedCommentContent.(string); ok && content != "" {
+				snippet := extractSnippet(content, q)
+				sir.MatchedSnippet = &snippet
+			}
+		}
+		resp[i] = sir
+	}
+
+	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issues": resp,
+		"total":  total,
+	})
+}
+
+func searchRowToIssue(row db.SearchIssuesRow) db.Issue {
+	return db.Issue{
+		ID:                 row.ID,
+		WorkspaceID:        row.WorkspaceID,
+		Title:              row.Title,
+		Description:        row.Description,
+		Status:             row.Status,
+		Priority:           row.Priority,
+		AssigneeType:       row.AssigneeType,
+		AssigneeID:         row.AssigneeID,
+		CreatorType:        row.CreatorType,
+		CreatorID:          row.CreatorID,
+		ParentIssueID:      row.ParentIssueID,
+		AcceptanceCriteria: row.AcceptanceCriteria,
+		ContextRefs:        row.ContextRefs,
+		Position:           row.Position,
+		DueDate:            row.DueDate,
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+		Number:             row.Number,
+		ProjectID:          row.ProjectID,
 	}
 }
 
@@ -93,7 +301,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(ctx, wsUUID)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
-			resp[i] = issueToResponse(issue, prefix)
+			resp[i] = openIssueRowToResponse(issue, prefix)
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -148,7 +356,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
-		resp[i] = issueToResponse(issue, prefix)
+		resp[i] = issueListRowToResponse(issue, prefix)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -219,6 +427,7 @@ type CreateIssueRequest struct {
 	AssigneeType       *string  `json:"assignee_type"`
 	AssigneeID         *string  `json:"assignee_id"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
+	ProjectID          *string  `json:"project_id"`
 	DueDate            *string  `json:"due_date"`
 	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
 }
@@ -327,6 +536,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Position:           0,
 		DueDate:            dueDate,
 		Number:             issueNumber,
+		ProjectID:          func() pgtype.UUID { if req.ProjectID != nil { return parseUUID(*req.ProjectID) }; return pgtype.UUID{} }(),
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -384,6 +594,7 @@ type UpdateIssueRequest struct {
 	Position           *float64 `json:"position"`
 	DueDate            *string  `json:"due_date"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
+	ProjectID          *string  `json:"project_id"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -419,6 +630,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:    prevIssue.AssigneeID,
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
+		ProjectID:     prevIssue.ProjectID,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -496,6 +708,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ParentIssueID = newParentID
 		} else {
 			params.ParentIssueID = pgtype.UUID{Valid: false} // explicit null = remove parent
+		}
+	}
+	if _, ok := rawFields["project_id"]; ok {
+		if req.ProjectID != nil {
+			params.ProjectID = parseUUID(*req.ProjectID)
+		} else {
+			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 

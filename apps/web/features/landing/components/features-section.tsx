@@ -18,15 +18,14 @@ import {
   Sparkles,
   UserMinus,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@multica/ui/lib/utils";
 import { ImageIcon } from "./shared";
 import { useLocale } from "../i18n";
 import type { LandingDict } from "../i18n";
-import { StatusIcon } from "@/features/issues/components/status-icon";
-import { PriorityIcon } from "@/features/issues/components/priority-icon";
-import { STATUS_CONFIG } from "@/features/issues/config/status";
-import { PRIORITY_CONFIG } from "@/features/issues/config/priority";
-import type { IssueStatus, IssuePriority } from "@/shared/types";
+import { StatusIcon, PriorityIcon } from "@multica/views/issues/components";
+import { STATUS_CONFIG } from "@multica/core/issues/config/status";
+import { PRIORITY_CONFIG } from "@multica/core/issues/config/priority";
+import type { IssueStatus, IssuePriority } from "@multica/core/types";
 
 /* ------------------------------------------------------------------ */
 /*  Mock ActorAvatar — mirrors the real ActorAvatar styling exactly     */

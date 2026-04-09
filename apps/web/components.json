@@ -13,11 +13,11 @@
   "iconLibrary": "lucide",
   "rtl": false,
   "aliases": {
-    "components": "@/components",
-    "utils": "@/lib/utils",
-    "ui": "@/components/ui",
-    "lib": "@/lib",
-    "hooks": "@/hooks"
+    "components": "@multica/ui/components",
+    "utils": "@multica/ui/lib/utils",
+    "ui": "@multica/ui/components/ui",
+    "lib": "@multica/ui/lib",
+    "hooks": "@multica/ui/hooks"
   },
   "menuColor": "default",
   "menuAccent": "subtle",

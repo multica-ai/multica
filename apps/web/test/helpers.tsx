@@ -1,7 +1,7 @@
 import React from "react";
 import { vi } from "vitest";
 import { render, type RenderOptions } from "@testing-library/react";
-import type { User, Workspace, MemberWithUser, Agent } from "@/shared/types";
+import type { User, Workspace, MemberWithUser, Agent } from "@multica/core/types";
 
 // Mock user
 export const mockUser: User = {

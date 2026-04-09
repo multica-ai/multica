@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { MulticaIcon } from "@/components/multica-icon";
-import { cn } from "@/lib/utils";
+import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@/features/auth";
 import { useLocale } from "../i18n";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";

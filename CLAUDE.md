@@ -12,58 +12,108 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 
 ## Architecture
 
-**Go backend + standalone Next.js frontend.**
+**Go backend + monorepo frontend with shared packages.**
 
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
-- `apps/web/` — Next.js 16 frontend (App Router) — self-contained, no shared package dependencies
+- `apps/web/` — Next.js 16 frontend (App Router)
+- `packages/core/` — Headless business logic (zero react-dom, all-platform reuse)
+- `packages/ui/` — Atomic UI components (zero business logic)
+- `packages/views/` — Shared business pages/components (zero next/* imports)
+- `packages/tsconfig/` — Shared TypeScript configuration
 
-### Web App Structure (`apps/web/`)
+### Package Architecture
 
-The frontend uses a **feature-based architecture** with four layers:
+Three shared packages with single-direction dependencies:
 
 ```
-apps/web/
-├── app/          # Routing layer (thin shells — import from features/)
-├── core/         # Headless business logic (TanStack Query, zero JSX, zero react-dom)
-├── features/     # UI business components, organized by domain
-├── shared/       # Cross-feature utilities (api client, types, logger)
+packages/
+├── core/     # @multica/core  — types, API client, stores, queries, mutations, realtime
+├── ui/       # @multica/ui    — 55 shadcn components, common components, markdown, hooks
+├── views/    # @multica/views — issue pages, editor, modals, skills, runtimes, navigation
+└── tsconfig/ # @multica/tsconfig — shared TS base configs
 ```
 
-**`app/`** — Next.js App Router pages. Route files should be thin: import and re-export from `features/`. Layout components and route-specific glue (redirects, auth guards) live here. Shared layout components (e.g. `app-sidebar`) stay in `app/(dashboard)/_components/`.
+**Dependency direction:** `views/ → core/ + ui/`. Core and UI are independent of each other. No package imports from `next/*` or `apps/web/`.
 
-**`core/`** — Headless business logic. Query key factories, `queryOptions`, mutation hooks, WS cache updaters. **No JSX, no react-dom.** Designed for future extraction to `packages/core/` in a monorepo.
+**Platform bridge:** `apps/web/platform/` is the only place that touches `process.env`, `next/navigation`, and creates store/api singletons. Each future app (desktop, mobile) provides its own platform layer.
+
+### packages/core/ (`@multica/core`)
+
+Headless business logic. **Zero react-dom, zero localStorage, zero process.env.**
 
 | Module | Purpose | Key exports |
 |---|---|---|
-| `core/issues/` | Issue queries, mutations, WS updaters | `issueListOptions`, `useUpdateIssue`, `onIssueUpdated` |
+| `core/types/` | Domain types + StorageAdapter interface | `Issue`, `Agent`, `Workspace`, `StorageAdapter` |
+| `core/api/` | API client class + WS client | `ApiClient`, `WSClient`, `setApiInstance()` |
+| `core/auth/` | Auth store factory | `createAuthStore(options)`, `registerAuthStore()` |
+| `core/workspace/` | Workspace store factory + actor hooks | `createWorkspaceStore(api)`, `useActorName()` |
+| `core/issues/` | Issue queries, mutations, stores, config | `issueListOptions`, `useUpdateIssue`, `useIssueStore` |
 | `core/inbox/` | Inbox queries, mutations, WS updaters | `inboxListOptions`, `useMarkInboxRead` |
-| `core/workspace/` | Member/agent/skill queries, workspace mutations | `memberListOptions`, `agentListOptions` |
-| `core/runtimes/` | Runtime queries | `runtimeListOptions` |
-| `core/query-client.ts` | QueryClient factory | `createQueryClient` |
-| `core/provider.tsx` | QueryClientProvider wrapper | `QueryProvider` |
-| `core/hooks.ts` | Shared hooks | `useWorkspaceId` |
+| `core/runtimes/` | Runtime queries + mutations | `runtimeListOptions`, `useDeleteRuntime` |
+| `core/realtime/` | WS provider + sync hooks | `WSProvider`, `useWSEvent`, `useRealtimeSync` |
+| `core/hooks.tsx` | Workspace ID context | `useWorkspaceId`, `WorkspaceIdProvider` |
+| `core/modals/` | Modal state store | `useModalStore` |
+| `core/navigation/` | Navigation state store | `useNavigationStore` |
 
-**`features/`** — Domain modules with UI components, client-only stores, and config:
+**Store factory pattern:** Auth and workspace stores are created via factory functions that receive platform-specific dependencies:
+```typescript
+createAuthStore({ api, storage, onLogin?, onLogout? })
+createWorkspaceStore(api, { storage?, onError? })
+```
+Each app creates its own instances in its platform layer and registers them via `registerAuthStore()` / `registerWorkspaceStore()`.
 
-| Feature | Purpose | Exports |
-|---|---|---|
-| `features/auth/` | Authentication state | `useAuthStore`, `AuthInitializer` |
-| `features/workspace/` | Workspace identity + UI | `useWorkspaceStore` (client-only: workspace/workspaces), `useActorName` |
-| `features/issues/` | Issue UI components + client state | `useIssueStore` (client-only: activeIssueId), icons, pickers, config |
-| `features/realtime/` | WebSocket connection + sync | `WSProvider`, `useWSEvent`, `useRealtimeSync` |
-| `features/modals/` | Modal registry and state | Modal store and components |
-| `features/skills/` | Skill management | Skill components |
+**StorageAdapter:** All persistent storage goes through a `StorageAdapter` interface (getItem/setItem/removeItem), injected by the platform. Web uses an SSR-safe localStorage wrapper.
 
-**`shared/`** — Code used across multiple features (will migrate to `core/` in Phase 5):
-- `shared/api/` — `ApiClient` (REST) and `WSClient` (WebSocket) for backend communication, plus the `api` singleton.
-- `shared/types/` — Domain types (Issue, Agent, Workspace, etc.) and WebSocket event types.
-- `shared/logger.ts` — Logger utility.
+### packages/ui/ (`@multica/ui`)
+
+Atomic UI layer. **Zero business logic, zero `@multica/core` imports.**
+
+- `components/ui/` — 55 shadcn components (button, dialog, card, tooltip, sidebar, etc.)
+- `components/common/` — Pure-props components (actor-avatar, emoji-picker, reaction-bar, file-upload-button)
+- `markdown/` — Markdown renderer with `renderMention` slot for platform-specific mention cards
+- `hooks/` — DOM hooks (use-auto-scroll, use-mobile, use-scroll-fade)
+- `lib/utils.ts` — `cn()` function (clsx + tailwind-merge)
+- `styles/tokens.css` — Tailwind CSS v4 design tokens (@theme, :root, .dark variables)
+
+### packages/views/ (`@multica/views`)
+
+Shared business UI pages. **Zero `next/*` imports.** Uses `NavigationAdapter` for routing.
+
+- `navigation/` — `NavigationAdapter` interface, `useNavigation()` hook, `AppLink` component
+- `issues/components/` — IssuesPage, IssueDetail, BoardView, ListView, pickers, icons
+- `editor/` — ContentEditor, TitleEditor, Tiptap extensions
+- `modals/` — CreateIssueModal, CreateWorkspaceModal, ModalRegistry
+- `my-issues/`, `skills/`, `runtimes/` — domain pages
+- `common/` — Data-aware wrappers (ActorAvatar with useActorName, Markdown with IssueMentionCard)
+
+### apps/web/ (Next.js App)
+
+Thin routing shells + platform-specific code.
+
+```
+apps/web/
+├── app/              # Next.js route shells (< 15 lines each, import from @multica/views)
+├── platform/         # Web platform bridge (api singleton, store instances, navigation, storage)
+├── features/
+│   ├── auth/         # Web-only: auth-cookie.ts, initializer.tsx
+│   ├── landing/      # Web-only: landing pages (uses next/image, next/link)
+│   └── search/       # Web-only: search dialog
+└── components/       # App-level: theme-provider, multica-icon, locale-sync, loading-indicator
+```
+
+**`platform/`** — The only code that touches Next.js APIs and browser globals:
+- `api.ts` — Creates `ApiClient` singleton with `onUnauthorized` redirect
+- `auth.ts` — `createAuthStore({ api, storage: webStorage, onLogin: setLoggedInCookie })`
+- `workspace.ts` — `createWorkspaceStore(api, { storage: webStorage, onError: toast.error })`
+- `ws-provider.tsx` — Wraps `WSProvider` with web-specific WS URL and store instances
+- `navigation.tsx` — `WebNavigationProvider` wrapping Next.js `useRouter`/`usePathname`
+- `storage.ts` — SSR-safe `webStorage` adapter (guards `localStorage` with `typeof window` checks)
 
 ### State Management
 
-- **TanStack Query** for all server state — issues, inbox, members, agents, skills, runtimes. Query definitions live in `core/<domain>/queries.ts`, mutations in `core/<domain>/mutations.ts`.
-- **Zustand** for client-only state — UI selections (`activeIssueId`), view filters, modal state, workspace identity, navigation. No API calls in Zustand stores.
-- **React Context** only for connection lifecycle (`WSProvider` in `features/realtime/`).
+- **TanStack Query** for all server state — issues, inbox, members, agents, skills, runtimes. Query definitions in `@multica/core/<domain>/queries.ts`, mutations in `mutations.ts`.
+- **Zustand** for client-only state — UI selections (`activeIssueId`), view filters, modal state. Auth and workspace stores use factory pattern with injected dependencies.
+- **React Context** for `WorkspaceIdProvider` (provides workspace ID to all dashboard children) and `NavigationProvider` (provides platform-agnostic routing).
 - **Local `useState`** for component-scoped UI state (forms, modals, filters).
 
 **TanStack Query conventions:**
@@ -71,45 +121,51 @@ apps/web/
 - WS events trigger `queryClient.invalidateQueries()` (preferred) or `queryClient.setQueryData()` for granular updates.
 - All workspace-scoped query keys include `wsId` — workspace switch automatically uses new cache.
 - Mutations use `onMutate` for optimistic updates + `onError` for rollback + `onSettled` for invalidation.
-- Components access QueryClient via `useQueryClient()` hook. Non-React contexts (e.g. Tiptap plugin callbacks) receive QueryClient via closure from the parent React component — never use module-level singletons.
 
 **Zustand store conventions:**
-- Stores hold only client state (UI selections, persisted preferences). Zero `api.*` calls in stores.
-- Import via `useAuthStore(selector)` or `useWorkspaceStore(selector)`.
-- Stores must not call `useRouter` or any React hooks — keep navigation in components.
-- `useWorkspaceStore` manages workspace identity (`workspace`, `workspaces`, `api.setWorkspaceId`, localStorage). Server data (members, agents, skills) is in TanStack Query, not the store.
+- Stores in `@multica/core` hold only client state. Zero direct `api.*` calls — API access is injected via factory.
+- Auth/workspace stores are created by platform layer and registered via `registerAuthStore()` / `registerWorkspaceStore()`.
+- Other stores (issue, modal, navigation) are plain Zustand stores exported directly.
 
-### Import Aliases
+### Import Conventions
 
-Use `@/` alias (maps to `apps/web/`) and `@core/` alias (maps to `apps/web/core/`):
 ```typescript
-// Core (headless business logic)
-import { issueListOptions, issueKeys } from "@core/issues/queries";
-import { useUpdateIssue, useCreateIssue } from "@core/issues/mutations";
-import { memberListOptions, agentListOptions } from "@core/workspace/queries";
-import { useWorkspaceId } from "@core/hooks";
+// Core (headless business logic) — from @multica/core
+import { issueListOptions } from "@multica/core/issues/queries";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useWorkspaceId } from "@multica/core/hooks";
+import type { Issue } from "@multica/core/types";
 
-// Shared (api client, types)
-import { api } from "@/shared/api";
-import type { Issue } from "@/shared/types";
+// UI (atomic components) — from @multica/ui
+import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
+import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 
-// Features (UI components, client stores)
-import { useAuthStore } from "@/features/auth";
-import { useWorkspaceStore } from "@/features/workspace";
-import { useWSEvent } from "@/features/realtime";
-import { StatusIcon } from "@/features/issues/components";
+// Views (shared pages) — from @multica/views
+import { IssuesPage } from "@multica/views/issues/components";
+import { useNavigation, AppLink } from "@multica/views/navigation";
+import { ModalRegistry } from "@multica/views/modals/registry";
+
+// Platform (web-only singletons) — from @/platform
+import { api } from "@/platform/api";
+import { useAuthStore } from "@/platform/auth";
+import { useWorkspaceStore } from "@/platform/workspace";
+
+// Web-only features — from @/features
+import { AuthInitializer } from "@/features/auth";
+import { SearchCommand } from "@/features/search";
 ```
 
-Within a feature, use relative imports. Between features or to shared, use `@/`. For core modules, use `@core/`.
+`@/` maps to `apps/web/`. Within a package, use relative imports. Between packages, use `@multica/*`.
 
 ### Data Flow
 
 ```
-Browser → useQuery (core/) → ApiClient (shared/api) → REST API (Chi handlers) → sqlc queries → PostgreSQL
+Browser → useQuery (@multica/core) → ApiClient (@multica/core/api) → REST API → sqlc → PostgreSQL
 Browser ← useQuery cache ← invalidateQueries ← WS event handlers ← WSClient ← Hub.Broadcast()
 ```
 
-Mutations: `useMutation (core/)` → optimistic cache update → API call → onSettled invalidation.
+Mutations: `useMutation (@multica/core)` → optimistic cache update → API call → onSettled invalidation.
 WS events: `use-realtime-sync.ts` → `queryClient.invalidateQueries()` for most events, `setQueryData()` for granular issue/inbox updates.
 
 ### Backend Structure (`server/`)
@@ -144,13 +200,13 @@ make start            # Start backend + frontend together
 make stop             # Stop app processes for the current checkout
 make db-down          # Stop the shared PostgreSQL container
 
-# Frontend
+# Frontend (all commands go through Turborepo)
 pnpm install
 pnpm dev:web          # Next.js dev server (port 3000)
 pnpm build            # Build frontend
-pnpm typecheck        # TypeScript check
+pnpm typecheck        # TypeScript check (all packages via turbo)
 pnpm lint             # ESLint via Next.js
-pnpm test             # TS tests (Vitest)
+pnpm test             # TS tests (Vitest, via turbo)
 
 # Backend (Go)
 make dev              # Run Go server (port 8080)
@@ -170,6 +226,9 @@ pnpm --filter @multica/web exec vitest run src/path/to/file.test.ts
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts
+
+# shadcn (monorepo mode — must specify app)
+npx shadcn add badge -c apps/web
 
 # Infrastructure
 make db-up            # Start shared PostgreSQL (pgvector/pg17 image)
@@ -201,12 +260,21 @@ make start-worktree     # Start using .env.worktree
 - Treat compatibility code as a maintenance cost, not a default safety mechanism. Avoid "just in case" branches that make the codebase harder to reason about.
 - Avoid broad refactors unless required by the task.
 
+### Package Boundary Rules
+
+- `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries
+- `packages/ui/` — zero `@multica/core` imports (pure UI, no business logic)
+- `packages/views/` — zero `next/*` imports (use NavigationAdapter for routing)
+- `apps/web/platform/` — the only place for Next.js APIs, env vars, and browser globals
+
 ## UI/UX Rules
 
-- Prefer shadcn components over custom implementations. Install missing components via `npx shadcn add`.
-- **Feature-specific components** → `features/<domain>/components/` — issue icons, pickers, and other domain-bound UI live inside their feature module.
+- Prefer shadcn components over custom implementations. Install via `npx shadcn add <component> -c apps/web` (monorepo flag required).
+- **Shared UI components** → `packages/ui/components/` — shadcn primitives and pure-props common components.
+- **Shared business components** → `packages/views/<domain>/components/` — pages and domain-bound UI.
+- **Web-only components** → `apps/web/features/` or `apps/web/components/`.
 - Use shadcn design tokens for styling (e.g. `bg-primary`, `text-muted-foreground`, `text-destructive`). Avoid hardcoded color values (e.g. `text-red-500`, `bg-gray-100`).
-- Do not introduce extra state (useState, context, reducers) unless explicitly required by the design. Server data goes through TanStack Query (`core/`), client-only shared state through Zustand, React Context only for connection lifecycle.
+- Do not introduce extra state (useState, context, reducers) unless explicitly required by the design.
 - Pay close attention to **overflow** (truncate long text, scrollable containers), **alignment**, and **spacing** consistency.
 - When unsure about interaction or state design, ask — the user will provide direction.
 

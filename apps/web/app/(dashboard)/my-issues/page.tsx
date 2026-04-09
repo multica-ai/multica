@@ -1,6 +1,6 @@
 "use client";
 
-import { MyIssuesPage } from "@/features/my-issues";
+import { MyIssuesPage } from "@multica/views/my-issues";
 
 export default function Page() {
   return <MyIssuesPage />;

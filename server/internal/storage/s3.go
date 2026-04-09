@@ -123,14 +123,28 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	}
 }
 
+// isInlineContentType returns true for media types that browsers should
+// display inline (images, video, audio, PDF). Everything else triggers a
+// download via Content-Disposition: attachment.
+func isInlineContentType(ct string) bool {
+	return strings.HasPrefix(ct, "image/") ||
+		strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "audio/") ||
+		ct == "application/pdf"
+}
+
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	safe := sanitizeFilename(filename)
+	disposition := "attachment"
+	if isInlineContentType(contentType) {
+		disposition = "inline"
+	}
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
 		Body:               bytes.NewReader(data),
 		ContentType:        aws.String(contentType),
-		ContentDisposition: aws.String(fmt.Sprintf(`inline; filename="%s"`, safe)),
+		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       types.StorageClassIntelligentTiering,
 	})

@@ -58,6 +58,11 @@ const (
 	EventSkillUpdated = "skill:updated"
 	EventSkillDeleted = "skill:deleted"
 
+	// Project events
+	EventProjectCreated = "project:created"
+	EventProjectUpdated = "project:updated"
+	EventProjectDeleted = "project:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

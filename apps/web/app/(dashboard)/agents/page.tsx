@@ -34,7 +34,7 @@ import type {
   RuntimeDevice,
   CreateAgentRequest,
   UpdateAgentRequest,
-} from "@/shared/types";
+} from "@multica/core/types";
 import {
   Dialog,
   DialogContent,
@@ -42,38 +42,38 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/components/ui/dialog";
+} from "@multica/ui/components/ui/dialog";
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
-} from "@/components/ui/resizable";
+} from "@multica/ui/components/ui/resizable";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-} from "@/components/ui/popover";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@multica/ui/components/ui/popover";
+import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
-import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/shared/api";
-import { useAuthStore } from "@/features/auth";
-import { useWorkspaceStore } from "@/features/workspace";
-import { runtimeListOptions } from "@core/runtimes/queries";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { api } from "@/platform/api";
+import { useAuthStore } from "@/platform/auth";
+import { useWorkspaceStore } from "@/platform/workspace";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWorkspaceId } from "@core/hooks";
-import { issueListOptions } from "@core/issues/queries";
-import { skillListOptions, agentListOptions, workspaceKeys } from "@core/workspace/queries";
-import { ActorAvatar } from "@/components/common/actor-avatar";
-import { useFileUpload } from "@/shared/hooks/use-file-upload";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { issueListOptions } from "@multica/core/issues/queries";
+import { skillListOptions, agentListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { ActorAvatar } from "@multica/views/common/actor-avatar";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 
 
 // ---------------------------------------------------------------------------
@@ -734,7 +734,7 @@ function SettingsTab({
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [saving, setSaving] = useState(false);
-  const { upload, uploading } = useFileUpload();
+  const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

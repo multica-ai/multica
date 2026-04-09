@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { IssueDetail } from "@/features/issues/components";
+import { IssueDetail } from "@multica/views/issues/components";
 
 export default function IssueDetailPage({
   params,

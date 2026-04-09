@@ -1,6 +1,6 @@
 "use client";
 
-import { IssuesPage } from "@/features/issues/components/issues-page";
+import { IssuesPage } from "@multica/views/issues/components";
 
 export default function Page() {
   return <IssuesPage />;

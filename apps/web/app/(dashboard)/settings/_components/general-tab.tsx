@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { cn } from "@/lib/utils";
+import { cn } from "@multica/ui/lib/utils";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",

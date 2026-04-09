@@ -1,0 +1,53 @@
+{
+  "name": "@multica/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./components/ui/*": "./components/ui/*.tsx",
+    "./components/common/*": "./components/common/*.tsx",
+    "./markdown": "./markdown/index.ts",
+    "./markdown/*": "./markdown/*.tsx",
+    "./markdown/linkify": "./markdown/linkify.ts",
+    "./markdown/mentions": "./markdown/mentions.ts",
+    "./hooks/*": "./hooks/*.ts",
+    "./lib/utils": "./lib/utils.ts",
+    "./styles/tokens.css": "./styles/tokens.css"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.3.0",
+    "@emoji-mart/data": "^1.2.1",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "cmdk": "^1.1.1",
+    "date-fns": "^4.1.0",
+    "embla-carousel-react": "^8.6.0",
+    "emoji-mart": "^5.6.0",
+    "input-otp": "^1.4.2",
+    "linkify-it": "^5.0.0",
+    "lucide-react": "catalog:",
+    "next-themes": "^0.4.6",
+    "react-day-picker": "^9.14.0",
+    "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.7.5",
+    "recharts": "3.8.0",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^3.21.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "catalog:",
+    "tw-animate-css": "^1.4.0",
+    "vaul": "^1.1.2"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/linkify-it": "^5.0.0",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "typescript": "catalog:"
+  }
+}

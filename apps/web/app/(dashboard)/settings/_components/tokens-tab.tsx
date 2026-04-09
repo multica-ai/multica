@@ -2,18 +2,18 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Key, Trash2, Copy, Check } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import type { PersonalAccessToken } from "@/shared/types";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import type { PersonalAccessToken } from "@multica/core/types";
+import { Input } from "@multica/ui/components/ui/input";
+import { Button } from "@multica/ui/components/ui/button";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@/components/ui/select";
+} from "@multica/ui/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/components/ui/dialog";
+} from "@multica/ui/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,10 +31,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+} from "@multica/ui/components/ui/alert-dialog";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { toast } from "sonner";
-import { api } from "@/shared/api";
+import { api } from "@/platform/api";
 
 export function TokensTab() {
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);

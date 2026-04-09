@@ -57,7 +57,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the caller is a member of the target workspace.
-	if _, ok := h.requireWorkspaceMember(w, r, req.WorkspaceID, "workspace not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, req.WorkspaceID, "workspace not found")
+	if !ok {
 		return
 	}
 
@@ -104,6 +105,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			Status:      status,
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
+			OwnerID:     member.UserID,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())

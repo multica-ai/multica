@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, Loader2, Save } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
+import { Button } from "@multica/ui/components/ui/button";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
-import { useAuthStore } from "@/features/auth";
-import { api } from "@/shared/api";
-import { useFileUpload } from "@/shared/hooks/use-file-upload";
+import { useAuthStore } from "@/platform/auth";
+import { api } from "@/platform/api";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
@@ -17,7 +17,7 @@ export function AccountTab() {
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
-  const { upload, uploading } = useFileUpload();
+  const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {

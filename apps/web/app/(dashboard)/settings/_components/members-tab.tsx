@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users } from "lucide-react";
-import { ActorAvatar } from "@/components/common/actor-avatar";
-import type { MemberWithUser, MemberRole } from "@/shared/types";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ActorAvatar } from "@multica/views/common/actor-avatar";
+import type { MemberWithUser, MemberRole } from "@multica/core/types";
+import { Input } from "@multica/ui/components/ui/input";
+import { Button } from "@multica/ui/components/ui/button";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Badge } from "@multica/ui/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -17,14 +17,14 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/components/ui/alert-dialog";
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@/components/ui/select";
+} from "@multica/ui/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -34,14 +34,14 @@ import {
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
-} from "@/components/ui/dropdown-menu";
+} from "@multica/ui/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@/features/auth";
-import { useWorkspaceStore } from "@/features/workspace";
-import { useWorkspaceId } from "@core/hooks";
-import { memberListOptions, workspaceKeys } from "@core/workspace/queries";
-import { api } from "@/shared/api";
+import { useAuthStore } from "@/platform/auth";
+import { useWorkspaceStore } from "@/platform/workspace";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { api } from "@/platform/api";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
   owner: { label: "Owner", icon: Crown, description: "Full access, manage all settings" },

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +15,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// extContentTypes overrides http.DetectContentType for extensions it gets wrong.
+// Go's sniffer returns text/xml for SVG, text/plain for CSS/JS, etc.
+var extContentTypes = map[string]string{
+	".svg":  "image/svg+xml",
+	".css":  "text/css",
+	".js":   "application/javascript",
+	".mjs":  "application/javascript",
+	".json": "application/json",
+	".wasm": "application/wasm",
+}
 
 const maxUploadSize = 100 << 20 // 100 MB
 
@@ -121,6 +133,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contentType := http.DetectContentType(buf[:n])
+	// Override with extension-based type when the sniffer gets it wrong.
+	if ct, ok := extContentTypes[strings.ToLower(path.Ext(header.Filename))]; ok {
+		contentType = ct
+	}
 	// Seek back so the full file is uploaded.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read file")

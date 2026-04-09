@@ -1,0 +1,109 @@
+"use client";
+
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  type ReactNode,
+} from "react";
+import { WSClient } from "../api/ws-client";
+import type { WSEventType, StorageAdapter } from "../types";
+import type { StoreApi, UseBoundStore } from "zustand";
+import type { AuthState } from "../auth/store";
+import type { WorkspaceStore } from "../workspace/store";
+import { createLogger } from "../logger";
+import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
+
+type EventHandler = (payload: unknown, actorId?: string) => void;
+
+interface WSContextValue {
+  subscribe: (event: WSEventType, handler: EventHandler) => () => void;
+  onReconnect: (callback: () => void) => () => void;
+}
+
+const WSContext = createContext<WSContextValue | null>(null);
+
+export interface WSProviderProps {
+  children: ReactNode;
+  /** WebSocket server URL (e.g. "ws://localhost:8080/ws") */
+  wsUrl: string;
+  /** Platform-created auth store instance */
+  authStore: UseBoundStore<StoreApi<AuthState>>;
+  /** Platform-created workspace store instance */
+  workspaceStore: UseBoundStore<StoreApi<WorkspaceStore>>;
+  /** Platform-specific storage adapter for reading auth tokens */
+  storage: StorageAdapter;
+  /** Optional callback for showing toast messages (platform-specific, e.g. sonner) */
+  onToast?: (message: string, type?: "info" | "error") => void;
+}
+
+export function WSProvider({
+  children,
+  wsUrl,
+  authStore,
+  workspaceStore,
+  storage,
+  onToast,
+}: WSProviderProps) {
+  const user = authStore((s) => s.user);
+  const workspace = workspaceStore((s) => s.workspace);
+  const [wsClient, setWsClient] = useState<WSClient | null>(null);
+  const wsRef = useRef<WSClient | null>(null);
+
+  useEffect(() => {
+    if (!user || !workspace) return;
+
+    const token = storage.getItem("multica_token");
+    if (!token) return;
+
+    const ws = new WSClient(wsUrl, { logger: createLogger("ws") });
+    ws.setAuth(token, workspace.id);
+    wsRef.current = ws;
+    setWsClient(ws);
+    ws.connect();
+
+    return () => {
+      ws.disconnect();
+      wsRef.current = null;
+      setWsClient(null);
+    };
+  }, [user, workspace, wsUrl, storage]);
+
+  const stores: RealtimeSyncStores = { authStore, workspaceStore };
+
+  // Centralized WS -> store sync (uses state so it re-subscribes when WS changes)
+  useRealtimeSync(wsClient, stores, onToast);
+
+  const subscribe = useCallback(
+    (event: WSEventType, handler: EventHandler) => {
+      const ws = wsRef.current;
+      if (!ws) return () => {};
+      return ws.on(event, handler);
+    },
+    [],
+  );
+
+  const onReconnectCb = useCallback(
+    (callback: () => void) => {
+      const ws = wsRef.current;
+      if (!ws) return () => {};
+      return ws.onReconnect(callback);
+    },
+    [],
+  );
+
+  return (
+    <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
+      {children}
+    </WSContext.Provider>
+  );
+}
+
+export function useWS() {
+  const ctx = useContext(WSContext);
+  if (!ctx) throw new Error("useWS must be used within WSProvider");
+  return ctx;
+}

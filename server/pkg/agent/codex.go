@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -221,10 +223,23 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		outputMu.Unlock()
 
 		// Build usage map from accumulated codex usage.
+		// First check JSON-RPC notifications (often empty for Codex).
 		var usageMap map[string]TokenUsage
 		c.usageMu.Lock()
 		u := c.usage
 		c.usageMu.Unlock()
+
+		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
+		// Codex writes token_count events to ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
+		if u.InputTokens == 0 && u.OutputTokens == 0 {
+			if scanned := scanCodexSessionUsage(startTime); scanned != nil {
+				u = scanned.usage
+				if scanned.model != "" && opts.Model == "" {
+					opts.Model = scanned.model
+				}
+			}
+		}
+
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
 			model := opts.Model
 			if model == "" {
@@ -682,6 +697,169 @@ func codexInt64(m map[string]any, keys ...string) int64 {
 		}
 	}
 	return 0
+}
+
+// ── Codex session log scanner ──
+
+// codexSessionUsage holds usage extracted from a Codex session JSONL file.
+type codexSessionUsage struct {
+	usage TokenUsage
+	model string
+}
+
+// scanCodexSessionUsage scans Codex session JSONL files written after startTime
+// to extract token usage. Codex writes token_count events to
+// ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
+func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
+	root := codexSessionRoot()
+	if root == "" {
+		return nil
+	}
+
+	// Look in today's session directory.
+	dateDir := filepath.Join(root,
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+
+	files, err := filepath.Glob(filepath.Join(dateDir, "*.jsonl"))
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+
+	// Only scan files modified after startTime (this task's session).
+	var result codexSessionUsage
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil || info.ModTime().Before(startTime) {
+			continue
+		}
+		if u := parseCodexSessionFile(f); u != nil {
+			// Take the last matching file's data (usually there's only one per task).
+			result = *u
+		}
+	}
+
+	if result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 {
+		return nil
+	}
+	return &result
+}
+
+// codexSessionRoot returns the Codex sessions directory.
+func codexSessionRoot() string {
+	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
+		dir := filepath.Join(codexHome, "sessions")
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	dir := filepath.Join(home, ".codex", "sessions")
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return dir
+	}
+	return ""
+}
+
+// codexSessionTokenCount represents a token_count event in Codex JSONL.
+type codexSessionTokenCount struct {
+	Type    string `json:"type"`
+	Payload *struct {
+		Type string `json:"type"`
+		Info *struct {
+			TotalTokenUsage *struct {
+				InputTokens           int64 `json:"input_tokens"`
+				OutputTokens          int64 `json:"output_tokens"`
+				CachedInputTokens     int64 `json:"cached_input_tokens"`
+				CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
+				ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+			} `json:"total_token_usage"`
+			LastTokenUsage *struct {
+				InputTokens           int64 `json:"input_tokens"`
+				OutputTokens          int64 `json:"output_tokens"`
+				CachedInputTokens     int64 `json:"cached_input_tokens"`
+				CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
+				ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+			} `json:"last_token_usage"`
+			Model string `json:"model"`
+		} `json:"info"`
+		Model string `json:"model"`
+	} `json:"payload"`
+}
+
+// parseCodexSessionFile extracts the final token_count from a Codex session file.
+func parseCodexSessionFile(path string) *codexSessionUsage {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var result codexSessionUsage
+	found := false
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		// Fast pre-filter.
+		if !bytesContainsStr(line, "token_count") && !bytesContainsStr(line, "turn_context") {
+			continue
+		}
+
+		var evt codexSessionTokenCount
+		if err := json.Unmarshal(line, &evt); err != nil || evt.Payload == nil {
+			continue
+		}
+
+		// Track model from turn_context events.
+		if evt.Type == "turn_context" && evt.Payload.Model != "" {
+			result.model = evt.Payload.Model
+			continue
+		}
+
+		// Extract token usage from token_count events.
+		if evt.Payload.Type == "token_count" && evt.Payload.Info != nil {
+			usage := evt.Payload.Info.TotalTokenUsage
+			if usage == nil {
+				usage = evt.Payload.Info.LastTokenUsage
+			}
+			if usage != nil {
+				cachedTokens := usage.CachedInputTokens
+				if cachedTokens == 0 {
+					cachedTokens = usage.CacheReadInputTokens
+				}
+				result.usage = TokenUsage{
+					InputTokens:     usage.InputTokens,
+					OutputTokens:    usage.OutputTokens + usage.ReasoningOutputTokens,
+					CacheReadTokens: cachedTokens,
+				}
+				if evt.Payload.Info.Model != "" {
+					result.model = evt.Payload.Info.Model
+				}
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		return nil
+	}
+	return &result
+}
+
+// bytesContainsStr checks if b contains the string s (without allocating).
+func bytesContainsStr(b []byte, s string) bool {
+	return strings.Contains(string(b), s)
 }
 
 // ── Helpers ──

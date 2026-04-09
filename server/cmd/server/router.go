@@ -157,6 +157,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
+				r.Get("/search", h.SearchIssues)
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/batch-update", h.BatchUpdateIssues)
@@ -178,6 +179,17 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
+				})
+			})
+
+			// Projects
+			r.Route("/api/projects", func(r chi.Router) {
+				r.Get("/", h.ListProjects)
+				r.Post("/", h.CreateProject)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetProject)
+					r.Put("/", h.UpdateProject)
+					r.Delete("/", h.DeleteProject)
 				})
 			})
 
@@ -232,12 +244,15 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
-				r.Get("/{runtimeId}/usage", h.GetRuntimeUsage)
-				r.Get("/{runtimeId}/activity", h.GetRuntimeTaskActivity)
-				r.Post("/{runtimeId}/ping", h.InitiatePing)
-				r.Get("/{runtimeId}/ping/{pingId}", h.GetPing)
-				r.Post("/{runtimeId}/update", h.InitiateUpdate)
-				r.Get("/{runtimeId}/update/{updateId}", h.GetUpdate)
+				r.Route("/{runtimeId}", func(r chi.Router) {
+					r.Get("/usage", h.GetRuntimeUsage)
+					r.Get("/activity", h.GetRuntimeTaskActivity)
+					r.Post("/ping", h.InitiatePing)
+					r.Get("/ping/{pingId}", h.GetPing)
+					r.Post("/update", h.InitiateUpdate)
+					r.Get("/update/{updateId}", h.GetUpdate)
+					r.Delete("/", h.DeleteAgentRuntime)
+				})
 			})
 
 			// Inbox

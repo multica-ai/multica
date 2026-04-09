@@ -206,6 +206,17 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	return cfg.WorkspaceID
 }
 
+// requireWorkspaceID resolves the workspace ID and returns an error with
+// actionable instructions if it is empty (e.g. user has multiple workspaces
+// but no default configured).
+func requireWorkspaceID(cmd *cobra.Command) (string, error) {
+	id := resolveWorkspaceID(cmd)
+	if id == "" {
+		return "", fmt.Errorf("workspace_id is required: use --workspace-id flag, set MULTICA_WORKSPACE_ID env, or run 'multica config set workspace_id <id>'")
+	}
+	return id, nil
+}
+
 // ---------------------------------------------------------------------------
 // Agent commands
 // ---------------------------------------------------------------------------
@@ -215,15 +226,18 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if client.WorkspaceID == "" {
+		if _, err := requireWorkspaceID(cmd); err != nil {
+			return err
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var agents []map[string]any
 	params := url.Values{}
-	if client.WorkspaceID != "" {
-		params.Set("workspace_id", client.WorkspaceID)
-	}
+	params.Set("workspace_id", client.WorkspaceID)
 	if v, _ := cmd.Flags().GetBool("include-archived"); v {
 		params.Set("include_archived", "true")
 	}

@@ -8,7 +8,7 @@
  * Inherits color from `currentColor` (use Tailwind `text-*`).
  * Scales with font-size (use Tailwind `text-*` for size).
  */
-import { cn } from "@/lib/utils"
+import { cn } from "@multica/ui/lib/utils"
 
 export interface SpinnerProps {
   /** Additional className for styling (color via text-*, size via Tailwind text-*) */

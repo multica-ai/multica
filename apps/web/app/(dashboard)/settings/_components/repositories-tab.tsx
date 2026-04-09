@@ -2,17 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { Save, Plus, Trash2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@multica/ui/components/ui/input";
+import { Button } from "@multica/ui/components/ui/button";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { useAuthStore } from "@/features/auth";
-import { useWorkspaceStore } from "@/features/workspace";
-import { useWorkspaceId } from "@core/hooks";
-import { memberListOptions } from "@core/workspace/queries";
-import { api } from "@/shared/api";
-import type { WorkspaceRepo } from "@/shared/types";
+import { useAuthStore } from "@/platform/auth";
+import { useWorkspaceStore } from "@/platform/workspace";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { memberListOptions } from "@multica/core/workspace/queries";
+import { api } from "@/platform/api";
+import type { WorkspaceRepo } from "@multica/core/types";
 
 export function RepositoriesTab() {
   const user = useAuthStore((s) => s.user);

@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 // Mock auth store
 const mockSendCode = vi.fn();
 const mockVerifyCode = vi.fn();
-vi.mock("@/features/auth", () => ({
+vi.mock("@/platform/auth", () => ({
   useAuthStore: (selector: (s: any) => any) =>
     selector({
       sendCode: mockSendCode,
@@ -20,9 +20,14 @@ vi.mock("@/features/auth", () => ({
     }),
 }));
 
+// Mock auth-cookie
+vi.mock("@/features/auth/auth-cookie", () => ({
+  setLoggedInCookie: vi.fn(),
+}));
+
 // Mock workspace store
 const mockHydrateWorkspace = vi.fn();
-vi.mock("@/features/workspace", () => ({
+vi.mock("@/platform/workspace", () => ({
   useWorkspaceStore: (selector: (s: any) => any) =>
     selector({
       hydrateWorkspace: mockHydrateWorkspace,
@@ -30,7 +35,7 @@ vi.mock("@/features/workspace", () => ({
 }));
 
 // Mock api
-vi.mock("@/shared/api", () => ({
+vi.mock("@/platform/api", () => ({
   api: {
     listWorkspaces: vi.fn().mockResolvedValue([]),
     verifyCode: vi.fn(),

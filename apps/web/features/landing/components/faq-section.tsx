@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@multica/ui/lib/utils";
 import { useLocale } from "../i18n";
 
 export function FAQSection() {

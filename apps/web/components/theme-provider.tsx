@@ -1,7 +1,7 @@
 "use client"
 
 import { ThemeProvider as NextThemesProvider } from "next-themes"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@multica/ui/components/ui/tooltip"
 
 function ThemeProvider({
   children,

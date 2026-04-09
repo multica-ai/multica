@@ -7,8 +7,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from "@/components/ui/dropdown-menu"
-import { SidebarMenuButton } from "@/components/ui/sidebar"
+} from "@multica/ui/components/ui/dropdown-menu"
+import { SidebarMenuButton } from "@multica/ui/components/ui/sidebar"
 
 export function ThemeToggle() {
   const { setTheme } = useTheme()

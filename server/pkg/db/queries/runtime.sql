@@ -21,8 +21,9 @@ INSERT INTO agent_runtime (
     status,
     device_info,
     metadata,
+    owner_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -30,6 +31,7 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
+    owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
 RETURNING *;
@@ -62,3 +64,14 @@ WHERE status IN ('dispatched', 'running')
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
 RETURNING id, agent_id, issue_id;
+
+-- name: ListAgentRuntimesByOwner :many
+SELECT * FROM agent_runtime
+WHERE workspace_id = $1 AND owner_id = $2
+ORDER BY created_at ASC;
+
+-- name: DeleteAgentRuntime :exec
+DELETE FROM agent_runtime WHERE id = $1;
+
+-- name: CountAgentsByRuntime :one
+SELECT count(*) FROM agent WHERE runtime_id = $1;

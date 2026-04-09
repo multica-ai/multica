@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Toaster } from "@/components/ui/sonner";
-import { cn } from "@/lib/utils";
-import { QueryProvider } from "@core/provider";
+import { Toaster } from "@multica/ui/components/ui/sonner";
+import { cn } from "@multica/ui/lib/utils";
+import { QueryProvider } from "@multica/core/provider";
 import { AuthInitializer } from "@/features/auth";
-import { WSProvider } from "@/features/realtime";
-import { ModalRegistry } from "@/features/modals";
+import { WebWSProvider } from "@/platform/ws-provider";
+import { WebNavigationProvider } from "@/platform/navigation";
 import { LocaleSync } from "@/components/locale-sync";
 import "./globals.css";
 
@@ -66,10 +66,11 @@ export default function RootLayout({
         <LocaleSync />
         <ThemeProvider>
           <QueryProvider>
-            <AuthInitializer>
-              <WSProvider>{children}</WSProvider>
-            </AuthInitializer>
-            <ModalRegistry />
+            <WebNavigationProvider>
+              <AuthInitializer>
+                <WebWSProvider>{children}</WebWSProvider>
+              </AuthInitializer>
+            </WebNavigationProvider>
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

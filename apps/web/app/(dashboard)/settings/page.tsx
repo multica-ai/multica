@@ -1,8 +1,8 @@
 "use client";
 
 import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { useWorkspaceStore } from "@/features/workspace";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
+import { useWorkspaceStore } from "@/platform/workspace";
 import { AccountTab } from "./_components/account-tab";
 import { AppearanceTab } from "./_components/general-tab";
 import { TokensTab } from "./_components/tokens-tab";

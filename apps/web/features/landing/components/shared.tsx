@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@multica/ui/lib/utils";
 
 export const githubUrl = "https://github.com/multica-ai/multica";
 

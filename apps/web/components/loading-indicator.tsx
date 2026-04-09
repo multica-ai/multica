@@ -1,7 +1,7 @@
 "use client";
 
 import { Spinner } from "@/components/spinner";
-import { cn } from "@/lib/utils";
+import { cn } from "@multica/ui/lib/utils";
 
 export type LoadingVariant = "generating" | "streaming";
 

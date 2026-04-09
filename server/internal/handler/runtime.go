@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type AgentRuntimeResponse struct {
@@ -21,6 +23,7 @@ type AgentRuntimeResponse struct {
 	Status      string  `json:"status"`
 	DeviceInfo  string  `json:"device_info"`
 	Metadata    any     `json:"metadata"`
+	OwnerID     *string `json:"owner_id"`
 	LastSeenAt  *string `json:"last_seen_at"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
@@ -45,6 +48,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Status:      rt.Status,
 		DeviceInfo:  rt.DeviceInfo,
 		Metadata:    metadata,
+		OwnerID:     uuidToPtr(rt.OwnerID),
 		LastSeenAt:  timestampToPtr(rt.LastSeenAt),
 		CreatedAt:   timestampToString(rt.CreatedAt),
 		UpdatedAt:   timestampToString(rt.UpdatedAt),
@@ -285,7 +289,22 @@ func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 
-	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	var runtimes []db.AgentRuntime
+	var err error
+
+	if ownerFilter := r.URL.Query().Get("owner"); ownerFilter == "me" {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		runtimes, err = h.Queries.ListAgentRuntimesByOwner(r.Context(), db.ListAgentRuntimesByOwnerParams{
+			WorkspaceID: parseUUID(workspaceID),
+			OwnerID:     parseUUID(userID),
+		})
+	} else {
+		runtimes, err = h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list runtimes")
 		return
@@ -297,4 +316,55 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// DeleteAgentRuntime deletes a runtime after permission and dependency checks.
+func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+
+	// Permission: owner/admin can delete any runtime; members can only delete their own.
+	userID := uuidToString(member.UserID)
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isOwner := rt.OwnerID.Valid && uuidToString(rt.OwnerID) == userID
+	if !isAdmin && !isOwner {
+		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
+		return
+	}
+
+	// Check if any agents are bound to this runtime (ON DELETE RESTRICT).
+	agentCount, err := h.Queries.CountAgentsByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime dependencies")
+		return
+	}
+	if agentCount > 0 {
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has agents bound to it. Reassign or remove the agents first.")
+		return
+	}
+
+	if err := h.Queries.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+
+	slog.Info("runtime deleted", "runtime_id", runtimeID, "deleted_by", userID)
+
+	// Notify frontend to refresh runtime list.
+	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
+		"action": "delete",
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
