@@ -9,6 +9,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
+import { useAppLocale } from "../../i18n";
 
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/multica-ai/multica/releases/latest";
@@ -51,27 +52,12 @@ function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
-const statusConfig: Record<
-  RuntimeUpdateStatus,
-  { label: string; icon: typeof Loader2; color: string }
-> = {
-  pending: {
-    label: "Waiting for daemon...",
-    icon: Loader2,
-    color: "text-muted-foreground",
-  },
-  running: {
-    label: "Updating...",
-    icon: Loader2,
-    color: "text-info",
-  },
-  completed: {
-    label: "Update complete. Daemon is restarting...",
-    icon: CheckCircle2,
-    color: "text-success",
-  },
-  failed: { label: "Update failed", icon: XCircle, color: "text-destructive" },
-  timeout: { label: "Timeout", icon: XCircle, color: "text-warning" },
+const statusIcons: Record<RuntimeUpdateStatus, { icon: typeof Loader2; color: string }> = {
+  pending: { icon: Loader2, color: "text-muted-foreground" },
+  running: { icon: Loader2, color: "text-info" },
+  completed: { icon: CheckCircle2, color: "text-success" },
+  failed: { icon: XCircle, color: "text-destructive" },
+  timeout: { icon: XCircle, color: "text-warning" },
 };
 
 interface UpdateSectionProps {
@@ -85,6 +71,14 @@ export function UpdateSection({
   currentVersion,
   isOnline,
 }: UpdateSectionProps) {
+  const { t } = useAppLocale();
+  const statusLabels: Record<RuntimeUpdateStatus, string> = {
+    pending: t.runtimes.waitingForDaemon,
+    running: t.runtimes.updating,
+    completed: t.runtimes.updateComplete,
+    failed: t.runtimes.updateFailed,
+    timeout: t.runtimes.testTimeout,
+  };
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
   const [error, setError] = useState("");
@@ -133,7 +127,7 @@ export function UpdateSection({
             result.status === "failed" ||
             result.status === "timeout"
           ) {
-            setError(result.error ?? "Unknown error");
+            setError(result.error ?? t.runtimes.unknownError);
             setUpdating(false);
             cleanup();
           }
@@ -153,7 +147,7 @@ export function UpdateSection({
     latestVersion &&
     isNewer(latestVersion, currentVersion);
 
-  const config = status ? statusConfig[status] : null;
+  const config = status ? statusIcons[status] : null;
   const Icon = config?.icon;
   const isActive = status === "pending" || status === "running";
 
@@ -199,7 +193,7 @@ export function UpdateSection({
             className={`inline-flex items-center gap-1 text-xs ${config.color}`}
           >
             <Icon className={`h-3 w-3 ${isActive ? "animate-spin" : ""}`} />
-            {config.label}
+            {statusLabels[status!]}
           </span>
         )}
       </div>

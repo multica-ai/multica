@@ -310,6 +310,28 @@ export type AppDict = {
     deleteRuntime: string;
     runtimeDeleted: string;
     failedToDeleteRuntime: string;
+    offline: string;
+    testConnection: string;
+    testing: string;
+    waitingForDaemon: string;
+    runningTest: string;
+    connected: string;
+    testFailed: string;
+    testTimeout: string;
+    failedToInitiateTest: string;
+    unknownError: string;
+    noUsageData: string;
+    estimatedCost: string;
+    input: string;
+    output: string;
+    cacheRead: string;
+    cacheWrite: string;
+    date: string;
+    model: string;
+    updating: string;
+    updateComplete: string;
+    updateFailed: string;
+    tasks: string;
   };
   skills: {
     title: string;

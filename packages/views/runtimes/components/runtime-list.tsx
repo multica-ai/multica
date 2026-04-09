@@ -211,11 +211,7 @@ export function RuntimeList({
             {filter === "mine" ? t.runtimes.noRuntimesMine : ownerFilter ? t.runtimes.noRuntimesOwner : t.runtimes.noRuntimesRegistered}
           </p>
           <p className="mt-1 text-xs text-muted-foreground text-center">
-            Run{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              multica daemon start
-            </code>{" "}
-            to register a local runtime.
+            {t.runtimes.registerHint}
           </p>
         </div>
       ) : (

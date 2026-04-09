@@ -65,6 +65,7 @@ type NavItem = {
 const personalNav: NavItem[] = [
   { href: "/inbox", navKey: "inbox", icon: Inbox },
   { href: "/my-issues", navKey: "myIssues", icon: CircleUser },
+
 ];
 
 const workspaceNav: NavItem[] = [
