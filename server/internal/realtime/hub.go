@@ -17,6 +17,12 @@ type MembershipChecker interface {
 	IsMember(ctx context.Context, userID, workspaceID string) bool
 }
 
+// PATResolver resolves a Personal Access Token to a user ID.
+// Returns the user ID and true if the token is valid, or ("", false) otherwise.
+type PATResolver interface {
+	ResolveToken(ctx context.Context, token string) (userID string, ok bool)
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		// TODO: Restrict origins in production
@@ -214,8 +220,8 @@ func (h *Hub) Broadcast(message []byte) {
 	h.broadcast <- message
 }
 
-// HandleWebSocket upgrades an HTTP connection to WebSocket with JWT auth.
-func HandleWebSocket(hub *Hub, mc MembershipChecker, w http.ResponseWriter, r *http.Request) {
+// HandleWebSocket upgrades an HTTP connection to WebSocket with JWT or PAT auth.
+func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.URL.Query().Get("token")
 	workspaceID := r.URL.Query().Get("workspace_id")
 
@@ -224,28 +230,45 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, w http.ResponseWriter, r *h
 		return
 	}
 
-	// Validate JWT
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, jwt.ErrSignatureInvalid
+	var userID string
+
+	if strings.HasPrefix(tokenStr, "mul_") {
+		// PAT authentication
+		if pr == nil {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
 		}
-		return auth.JWTSecret(), nil
-	})
-	if err != nil || !token.Valid {
-		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-		return
-	}
+		uid, ok := pr.ResolveToken(r.Context(), tokenStr)
+		if !ok {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
+		userID = uid
+	} else {
+		// JWT authentication
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return auth.JWTSecret(), nil
+		})
+		if err != nil || !token.Valid {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
-		return
-	}
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
+			return
+		}
 
-	userID, ok := claims["sub"].(string)
-	if !ok || strings.TrimSpace(userID) == "" {
-		http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
-		return
+		uid, ok := claims["sub"].(string)
+		if !ok || strings.TrimSpace(uid) == "" {
+			http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
+			return
+		}
+		userID = uid
 	}
 
 	// Verify user is a member of the workspace

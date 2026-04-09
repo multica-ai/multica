@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -75,8 +76,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
+	pr := &patResolver{queries: queries}
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		realtime.HandleWebSocket(hub, mc, w, r)
+		realtime.HandleWebSocket(hub, mc, pr, w, r)
 	})
 
 	// Auth (public)
@@ -297,6 +299,22 @@ func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID s
 		WorkspaceID: parseUUID(workspaceID),
 	})
 	return err == nil
+}
+
+// patResolver implements realtime.PATResolver using database queries.
+type patResolver struct {
+	queries *db.Queries
+}
+
+func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, bool) {
+	hash := auth.HashToken(token)
+	pat, err := pr.queries.GetPersonalAccessTokenByHash(ctx, hash)
+	if err != nil {
+		return "", false
+	}
+	// Best-effort: update last_used_at
+	go pr.queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+	return util.UUIDToString(pat.UserID), true
 }
 
 func parseUUID(s string) pgtype.UUID {
