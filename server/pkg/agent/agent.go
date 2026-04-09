@@ -25,6 +25,7 @@ type ExecOptions struct {
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration
+	SandboxMode     string
 	ResumeSessionID string // if non-empty, resume a previous agent session
 }
 

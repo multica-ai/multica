@@ -976,6 +976,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		Cwd:             env.WorkDir,
 		Model:           entry.Model,
 		Timeout:         d.cfg.AgentTimeout,
+		SandboxMode:     codexSandboxModeFromTask(task),
 		ResumeSessionID: task.PriorSessionID,
 	})
 	if err != nil {
@@ -1158,6 +1159,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 		return TaskResult{Status: "blocked", Comment: errMsg, Usage: usageEntries}, nil
 	}
+}
+
+func codexSandboxModeFromTask(task Task) string {
+	if task.Agent == nil || task.Agent.RuntimeConfig == nil {
+		return ""
+	}
+	value, _ := task.Agent.RuntimeConfig["codex_sandbox_mode"].(string)
+	return value
 }
 
 // repoDataToInfo converts daemon RepoData to repocache RepoInfo.

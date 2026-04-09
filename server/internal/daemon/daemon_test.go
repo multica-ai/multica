@@ -83,3 +83,54 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 		t.Fatal("did not expect 500 to be treated as workspace not found")
 	}
 }
+
+func TestCodexSandboxModeFromTask(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		task Task
+		want string
+	}{
+		{
+			name: "missing agent",
+			task: Task{},
+			want: "",
+		},
+		{
+			name: "missing runtime config",
+			task: Task{
+				Agent: &AgentData{},
+			},
+			want: "",
+		},
+		{
+			name: "missing codex sandbox mode",
+			task: Task{
+				Agent: &AgentData{
+					RuntimeConfig: map[string]any{"other": "value"},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "danger full access",
+			task: Task{
+				Agent: &AgentData{
+					RuntimeConfig: map[string]any{"codex_sandbox_mode": "danger-full-access"},
+				},
+			},
+			want: "danger-full-access",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := codexSandboxModeFromTask(tt.task); got != tt.want {
+				t.Fatalf("codexSandboxModeFromTask() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
