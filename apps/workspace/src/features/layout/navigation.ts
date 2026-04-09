@@ -25,6 +25,8 @@ export const workspaceNav = [
 
 export function isWorkspaceNavActive(pathname: string, href: string): boolean {
   switch (href) {
+    case "/inbox":
+      return pathname === "/" || pathname === "/inbox";
     case "/issues":
       return pathname === "/issues" || pathname === "/board" || pathname.startsWith("/issues/");
     case "/agents":

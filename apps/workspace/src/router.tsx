@@ -29,16 +29,26 @@ function LoadingScreen() {
   );
 }
 
-function HomeRedirect() {
+function HomePage() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
 
   if (isLoading) return <LoadingScreen />;
-  return <Navigate to={user ? "/issues" : "/login"} replace />;
+  if (!user) return <Navigate to="/login" replace />;
+
+  return (
+    <DashboardLayout>
+      <InboxPage />
+    </DashboardLayout>
+  );
 }
 
 function NotFoundRedirect() {
-  return <HomeRedirect />;
+  const user = useAuthStore((s) => s.user);
+  const isLoading = useAuthStore((s) => s.isLoading);
+
+  if (isLoading) return <LoadingScreen />;
+  return <Navigate to={user ? "/" : "/login"} replace />;
 }
 
 function ProtectedLayout() {
@@ -83,7 +93,7 @@ const rootRoute = createRootRoute({
 const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: HomeRedirect,
+  component: HomePage,
 });
 
 const loginRoute = createRoute({

@@ -15,3 +15,9 @@
 - 已执行 `bash scripts/build-release.sh`，确认 workspace、server、migrate 三类产物可以成功构建。
 - 已执行 `bash scripts/package-release.sh` 和 `SKIP_BUILD=1 make release-package RELEASE_OUTPUT_DIR=dist/release-make`，确认发布目录可成功组装。
 - 用户后续将采用 VPS 直接 clone 源码并本机编译的路径，发布包组装脚本保留为可选方案，主路径切换为源码部署。
+
+## Current Task
+
+- [ ] 阶段一：确认 workspace 构建产物位置与 server 前端分发入口
+- [ ] 阶段二：将 workspace 静态产物改为通过 `go:embed` 内嵌到 server
+- [ ] 阶段三：验证 server 在存在内嵌产物时可正常构建

@@ -33,7 +33,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/shared/api";
-import { useRouter, useSearchParams } from "@/shared/router";
+import { usePathname, useRouter, useSearchParams } from "@/shared/router";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
 
@@ -242,6 +242,7 @@ function InboxListItem({
 
 export default function InboxPage() {
   const isMobile = useIsMobile();
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlIssue = searchParams.get("issue") ?? "";
@@ -255,9 +256,10 @@ export default function InboxPage() {
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
-    const url = key ? `/inbox?issue=${key}` : "/inbox";
+    const basePath = pathname === "/" ? "/" : "/inbox";
+    const url = key ? `${basePath}?issue=${key}` : basePath;
     router.replace(url);
-  }, [router]);
+  }, [pathname, router]);
 
   const items = useInboxStore((s) => s.dedupedItems());
   const loading = useInboxStore((s) => s.loading);

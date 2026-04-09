@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           ws: true,
         },
-        "^/$": {
+        "^/marketing$": {
           target: marketingTarget,
           changeOrigin: true,
         },
