@@ -9,15 +9,46 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 - Agents can be assigned issues, create issues, comment, and change status
 - Supports local (daemon) and cloud agent runtimes
 - Built for 2-10 person AI-native teams
+- The repo is a monorepo with a Go backend, a product workspace SPA, a marketing site, CLI tooling, and OpenSpec change artifacts
+
+## Current Repository Shape
+
+- `server/` — Go backend, CLI, daemon, migrations, sqlc queries, and generated DB code
+- `apps/workspace/` — primary product app. Vite + React + TanStack Router
+- `apps/web/` — Next.js 16 marketing/public site
+- `e2e/` — Playwright end-to-end tests
+- `openspec/` — spec-driven change proposals and evolving product requirements
+- `scripts/` and root `Makefile` — local setup, verification, and worktree helpers
 
 ## Architecture
 
-**Go backend + standalone Next.js frontend.**
+**Go backend + frontend monorepo.**
 
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
-- `apps/web/` — Next.js 16 frontend (App Router) — self-contained, no shared package dependencies
+- `apps/workspace/` — Vite + React product workspace app
+- `apps/web/` — Next.js 16 frontend (App Router) for marketing/public pages
 - `e2e/` — Playwright end-to-end tests
 - `scripts/` and root `Makefile` — local setup and verification
+
+### Workspace App Structure (`apps/workspace/src/`)
+
+The workspace frontend uses a feature-based architecture with most product code under `src/`.
+
+```
+apps/workspace/src/
+├── components/   # Reusable UI primitives and app-level components
+├── features/     # Business logic, organized by domain
+├── hooks/        # Reusable hooks
+├── lib/          # App-specific utilities
+├── shared/       # Shared API client, types, router, logger, utilities
+├── styles/       # Global and shared styles
+├── test/         # Shared test utilities and setup
+├── app-shell.tsx # Main authenticated shell
+├── main.tsx      # App bootstrap
+└── router.tsx    # Route tree and navigation setup
+```
+
+`apps/workspace` uses `@/` alias mapping to `src/`.
 
 ### Web App Structure (`apps/web/`)
 
@@ -51,6 +82,8 @@ apps/web/
 - `shared/types/` — Domain types (Issue, Agent, Workspace, etc.) and WebSocket event types.
 - `shared/logger.ts` — Logger utility.
 
+`apps/web` uses `@/` alias mapping to the app root.
+
 ### State Management
 
 - **Zustand** for global client state — one store per feature domain (`features/auth/store.ts`, `features/workspace/store.ts`, `features/issues/store.ts`, `features/inbox/store.ts`).
@@ -66,7 +99,13 @@ apps/web/
 
 ### Import Aliases
 
-Use `@/` alias (maps to `apps/web/`):
+Use `@/` alias:
+
+- In `apps/web`, `@/` maps to `apps/web/`.
+- In `apps/workspace`, `@/` maps to `apps/workspace/src/`.
+
+Example imports:
+
 ```typescript
 import { api } from "@/shared/api";
 import type { Issue } from "@/shared/types";
@@ -110,25 +149,35 @@ All queries filter by `workspace_id`. Membership checks gate access. `X-Workspac
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
 
+## OpenSpec Workflow
+
+- Non-trivial product changes should use `openspec/changes/<change-name>/`.
+- Proposal, design, specs, and tasks are the source of truth during implementation.
+- Use the existing `/opsx:propose`, `/opsx:apply`, `/opsx:explore`, and `/opsx:archive` prompts when the user asks for OpenSpec-driven work.
+- Main specs live in `openspec/specs/`; active work lives in `openspec/changes/`.
+
 ## Commands
 
 ```bash
 # One-click setup & run
-make setup            # First-time: ensure shared DB, create app DB, migrate
-make start            # Start backend + frontend together
+make setup            # Install deps, ensure shared DB, run migrations
+make start            # Start backend + workspace SPA + marketing site
 make stop             # Stop app processes for the current checkout
+make check            # Full verification for the current checkout
 make db-down          # Stop the shared PostgreSQL container
 
 # Frontend
 pnpm install
-pnpm dev:web          # Next.js dev server (port 3000)
-pnpm build            # Build frontend
-pnpm typecheck        # TypeScript check
-pnpm lint             # ESLint via Next.js
-pnpm test             # TS tests (Vitest)
+pnpm dev:workspace    # Workspace SPA on FRONTEND_PORT (default 3000)
+pnpm dev:web          # Alias for workspace SPA from the repo root
+pnpm dev:marketing    # Marketing site on MARKETING_PORT (default 3001)
+pnpm build            # Build both frontends
+pnpm typecheck        # TypeScript check for both frontends
+pnpm lint             # TypeScript-based lint commands for both frontends
+pnpm test             # Frontend tests (Vitest)
 
 # Backend (Go)
-make dev              # Run Go server (port 8080)
+make dev              # Run Go server only
 make daemon           # Run local daemon
 make build            # Build server + CLI binaries to server/bin/
 make cli ARGS="..."   # Run multica CLI (e.g. make cli ARGS="config")
@@ -141,21 +190,28 @@ make migrate-down     # Rollback migrations
 cd server && go test ./internal/handler/ -run TestName
 
 # Run a single TS test
-pnpm --filter @multica/web exec vitest run src/path/to/file.test.ts
+pnpm --filter @multica/workspace exec vitest run src/path/to/file.test.ts
+pnpm --filter @multica/web exec vitest run path/to/file.test.ts
 
 # Run a single E2E test (requires backend + frontend running)
-pnpm exec playwright test e2e/tests/specific-test.spec.ts
+pnpm exec playwright test e2e/issues.spec.ts
 
 # Infrastructure
 make db-up            # Start shared PostgreSQL (pgvector/pg17 image)
 make db-down          # Stop shared PostgreSQL
+
+# Worktrees
+make worktree-env       # Generate .env.worktree with unique DB/ports
+make setup-worktree     # Setup using .env.worktree
+make start-worktree     # Start using .env.worktree
+make check-worktree     # Run checks in a worktree
 ```
 
-### CI Requirements
+## CI Requirements
 
-CI runs on Node 22 and Go 1.24 with a `pgvector/pgvector:pg17` PostgreSQL service. See `.github/workflows/ci.yml`.
+CI runs on Node 22 and Go 1.26.1 with a `pgvector/pgvector:pg17` PostgreSQL service. See `.github/workflows/ci.yml`.
 
-### Worktree Support
+## Worktree Support
 
 All checkouts share one PostgreSQL container. Isolation is at the database level — each worktree gets its own DB name and unique ports via `.env.worktree`. Main checkouts use `.env`.
 
@@ -168,7 +224,7 @@ make start-worktree     # Start using .env.worktree
 ## Coding Rules
 
 - TypeScript strict mode is enabled; keep types explicit.
-- TypeScript in `apps/web` uses 2-space indentation, double quotes, and semicolons.
+- TypeScript in `apps/web` and `apps/workspace` uses 2-space indentation, double quotes, and semicolons.
 - Prefer PascalCase for React components, camelCase for hooks and helpers, and colocated test files such as `page.test.tsx`.
 - Go code follows standard Go conventions (gofmt, go vet). Use domain-oriented filenames like `issue.go` or `cmd_issue.go`.
 - Do not hand-edit generated code in `server/pkg/db/generated/`.
@@ -178,9 +234,11 @@ make start-worktree     # Start using .env.worktree
 - If a flow or API is being replaced and the product is not yet live, prefer removing the old path instead of preserving both old and new behavior.
 - Treat compatibility code as a maintenance cost, not a default safety mechanism. Avoid "just in case" branches that make the codebase harder to reason about.
 - Avoid broad refactors unless required by the task.
+- When shared behavior exists in both frontends, prefer mirrored updates rather than allowing them to drift.
 
 ## UI/UX Rules
 
+- Design work must follow the rules in `DESIGN.md`.
 - Prefer shadcn components over custom implementations. Install missing components via `npx shadcn add`.
 - **Feature-specific components** → `features/<domain>/components/` — issue icons, pickers, and other domain-bound UI live inside their feature module.
 - Use shadcn design tokens for styling (e.g. `bg-primary`, `text-muted-foreground`, `text-destructive`). Avoid hardcoded color values (e.g. `text-red-500`, `bg-gray-100`).
@@ -190,7 +248,7 @@ make start-worktree     # Start using .env.worktree
 
 ## Testing Rules
 
-- **TypeScript**: Vitest with Testing Library. Shared test setup lives in `apps/web/test/`. Mock external/third-party dependencies only.
+- **TypeScript**: Vitest with Testing Library. Shared test setup lives in each app's `test/` directory. Mock external/third-party dependencies only.
 - **Go**: Standard `go test`. Tests should create their own fixture data in a test database.
 - End-to-end tests live in `e2e/*.spec.ts`; `make check` will start missing services automatically, while direct Playwright runs expect the app to already be running.
 - Add or update tests whenever you change handlers, CLI commands, daemon behavior, or SQL-backed flows.
@@ -199,14 +257,24 @@ make start-worktree     # Start using .env.worktree
 
 - Use atomic commits grouped by logical intent.
 - Conventional format with scopes:
-  - `feat(web): ...`, `feat(cli): ...`
-  - `fix(web): ...`, `fix(cli): ...`
+  - `feat(workspace): ...`, `feat(web): ...`, `feat(server): ...`, `feat(cli): ...`
+  - `fix(workspace): ...`, `fix(web): ...`, `fix(server): ...`, `fix(cli): ...`
   - `refactor(daemon): ...`
-  - `test(cli): ...`
+  - `test(scope): ...`
   - `docs: ...`
   - `chore(scope): ...`
 - Keep PRs focused and include a short description, linked issue or PR number when relevant, screenshots for UI work, and notes for migrations, env changes, or CLI surface changes.
 - Before opening a PR, run `make check` or the relevant frontend/backend subset.
+
+## CLI Release
+
+**Prerequisite:** A CLI release must accompany every Production deployment. When deploying to Production, always release a new CLI version as part of the process.
+
+1. Create a tag on the `main` branch: `git tag v0.x.x`
+2. Push the tag: `git push origin v0.x.x`
+3. GitHub Actions automatically triggers `release.yml`: runs Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap
+
+By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), unless the user specifies a specific version.
 
 ## Minimum Pre-Push Checks
 
@@ -226,7 +294,7 @@ pnpm exec playwright test   # E2E only (requires backend + frontend running)
 
 ## AI Agent Verification Loop
 
-After writing or modifying code, always run the full verification pipeline:
+When a full verification pass is required, run the full verification pipeline:
 
 ```bash
 make check
