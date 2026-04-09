@@ -542,7 +542,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
+	h.deleteStoredObjects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
 	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
 		"comment_id": commentId,
