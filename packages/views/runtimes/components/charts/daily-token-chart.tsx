@@ -38,6 +38,7 @@ export function DailyTokenChart({ data }: { data: DailyTokenData[] }) {
             interval="preserveStartEnd"
           />
           <YAxis
+            type="number"
             tickLine={false}
             axisLine={false}
             tickMargin={8}
