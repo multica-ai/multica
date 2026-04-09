@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { clearStoredSession } from "@/platform/auth-session";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -42,6 +43,10 @@ vi.mock("@/platform/api", () => ({
     setToken: vi.fn(),
     getMe: vi.fn(),
   },
+}));
+
+vi.mock("@/platform/auth-session", () => ({
+  clearStoredSession: vi.fn(),
 }));
 
 import LoginPage from "./page";
@@ -119,6 +124,14 @@ describe("LoginPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Network error")).toBeInTheDocument();
+    });
+  });
+
+  it("clears the logged-in cookie when no cached token exists", async () => {
+    render(<LoginPage />);
+
+    await waitFor(() => {
+      expect(clearStoredSession).toHaveBeenCalled();
     });
   });
 });
