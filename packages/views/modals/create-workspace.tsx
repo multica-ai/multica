@@ -15,10 +15,12 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { useWorkspaceStore } from "@multica/core/workspace";
+import { useAppLocale } from "@multica/views/i18n";
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
+  const { t } = useAppLocale();
   const router = useNavigation();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -26,7 +28,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
 
   const slugError =
     slug.length > 0 && !SLUG_REGEX.test(slug)
-      ? "Only lowercase letters, numbers, and hyphens"
+      ? t.modals.slugValidationError
       : null;
 
   const canSubmit = name.trim().length > 0 && slug.trim().length > 0 && !slugError;
@@ -55,7 +57,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
       router.push("/issues");
       await switchWorkspace(ws.id);
     } catch {
-      toast.error("Failed to create workspace");
+      toast.error(t.modals.failedToCreateWorkspace);
     } finally {
       setCreating(false);
     }
@@ -74,34 +76,33 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
           onClick={onClose}
         >
           <ArrowLeft className="h-4 w-4" />
-          Back
+          {t.common.back}
         </Button>
 
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <DialogTitle className="text-2xl font-semibold">
-              Create a new workspace
+              {t.modals.createWorkspaceTitle}
             </DialogTitle>
             <DialogDescription className="mt-2">
-              Workspaces are shared environments where teams can work on
-              projects and issues.
+              {t.modals.createWorkspaceDescription}
             </DialogDescription>
           </div>
 
           <Card className="w-full">
             <CardContent className="space-y-4 pt-6">
               <div className="space-y-1.5">
-                <Label>Workspace Name</Label>
+                <Label>{t.modals.workspaceNameLabel}</Label>
                 <Input
                   autoFocus
                   type="text"
                   value={name}
                   onChange={(e) => handleNameChange(e.target.value)}
-                  placeholder="My Workspace"
+                  placeholder={t.modals.workspaceNamePlaceholder}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Workspace URL</Label>
+                <Label>{t.modals.workspaceUrlLabel}</Label>
                 <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
                   <span className="pl-3 text-sm text-muted-foreground select-none">
                     multica.app/
@@ -110,7 +111,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
                     type="text"
                     value={slug}
                     onChange={(e) => setSlug(e.target.value)}
-                    placeholder="my-workspace"
+                    placeholder={t.modals.workspaceSlugPlaceholder}
                     className="border-0 shadow-none focus-visible:ring-0"
                   />
                 </div>
@@ -127,7 +128,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
             onClick={handleCreate}
             disabled={creating || !canSubmit}
           >
-            {creating ? "Creating..." : "Create workspace"}
+            {creating ? t.modals.creatingWorkspace : t.modals.createWorkspaceButton}
           </Button>
         </div>
       </DialogContent>

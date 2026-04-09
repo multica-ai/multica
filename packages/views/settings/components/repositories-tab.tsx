@@ -13,6 +13,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { WorkspaceRepo } from "@multica/core/types";
+import { useAppLocale } from "@multica/views/i18n";
 
 export function RepositoriesTab() {
   const user = useAuthStore((s) => s.user);
@@ -20,6 +21,7 @@ export function RepositoriesTab() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
+  const { t } = useAppLocale();
 
   const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
   const [saving, setSaving] = useState(false);
@@ -37,9 +39,9 @@ export function RepositoriesTab() {
     try {
       const updated = await api.updateWorkspace(workspace.id, { repos });
       updateWorkspace(updated);
-      toast.success("Repositories saved");
+      toast.success(t.settings.repositoriesSaved);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save repositories");
+      toast.error(e instanceof Error ? e.message : t.settings.failedToSaveRepositories);
     } finally {
       setSaving(false);
     }
@@ -62,12 +64,12 @@ export function RepositoriesTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Repositories</h2>
+        <h2 className="text-sm font-semibold">{t.settings.repositoriesTitle}</h2>
 
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              GitHub repositories associated with this workspace. Agents use these to clone and work on code.
+              {t.settings.repositoriesDescription}
             </p>
 
             {repos.map((repo, index) => (
@@ -78,7 +80,7 @@ export function RepositoriesTab() {
                     value={repo.url}
                     onChange={(e) => handleRepoChange(index, "url", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="https://github.com/org/repo"
+                    placeholder={t.settings.repoUrlPlaceholder}
                     className="text-sm"
                   />
                   <Input
@@ -86,7 +88,7 @@ export function RepositoriesTab() {
                     value={repo.description}
                     onChange={(e) => handleRepoChange(index, "description", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="Description (e.g. Go backend + Next.js frontend)"
+                    placeholder={t.settings.repoDescriptionPlaceholder}
                     className="text-sm"
                   />
                 </div>
@@ -107,7 +109,7 @@ export function RepositoriesTab() {
               <div className="flex items-center justify-between pt-1">
                 <Button variant="outline" size="sm" onClick={handleAddRepo}>
                   <Plus className="h-3 w-3" />
-                  Add repository
+                  {t.settings.addRepository}
                 </Button>
                 <Button
                   size="sm"
@@ -115,14 +117,14 @@ export function RepositoriesTab() {
                   disabled={saving}
                 >
                   <Save className="h-3 w-3" />
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? t.settings.saving : t.settings.save}
                 </Button>
               </div>
             )}
 
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can manage repositories.
+                {t.settings.onlyAdminsCanManageRepos}
               </p>
             )}
           </CardContent>

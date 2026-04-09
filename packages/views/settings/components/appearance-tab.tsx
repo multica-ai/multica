@@ -2,6 +2,7 @@
 
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
+import { useAppLocale, locales, localeLabels } from "@multica/views/i18n";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
@@ -78,28 +79,30 @@ function WindowMockup({
   );
 }
 
-const themeOptions = [
-  { value: "light" as const, label: "Light" },
-  { value: "dark" as const, label: "Dark" },
-  { value: "system" as const, label: "System" },
+const themeOptionKeys = [
+  { value: "light" as const, labelKey: "themeLight" as const },
+  { value: "dark" as const, labelKey: "themeDark" as const },
+  { value: "system" as const, labelKey: "themeSystem" as const },
 ];
 
 export function AppearanceTab() {
   const { theme, setTheme } = useTheme();
+  const { t, locale, setLocale } = useAppLocale();
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Theme</h2>
-        <div className="flex gap-6" role="radiogroup" aria-label="Theme">
-          {themeOptions.map((opt) => {
+        <h2 className="text-sm font-semibold">{t.settings.themeTitle}</h2>
+        <div className="flex gap-6" role="radiogroup" aria-label={t.settings.themeTitle}>
+          {themeOptionKeys.map((opt) => {
             const active = theme === opt.value;
+            const label = t.settings[opt.labelKey];
             return (
               <button
                 key={opt.value}
                 role="radio"
                 aria-checked={active}
-                aria-label={`Select ${opt.label} theme`}
+                aria-label={`${label}`}
                 onClick={() => setTheme(opt.value)}
                 className="group flex flex-col items-center gap-2"
               >
@@ -134,11 +137,31 @@ export function AppearanceTab() {
                       : "text-muted-foreground"
                   )}
                 >
-                  {opt.label}
+                  {label}
                 </span>
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t.settings.languageTitle}</h2>
+        <div className="flex gap-2">
+          {locales.map((l) => (
+            <button
+              key={l}
+              onClick={() => setLocale(l)}
+              className={cn(
+                "rounded-md border px-4 py-2 text-sm transition-colors",
+                locale === l
+                  ? "border-brand bg-brand/10 font-medium text-brand"
+                  : "border-border text-muted-foreground hover:border-foreground/20"
+              )}
+            >
+              {localeLabels[l]}
+            </button>
+          ))}
         </div>
       </section>
     </div>

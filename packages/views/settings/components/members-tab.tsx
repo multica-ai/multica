@@ -42,12 +42,22 @@ import { useWorkspaceStore } from "@multica/core/workspace";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { useAppLocale } from "../../i18n";
+import type { AppDict } from "../../i18n";
 
-const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
-  owner: { label: "Owner", icon: Crown, description: "Full access, manage all settings" },
-  admin: { label: "Admin", icon: Shield, description: "Manage members and settings" },
-  member: { label: "Member", icon: User, description: "Create and work on issues" },
+const roleIcons: Record<MemberRole, typeof Crown> = {
+  owner: Crown,
+  admin: Shield,
+  member: User,
 };
+
+function getRoleConfig(t: AppDict): Record<MemberRole, { label: string; icon: typeof Crown; description: string }> {
+  return {
+    owner: { label: t.settings.roleOwner, icon: Crown, description: t.settings.roleOwnerDescription },
+    admin: { label: t.settings.roleAdmin, icon: Shield, description: t.settings.roleAdminDescription },
+    member: { label: t.settings.roleMember, icon: User, description: t.settings.roleMemberDescription },
+  };
+}
 
 function MemberRow({
   member,
@@ -57,6 +67,7 @@ function MemberRow({
   busy,
   onRoleChange,
   onRemove,
+  t,
 }: {
   member: MemberWithUser;
   canManage: boolean;
@@ -65,7 +76,9 @@ function MemberRow({
   busy: boolean;
   onRoleChange: (role: MemberRole) => void;
   onRemove: () => void;
+  t: AppDict;
 }) {
+  const roleConfig = getRoleConfig(t);
   const rc = roleConfig[member.role];
   const RoleIcon = rc.icon;
   const canEditRole = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
@@ -93,7 +106,7 @@ function MemberRow({
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Shield className="h-3.5 w-3.5" />
-                  Change role
+                  {t.settings.changeRole}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-auto">
                   {(Object.entries(roleConfig) as [MemberRole, (typeof roleConfig)[MemberRole]][]).map(
@@ -126,7 +139,7 @@ function MemberRow({
             {canRemove && (
               <DropdownMenuItem variant="destructive" onClick={onRemove}>
                 <UserMinus className="h-3.5 w-3.5" />
-                Remove from workspace
+                {t.settings.removeFromWorkspace}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
@@ -146,6 +159,7 @@ export function MembersTab() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { t } = useAppLocale();
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
@@ -173,9 +187,9 @@ export function MembersTab() {
       setInviteEmail("");
       setInviteRole("member");
       qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-      toast.success("Member added");
+      toast.success(t.settings.memberAdded);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add member");
+      toast.error(e instanceof Error ? e.message : t.settings.failedToAddMember);
     } finally {
       setInviteLoading(false);
     }
@@ -187,9 +201,9 @@ export function MembersTab() {
     try {
       await api.updateMember(workspace.id, memberId, { role });
       qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-      toast.success("Role updated");
+      toast.success(t.settings.roleUpdated);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update member");
+      toast.error(e instanceof Error ? e.message : t.settings.failedToUpdateMember);
     } finally {
       setMemberActionId(null);
     }
@@ -198,17 +212,17 @@ export function MembersTab() {
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
     setConfirmAction({
-      title: `Remove ${member.name}`,
-      description: `Remove ${member.name} from ${workspace.name}? They will lose access to this workspace.`,
+      title: `${t.settings.removeFromWorkspace} ${member.name}`,
+      description: `${t.settings.removeFromWorkspace} ${member.name}?`,
       variant: "destructive",
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {
           await api.deleteMember(workspace.id, member.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          toast.success("Member removed");
+          toast.success(t.settings.memberRemoved);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to remove member");
+          toast.error(e instanceof Error ? e.message : t.settings.failedToRemoveMember);
         } finally {
           setMemberActionId(null);
         }
@@ -223,7 +237,7 @@ export function MembersTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Members ({members.length})</h2>
+          <h2 className="text-sm font-semibold">{t.settings.membersTitle} ({members.length})</h2>
         </div>
 
         {canManageWorkspace && (
@@ -231,28 +245,28 @@ export function MembersTab() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Add member</h3>
+                <h3 className="text-sm font-medium">{t.settings.addMember}</h3>
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
                   type="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="user@company.com"
+                  placeholder={t.settings.emailPlaceholder}
                 />
                 <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
                   <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    {isOwner && <SelectItem value="owner">Owner</SelectItem>}
+                    <SelectItem value="member">{t.settings.roleMember}</SelectItem>
+                    <SelectItem value="admin">{t.settings.roleAdmin}</SelectItem>
+                    {isOwner && <SelectItem value="owner">{t.settings.roleOwner}</SelectItem>}
                   </SelectContent>
                 </Select>
                 <Button
                   onClick={handleAddMember}
                   disabled={inviteLoading || !inviteEmail.trim()}
                 >
-                  {inviteLoading ? "Adding..." : "Add"}
+                  {inviteLoading ? t.settings.adding : t.settings.addButton}
                 </Button>
               </div>
             </CardContent>
@@ -271,12 +285,13 @@ export function MembersTab() {
                   busy={memberActionId === m.id}
                   onRoleChange={(role) => handleRoleChange(m.id, role)}
                   onRemove={() => handleRemoveMember(m)}
+                  t={t}
                 />
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No members found.</p>
+          <p className="text-sm text-muted-foreground">{t.settings.noMembersFound}</p>
         )}
       </section>
 
@@ -287,7 +302,7 @@ export function MembersTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -295,7 +310,7 @@ export function MembersTab() {
                 setConfirmAction(null);
               }}
             >
-              Confirm
+              {t.common.confirm}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
