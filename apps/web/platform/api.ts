@@ -1,6 +1,10 @@
 import { ApiClient } from "@multica/core/api/client";
 import { setApiInstance } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
+import {
+  clearStoredSession,
+  getUnauthorizedRedirectPath,
+} from "./auth-session";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -8,10 +12,10 @@ export const api = new ApiClient(API_BASE_URL, {
   logger: createLogger("api"),
   onUnauthorized: () => {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("multica_token");
-      localStorage.removeItem("multica_workspace_id");
-      if (window.location.pathname !== "/") {
-        window.location.href = "/";
+      clearStoredSession();
+      const redirectPath = getUnauthorizedRedirectPath(window.location.pathname);
+      if (redirectPath) {
+        window.location.href = redirectPath;
       }
     }
   },

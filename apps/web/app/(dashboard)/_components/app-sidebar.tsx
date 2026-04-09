@@ -48,6 +48,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useAuthStore } from "@/platform/auth";
 import { useWorkspaceStore } from "@/platform/workspace";
+import { clearStoredSession } from "@/platform/auth-session";
 import { useQuery } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@/platform/api";
@@ -100,6 +101,7 @@ export function AppSidebar() {
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate();
 
   const logout = () => {
+    clearStoredSession();
     router.push("/");
     authLogout();
     useWorkspaceStore.getState().clearWorkspace();

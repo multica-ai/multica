@@ -7,6 +7,7 @@ import { useNavigationStore } from "@multica/core/navigation";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
 import { useAuthStore } from "@/platform/auth";
 import { useWorkspaceStore } from "@/platform/workspace";
+import { clearStoredSession } from "@/platform/auth-session";
 import { WorkspaceIdProvider } from "@multica/core/hooks";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { SearchCommand } from "@/features/search";
@@ -26,6 +27,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!isLoading && !user) {
+      clearStoredSession();
       router.push("/");
     }
   }, [user, isLoading, router]);

@@ -6,6 +6,7 @@ import { useAuthStore } from "@/platform/auth";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import { useWorkspaceStore } from "@/platform/workspace";
 import { api } from "@/platform/api";
+import { clearStoredSession } from "@/platform/auth-session";
 import {
   Card,
   CardHeader,
@@ -68,6 +69,13 @@ function LoginPageContent() {
   const [submitting, setSubmitting] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [existingUser, setExistingUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("multica_token");
+    if (!token) {
+      clearStoredSession();
+    }
+  }, []);
 
   // Check for existing session when CLI callback is present.
   useEffect(() => {
