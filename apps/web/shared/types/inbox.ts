@@ -9,6 +9,8 @@ export type InboxItemType =
   | "status_changed"
   | "priority_changed"
   | "due_date_changed"
+  | "start_date_changed"
+  | "end_date_changed"
   | "new_comment"
   | "mentioned"
   | "review_requested"

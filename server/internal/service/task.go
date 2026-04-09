@@ -520,6 +520,8 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		"position":        issue.Position,
 		"due_date":        util.TimestampToPtr(issue.DueDate),
+		"start_date":      util.TimestampToPtr(issue.StartDate),
+		"end_date":        util.TimestampToPtr(issue.EndDate),
 		"created_at":      util.TimestampToString(issue.CreatedAt),
 		"updated_at":      util.TimestampToString(issue.UpdatedAt),
 	}

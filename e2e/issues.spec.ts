@@ -50,6 +50,82 @@ test.describe("Issues", () => {
     });
   });
 
+  test("can create and edit issue schedule dates", async ({ page }) => {
+    const title = "E2E Scheduled " + Date.now();
+    const schedule = await page.evaluate(() => {
+      const build = (offset: number) => {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() + offset);
+        return {
+          dataDay: date.toLocaleDateString(),
+          iso: date.toISOString(),
+          label: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        };
+      };
+
+      return {
+        start: build(0),
+        end: build(1),
+        updatedEnd: build(2),
+      };
+    });
+
+    await page.getByRole("button", { name: "New issue" }).click();
+    await page.getByLabel("Issue title").fill(title);
+
+    await page.getByRole("button", { name: "Start date" }).click();
+    await page.locator(`[data-slot="popover-content"] [data-day="${schedule.start.dataDay}"]`).last().click();
+
+    await page.getByRole("button", { name: "End date" }).click();
+    await page.locator(`[data-slot="popover-content"] [data-day="${schedule.end.dataDay}"]`).last().click();
+
+    await page.getByRole("button", { name: "Create Issue" }).click();
+
+    const issueLink = page.getByRole("link", { name: new RegExp(title) }).first();
+    await expect(issueLink).toBeVisible({ timeout: 10000 });
+    await issueLink.click();
+
+    await page.waitForURL(/\/issues\/[\w-]+/);
+    const issueId = page.url().split("/").pop();
+    if (!issueId) {
+      throw new Error("Missing issue id from detail URL");
+    }
+
+    await expect(page.getByRole("button", { name: schedule.start.label })).toBeVisible();
+    await expect(page.getByRole("button", { name: schedule.end.label })).toBeVisible();
+
+    await expect.poll(async () => {
+      const issue = await api.getIssue(issueId);
+      return {
+        start_date: issue.start_date,
+        end_date: issue.end_date,
+      };
+    }).toEqual({
+      start_date: schedule.start.iso,
+      end_date: schedule.end.iso,
+    });
+
+    await page.getByRole("button", { name: schedule.start.label }).click();
+    await page.getByRole("button", { name: "Clear date" }).click();
+    await expect(page.getByRole("button", { name: "Start date" })).toBeVisible();
+
+    await page.getByRole("button", { name: schedule.end.label }).click();
+    await page.locator(`[data-slot="popover-content"] [data-day="${schedule.updatedEnd.dataDay}"]`).last().click();
+    await expect(page.getByRole("button", { name: schedule.updatedEnd.label })).toBeVisible();
+
+    await expect.poll(async () => {
+      const issue = await api.getIssue(issueId);
+      return {
+        start_date: issue.start_date,
+        end_date: issue.end_date,
+      };
+    }).toEqual({
+      start_date: null,
+      end_date: schedule.updatedEnd.iso,
+    });
+  });
+
   test("can navigate to issue detail page", async ({ page }) => {
     const title = "E2E Detail Test " + Date.now();
     const issue = await api.createIssue(title);

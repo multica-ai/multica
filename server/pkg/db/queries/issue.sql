@@ -19,9 +19,9 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number
+    parent_issue_id, position, due_date, start_date, end_date, number
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -38,6 +38,8 @@ UPDATE issue SET
     assignee_id = sqlc.narg('assignee_id'),
     position = COALESCE(sqlc.narg('position'), position),
     due_date = sqlc.narg('due_date'),
+    start_date = sqlc.narg('start_date'),
+    end_date = sqlc.narg('end_date'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

@@ -48,6 +48,8 @@ const typeLabels: Record<InboxItemType, string> = {
   status_changed: "Status changed",
   priority_changed: "Priority changed",
   due_date_changed: "Due date changed",
+  start_date_changed: "Start date changed",
+  end_date_changed: "End date changed",
   new_comment: "New comment",
   mentioned: "Mentioned",
   review_requested: "Review requested",
@@ -74,6 +76,16 @@ function shortDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+  });
+}
+
+function shortDateTime(dateStr: string): string {
+  if (!dateStr) return "";
+  return new Date(dateStr).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -125,6 +137,14 @@ function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "due_date_changed": {
       if (details.to) return <span>Set due date to {shortDate(details.to)}</span>;
       return <span>Removed due date</span>;
+    }
+    case "start_date_changed": {
+      if (details.to) return <span>Set start date to {shortDateTime(details.to)}</span>;
+      return <span>Removed start date</span>;
+    }
+    case "end_date_changed": {
+      if (details.to) return <span>Set end date to {shortDateTime(details.to)}</span>;
+      return <span>Removed end date</span>;
     }
     case "new_comment": {
       if (item.body) return <span>{item.body}</span>;

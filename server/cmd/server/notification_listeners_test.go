@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -419,8 +420,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
@@ -673,5 +674,131 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	}
 	if sub1Items[0].Severity != "info" {
 		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
+	}
+}
+
+func TestNotification_StartDateChanged(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	sub1Email := "notif-sub1-startdate@multica.ai"
+	sub1ID := createTestUser(t, sub1Email)
+	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
+
+	startDate := "2026-04-15T00:00:00Z"
+	prevStartDate := "2026-04-10T00:00:00Z"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "start date test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				StartDate:   &startDate,
+			},
+			"assignee_changed":   false,
+			"status_changed":     false,
+			"start_date_changed": true,
+			"prev_start_date":    &prevStartDate,
+		},
+	})
+
+	actorItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(actorItems) != 0 {
+		t.Fatalf("expected 0 inbox items for actor, got %d", len(actorItems))
+	}
+
+	sub1Items := inboxItemsForRecipient(t, queries, sub1ID)
+	if len(sub1Items) != 1 {
+		t.Fatalf("expected 1 inbox item for sub1, got %d", len(sub1Items))
+	}
+	if sub1Items[0].Type != "start_date_changed" {
+		t.Fatalf("expected type 'start_date_changed', got %q", sub1Items[0].Type)
+	}
+	var startDetails map[string]string
+	if err := json.Unmarshal(sub1Items[0].Details, &startDetails); err != nil {
+		t.Fatalf("failed to unmarshal notification details: %v", err)
+	}
+	if startDetails["from"] != prevStartDate {
+		t.Fatalf("expected from detail %q, got %q", prevStartDate, startDetails["from"])
+	}
+	if startDetails["to"] != startDate {
+		t.Fatalf("expected to detail %q, got %q", startDate, startDetails["to"])
+	}
+}
+
+func TestNotification_EndDateChanged(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	sub1Email := "notif-sub1-enddate@multica.ai"
+	sub1ID := createTestUser(t, sub1Email)
+	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
+
+	prevEndDate := "2026-04-18T00:00:00Z"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "end date test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				EndDate:     nil,
+			},
+			"assignee_changed": false,
+			"status_changed":   false,
+			"end_date_changed": true,
+			"prev_end_date":    &prevEndDate,
+		},
+	})
+
+	sub1Items := inboxItemsForRecipient(t, queries, sub1ID)
+	if len(sub1Items) != 1 {
+		t.Fatalf("expected 1 inbox item for sub1, got %d", len(sub1Items))
+	}
+	if sub1Items[0].Type != "end_date_changed" {
+		t.Fatalf("expected type 'end_date_changed', got %q", sub1Items[0].Type)
+	}
+	var endDetails map[string]string
+	if err := json.Unmarshal(sub1Items[0].Details, &endDetails); err != nil {
+		t.Fatalf("failed to unmarshal notification details: %v", err)
+	}
+	if endDetails["from"] != prevEndDate {
+		t.Fatalf("expected from detail %q, got %q", prevEndDate, endDetails["from"])
+	}
+	if endDetails["to"] != "" {
+		t.Fatalf("expected empty to detail for cleared end date, got %q", endDetails["to"])
 	}
 }
