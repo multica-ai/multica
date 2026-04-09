@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,25 +19,27 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	Position      float64                 `json:"position"`
+	DueDate       *string                 `json:"due_date"`
+	StartDate     *string                 `json:"start_date"`
+	EndDate       *string                 `json:"end_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 }
 
 type agentTriggerSnapshot struct {
@@ -54,6 +57,76 @@ func defaultAgentTriggers() []byte {
 		{Type: "on_mention", Enabled: true},
 	})
 	return b
+}
+
+func parseOptionalRFC3339Timestamp(value *string, fieldName string) (pgtype.Timestamptz, error) {
+	if value == nil || *value == "" {
+		return pgtype.Timestamptz{}, nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339, *value)
+	if err != nil {
+		return pgtype.Timestamptz{}, fmt.Errorf("invalid %s format, expected RFC3339", fieldName)
+	}
+
+	return pgtype.Timestamptz{Time: parsed, Valid: true}, nil
+}
+
+func validateScheduleWindow(startDate, endDate pgtype.Timestamptz) error {
+	if startDate.Valid && endDate.Valid && startDate.Time.After(endDate.Time) {
+		return fmt.Errorf("start_date must be on or before end_date")
+	}
+
+	return nil
+}
+
+func stringPtrChanged(prev, next *string) bool {
+	switch {
+	case prev == nil && next == nil:
+		return false
+	case prev == nil || next == nil:
+		return true
+	default:
+		return *prev != *next
+	}
+}
+
+func hasRawField(rawFields map[string]json.RawMessage, field string) bool {
+	_, ok := rawFields[field]
+	return ok
+}
+
+func buildIssueUpdateEventPayload(prevIssue db.Issue, issue db.Issue, resp IssueResponse, rawFields map[string]json.RawMessage) (map[string]any, bool) {
+	prevDescription := textToPtr(prevIssue.Description)
+	prevDueDate := timestampToPtr(prevIssue.DueDate)
+	prevStartDate := timestampToPtr(prevIssue.StartDate)
+	prevEndDate := timestampToPtr(prevIssue.EndDate)
+
+	assigneeChanged := (hasRawField(rawFields, "assignee_type") || hasRawField(rawFields, "assignee_id")) &&
+		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
+
+	return map[string]any{
+		"issue":               resp,
+		"assignee_changed":    assigneeChanged,
+		"status_changed":      hasRawField(rawFields, "status") && prevIssue.Status != issue.Status,
+		"priority_changed":    hasRawField(rawFields, "priority") && prevIssue.Priority != issue.Priority,
+		"due_date_changed":    hasRawField(rawFields, "due_date") && stringPtrChanged(prevDueDate, resp.DueDate),
+		"start_date_changed":  hasRawField(rawFields, "start_date") && stringPtrChanged(prevStartDate, resp.StartDate),
+		"end_date_changed":    hasRawField(rawFields, "end_date") && stringPtrChanged(prevEndDate, resp.EndDate),
+		"description_changed": hasRawField(rawFields, "description") && stringPtrChanged(prevDescription, resp.Description),
+		"title_changed":       hasRawField(rawFields, "title") && prevIssue.Title != issue.Title,
+		"prev_title":          prevIssue.Title,
+		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
+		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
+		"prev_status":         prevIssue.Status,
+		"prev_priority":       prevIssue.Priority,
+		"prev_due_date":       prevDueDate,
+		"prev_start_date":     prevStartDate,
+		"prev_end_date":       prevEndDate,
+		"prev_description":    prevDescription,
+		"creator_type":        prevIssue.CreatorType,
+		"creator_id":          uuidToString(prevIssue.CreatorID),
+	}, assigneeChanged
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -74,6 +147,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		Position:      i.Position,
 		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     timestampToPtr(i.StartDate),
+		EndDate:       timestampToPtr(i.EndDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
@@ -170,14 +245,16 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateIssueRequest struct {
-	Title              string  `json:"title"`
-	Description        *string `json:"description"`
-	Status             string  `json:"status"`
-	Priority           string  `json:"priority"`
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         *string `json:"assignee_id"`
-	ParentIssueID      *string `json:"parent_issue_id"`
-	DueDate            *string `json:"due_date"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	DueDate       *string `json:"due_date"`
+	StartDate     *string `json:"start_date"`
+	EndDate       *string `json:"end_date"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -231,14 +308,24 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueID = parseUUID(*req.ParentIssueID)
 	}
 
-	var dueDate pgtype.Timestamptz
-	if req.DueDate != nil && *req.DueDate != "" {
-		t, err := time.Parse(time.RFC3339, *req.DueDate)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
-			return
-		}
-		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
+	dueDate, err := parseOptionalRFC3339Timestamp(req.DueDate, "due_date")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	startDate, err := parseOptionalRFC3339Timestamp(req.StartDate, "start_date")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	endDate, err := parseOptionalRFC3339Timestamp(req.EndDate, "end_date")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateScheduleWindow(startDate, endDate); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// Use a transaction to atomically increment the workspace issue counter
@@ -262,19 +349,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        parseUUID(workspaceID),
-		Title:              req.Title,
-		Description:        ptrToText(req.Description),
-		Status:             status,
-		Priority:           priority,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
-		ParentIssueID:      parentIssueID,
-		Position:           0,
-		DueDate:            dueDate,
-		Number:             issueNumber,
+		WorkspaceID:   parseUUID(workspaceID),
+		Title:         req.Title,
+		Description:   ptrToText(req.Description),
+		Status:        status,
+		Priority:      priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   creatorType,
+		CreatorID:     parseUUID(actualCreatorID),
+		ParentIssueID: parentIssueID,
+		Position:      0,
+		DueDate:       dueDate,
+		StartDate:     startDate,
+		EndDate:       endDate,
+		Number:        issueNumber,
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -303,14 +392,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
+	Title        *string  `json:"title"`
+	Description  *string  `json:"description"`
+	Status       *string  `json:"status"`
+	Priority     *string  `json:"priority"`
+	AssigneeType *string  `json:"assignee_type"`
+	AssigneeID   *string  `json:"assignee_id"`
+	Position     *float64 `json:"position"`
+	DueDate      *string  `json:"due_date"`
+	StartDate    *string  `json:"start_date"`
+	EndDate      *string  `json:"end_date"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -345,6 +436,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		AssigneeType: prevIssue.AssigneeType,
 		AssigneeID:   prevIssue.AssigneeID,
 		DueDate:      prevIssue.DueDate,
+		StartDate:    prevIssue.StartDate,
+		EndDate:      prevIssue.EndDate,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -379,16 +472,33 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
-		if req.DueDate != nil && *req.DueDate != "" {
-			t, err := time.Parse(time.RFC3339, *req.DueDate)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
-				return
-			}
-			params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
-		} else {
-			params.DueDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+		parsedDueDate, err := parseOptionalRFC3339Timestamp(req.DueDate, "due_date")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
 		}
+		params.DueDate = parsedDueDate
+	}
+	if _, ok := rawFields["start_date"]; ok {
+		parsedStartDate, err := parseOptionalRFC3339Timestamp(req.StartDate, "start_date")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.StartDate = parsedStartDate
+	}
+	if _, ok := rawFields["end_date"]; ok {
+		parsedEndDate, err := parseOptionalRFC3339Timestamp(req.EndDate, "end_date")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.EndDate = parsedEndDate
+	}
+
+	if err := validateScheduleWindow(params.StartDate, params.EndDate); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// Enforce agent visibility: private agents can only be assigned by owner/admin.
@@ -409,38 +519,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
-
-	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
-		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
-	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
-	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
-	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevDueDate := timestampToPtr(prevIssue.DueDate)
-	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
-		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
+	payload, assigneeChanged := buildIssueUpdateEventPayload(prevIssue, issue, resp, rawFields)
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-		"issue":               resp,
-		"assignee_changed":    assigneeChanged,
-		"status_changed":      statusChanged,
-		"priority_changed":    priorityChanged,
-		"due_date_changed":    dueDateChanged,
-		"description_changed": descriptionChanged,
-		"title_changed":       titleChanged,
-		"prev_title":          prevIssue.Title,
-		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
-		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
-		"prev_status":         prevIssue.Status,
-		"prev_priority":       prevIssue.Priority,
-		"prev_due_date":       prevDueDate,
-		"prev_description":    textToPtr(prevIssue.Description),
-		"creator_type":        prevIssue.CreatorType,
-		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, payload)
 
 	// Reconcile task queue when assignee changes (not on status changes —
 	// agents manage issue status themselves via the CLI).
@@ -649,6 +732,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeType: prevIssue.AssigneeType,
 			AssigneeID:   prevIssue.AssigneeID,
 			DueDate:      prevIssue.DueDate,
+			StartDate:    prevIssue.StartDate,
+			EndDate:      prevIssue.EndDate,
 		}
 
 		if req.Updates.Title != nil {
@@ -681,15 +766,29 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
-			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
-				t, err := time.Parse(time.RFC3339, *req.Updates.DueDate)
-				if err != nil {
-					continue
-				}
-				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
-			} else {
-				params.DueDate = pgtype.Timestamptz{Valid: false}
+			parsedDueDate, err := parseOptionalRFC3339Timestamp(req.Updates.DueDate, "due_date")
+			if err != nil {
+				continue
 			}
+			params.DueDate = parsedDueDate
+		}
+		if _, ok := rawUpdates["start_date"]; ok {
+			parsedStartDate, err := parseOptionalRFC3339Timestamp(req.Updates.StartDate, "start_date")
+			if err != nil {
+				continue
+			}
+			params.StartDate = parsedStartDate
+		}
+		if _, ok := rawUpdates["end_date"]; ok {
+			parsedEndDate, err := parseOptionalRFC3339Timestamp(req.Updates.EndDate, "end_date")
+			if err != nil {
+				continue
+			}
+			params.EndDate = parsedEndDate
+		}
+
+		if err := validateScheduleWindow(params.StartDate, params.EndDate); err != nil {
+			continue
 		}
 
 		// Enforce agent visibility for batch assignment.
@@ -708,18 +807,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		payload, assigneeChanged := buildIssueUpdateEventPayload(prevIssue, issue, resp, rawUpdates)
 
-		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
-			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
-		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
-
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-			"issue":            resp,
-			"assignee_changed": assigneeChanged,
-			"status_changed":   statusChanged,
-			"priority_changed": priorityChanged,
-		})
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, payload)
 
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)

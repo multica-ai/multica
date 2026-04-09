@@ -33,7 +33,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/shared/api";
-import { useRouter, useSearchParams } from "@/shared/router";
+import { usePathname, useRouter, useSearchParams } from "@/shared/router";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
 
@@ -48,6 +48,8 @@ const typeLabels: Record<InboxItemType, string> = {
   status_changed: "Status changed",
   priority_changed: "Priority changed",
   due_date_changed: "Due date changed",
+  start_date_changed: "Start date changed",
+  end_date_changed: "End date changed",
   new_comment: "New comment",
   mentioned: "Mentioned",
   review_requested: "Review requested",
@@ -74,6 +76,16 @@ function shortDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+  });
+}
+
+function shortDateTime(dateStr: string): string {
+  if (!dateStr) return "";
+  return new Date(dateStr).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -125,6 +137,14 @@ function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "due_date_changed": {
       if (details.to) return <span>Set due date to {shortDate(details.to)}</span>;
       return <span>Removed due date</span>;
+    }
+    case "start_date_changed": {
+      if (details.to) return <span>Set start date to {shortDateTime(details.to)}</span>;
+      return <span>Removed start date</span>;
+    }
+    case "end_date_changed": {
+      if (details.to) return <span>Set end date to {shortDateTime(details.to)}</span>;
+      return <span>Removed end date</span>;
     }
     case "new_comment": {
       if (item.body) return <span>{item.body}</span>;
@@ -222,6 +242,7 @@ function InboxListItem({
 
 export default function InboxPage() {
   const isMobile = useIsMobile();
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlIssue = searchParams.get("issue") ?? "";
@@ -235,9 +256,10 @@ export default function InboxPage() {
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
-    const url = key ? `/inbox?issue=${key}` : "/inbox";
+    const basePath = pathname === "/" ? "/" : "/inbox";
+    const url = key ? `${basePath}?issue=${key}` : basePath;
     router.replace(url);
-  }, [router]);
+  }, [pathname, router]);
 
   const items = useInboxStore((s) => s.dedupedItems());
   const loading = useInboxStore((s) => s.loading);

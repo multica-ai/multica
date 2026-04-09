@@ -18,7 +18,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -311,7 +310,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 	})
 
-	// issue:updated — handle assignee changes, status changes, priority, due date
+	// issue:updated — handle assignee changes, status changes, priority, and schedule dates
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
@@ -425,6 +424,44 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				nil, "due_date_changed", "info",
 				issue.Title, "",
 				dueDateDetails)
+		}
+
+		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+			prevStartDateStr := ""
+			if prevStartDate, ok := payload["prev_start_date"].(*string); ok && prevStartDate != nil {
+				prevStartDateStr = *prevStartDate
+			}
+			newStartDateStr := ""
+			if issue.StartDate != nil {
+				newStartDateStr = *issue.StartDate
+			}
+			startDateDetails, _ := json.Marshal(map[string]string{
+				"from": prevStartDateStr,
+				"to":   newStartDateStr,
+			})
+			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
+				nil, "start_date_changed", "info",
+				issue.Title, "",
+				startDateDetails)
+		}
+
+		if endDateChanged, _ := payload["end_date_changed"].(bool); endDateChanged {
+			prevEndDateStr := ""
+			if prevEndDate, ok := payload["prev_end_date"].(*string); ok && prevEndDate != nil {
+				prevEndDateStr = *prevEndDate
+			}
+			newEndDateStr := ""
+			if issue.EndDate != nil {
+				newEndDateStr = *issue.EndDate
+			}
+			endDateDetails, _ := json.Marshal(map[string]string{
+				"from": prevEndDateStr,
+				"to":   newEndDateStr,
+			})
+			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
+				nil, "end_date_changed", "info",
+				issue.Title, "",
+				endDateDetails)
 		}
 
 		// Notify NEW @mentions in description

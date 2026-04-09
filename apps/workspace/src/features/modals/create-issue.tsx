@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { CalendarDays, Check, ChevronRight, Maximize2, Minimize2, UserMinus, X as XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
+import type { UpdateIssueRequest, IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
 import {
   Dialog,
   DialogContent,
@@ -21,12 +21,11 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { ContentEditor, type ContentEditorRef } from "@/features/editor";
 import { TitleEditor } from "@/features/editor";
-import { StatusIcon, PriorityIcon } from "@/features/issues/components";
+import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker } from "@/features/issues/components";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
@@ -61,6 +60,17 @@ function PillButton({
   );
 }
 
+function shortDateTime(date: string | null): string {
+  if (!date) return "";
+
+  return new Date(date).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // CreateIssueModal
 // ---------------------------------------------------------------------------
@@ -84,14 +94,13 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [startDate, setStartDate] = useState<string | null>(draft.startDate);
+  const [endDate, setEndDate] = useState<string | null>(draft.endDate);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Assignee popover
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [assigneeFilter, setAssigneeFilter] = useState("");
-
-  // Due date popover
-  const [dueDateOpen, setDueDateOpen] = useState(false);
 
   // File upload
   const { uploadWithToast } = useFileUpload();
@@ -117,6 +126,19 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     setDraft({ assigneeType: type, assigneeId: id });
   };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+  const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
+  const updateEndDate = (v: string | null) => { setEndDate(v); setDraft({ endDate: v }); };
+  const handleDateUpdate = (updates: Partial<UpdateIssueRequest>) => {
+    if ("start_date" in updates) {
+      updateStartDate(updates.start_date ?? null);
+    }
+    if ("end_date" in updates) {
+      updateEndDate(updates.end_date ?? null);
+    }
+    if ("due_date" in updates) {
+      updateDueDate(updates.due_date ?? null);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
@@ -129,6 +151,8 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
         due_date: dueDate || undefined,
       });
       useIssueStore.getState().addIssue(issue);
@@ -375,46 +399,52 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
             </PopoverContent>
           </Popover>
 
-          {/* Due date */}
-          <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
-            <PopoverTrigger
-              render={
-                <PillButton>
-                  <CalendarDays className="size-3.5 text-muted-foreground" />
-                  {dueDateObj ? (
-                    <span>{dueDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                  ) : (
-                    <span className="text-muted-foreground">Due date</span>
-                  )}
-                </PillButton>
-              }
-            />
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={dueDateObj}
-                onSelect={(d: Date | undefined) => {
-                  updateDueDate(d ? d.toISOString() : null);
-                  setDueDateOpen(false);
-                }}
-              />
-              {dueDateObj && (
-                <div className="border-t px-3 py-2">
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => {
-                      updateDueDate(null);
-                      setDueDateOpen(false);
-                    }}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    Clear date
-                  </Button>
-                </div>
-              )}
-            </PopoverContent>
-          </Popover>
+          <IssueDateTimePicker
+            field="start_date"
+            dateTimeValue={startDate}
+            onUpdate={handleDateUpdate}
+            trigger={
+              <PillButton>
+                <CalendarDays className="size-3.5 text-muted-foreground" />
+                {startDate ? (
+                  <span>{shortDateTime(startDate)}</span>
+                ) : (
+                  <span className="text-muted-foreground">Start date</span>
+                )}
+              </PillButton>
+            }
+          />
+
+          <IssueDateTimePicker
+            field="end_date"
+            dateTimeValue={endDate}
+            onUpdate={handleDateUpdate}
+            trigger={
+              <PillButton>
+                <CalendarDays className="size-3.5 text-muted-foreground" />
+                {endDate ? (
+                  <span>{shortDateTime(endDate)}</span>
+                ) : (
+                  <span className="text-muted-foreground">End date</span>
+                )}
+              </PillButton>
+            }
+          />
+
+          <DueDatePicker
+            dueDate={dueDate}
+            onUpdate={handleDateUpdate}
+            trigger={
+              <PillButton>
+                <CalendarDays className="size-3.5 text-muted-foreground" />
+                {dueDateObj ? (
+                  <span>{dueDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                ) : (
+                  <span className="text-muted-foreground">Due date</span>
+                )}
+              </PillButton>
+            }
+          />
         </div>
 
         {/* Footer */}

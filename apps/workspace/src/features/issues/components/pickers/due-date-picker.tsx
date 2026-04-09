@@ -18,7 +18,7 @@ export function DueDatePicker({
 }: {
   dueDate: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
-  trigger?: React.ReactNode;
+  trigger?: React.ReactElement;
 }) {
   const [open, setOpen] = useState(false);
   const date = dueDate ? new Date(dueDate) : undefined;
@@ -26,8 +26,10 @@ export function DueDatePicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors">
-        {customTrigger ?? (
+      {customTrigger ? (
+        <PopoverTrigger render={customTrigger} />
+      ) : (
+        <PopoverTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors">
           <>
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
@@ -38,8 +40,8 @@ export function DueDatePicker({
               <span className="text-muted-foreground">Due date</span>
             )}
           </>
-        )}
-      </PopoverTrigger>
+        </PopoverTrigger>
+      )}
       <PopoverContent className="w-auto p-0" align="start">
         <Calendar
           mode="single"

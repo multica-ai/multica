@@ -171,6 +171,64 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
+		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+			prevStartDate := ""
+			if v, ok := payload["prev_start_date"].(*string); ok && v != nil {
+				prevStartDate = *v
+			}
+			newStartDate := ""
+			if issue.StartDate != nil {
+				newStartDate = *issue.StartDate
+			}
+			details, _ := json.Marshal(map[string]string{
+				"from": prevStartDate,
+				"to":   newStartDate,
+			})
+			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				WorkspaceID: parseUUID(issue.WorkspaceID),
+				IssueID:     parseUUID(issue.ID),
+				ActorType:   util.StrToText(e.ActorType),
+				ActorID:     parseUUID(e.ActorID),
+				Action:      "start_date_changed",
+				Details:     details,
+			})
+			if err != nil {
+				slog.Error("activity: failed to record start date change",
+					"issue_id", issue.ID, "error", err)
+			} else {
+				publishActivityEvent(bus, e, activity)
+			}
+		}
+
+		if endDateChanged, _ := payload["end_date_changed"].(bool); endDateChanged {
+			prevEndDate := ""
+			if v, ok := payload["prev_end_date"].(*string); ok && v != nil {
+				prevEndDate = *v
+			}
+			newEndDate := ""
+			if issue.EndDate != nil {
+				newEndDate = *issue.EndDate
+			}
+			details, _ := json.Marshal(map[string]string{
+				"from": prevEndDate,
+				"to":   newEndDate,
+			})
+			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				WorkspaceID: parseUUID(issue.WorkspaceID),
+				IssueID:     parseUUID(issue.ID),
+				ActorType:   util.StrToText(e.ActorType),
+				ActorID:     parseUUID(e.ActorID),
+				Action:      "end_date_changed",
+				Details:     details,
+			})
+			if err != nil {
+				slog.Error("activity: failed to record end date change",
+					"issue_id", issue.ID, "error", err)
+			} else {
+				publishActivityEvent(bus, e, activity)
+			}
+		}
+
 		if titleChanged, _ := payload["title_changed"].(bool); titleChanged {
 			prevTitle, _ := payload["prev_title"].(string)
 			details, _ := json.Marshal(map[string]string{

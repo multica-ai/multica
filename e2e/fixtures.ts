@@ -105,6 +105,11 @@ export class TestApiClient {
     return issue;
   }
 
+  async getIssue(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}`);
+    return res.json();
+  }
+
   async listRuntimes() {
     const wsId = this.workspaceId;
     if (!wsId) {

@@ -59,7 +59,7 @@ import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@/shared/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
-import { StatusIcon, PriorityIcon, DueDatePicker, AssigneePicker, canAssignAgent } from "@/features/issues/components";
+import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, AssigneePicker, canAssignAgent } from "@/features/issues/components";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
@@ -79,6 +79,16 @@ function shortDate(date: string | null): string {
   return new Date(date).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+  });
+}
+
+function shortDateTime(date: string | null): string {
+  if (!date) return "—";
+  return new Date(date).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -116,6 +126,16 @@ function formatActivity(
       if (!details.to) return "removed due date";
       const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
       return `set due date to ${formatted}`;
+    }
+    case "start_date_changed": {
+      if (!details.to) return "removed start date";
+      const formatted = shortDateTime(details.to);
+      return `set start date to ${formatted}`;
+    }
+    case "end_date_changed": {
+      if (!details.to) return "removed end date";
+      const formatted = shortDateTime(details.to);
+      return `set end date to ${formatted}`;
     }
     case "title_changed":
       return `renamed this issue from "${details.from ?? "?"}" to "${details.to ?? "?"}"`;
@@ -869,14 +889,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                         const details = (entry.details ?? {}) as Record<string, string>;
                         const isStatusChange = entry.action === "status_changed";
                         const isPriorityChange = entry.action === "priority_changed";
-                        const isDueDateChange = entry.action === "due_date_changed";
+                        const isScheduleDateChange = entry.action === "due_date_changed" || entry.action === "start_date_changed" || entry.action === "end_date_changed";
 
                         let leadIcon: React.ReactNode;
                         if (isStatusChange && details.to) {
                           leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
                         } else if (isPriorityChange && details.to) {
                           leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-                        } else if (isDueDateChange) {
+                        } else if (isScheduleDateChange) {
                           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
                         } else {
                           leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
@@ -1007,6 +1027,24 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   assigneeId={issue.assignee_id}
                   onUpdate={handleUpdateField}
                   align="start"
+                />
+              </PropRow>
+
+              {/* Start date */}
+              <PropRow label="Start date">
+                <IssueDateTimePicker
+                  field="start_date"
+                  dateTimeValue={issue.start_date}
+                  onUpdate={handleUpdateField}
+                />
+              </PropRow>
+
+              {/* End date */}
+              <PropRow label="End date">
+                <IssueDateTimePicker
+                  field="end_date"
+                  dateTimeValue={issue.end_date}
+                  onUpdate={handleUpdateField}
                 />
               </PropRow>
 

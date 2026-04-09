@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 var testHandler *Handler
@@ -156,6 +158,25 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+func assertTimestampPtrEqual(t *testing.T, actual *string, expected string, field string) {
+	t.Helper()
+	if actual == nil {
+		t.Fatalf("%s: expected %q, got nil", field, expected)
+	}
+
+	expectedTime, err := time.Parse(time.RFC3339Nano, expected)
+	if err != nil {
+		t.Fatalf("%s: failed to parse expected timestamp %q: %v", field, expected, err)
+	}
+	actualTime, err := time.Parse(time.RFC3339Nano, *actual)
+	if err != nil {
+		t.Fatalf("%s: failed to parse actual timestamp %q: %v", field, *actual, err)
+	}
+	if !actualTime.Equal(expectedTime) {
+		t.Fatalf("%s: expected %q, got %q", field, expected, *actual)
+	}
+}
+
 func TestIssueCRUD(t *testing.T) {
 	// Create
 	w := httptest.NewRecorder()
@@ -249,6 +270,235 @@ func TestIssueCRUD(t *testing.T) {
 	testHandler.GetIssue(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GetIssue after delete: expected 404, got %d", w.Code)
+	}
+}
+
+func TestIssueScheduleDates(t *testing.T) {
+	createStartDate := "2026-04-10T00:00:00Z"
+	createEndDate := "2026-04-15T00:00:00Z"
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Scheduled issue",
+		"status":     "todo",
+		"start_date": createStartDate,
+		"end_date":   createEndDate,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	assertTimestampPtrEqual(t, created.StartDate, createStartDate, "CreateIssue start_date")
+	assertTimestampPtrEqual(t, created.EndDate, createEndDate, "CreateIssue end_date")
+
+	issueID := created.ID
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/issues/"+issueID, nil)
+		req = withURLParam(req, "id", issueID)
+		testHandler.DeleteIssue(w, req)
+	})
+
+	// Get the issue to verify single-issue responses include schedule dates.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+issueID, nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var fetched IssueResponse
+	json.NewDecoder(w.Body).Decode(&fetched)
+	assertTimestampPtrEqual(t, fetched.StartDate, createStartDate, "GetIssue start_date")
+	assertTimestampPtrEqual(t, fetched.EndDate, createEndDate, "GetIssue end_date")
+
+	// List responses should also include the stored schedule dates.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var listResp struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	json.NewDecoder(w.Body).Decode(&listResp)
+	var listed *IssueResponse
+	for i := range listResp.Issues {
+		if listResp.Issues[i].ID == issueID {
+			listed = &listResp.Issues[i]
+			break
+		}
+	}
+	if listed == nil {
+		t.Fatalf("ListIssues: expected issue %s in response", issueID)
+	}
+	assertTimestampPtrEqual(t, listed.StartDate, createStartDate, "ListIssues start_date")
+	assertTimestampPtrEqual(t, listed.EndDate, createEndDate, "ListIssues end_date")
+
+	// Update only the start date and keep the previous end date.
+	updatedStartDate := "2026-04-11T00:00:00Z"
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"start_date": updatedStartDate,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated IssueResponse
+	json.NewDecoder(w.Body).Decode(&updated)
+	assertTimestampPtrEqual(t, updated.StartDate, updatedStartDate, "UpdateIssue start_date")
+	assertTimestampPtrEqual(t, updated.EndDate, createEndDate, "UpdateIssue end_date")
+
+	// Clear only the end date.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"end_date": nil,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue clear end_date: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cleared IssueResponse
+	json.NewDecoder(w.Body).Decode(&cleared)
+	if cleared.EndDate != nil {
+		t.Fatalf("UpdateIssue clear end_date: expected nil end_date, got %#v", cleared.EndDate)
+	}
+	assertTimestampPtrEqual(t, cleared.StartDate, updatedStartDate, "UpdateIssue clear end_date start_date")
+}
+
+func TestIssueScheduleDatesRejectInvalidRange(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Invalid schedule",
+		"start_date": "2026-04-20T00:00:00Z",
+		"end_date":   "2026-04-10T00:00:00Z",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue invalid range: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "start_date must be on or before end_date") {
+		t.Fatalf("CreateIssue invalid range: unexpected body %s", w.Body.String())
+	}
+
+	createStartDate := "2026-04-10T00:00:00Z"
+	createEndDate := "2026-04-15T00:00:00Z"
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Valid schedule",
+		"start_date": createStartDate,
+		"end_date":   createEndDate,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue valid range: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	issueID := created.ID
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/issues/"+issueID, nil)
+		req = withURLParam(req, "id", issueID)
+		testHandler.DeleteIssue(w, req)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"start_date": "2026-04-18T00:00:00Z",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateIssue invalid range: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "start_date must be on or before end_date") {
+		t.Fatalf("UpdateIssue invalid range: unexpected body %s", w.Body.String())
+	}
+}
+
+func TestIssueUpdatePublishesScheduleDateMetadata(t *testing.T) {
+	createStartDate := "2026-04-10T00:00:00Z"
+	createEndDate := "2026-04-15T00:00:00Z"
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Metadata schedule issue",
+		"start_date": createStartDate,
+		"end_date":   createEndDate,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	issueID := created.ID
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/issues/"+issueID, nil)
+		req = withURLParam(req, "id", issueID)
+		testHandler.DeleteIssue(w, req)
+	})
+
+	eventsCh := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+		if len(eventsCh) == 0 {
+			eventsCh <- e
+		}
+	})
+
+	updatedStartDate := "2026-04-12T00:00:00Z"
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"start_date": updatedStartDate,
+		"end_date":   nil,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case evt := <-eventsCh:
+		payload, ok := evt.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("expected map payload, got %T", evt.Payload)
+		}
+		if changed, _ := payload["start_date_changed"].(bool); !changed {
+			t.Fatalf("expected start_date_changed to be true")
+		}
+		if changed, _ := payload["end_date_changed"].(bool); !changed {
+			t.Fatalf("expected end_date_changed to be true")
+		}
+		prevStartDate, _ := payload["prev_start_date"].(*string)
+		assertTimestampPtrEqual(t, prevStartDate, createStartDate, "prev_start_date")
+		prevEndDate, _ := payload["prev_end_date"].(*string)
+		assertTimestampPtrEqual(t, prevEndDate, createEndDate, "prev_end_date")
+		issue, ok := payload["issue"].(IssueResponse)
+		if !ok {
+			t.Fatalf("expected IssueResponse payload, got %T", payload["issue"])
+		}
+		assertTimestampPtrEqual(t, issue.StartDate, updatedStartDate, "updated issue start_date")
+		if issue.EndDate != nil {
+			t.Fatalf("expected cleared end_date, got %#v", issue.EndDate)
+		}
+	default:
+		t.Fatal("expected issue update event")
 	}
 }
 
@@ -656,11 +906,11 @@ func TestResolveActor(t *testing.T) {
 	})
 
 	tests := []struct {
-		name            string
-		agentIDHeader   string
-		taskIDHeader    string
-		wantActorType   string
-		wantIsAgent     bool
+		name          string
+		agentIDHeader string
+		taskIDHeader  string
+		wantActorType string
+		wantIsAgent   bool
 	}{
 		{
 			name:          "no headers returns member",

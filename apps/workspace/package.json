@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "sh -c 'vite --host 0.0.0.0 --port \"${FRONTEND_PORT:-3000}\"'",
+    "dev": "vite dev",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port \"${FRONTEND_PORT:-3000}\"",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"

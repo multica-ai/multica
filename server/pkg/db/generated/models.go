@@ -175,6 +175,8 @@ type Issue struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
+	StartDate          pgtype.Timestamptz `json:"start_date"`
+	EndDate            pgtype.Timestamptz `json:"end_date"`
 }
 
 type IssueDependency struct {

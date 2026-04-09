@@ -156,7 +156,7 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":  true,
+			"assignee_changed":   true,
 			"prev_assignee_type": (*string)(nil),
 			"prev_assignee_id":   (*string)(nil),
 		},
@@ -218,6 +218,113 @@ func TestActivityIssueUpdated_NoChangeFlags(t *testing.T) {
 	activities := listActivitiesForIssue(t, queries, issueID)
 	if len(activities) != 0 {
 		t.Fatalf("expected 0 activities when no change flags, got %d", len(activities))
+	}
+}
+
+func TestActivityIssueUpdated_StartDateChanged(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupActivities(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	startDate := "2026-04-15T00:00:00Z"
+	prevStartDate := "2026-04-10T00:00:00Z"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "activity test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				StartDate:   &startDate,
+			},
+			"start_date_changed": true,
+			"prev_start_date":    &prevStartDate,
+		},
+	})
+
+	activities := listActivitiesForIssue(t, queries, issueID)
+	if len(activities) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(activities))
+	}
+	if activities[0].Action != "start_date_changed" {
+		t.Fatalf("expected action 'start_date_changed', got %q", activities[0].Action)
+	}
+
+	var details map[string]string
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal details: %v", err)
+	}
+	if details["from"] != prevStartDate {
+		t.Fatalf("expected from %q, got %q", prevStartDate, details["from"])
+	}
+	if details["to"] != startDate {
+		t.Fatalf("expected to %q, got %q", startDate, details["to"])
+	}
+}
+
+func TestActivityIssueUpdated_EndDateChanged(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupActivities(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	prevEndDate := "2026-04-20T00:00:00Z"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "activity test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				EndDate:     nil,
+			},
+			"end_date_changed": true,
+			"prev_end_date":    &prevEndDate,
+		},
+	})
+
+	activities := listActivitiesForIssue(t, queries, issueID)
+	if len(activities) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(activities))
+	}
+	if activities[0].Action != "end_date_changed" {
+		t.Fatalf("expected action 'end_date_changed', got %q", activities[0].Action)
+	}
+
+	var details map[string]string
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal details: %v", err)
+	}
+	if details["from"] != prevEndDate {
+		t.Fatalf("expected from %q, got %q", prevEndDate, details["from"])
+	}
+	if details["to"] != "" {
+		t.Fatalf("expected empty to value for cleared end date, got %q", details["to"])
 	}
 }
 
