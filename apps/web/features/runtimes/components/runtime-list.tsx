@@ -1,6 +1,6 @@
 import { Server } from "lucide-react";
 import type { AgentRuntime } from "@/shared/types";
-import { RuntimeModeIcon } from "./shared";
+import { ProviderLogo } from "./provider-logo";
 
 function RuntimeListItem({
   runtime,
@@ -23,7 +23,7 @@ function RuntimeListItem({
           runtime.status === "online" ? "bg-success/10" : "bg-muted"
         }`}
       >
-        <RuntimeModeIcon mode={runtime.runtime_mode} />
+        <ProviderLogo provider={runtime.provider} className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{runtime.name}</div>
