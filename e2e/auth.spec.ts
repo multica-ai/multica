@@ -1,23 +1,21 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { loginAsDefault } from "./helpers";
 
 test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(page.locator("h1")).toContainText("Multica");
-    await expect(page.locator('input[placeholder="Email"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="Name"]')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toContainText(
-      "Sign in",
-    );
+    await expect(page.getByText("Multica")).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
   });
 
   test("login and redirect to /issues", async ({ page }) => {
-    await loginAsDefault(page);
+    await loginAsDefault(page, test.info().parallelIndex);
 
     await expect(page).toHaveURL(/\/issues/);
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Issues", exact: true })).toBeVisible();
   });
 
   test("unauthenticated user is redirected to /login", async ({ page }) => {
@@ -28,19 +26,15 @@ test.describe("Authentication", () => {
     });
 
     await page.goto("/issues");
-    await page.waitForURL("**/login", { timeout: 10000 });
+    await page.waitForURL(/\/login(?:\?|$)/, { timeout: 10000 });
   });
 
   test("logout redirects to /login", async ({ page }) => {
-    await loginAsDefault(page);
+    await loginAsDefault(page, test.info().parallelIndex);
 
-    // Open the workspace dropdown menu
-    await openWorkspaceMenu(page);
+    await page.getByRole("button", { name: "Log out" }).click();
 
-    // Click Sign out
-    await page.locator("text=Sign out").click();
-
-    await page.waitForURL("**/login", { timeout: 10000 });
+    await page.waitForURL(/\/login(?:\?|$)/, { timeout: 10000 });
     await expect(page).toHaveURL(/\/login/);
   });
 });

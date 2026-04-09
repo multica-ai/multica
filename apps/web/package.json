@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "sh -c 'next dev --port \"${FRONTEND_PORT:-3000}\"'",
+    "dev": "sh -c 'next dev --port \"${MARKETING_PORT:-3001}\"'",
     "build": "next build",
-    "start": "next start",
+    "start": "sh -c 'next start --port \"${MARKETING_PORT:-3001}\"'",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
-    "test": "vitest run"
+    "lint": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

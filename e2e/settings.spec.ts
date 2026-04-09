@@ -1,42 +1,56 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { loginAsDefault } from "./helpers";
 
 test.describe("Settings", () => {
   test("updating workspace name reflects in sidebar immediately", async ({
     page,
   }) => {
-    await loginAsDefault(page);
+    await loginAsDefault(page, test.info().parallelIndex);
 
-    // Read the current workspace name from the sidebar
-    const sidebarName = page.locator("aside button").first();
-    const originalName = await sidebarName.innerText();
+    const workspaceMenu = page.getByRole("button", { name: "Workspace menu" });
+    const originalName = (await workspaceMenu.innerText()).trim();
 
-    // Navigate to settings
-    await openWorkspaceMenu(page);
-    await page.locator("text=Settings").click();
+    await page.getByRole("link", { name: "Settings" }).click();
     await page.waitForURL("**/settings");
 
-    // Change workspace name
-    const nameInput = page
-      .locator('input[type="text"]')
-      .first();
+    await page.getByRole("tab", { name: "General" }).click();
+
+    const nameInput = page.locator('input[type="text"]').first();
     await nameInput.clear();
     const newName = "Renamed WS " + Date.now();
     await nameInput.fill(newName);
 
-    // Save
     await page.locator("button", { hasText: "Save" }).click();
 
-    // Wait for "Saved!" confirmation
-    await expect(page.locator("text=Saved!")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Workspace settings saved").last()).toBeVisible({
+      timeout: 5000,
+    });
 
-    // Sidebar should reflect the new name WITHOUT page refresh
-    await expect(sidebarName).toContainText(newName);
+    await expect(workspaceMenu).toContainText(newName);
 
-    // Restore original name so other tests aren't affected
     await nameInput.clear();
     await nameInput.fill(originalName.trim());
     await page.locator("button", { hasText: "Save" }).click();
-    await expect(page.locator("text=Saved!")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Workspace settings saved").last()).toBeVisible({
+      timeout: 5000,
+    });
+  });
+
+  test("mobile settings uses top tabs above content", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await loginAsDefault(page, test.info().parallelIndex);
+
+    await page.goto("/settings");
+    await page.waitForURL(/\/settings$/);
+
+    const tabsList = page.locator('[data-slot="tabs-list"]').first();
+    const contentHeading = page.getByRole("heading", { name: "Profile" });
+
+    const tabsBox = await tabsList.boundingBox();
+    const headingBox = await contentHeading.boundingBox();
+
+    expect(tabsBox).not.toBeNull();
+    expect(headingBox).not.toBeNull();
+    expect(headingBox!.y).toBeGreaterThan((tabsBox!.y + tabsBox!.height) - 1);
   });
 });

@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>Workspace Mobile Navigation Preview</title>
+    <style>
+      :root {
+        --bg: #eef1f7;
+        --panel: #f8fafc;
+        --surface: #ffffff;
+        --surface-alt: #f3f4f6;
+        --surface-muted: #eef2f7;
+        --border: #d8dee8;
+        --border-strong: #c4cbd7;
+        --text: #111827;
+        --muted: #667085;
+        --muted-strong: #475467;
+        --accent: #2563eb;
+        --accent-soft: #dbeafe;
+        --success: #16a34a;
+        --shadow:
+          0 24px 60px rgba(15, 23, 42, 0.12),
+          0 8px 20px rgba(15, 23, 42, 0.08);
+        --phone-shadow:
+          0 32px 80px rgba(15, 23, 42, 0.16),
+          0 12px 30px rgba(15, 23, 42, 0.12);
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+        --radius-md: 14px;
+        --radius-sm: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          "SF Pro Text",
+          "Segoe UI",
+          "Helvetica Neue",
+          Helvetica,
+          sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(37, 99, 235, 0.12), transparent 28%),
+          linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
+        color: var(--text);
+      }
+
+      .page {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 48px 20px 64px;
+      }
+
+      .hero {
+        padding: 0 4px 28px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.08);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .hero h1 {
+        margin: 16px 0 10px;
+        font-size: clamp(28px, 4vw, 44px);
+        line-height: 1.08;
+      }
+
+      .hero p {
+        max-width: 720px;
+        margin: 0;
+        color: var(--muted-strong);
+        font-size: 17px;
+        line-height: 1.7;
+      }
+
+      .note {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border: 1px solid rgba(37, 99, 235, 0.14);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--muted-strong);
+        font-size: 14px;
+        line-height: 1.7;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+      }
+
+      .gallery {
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+      }
+
+      .shot {
+        padding: 24px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .shot-header {
+        margin-bottom: 18px;
+      }
+
+      .shot-header h2 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+
+      .shot-header p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .phone-wrap {
+        display: flex;
+        justify-content: center;
+      }
+
+      .phone {
+        position: relative;
+        width: min(100%, 390px);
+        min-height: 812px;
+        padding: 12px;
+        border-radius: 38px;
+        background:
+          linear-gradient(180deg, #1f2937 0%, #111827 100%);
+        box-shadow: var(--phone-shadow);
+      }
+
+      .phone::before {
+        content: "";
+        position: absolute;
+        top: 14px;
+        left: 50%;
+        width: 124px;
+        height: 28px;
+        transform: translateX(-50%);
+        border-radius: 0 0 16px 16px;
+        background: #0b1220;
+        z-index: 4;
+      }
+
+      .screen {
+        position: relative;
+        overflow: hidden;
+        min-height: 788px;
+        border-radius: 28px;
+        background:
+          linear-gradient(180deg, #fdfefe 0%, #f5f7fa 100%);
+      }
+
+      .screen-content {
+        padding-top: 10px;
+      }
+
+      .statusbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 18px 4px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .signal {
+        display: inline-flex;
+        gap: 3px;
+        align-items: flex-end;
+      }
+
+      .signal span {
+        display: block;
+        width: 4px;
+        background: var(--muted);
+        border-radius: 999px;
+      }
+
+      .signal span:nth-child(1) { height: 6px; }
+      .signal span:nth-child(2) { height: 9px; }
+      .signal span:nth-child(3) { height: 12px; }
+      .signal span:nth-child(4) { height: 14px; }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px 10px;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(14px);
+      }
+
+      .topbar-title {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .topbar-title .label {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .topbar-title .name {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .icon-btn {
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--surface-muted);
+        color: var(--text);
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .icon-btn.ghost {
+        background: transparent;
+        color: var(--muted-strong);
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted-strong);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .pill.active {
+        border-color: rgba(37, 99, 235, 0.18);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .section {
+        padding: 18px 16px 0;
+      }
+
+      .page-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .page-head h3 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .page-head p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .tag-row,
+      .chip-row {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+      }
+
+      .tag-row::-webkit-scrollbar,
+      .chip-row::-webkit-scrollbar {
+        display: none;
+      }
+
+      .tag {
+        flex: 0 0 auto;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--muted-strong);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .tag.active {
+        border-color: rgba(37, 99, 235, 0.16);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .chip {
+        flex: 0 0 auto;
+        padding: 9px 12px;
+        border-radius: 12px;
+        background: var(--surface-alt);
+        color: var(--muted-strong);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .chip.strong {
+        background: #111827;
+        color: #ffffff;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .card {
+        padding: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        border-radius: 18px;
+        background: var(--surface);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+      }
+
+      .card .kicker {
+        margin: 0 0 8px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .card h4 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .issue-meta,
+      .agent-meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .meta-pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: var(--surface-muted);
+        color: var(--muted-strong);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .meta-pill.good {
+        background: rgba(22, 163, 74, 0.12);
+        color: var(--success);
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .list-item {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+        align-items: start;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+      }
+
+      .list-item:last-child {
+        border-bottom: 0;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .list-item h5 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .list-item p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .list-item .time {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .input {
+        min-height: 42px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #ffffff;
+        color: var(--text);
+        font-size: 14px;
+      }
+
+      .textarea {
+        min-height: 118px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: #ffffff;
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .profile-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .avatar {
+        width: 54px;
+        height: 54px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%);
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 10px;
+      }
+
+      .primary-btn,
+      .secondary-btn {
+        min-height: 42px;
+        padding: 0 16px;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .primary-btn {
+        background: #111827;
+        color: #ffffff;
+      }
+
+      .secondary-btn {
+        background: var(--surface-alt);
+        color: var(--muted-strong);
+      }
+
+      .drawer-demo {
+        position: relative;
+        min-height: 788px;
+      }
+
+      .drawer-demo::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.42);
+      }
+
+      .drawer {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 2;
+        width: 286px;
+        padding: 22px 18px;
+        background: rgba(252, 252, 253, 0.98);
+        border-right: 1px solid rgba(15, 23, 42, 0.08);
+      }
+
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .workspace-badge {
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #111827 0%, #1f2937 100%);
+        color: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .drawer-title {
+        min-width: 0;
+      }
+
+      .drawer-title strong,
+      .drawer-title span {
+        display: block;
+      }
+
+      .drawer-title span {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .drawer-section {
+        margin-top: 18px;
+      }
+
+      .drawer-section .label {
+        margin: 0 0 8px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .nav-list {
+        display: grid;
+        gap: 4px;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 42px;
+        padding: 0 12px;
+        border-radius: 12px;
+        color: var(--muted-strong);
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .nav-item.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .nav-icon {
+        width: 18px;
+        text-align: center;
+        color: inherit;
+      }
+
+      .split-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(37, 99, 235, 0.08);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .footer-note {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: 32px 14px 48px;
+        }
+
+        .shot {
+          padding: 18px;
+          border-radius: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <span class="eyebrow">Preview HTML</span>
+        <h1>Workspace mobile navigation preview</h1>
+        <p>
+          这个示意稿只用来确认移动端工作区的层级关系。方向更接近 Jira：
+          顶部只保留工具栏，一级导航收进侧滑菜单，当前页面自己的菜单放在内容上方。
+        </p>
+        <div class="note">
+          重点确认三件事：顶部工具栏是否足够轻、一级导航是否应该收进侧滑菜单、
+          以及双栏页面在手机上是否统一改成“列表进入详情再返回”的单列结构。
+        </div>
+      </header>
+
+      <main class="gallery">
+        <section class="shot">
+          <div class="shot-header">
+            <h2>1. Issues main view</h2>
+            <p>
+              顶部只放菜单入口、工作区名和新建入口。当前页面的范围切换和筛选操作放在内容上方，
+              不把整套一级导航铺在顶部。
+            </p>
+          </div>
+          <div class="phone-wrap">
+            <div class="phone">
+              <div class="screen">
+                <div class="screen-content">
+                  <div class="statusbar">
+                    <span>9:41</span>
+                    <span class="signal" aria-hidden="true">
+                      <span></span><span></span><span></span><span></span>
+                    </span>
+                  </div>
+                  <div class="topbar">
+                    <button class="icon-btn" aria-label="Open navigation">
+                      &#9776;
+                    </button>
+                    <div class="topbar-title">
+                      <span class="label">Workspace</span>
+                      <span class="name">aircjm's Workspace</span>
+                    </div>
+                    <button class="icon-btn" aria-label="Create new issue">
+                      &#43;
+                    </button>
+                  </div>
+
+                  <div class="section">
+                    <div class="page-head">
+                      <div>
+                        <h3>Issues</h3>
+                        <p>Focus on team work without showing the full app menu.</p>
+                      </div>
+                      <span class="pill active">12 open</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="tag-row">
+                      <span class="tag active">All</span>
+                      <span class="tag">Members</span>
+                      <span class="tag">Agents</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="chip-row">
+                      <span class="chip">Filter</span>
+                      <span class="chip">Display</span>
+                      <span class="chip strong">Board</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="stack">
+                      <div class="card">
+                        <p class="kicker">In progress</p>
+                        <h4>Refine runtime setup copy</h4>
+                        <p>
+                          The page-level controls stay local to Issues. The global
+                          app menu no longer competes for this same space.
+                        </p>
+                        <div class="issue-meta">
+                          <span class="meta-pill">Agent</span>
+                          <span class="meta-pill good">Working</span>
+                          <span class="meta-pill">High priority</span>
+                        </div>
+                      </div>
+
+                      <div class="card">
+                        <p class="kicker">Todo</p>
+                        <h4>Fix mobile detail drill-in</h4>
+                        <p>
+                          Deep links such as <code>/issues/:id</code> still belong
+                          to the Issues area, but they do not add another global nav
+                          bar.
+                        </p>
+                        <div class="issue-meta">
+                          <span class="meta-pill">Member</span>
+                          <span class="meta-pill">Needs review</span>
+                        </div>
+                      </div>
+
+                      <div class="card">
+                        <p class="kicker">Review</p>
+                        <h4>Unify page-level filters</h4>
+                        <p>
+                          Filters, display settings, and view mode remain compact so
+                          the top of the page stays short on a phone.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="split-note">
+                      Global menu stays hidden until the user opens the side drawer.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="shot">
+          <div class="shot-header">
+            <h2>2. Primary navigation opened</h2>
+            <p>
+              一级导航收进左侧菜单，和工作区切换、退出登录分区显示。这样更接近 Jira 的层级，
+              也不会把手机顶部塞满。
+            </p>
+          </div>
+          <div class="phone-wrap">
+            <div class="phone">
+              <div class="screen drawer-demo">
+                <div class="screen-content">
+                  <div class="statusbar">
+                    <span>9:41</span>
+                    <span class="signal" aria-hidden="true">
+                      <span></span><span></span><span></span><span></span>
+                    </span>
+                  </div>
+                  <div class="topbar">
+                    <button class="icon-btn">&#9776;</button>
+                    <div class="topbar-title">
+                      <span class="label">Workspace</span>
+                      <span class="name">aircjm's Workspace</span>
+                    </div>
+                    <button class="icon-btn">&#43;</button>
+                  </div>
+
+                  <div class="section">
+                    <div class="page-head">
+                      <div>
+                        <h3>Issues</h3>
+                        <p>Background page stays visible under the drawer.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <aside class="drawer" aria-label="Primary navigation drawer">
+                  <div class="drawer-head">
+                    <div class="workspace-badge">M</div>
+                    <div class="drawer-title">
+                      <strong>aircjm's Workspace</strong>
+                      <span>workspace menu, switcher, and account actions</span>
+                    </div>
+                  </div>
+
+                  <div class="drawer-section">
+                    <p class="label">Navigation</p>
+                    <div class="nav-list">
+                      <div class="nav-item"><span class="nav-icon">I</span>Inbox</div>
+                      <div class="nav-item"><span class="nav-icon">M</span>My Issues</div>
+                      <div class="nav-item active"><span class="nav-icon">L</span>Issues</div>
+                      <div class="nav-item"><span class="nav-icon">A</span>Agents</div>
+                      <div class="nav-item"><span class="nav-icon">R</span>Runtimes</div>
+                      <div class="nav-item"><span class="nav-icon">S</span>Skills</div>
+                      <div class="nav-item"><span class="nav-icon">G</span>Settings</div>
+                    </div>
+                  </div>
+
+                  <div class="drawer-section">
+                    <p class="label">Workspace</p>
+                    <div class="nav-list">
+                      <div class="nav-item"><span class="nav-icon">W</span>Switch workspace</div>
+                      <div class="nav-item"><span class="nav-icon">N</span>New issue</div>
+                    </div>
+                  </div>
+
+                  <div class="drawer-section">
+                    <p class="label">Account</p>
+                    <div class="nav-list">
+                      <div class="nav-item"><span class="nav-icon">Q</span>Log out</div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="shot">
+          <div class="shot-header">
+            <h2>3. Settings with top sub-navigation</h2>
+            <p>
+              `Settings` 在手机上不再保留左侧二级菜单，改为内容上方横向滚动切换。
+              一级导航仍然在侧滑菜单里，不会和这里混在一起。
+            </p>
+          </div>
+          <div class="phone-wrap">
+            <div class="phone">
+              <div class="screen">
+                <div class="screen-content">
+                  <div class="statusbar">
+                    <span>9:41</span>
+                    <span class="signal" aria-hidden="true">
+                      <span></span><span></span><span></span><span></span>
+                    </span>
+                  </div>
+                  <div class="topbar">
+                    <button class="icon-btn">&#9776;</button>
+                    <div class="topbar-title">
+                      <span class="label">Workspace</span>
+                      <span class="name">aircjm's Workspace</span>
+                    </div>
+                    <button class="icon-btn">&#43;</button>
+                  </div>
+
+                  <div class="section">
+                    <div class="page-head">
+                      <div>
+                        <h3>Settings</h3>
+                        <p>Page-level navigation sits above the content only.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="tag-row">
+                      <span class="tag active">Profile</span>
+                      <span class="tag">Appearance</span>
+                      <span class="tag">API Tokens</span>
+                      <span class="tag">General</span>
+                      <span class="tag">Repositories</span>
+                      <span class="tag">Members</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <div class="profile-row">
+                        <div class="avatar">A</div>
+                        <div>
+                          <p class="kicker">Profile</p>
+                          <h4>Visible account settings</h4>
+                          <p>Sub-navigation stays close to the form it controls.</p>
+                        </div>
+                      </div>
+
+                      <div class="stack" style="margin-top: 18px;">
+                        <div class="field">
+                          <label>Name</label>
+                          <div class="input">aircjm</div>
+                        </div>
+                        <div class="field">
+                          <label>Email</label>
+                          <div class="input">aircjm@example.com</div>
+                        </div>
+                        <div class="button-row">
+                          <div class="primary-btn">Update Profile</div>
+                          <div class="secondary-btn">Cancel</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="split-note">
+                      The left settings rail disappears on mobile and becomes a top tab row.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="shot">
+          <div class="shot-header">
+            <h2>4. Inbox detail in single-column drill-in</h2>
+            <p>
+              `Inbox` 这类原本左右分栏的页面，在手机上改成单列结构：先看列表，点进后看详情，
+              顶部用返回表示当前处于详情态。
+            </p>
+          </div>
+          <div class="phone-wrap">
+            <div class="phone">
+              <div class="screen">
+                <div class="screen-content">
+                  <div class="statusbar">
+                    <span>9:41</span>
+                    <span class="signal" aria-hidden="true">
+                      <span></span><span></span><span></span><span></span>
+                    </span>
+                  </div>
+                  <div class="topbar">
+                    <button class="icon-btn ghost" aria-label="Back to inbox list">
+                      &#8592;
+                    </button>
+                    <div class="topbar-title">
+                      <span class="label">Inbox detail</span>
+                      <span class="name">Back to notification list</span>
+                    </div>
+                    <button class="icon-btn">&#43;</button>
+                  </div>
+
+                  <div class="section">
+                    <div class="page-head">
+                      <div>
+                        <h3>Inbox</h3>
+                        <p>Detail view opened from <code>/inbox?issue=...</code></p>
+                      </div>
+                      <span class="pill">Unread</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <p class="kicker">Selected notification</p>
+                      <h4>Runtime setup copy needs review</h4>
+                      <p>
+                        Instead of keeping the list squeezed on the left, the phone
+                        shows the selected item as a full detail screen with a clear
+                        back action.
+                      </p>
+                      <div class="issue-meta">
+                        <span class="meta-pill">Issue assigned</span>
+                        <span class="meta-pill">2m ago</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="chip-row">
+                      <span class="chip strong">Comment</span>
+                      <span class="chip">Open issue</span>
+                      <span class="chip">Archive</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <p class="kicker">Latest comment</p>
+                      <h4>Highlight the next action</h4>
+                      <p>
+                        "The mobile flow should not keep the list visible. Show the
+                        issue thread directly and let the user go back when needed."
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <p class="kicker">Quick reply</p>
+                      <div class="textarea">
+                        Leave a comment and return to the list when finished.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="split-note">
+                      Same rule applies to other split pages such as Runtimes and Skills.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="shot">
+          <div class="shot-header">
+            <h2>5. Agents detail with local sub-navigation</h2>
+            <p>
+              `Agents` 详情页保留自己的横向菜单，但这层菜单只作用于当前 agent。
+              全局页面切换仍然回到侧滑菜单处理。
+            </p>
+          </div>
+          <div class="phone-wrap">
+            <div class="phone">
+              <div class="screen">
+                <div class="screen-content">
+                  <div class="statusbar">
+                    <span>9:41</span>
+                    <span class="signal" aria-hidden="true">
+                      <span></span><span></span><span></span><span></span>
+                    </span>
+                  </div>
+                  <div class="topbar">
+                    <button class="icon-btn ghost" aria-label="Back to agents list">
+                      &#8592;
+                    </button>
+                    <div class="topbar-title">
+                      <span class="label">Agents</span>
+                      <span class="name">Back to agent list</span>
+                    </div>
+                    <button class="icon-btn">&#43;</button>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <p class="kicker">Selected agent</p>
+                      <h4>Deep Research Agent</h4>
+                      <p>
+                        Agent detail becomes a full mobile page instead of competing
+                        with the list panel on the left.
+                      </p>
+                      <div class="agent-meta">
+                        <span class="meta-pill good">Working</span>
+                        <span class="meta-pill">Cloud runtime</span>
+                        <span class="meta-pill">Workspace visible</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="tag-row">
+                      <span class="tag active">Instructions</span>
+                      <span class="tag">Skills</span>
+                      <span class="tag">Tools</span>
+                      <span class="tag">Triggers</span>
+                      <span class="tag">Tasks</span>
+                      <span class="tag">Settings</span>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <p class="kicker">Instructions</p>
+                      <div class="textarea">
+                        Focus on deep problem analysis, summarize findings clearly,
+                        and return with concrete next actions for the team.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="card">
+                      <p class="kicker">Recent tasks</p>
+                      <div class="list">
+                        <div class="list-item">
+                          <span class="dot"></span>
+                          <div>
+                            <h5>Audit workspace routing</h5>
+                            <p>Completed with 4 concrete changes.</p>
+                          </div>
+                          <span class="time">5m</span>
+                        </div>
+                        <div class="list-item">
+                          <span class="dot" style="background:#94a3b8;"></span>
+                          <div>
+                            <h5>Review responsive settings layout</h5>
+                            <p>Waiting for design approval.</p>
+                          </div>
+                          <span class="time">12m</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="split-note">
+                      Local tabs still exist, but only inside the current agent detail page.
+                    </div>
+                    <p class="footer-note">
+                      `Runtimes` and `Skills` follow the same mobile rule: list first,
+                      then detail, then a clear back path.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -145,6 +145,12 @@ pnpm install
 cp .env.example .env
 make setup
 make start
+
+# Optional: use air for Go hot reload while starting everything together
+go install github.com/air-verse/air@latest
+pnpm dev:air
+# or
+make start-air
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.

@@ -17,8 +17,15 @@ set +a
 POSTGRES_DB="${POSTGRES_DB:-multica}"
 POSTGRES_USER="${POSTGRES_USER:-multica}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-multica}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable}"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
+
+if psql "$DATABASE_URL" -Atqc "SELECT 1" > /dev/null 2>&1; then
+  echo "✓ PostgreSQL already reachable. Application database: $POSTGRES_DB"
+  exit 0
+fi
 
 echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
 docker compose up -d postgres

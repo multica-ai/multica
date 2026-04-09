@@ -21,7 +21,9 @@ postgres_db="multica_${slug}_${offset}"
 postgres_port=5432
 backend_port=$((18080 + offset))
 frontend_port=$((13000 + offset))
+marketing_port=$((14000 + offset))
 frontend_origin="http://localhost:${frontend_port}"
+marketing_origin="http://localhost:${marketing_port}"
 
 cat > "$ENV_FILE" <<EOF
 POSTGRES_DB=${postgres_db}
@@ -41,8 +43,13 @@ GOOGLE_REDIRECT_URI=${frontend_origin}/auth/callback
 
 FRONTEND_PORT=${frontend_port}
 FRONTEND_ORIGIN=${frontend_origin}
+MARKETING_PORT=${marketing_port}
+MARKETING_SITE_ORIGIN=${marketing_origin}
 NEXT_PUBLIC_API_URL=http://localhost:${backend_port}
 NEXT_PUBLIC_WS_URL=ws://localhost:${backend_port}/ws
+VITE_API_URL=
+VITE_WS_URL=
+WORKSPACE_DIST_DIR=../apps/workspace/dist
 EOF
 
 echo "Generated $ENV_FILE for worktree '$worktree_name'"
@@ -50,6 +57,7 @@ echo "  Shared Postgres: localhost:${postgres_port}"
 echo "  Database: ${postgres_db}"
 echo "  Backend:  http://localhost:${backend_port}"
 echo "  Frontend: ${frontend_origin}"
+echo "  Marketing: ${marketing_origin}"
 echo ""
 echo "Next steps:"
 echo "  make setup-worktree"

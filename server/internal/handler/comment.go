@@ -389,9 +389,14 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		}
 		agentUUID := parseUUID(m.ID)
 		// Prevent duplicate: skip if this agent is the issue's assignee
-		// (already handled by the on_comment trigger above).
-		if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" &&
-			issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == m.ID {
+		// (already handled by the on_comment trigger above) — but only
+		// when the issue is in a non-terminal status where on_comment
+		// will actually fire. For done/cancelled issues on_comment is
+		// suppressed, so an explicit @mention must still go through.
+		isAssignee := issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" &&
+			issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == m.ID
+		isTerminal := issue.Status == "done" || issue.Status == "cancelled"
+		if isAssignee && !isTerminal {
 			continue
 		}
 		// Load the agent to check visibility, archive status, and trigger config.
