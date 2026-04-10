@@ -53,6 +53,7 @@
     "@types/linkify-it": "^5.0.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "rehype-sanitize": "^6.0.0",
     "typescript": "catalog:"
   }
 }

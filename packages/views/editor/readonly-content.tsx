@@ -23,6 +23,7 @@ import ReactMarkdown, {
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 // @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
@@ -40,6 +41,32 @@ import "./content-editor.css";
 // ---------------------------------------------------------------------------
 
 const lowlight = createLowlight(common);
+
+// ---------------------------------------------------------------------------
+// Sanitization schema — extends GitHub defaults to allow file-card data attrs
+// ---------------------------------------------------------------------------
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      "dataType",
+      "dataHref",
+      "dataFilename",
+    ],
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      ["className", /^language-/],
+      ["className", /^hljs/],
+    ],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      "alt",
+    ],
+  },
+};
 
 // ---------------------------------------------------------------------------
 // URL transform — allow mention:// protocol through react-markdown's sanitizer
@@ -243,7 +270,7 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
     <div className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
         remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
         urlTransform={urlTransform}
         components={components}
       >
