@@ -43,6 +43,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Inject working directory hint if set on the issue or project.
+	if ctx.WorkingDir != "" {
+		b.WriteString("## Working Directory\n\n")
+		fmt.Fprintf(&b, "Your primary working directory is `%s`.\n", ctx.WorkingDir)
+		b.WriteString("Start there. Do not create a new workdir from scratch unless explicitly asked.\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")

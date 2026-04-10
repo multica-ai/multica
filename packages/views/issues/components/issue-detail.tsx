@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { DirInput } from "../../common/dir-input";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -1223,6 +1224,16 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ProjectPicker
                   projectId={issue.project_id}
                   onUpdate={handleUpdateField}
+                />
+              </PropRow>
+
+              {/* Working Directory */}
+              <PropRow label="Work dir">
+                <DirInput
+                  inputKey={issue.id}
+                  value={issue.working_directory}
+                  className="flex-1 min-w-0"
+                  onCommit={(dir) => handleUpdateField({ working_directory: dir })}
                 />
               </PropRow>
             </div>}

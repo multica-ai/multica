@@ -198,6 +198,7 @@ type Issue struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	WorkingDirectory   pgtype.Text        `json:"working_directory"`
 }
 
 type IssueDependency struct {
@@ -268,17 +269,18 @@ type PinnedItem struct {
 }
 
 type Project struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Title       string             `json:"title"`
-	Description pgtype.Text        `json:"description"`
-	Icon        pgtype.Text        `json:"icon"`
-	Status      string             `json:"status"`
-	LeadType    pgtype.Text        `json:"lead_type"`
-	LeadID      pgtype.UUID        `json:"lead_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Priority    string             `json:"priority"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Title            string             `json:"title"`
+	Description      pgtype.Text        `json:"description"`
+	Icon             pgtype.Text        `json:"icon"`
+	Status           string             `json:"status"`
+	LeadType         pgtype.Text        `json:"lead_type"`
+	LeadID           pgtype.UUID        `json:"lead_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	Priority         string             `json:"priority"`
+	WorkingDirectory pgtype.Text        `json:"working_directory"`
 }
 
 type RuntimeGlobalSkill struct {

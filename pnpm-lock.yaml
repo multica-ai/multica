@@ -36,9 +36,6 @@ catalogs:
     clsx:
       specifier: ^2.1.1
       version: 2.1.1
-    dotenv:
-      specifier: ^17.3.1
-      version: 17.3.1
     jsdom:
       specifier: ^29.0.1
       version: 29.0.1
@@ -414,9 +411,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 6.0.1(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1))
-      dotenv:
-        specifier: 'catalog:'
-        version: 17.3.1
       jsdom:
         specifier: 'catalog:'
         version: 29.0.1(@noble/hashes@1.8.0)

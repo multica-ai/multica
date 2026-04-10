@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback, useRef } from "react";
-import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -22,7 +21,6 @@ import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
-import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -33,7 +31,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
+import { DirInput } from "../../common/dir-input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,11 +44,6 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import {
   AlertDialog,
@@ -64,33 +57,36 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 
 // ---------------------------------------------------------------------------
-// Property row — sidebar property display
+// Property pill — inline clickable pill for status/lead
 // ---------------------------------------------------------------------------
 
-function PropRow({
-  label,
+function PropertyPill({
   children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+  className,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs truncate">
-        {children}
-      </div>
-    </div>
+    <button
+      type="button"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+        "hover:bg-accent/60 transition-colors cursor-pointer",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Project Issues — reuses the existing issues list/board components
+// Project Issues Tab — reuses the existing issues list/board components
 // ---------------------------------------------------------------------------
 
 const projectViewStore = createIssueViewStore("project_issues_view");
 
-function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
+function ProjectIssuesTab({ projectIssues }: { projectIssues: Issue[] }) {
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -102,6 +98,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
     () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
     [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
   );
+
   const doneColumnCount = useMemo(
     () => projectIssues.filter((issue) => issue.status === "done").length,
     [projectIssues],
@@ -175,12 +172,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
           doneTotal={doneColumnCount}
         />
       ) : (
-        <ListView
-          issues={issues}
-          visibleStatuses={visibleStatuses}
-          childProgressMap={childProgressMap}
-          doneTotal={doneColumnCount}
-        />
+        <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} doneTotal={doneColumnCount} />
       )}
     </div>
   );
@@ -208,14 +200,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const descEditorRef = useRef<ContentEditorRef>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [propertiesOpen, setPropertiesOpen] = useState(true);
-
-  // Sidebar panel
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_project_detail_layout",
-  });
-  const sidebarRef = usePanelRef();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState<"overview" | "issues">("overview");
 
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);
@@ -262,7 +247,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     return <div className="flex items-center justify-center h-full text-muted-foreground">Project not found</div>;
   }
 
-  const issueMetrics = getProjectIssueMetrics(project, projectIssues);
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
 
@@ -340,270 +324,253 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           >
             <Link2 className="h-4 w-4" />
           </Button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant={sidebarOpen ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  className={sidebarOpen ? "" : "text-muted-foreground"}
-                  onClick={() => {
-                    const panel = sidebarRef.current;
-                    if (!panel) return;
-                    if (panel.isCollapsed()) panel.expand();
-                    else panel.collapse();
-                  }}
-                >
-                  <PanelRight className="h-4 w-4" />
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
-          </Tooltip>
         </div>
       </div>
 
-      {/* Main content — issues list + sidebar */}
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-        <ResizablePanel id="content" minSize="50%">
-          <div className="flex h-full flex-col">
-            <ViewStoreProvider store={projectViewStore}>
-              <IssuesHeader scopedIssues={projectIssues} />
-              <ProjectIssuesContent projectIssues={projectIssues} />
-              <BatchActionToolbar />
-            </ViewStoreProvider>
-          </div>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel
-          id="sidebar"
-          defaultSize={sidebarOpen ? 320 : 0}
-          minSize={260}
-          maxSize={420}
-          collapsible
-          groupResizeBehavior="preserve-pixel-size"
-          panelRef={sidebarRef}
-          onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+      {/* Tab bar */}
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b px-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("overview")}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+            activeTab === "overview"
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          )}
         >
-          {/* RIGHT: Properties sidebar */}
-          <div className="overflow-y-auto border-l h-full">
-            <div className="p-4 space-y-5">
-              {/* Icon + Title */}
-              <div>
-                <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-                  <PopoverTrigger
-                    render={
-                      <button
-                        type="button"
-                        className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                        title="Change icon"
-                      >
-                        {project.icon || "📁"}
-                      </button>
-                    }
-                  />
-                  <PopoverContent align="start" className="w-auto p-0">
-                    <EmojiPicker
-                      onSelect={(emoji) => {
-                        handleUpdateField({ icon: emoji });
-                        setIconPickerOpen(false);
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
+          Overview
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("issues")}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+            activeTab === "issues"
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          )}
+        >
+          Issues
+        </button>
+      </div>
 
-                <TitleEditor
-                  key={`title-${projectId}`}
-                  defaultValue={project.title}
-                  placeholder="Project title"
-                  className="mt-2 w-full text-base font-semibold leading-snug tracking-tight"
-                  onBlur={(value) => {
-                    const trimmed = value.trim();
-                    if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
+      {/* Tab content */}
+      {activeTab === "overview" ? (
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-4xl px-8 py-8">
+            {/* Icon — clickable to change */}
+            <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="text-3xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                    title="Change icon"
+                  >
+                    {project.icon || "📁"}
+                  </button>
+                }
+              />
+              <PopoverContent align="start" className="w-auto p-0">
+                <EmojiPicker
+                  onSelect={(emoji) => {
+                    handleUpdateField({ icon: emoji });
+                    setIconPickerOpen(false);
                   }}
                 />
-              </div>
+              </PopoverContent>
+            </Popover>
 
-              {/* Properties section */}
-              <div>
-                <button
-                  className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => setPropertiesOpen(!propertiesOpen)}
-                >
-                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-                  Properties
-                </button>
+            {/* Editable title */}
+            <TitleEditor
+              key={`title-${projectId}`}
+              defaultValue={project.title}
+              placeholder="Project title"
+              className="mt-3 w-full text-2xl font-bold leading-snug tracking-tight"
+              onBlur={(value) => {
+                const trimmed = value.trim();
+                if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
+              }}
+            />
 
-                {propertiesOpen && <div className="space-y-0.5 pl-2">
-                  {/* Status */}
-                  <PropRow label="Status">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
-                            <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
-                            <span>{statusCfg.label}</span>
-                          </button>
-                        }
-                      />
-                      <DropdownMenuContent align="start" className="w-44">
-                        {PROJECT_STATUS_ORDER.map((s) => (
-                          <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
-                            <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
-                            <span>{PROJECT_STATUS_CONFIG[s].label}</span>
-                            {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </PropRow>
-
-                  {/* Priority */}
-                  <PropRow label="Priority">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
-                            <PriorityIcon priority={project.priority} />
-                            <span>{priorityCfg.label}</span>
-                          </button>
-                        }
-                      />
-                      <DropdownMenuContent align="start" className="w-44">
-                        {PROJECT_PRIORITY_ORDER.map((p) => (
-                          <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
-                            <PriorityIcon priority={p} />
-                            <span>{PROJECT_PRIORITY_CONFIG[p].label}</span>
-                            {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </PropRow>
-
-                  {/* Lead */}
-                  <PropRow label="Lead">
-                    <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
-                      <PopoverTrigger
-                        render={
-                          <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
-                            {project.lead_type && project.lead_id ? (
-                              <>
-                                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={16} />
-                                <span>{getActorName(project.lead_type, project.lead_id)}</span>
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground">No lead</span>
-                            )}
-                          </button>
-                        }
-                      />
-                      <PopoverContent align="start" className="w-52 p-0">
-                        <div className="px-2 py-1.5 border-b">
-                          <input
-                            type="text"
-                            value={leadFilter}
-                            onChange={(e) => setLeadFilter(e.target.value)}
-                            placeholder="Assign lead..."
-                            className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-                          />
-                        </div>
-                        <div className="p-1 max-h-60 overflow-y-auto">
-                          <button
-                            type="button"
-                            onClick={() => { handleUpdateField({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                          >
-                            <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-muted-foreground">No lead</span>
-                          </button>
-                          {filteredMembers.length > 0 && (
-                            <>
-                              <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
-                              {filteredMembers.map((m) => (
-                                <button
-                                  type="button"
-                                  key={m.user_id}
-                                  onClick={() => { handleUpdateField({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
-                                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                                >
-                                  <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
-                                  <span>{m.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          )}
-                          {filteredAgents.length > 0 && (
-                            <>
-                              <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
-                              {filteredAgents.map((a) => (
-                                <button
-                                  type="button"
-                                  key={a.id}
-                                  onClick={() => { handleUpdateField({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
-                                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                                >
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={16} />
-                                  <span>{a.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          )}
-                          {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
-                            <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
-                          )}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </PropRow>
-                </div>}
-              </div>
-
-              {/* Progress */}
-              {issueMetrics.totalCount > 0 && (() => {
-                const pct = Math.round((issueMetrics.completedCount / issueMetrics.totalCount) * 100);
-                return (
-                  <div>
-                    <div className="text-xs font-medium mb-2 flex items-center gap-1">
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
-                      Progress
-                    </div>
-                    <div className="pl-2 flex items-center gap-3">
-                      <div className="relative h-2 flex-1 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                        {issueMetrics.completedCount}/{issueMetrics.totalCount}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Description */}
-              <div>
-                <h3 className="text-xs font-medium mb-2 flex items-center gap-1">
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
-                  Description
-                </h3>
-                <div className="pl-2">
-                  <ContentEditor
-                    ref={descEditorRef}
-                    key={projectId}
-                    defaultValue={project.description || ""}
-                    placeholder="Add description..."
-                    onUpdate={(md) => handleUpdateField({ description: md || null })}
-                    debounceMs={1500}
+            {/* Properties row — inline pills */}
+            <div className="mt-5 flex items-center gap-4">
+              <span className="text-xs font-medium text-muted-foreground shrink-0 w-20">Properties</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Status */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <PropertyPill>
+                        <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
+                        <span>{statusCfg.label}</span>
+                      </PropertyPill>
+                    }
                   />
-                </div>
+                  <DropdownMenuContent align="start" className="w-44">
+                    {PROJECT_STATUS_ORDER.map((s) => (
+                      <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
+                        <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
+                        <span>{PROJECT_STATUS_CONFIG[s].label}</span>
+                        {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Priority */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <PropertyPill>
+                        <PriorityIcon priority={project.priority} />
+                        <span>{priorityCfg.label}</span>
+                      </PropertyPill>
+                    }
+                  />
+                  <DropdownMenuContent align="start" className="w-44">
+                    {PROJECT_PRIORITY_ORDER.map((p) => (
+                      <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
+                        <PriorityIcon priority={p} />
+                        <span>{PROJECT_PRIORITY_CONFIG[p].label}</span>
+                        {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Lead */}
+                <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+                  <PopoverTrigger
+                    render={
+                      <PropertyPill>
+                        {project.lead_type && project.lead_id ? (
+                          <>
+                            <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={16} />
+                            <span>{getActorName(project.lead_type, project.lead_id)}</span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">Lead</span>
+                        )}
+                      </PropertyPill>
+                    }
+                  />
+                  <PopoverContent align="start" className="w-52 p-0">
+                    <div className="px-2 py-1.5 border-b">
+                      <input
+                        type="text"
+                        value={leadFilter}
+                        onChange={(e) => setLeadFilter(e.target.value)}
+                        placeholder="Assign lead..."
+                        className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                      />
+                    </div>
+                    <div className="p-1 max-h-60 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => { handleUpdateField({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                      >
+                        <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">No lead</span>
+                      </button>
+                      {filteredMembers.length > 0 && (
+                        <>
+                          <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
+                          {filteredMembers.map((m) => (
+                            <button
+                              type="button"
+                              key={m.user_id}
+                              onClick={() => { handleUpdateField({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                            >
+                              <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                              <span>{m.name}</span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {filteredAgents.length > 0 && (
+                        <>
+                          <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
+                          {filteredAgents.map((a) => (
+                            <button
+                              type="button"
+                              key={a.id}
+                              onClick={() => { handleUpdateField({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                            >
+                              <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                              <span>{a.name}</span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
+                        <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
+
+            {/* Working directory */}
+            <div className="mt-3 flex items-center gap-4">
+              <span className="text-xs font-medium text-muted-foreground shrink-0 w-20">Work dir</span>
+              <DirInput
+                inputKey={projectId}
+                value={project.working_directory}
+                className="max-w-xs flex-1"
+                onCommit={(dir) => handleUpdateField({ working_directory: dir })}
+              />
+            </div>
+
+            {/* Progress */}
+            {projectIssues.length > 0 && (() => {
+              const doneCount = projectIssues.filter((i) => i.status === "done" || i.status === "cancelled").length;
+              const totalCount = projectIssues.length;
+              const pct = Math.round((doneCount / totalCount) * 100);
+              return (
+                <div className="mt-5 flex items-center gap-4">
+                  <span className="text-xs font-medium text-muted-foreground shrink-0 w-20">Progress</span>
+                  <div className="flex items-center gap-3">
+                    <div className="relative h-2 w-40 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground tabular-nums">{doneCount}/{totalCount} ({pct}%)</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Description */}
+            <div className="mt-8">
+              <h3 className="text-xs font-medium text-muted-foreground mb-2">Description</h3>
+              <ContentEditor
+                ref={descEditorRef}
+                key={projectId}
+                defaultValue={project.description || ""}
+                placeholder="Add description..."
+                onUpdate={(md) => handleUpdateField({ description: md || null })}
+                debounceMs={1500}
+              />
+            </div>
+
           </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </div>
+      ) : (
+        /* Issues tab — reuse existing issue list/board components */
+        <ViewStoreProvider store={projectViewStore}>
+          <IssuesHeader scopedIssues={projectIssues} />
+          <ProjectIssuesTab projectIssues={projectIssues} />
+          <BatchActionToolbar />
+        </ViewStoreProvider>
+      )}
 
       {/* Delete confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

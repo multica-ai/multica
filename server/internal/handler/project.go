@@ -17,34 +17,36 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	ID               string  `json:"id"`
+	WorkspaceID      string  `json:"workspace_id"`
+	Title            string  `json:"title"`
+	Description      *string `json:"description"`
+	Icon             *string `json:"icon"`
+	Status           string  `json:"status"`
+	Priority         string  `json:"priority"`
+	LeadType         *string `json:"lead_type"`
+	LeadID           *string `json:"lead_id"`
+	WorkingDirectory *string `json:"working_directory"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+	IssueCount       int64   `json:"issue_count"`
+	DoneCount        int64   `json:"done_count"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:               uuidToString(p.ID),
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		Title:            p.Title,
+		Description:      textToPtr(p.Description),
+		Icon:             textToPtr(p.Icon),
+		Status:           p.Status,
+		Priority:         p.Priority,
+		LeadType:         textToPtr(p.LeadType),
+		LeadID:           uuidToPtr(p.LeadID),
+		WorkingDirectory: textToPtr(p.WorkingDirectory),
+		CreatedAt:        timestampToString(p.CreatedAt),
+		UpdatedAt:        timestampToString(p.UpdatedAt),
 	}
 }
 
@@ -57,23 +59,25 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 }
 
 type CreateProjectRequest struct {
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title            string  `json:"title"`
+	Description      *string `json:"description"`
+	Icon             *string `json:"icon"`
+	Status           string  `json:"status"`
+	Priority         string  `json:"priority"`
+	LeadType         *string `json:"lead_type"`
+	LeadID           *string `json:"lead_id"`
+	WorkingDirectory *string `json:"working_directory"`
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title            *string `json:"title"`
+	Description      *string `json:"description"`
+	Icon             *string `json:"icon"`
+	Status           *string `json:"status"`
+	Priority         *string `json:"priority"`
+	LeadType         *string `json:"lead_type"`
+	LeadID           *string `json:"lead_id"`
+	WorkingDirectory *string `json:"working_directory"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -169,14 +173,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		leadID = parseUUID(*req.LeadID)
 	}
 	project, err := h.Queries.CreateProject(r.Context(), db.CreateProjectParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Title:       req.Title,
-		Description: ptrToText(req.Description),
-		Icon:        ptrToText(req.Icon),
-		Status:      status,
-		LeadType:    leadType,
-		LeadID:      leadID,
-		Priority:    priority,
+		WorkspaceID:      parseUUID(workspaceID),
+		Title:            req.Title,
+		Description:      ptrToText(req.Description),
+		Icon:             ptrToText(req.Icon),
+		Status:           status,
+		LeadType:         leadType,
+		LeadID:           leadID,
+		Priority:         priority,
+		WorkingDirectory: ptrToText(req.WorkingDirectory),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create project")
@@ -215,11 +220,12 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	params := db.UpdateProjectParams{
-		ID:          prevProject.ID,
-		Description: prevProject.Description,
-		Icon:        prevProject.Icon,
-		LeadType:    prevProject.LeadType,
-		LeadID:      prevProject.LeadID,
+		ID:               prevProject.ID,
+		Description:      prevProject.Description,
+		Icon:             prevProject.Icon,
+		LeadType:         prevProject.LeadType,
+		LeadID:           prevProject.LeadID,
+		WorkingDirectory: prevProject.WorkingDirectory,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -256,6 +262,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = parseUUID(*req.LeadID)
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["working_directory"]; ok {
+		if req.WorkingDirectory != nil {
+			params.WorkingDirectory = pgtype.Text{String: *req.WorkingDirectory, Valid: true}
+		} else {
+			params.WorkingDirectory = pgtype.Text{Valid: false}
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)

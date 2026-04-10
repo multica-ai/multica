@@ -356,6 +356,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+			// Resolve working_directory: issue-level takes precedence over project-level.
+			if issue.WorkingDirectory.Valid && issue.WorkingDirectory.String != "" {
+				resp.WorkingDir = issue.WorkingDirectory.String
+			} else if issue.ProjectID.Valid {
+				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
+					if proj.WorkingDirectory.Valid && proj.WorkingDirectory.String != "" {
+						resp.WorkingDir = proj.WorkingDirectory.String
+					}
+				}
+			}
 		}
 
 		// Look up the prior session for this (agent, issue) pair so the daemon

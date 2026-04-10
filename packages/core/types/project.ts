@@ -12,6 +12,7 @@ export interface Project {
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  working_directory: string | null;
   created_at: string;
   updated_at: string;
   issue_count: number;
@@ -26,6 +27,7 @@ export interface CreateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent";
   lead_id?: string;
+  working_directory?: string;
 }
 
 export interface UpdateProjectRequest {
@@ -36,6 +38,7 @@ export interface UpdateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
+  working_directory?: string | null;
 }
 
 export interface ListProjectsResponse {
