@@ -102,6 +102,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.heartbeatLoop(ctx)
 	go d.usageScanLoop(ctx)
+	go d.globalSkillsWatchLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx)
 }
@@ -1202,6 +1203,68 @@ func truncateLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+// globalSkillsWatchLoop polls ~/.agents/skills/ every 10s and syncs any changes to
+// the server. A fingerprint (sorted name list) detects additions/removals/renames.
+func (d *Daemon) globalSkillsWatchLoop(ctx context.Context) {
+	const interval = 10 * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var lastFingerprint string
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			skills := execenv.ScanGlobalSkills()
+			fp := globalSkillsFingerprint(skills)
+			if fp == lastFingerprint {
+				continue
+			}
+			lastFingerprint = fp
+
+			runtimeIDs := d.allRuntimeIDs()
+			if len(runtimeIDs) == 0 {
+				continue
+			}
+
+			ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+			err := d.client.SyncGlobalSkills(ctx2, runtimeIDs, skills)
+			cancel()
+			if err != nil {
+				d.logger.Warn("global skills sync failed", "error", err)
+			} else {
+				d.logger.Info("global skills synced", "count", len(skills))
+			}
+		}
+	}
+}
+
+// globalSkillsFingerprint returns a stable string that changes when the skill set changes.
+func globalSkillsFingerprint(skills []execenv.GlobalSkill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	parts := make([]string, len(skills))
+	for i, s := range skills {
+		parts[i] = s.Name
+	}
+	// Skills are returned in directory-read order; sort for stability.
+	for i := 0; i < len(parts)-1; i++ {
+		for j := i + 1; j < len(parts); j++ {
+			if parts[j] < parts[i] {
+				parts[i], parts[j] = parts[j], parts[i]
+			}
+		}
+	}
+	result := ""
+	for _, p := range parts {
+		result += p + "|"
+	}
+	return result
 }
 
 func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {

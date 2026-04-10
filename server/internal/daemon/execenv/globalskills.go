@@ -18,7 +18,7 @@ type GlobalSkill struct {
 func ScanGlobalSkills() []GlobalSkill {
 	dir, err := agentsSkillsDir()
 	if err != nil {
-		return nil
+			return nil
 	}
 
 	entries, err := os.ReadDir(dir)

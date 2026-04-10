@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -218,6 +220,22 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 	return &resp, nil
 }
 
+// SyncGlobalSkills sends the current global skills for the given runtimes to the server.
+func (c *Client) SyncGlobalSkills(ctx context.Context, runtimeIDs []string, skills []execenv.GlobalSkill) error {
+	type skillPayload struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	payload := make([]skillPayload, len(skills))
+	for i, s := range skills {
+		payload[i] = skillPayload{Name: s.Name, Description: s.Description}
+	}
+	return c.putJSON(ctx, "/api/daemon/global-skills", map[string]any{
+		"runtime_ids":   runtimeIDs,
+		"global_skills": payload,
+	}, nil)
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
@@ -246,6 +264,42 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	if respBody == nil {
+		io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+func (c *Client) putJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	var body io.Reader
+	if reqBody != nil {
+		data, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+path, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &requestError{Method: http.MethodPut, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
 	if respBody == nil {
 		io.Copy(io.Discard, resp.Body)
