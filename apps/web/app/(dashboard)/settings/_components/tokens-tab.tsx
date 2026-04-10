@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import { Key, Trash2, Copy, Check } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { PersonalAccessToken } from "@multica/core/types";
@@ -35,10 +35,17 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@/platform/api";
+import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { useDashboardLocale } from "@/features/dashboard/i18n";
 
+const tokenListOptions = queryOptions({
+  queryKey: ["tokens"] as const,
+  queryFn: () => api.listPersonalAccessTokens(),
+});
+
 export function TokensTab() {
-  const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
+  const qc = useQueryClient();
+  const { data: tokens = [], isLoading: tokensLoading } = useQuery(tokenListOptions);
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
   const [tokenCreating, setTokenCreating] = useState(false);
@@ -46,21 +53,7 @@ export function TokensTab() {
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
-  const [tokensLoading, setTokensLoading] = useState(true);
   const { t, formatDate } = useDashboardLocale();
-
-  const loadTokens = useCallback(async () => {
-    try {
-      const list = await api.listPersonalAccessTokens();
-      setTokens(list);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.tokens.failedLoad);
-    } finally {
-      setTokensLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => { loadTokens(); }, [loadTokens]);
 
   const handleCreateToken = async () => {
     setTokenCreating(true);
@@ -70,7 +63,7 @@ export function TokensTab() {
       setNewToken(result.token);
       setTokenName("");
       setTokenExpiry("90");
-      await loadTokens();
+      await qc.invalidateQueries({ queryKey: ["tokens"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t.tokens.failedCreate);
     } finally {
@@ -82,7 +75,7 @@ export function TokensTab() {
     setTokenRevoking(id);
     try {
       await api.revokePersonalAccessToken(id);
-      await loadTokens();
+      await qc.invalidateQueries({ queryKey: ["tokens"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t.tokens.failedRevoke);
     } finally {
@@ -167,7 +160,7 @@ export function TokensTab() {
                           size="icon-sm"
                           onClick={() => setRevokeConfirmId(tok.id)}
                           disabled={tokenRevoking === tok.id}
-                          aria-label={`Revoke ${tok.name}`}
+                          aria-label={t.tokens.revokeLabel.replace("{name}", tok.name)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

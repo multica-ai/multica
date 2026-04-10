@@ -598,19 +598,12 @@ function SkillsTab({
 
 function TasksTab({ agent }: { agent: Agent }) {
   const { t, formatDateTime } = useDashboardLocale();
-  const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
-
-  useEffect(() => {
-    setLoading(true);
-    api
-      .listAgentTasks(agent.id)
-      .then(setTasks)
-      .catch(() => setTasks([]))
-      .finally(() => setLoading(false));
-  }, [agent.id]);
+  const { data: tasks = [], isLoading: loading } = useQuery({
+    queryKey: ["agentTasks", agent.id],
+    queryFn: () => api.listAgentTasks(agent.id),
+  });
 
   if (loading) {
     return (
@@ -695,7 +688,7 @@ function TasksTab({ agent }: { agent: Agent }) {
                       </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
+                      {issue?.title ?? `${t.agents.issueIdFallback} ${task.issue_id.slice(0, 8)}...`}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
@@ -785,7 +778,7 @@ function SettingsTab({
   return (
     <div className="max-w-lg space-y-6">
       <div>
-        <Label className="text-xs text-muted-foreground">Avatar</Label>
+        <Label className="text-xs text-muted-foreground">{t.agents.avatar}</Label>
         <div className="mt-1.5 flex items-center gap-4">
           <button
             type="button"
