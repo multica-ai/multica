@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -15,6 +16,7 @@ interface CommentInputProps {
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
+  const t = useTranslations("issueDetail");
   const [isEmpty, setIsEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
@@ -47,7 +49,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
         <ContentEditor
           ref={editorRef}
-          placeholder="Leave a comment..."
+          placeholder={t("leaveComment")}
           onUpdate={(md) => setIsEmpty(!md.trim())}
           onSubmit={handleSubmit}
           onUploadFile={handleUpload}

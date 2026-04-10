@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { useQuery, useQueryClient, useMutationState } from "@tanstack/react-query";
 import type { Comment, TimelineEntry, Reaction } from "@multica/core/types";
 import type {
@@ -39,6 +40,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
 
 export function useIssueTimeline(issueId: string, userId?: string) {
   const qc = useQueryClient();
+  const t = useTranslations("issueDetail");
   const { data: timeline = [], isLoading: loading } = useQuery(
     issueTimelineOptions(issueId),
   );
@@ -213,7 +215,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send comment");
+        toast.error(t("failedSendComment"));
       } finally {
         setSubmitting(false);
       }
@@ -232,7 +234,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send reply");
+        toast.error(t("failedSendReply"));
       }
     },
     [userId, createCommentMutation],
@@ -243,7 +245,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await updateCommentMutation.mutateAsync({ commentId, content });
       } catch {
-        toast.error("Failed to update comment");
+        toast.error(t("failedUpdateComment"));
       }
     },
     [updateCommentMutation],
@@ -254,7 +256,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await deleteCommentMutation.mutateAsync(commentId);
       } catch {
-        toast.error("Failed to delete comment");
+        toast.error(t("failedDeleteComment"));
       }
     },
     [deleteCommentMutation],

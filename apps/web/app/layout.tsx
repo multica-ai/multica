@@ -7,6 +7,7 @@ import { QueryProvider } from "@multica/core/provider";
 import { AuthInitializer } from "@/features/auth";
 import { WebWSProvider } from "@/platform/ws-provider";
 import { WebNavigationProvider } from "@/platform/navigation";
+import { getLocale } from "next-intl/server";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -50,14 +51,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Read locale server-side so <html lang> is correct on first paint.
+  // Falls back to "en" for non-locale routes (landing pages).
+  let locale = "en";
+  try {
+    locale = await getLocale();
+  } catch {
+    // Landing pages and other routes outside [locale] have no locale context
+  }
   return (
     <html
-      lang="en"
+      lang={locale}
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", geist.variable, geistMono.variable)}
     >

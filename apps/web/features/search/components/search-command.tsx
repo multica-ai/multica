@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "@/i18n/navigation";
+import { useTranslations } from "next-intl";
 import { Loader2, MessageSquare, SearchIcon } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
 import type { SearchIssueResult } from "@multica/core/types";
@@ -18,6 +19,8 @@ import {
 
 export function SearchCommand() {
   const router = useRouter();
+  const t = useTranslations("search");
+  const tIssues = useTranslations("issues");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchIssueResult[]>([]);
@@ -110,9 +113,9 @@ export function SearchCommand() {
         showCloseButton={false}
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Search Issues</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            Search issues by title, description, or comments
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
         <CommandPrimitive
@@ -123,7 +126,7 @@ export function SearchCommand() {
           <div className="flex items-center gap-3 border-b px-4 py-3">
             <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input
-              placeholder="Type a command or search..."
+              placeholder={t("placeholder")}
               value={query}
               onValueChange={handleValueChange}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
@@ -143,7 +146,7 @@ export function SearchCommand() {
 
             {!isLoading && query.trim() && results.length === 0 && (
               <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
-                No issues found.
+                {t("noIssuesFound")}
               </CommandPrimitive.Empty>
             )}
 
@@ -168,7 +171,7 @@ export function SearchCommand() {
                       <span
                         className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status].iconColor}`}
                       >
-                        {STATUS_CONFIG[issue.status].label}
+                        {tIssues(`statusLabels.${issue.status}` as Parameters<typeof tIssues>[0])}
                       </span>
                     </div>
                     {issue.match_source === "comment" &&
@@ -187,7 +190,7 @@ export function SearchCommand() {
 
             {!isLoading && !query.trim() && (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                Type to search issues...
+                {t("typeToSearch")}
               </div>
             )}
           </CommandPrimitive.List>

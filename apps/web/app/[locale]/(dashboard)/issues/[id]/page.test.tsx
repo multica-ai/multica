@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NextIntlClientProvider } from "next-intl";
 import type { Issue, Comment, TimelineEntry } from "@multica/core/types";
 import { WorkspaceIdProvider } from "@multica/core/hooks";
+import enMessages from "@/messages/en.json";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -434,13 +436,15 @@ async function renderPage(id = "issue-1") {
   let result: ReturnType<typeof render>;
   await act(async () => {
     result = render(
-      <QueryClientProvider client={queryClient}>
-        <WorkspaceIdProvider wsId="ws-1">
-          <Suspense fallback={<div>Suspense loading...</div>}>
-            <IssueDetailPage params={Promise.resolve({ id })} />
-          </Suspense>
-        </WorkspaceIdProvider>
-      </QueryClientProvider>,
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <QueryClientProvider client={queryClient}>
+          <WorkspaceIdProvider wsId="ws-1">
+            <Suspense fallback={<div>Suspense loading...</div>}>
+              <IssueDetailPage params={Promise.resolve({ id })} />
+            </Suspense>
+          </WorkspaceIdProvider>
+        </QueryClientProvider>
+      </NextIntlClientProvider>,
     );
   });
   return result!;
