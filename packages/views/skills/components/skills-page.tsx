@@ -253,7 +253,9 @@ function SkillListItem({
           </div>
         )}
       </div>
-      {!isGlobal && (skill.files?.length ?? 0) > 0 && (
+      {isGlobal ? (
+        <Badge variant="secondary" className="text-xs shrink-0">Global</Badge>
+      ) : (skill.files?.length ?? 0) > 0 && (
         <Badge variant="secondary">
           {skill.files!.length} file{skill.files!.length !== 1 ? "s" : ""}
         </Badge>
@@ -618,29 +620,60 @@ function SkillDetail({
 // ---------------------------------------------------------------------------
 
 function GlobalSkillDetail({ skill }: { skill: Skill }) {
+  const files = useMemo(
+    () => (skill.files ?? []).map((f) => ({ path: f.path, content: f.content })),
+    [skill.id, skill.files],
+  );
+  const [selectedPath, setSelectedPath] = useState(SKILL_MD);
+
+  useEffect(() => { setSelectedPath(SKILL_MD); }, [skill.id]);
+
+  const fileMap = useMemo(() => buildFileMap(skill.content, files), [skill.content, files]);
+  const filePaths = useMemo(() => Array.from(fileMap.keys()), [fileMap]);
+  const selectedContent = fileMap.get(selectedPath) ?? "";
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Header */}
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
           <Globe className="h-4 w-4 text-muted-foreground" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">{skill.name}</div>
+          <div className="text-sm font-medium truncate">{skill.name}</div>
           {skill.description && (
             <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
           )}
         </div>
-        <Badge variant="secondary" className="shrink-0 text-xs">Global</Badge>
+        <Badge variant="secondary" className="shrink-0 text-xs ml-3">Global</Badge>
       </div>
-      <div className="flex flex-1 items-center justify-center p-8 text-center text-muted-foreground">
-        <div>
-          <Globe className="mx-auto h-8 w-8 text-muted-foreground/30" />
-          <p className="mt-3 text-sm font-medium">Read-only skill</p>
-          <p className="mt-1 text-xs max-w-xs">
-            This skill is provided by your local daemon from{" "}
-            <code className="font-mono text-[11px]">~/.agents/skills</code>.
-            Edit it directly on disk.
-          </p>
+
+      {/* Source notice */}
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">
+        <Globe className="h-3 w-3 shrink-0" />
+        <span>
+          From <code className="font-mono text-[11px]">~/.agents/skills</code> · edit on disk to update
+        </span>
+      </div>
+
+      {/* File browser */}
+      <div className="flex flex-1 min-h-0">
+        <div className="w-52 shrink-0 border-r flex flex-col">
+          <div className="flex h-10 items-center border-b px-3">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Files</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <FileTree filePaths={filePaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <FileViewer
+            key={selectedPath}
+            path={selectedPath}
+            content={selectedContent}
+            onChange={() => {}}
+            readOnly
+          />
         </div>
       </div>
     </div>

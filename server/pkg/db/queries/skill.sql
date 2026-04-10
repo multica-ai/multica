@@ -31,6 +31,25 @@ RETURNING *;
 -- name: DeleteSkill :exec
 DELETE FROM skill WHERE id = $1;
 
+-- Global skill queries (daemon-owned, is_global = true)
+
+-- name: UpsertGlobalSkill :one
+INSERT INTO skill (workspace_id, runtime_id, name, description, content, config, is_global)
+VALUES ($1, $2, $3, $4, $5, '{}', true)
+ON CONFLICT (runtime_id, name) WHERE is_global DO UPDATE SET
+    description = EXCLUDED.description,
+    content     = EXCLUDED.content,
+    updated_at  = now()
+RETURNING *;
+
+-- name: DeleteGlobalSkillsNotIn :exec
+DELETE FROM skill
+WHERE runtime_id = $1 AND is_global = true
+  AND name != ALL(@names::text[]);
+
+-- name: DeleteAllGlobalSkillsByRuntime :exec
+DELETE FROM skill WHERE runtime_id = $1 AND is_global = true;
+
 -- Skill File CRUD
 
 -- name: ListSkillFiles :many
@@ -77,7 +96,7 @@ WHERE agent_id = $1 AND skill_id = $2;
 DELETE FROM agent_skill WHERE agent_id = $1;
 
 -- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+SELECT ask.agent_id, s.id, s.name, s.description, s.is_global, s.runtime_id
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1

@@ -6,11 +6,18 @@ import (
 	"strings"
 )
 
-// GlobalSkill holds the name and description of a skill discovered from
-// ~/.agents/skills/ on the local machine.
+// GlobalSkillFile is a supporting file within a global skill directory.
+type GlobalSkillFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// GlobalSkill represents a skill discovered from ~/.agents/skills/.
 type GlobalSkill struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Content     string            `json:"content"` // body of SKILL.md (after frontmatter)
+	Files       []GlobalSkillFile `json:"files"`   // all other files in the skill dir
 }
 
 // ScanGlobalSkills returns all skills found in ~/.agents/skills/.
@@ -18,7 +25,7 @@ type GlobalSkill struct {
 func ScanGlobalSkills() []GlobalSkill {
 	dir, err := agentsSkillsDir()
 	if err != nil {
-			return nil
+		return nil
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -46,30 +53,79 @@ func agentsSkillsDir() (string, error) {
 	return filepath.Join(home, ".agents", "skills"), nil
 }
 
-// readGlobalSkill reads a skill directory and extracts name/description.
+// readGlobalSkill reads a skill directory: extracts name/description from
+// SKILL.md frontmatter, stores the SKILL.md body as Content, and reads all
+// other files in the directory into Files.
 func readGlobalSkill(parentDir, dirName string) GlobalSkill {
-	content, err := os.ReadFile(filepath.Join(parentDir, dirName, "SKILL.md"))
+	skillDir := filepath.Join(parentDir, dirName)
+
+	// Read SKILL.md
+	skillMdPath := filepath.Join(skillDir, "SKILL.md")
+	raw, err := os.ReadFile(skillMdPath)
 	if err != nil {
 		return GlobalSkill{Name: dirName}
 	}
-	name, description := parseGlobalSkillFrontmatter(string(content))
+
+	name, description, body := parseGlobalSkillFrontmatter(string(raw))
 	if name == "" {
 		name = dirName
 	}
-	return GlobalSkill{Name: name, Description: description}
+
+	skill := GlobalSkill{
+		Name:        name,
+		Description: description,
+		Content:     body,
+	}
+
+	// Recursively collect all files except SKILL.md, preserving relative paths.
+	collectFiles(skillDir, skillDir, &skill.Files)
+
+	return skill
+}
+
+// collectFiles walks dir recursively and appends all files (excluding the root
+// SKILL.md) to out, using paths relative to rootDir.
+func collectFiles(rootDir, dir string, out *[]GlobalSkillFile) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		fullPath := filepath.Join(dir, entry.Name())
+		relPath, _ := filepath.Rel(rootDir, fullPath)
+		// Normalise to forward slashes so paths are consistent cross-platform.
+		relPath = filepath.ToSlash(relPath)
+
+		if entry.IsDir() {
+			collectFiles(rootDir, fullPath, out)
+			continue
+		}
+		if relPath == "SKILL.md" {
+			continue
+		}
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		*out = append(*out, GlobalSkillFile{Path: relPath, Content: string(data)})
+	}
 }
 
 // parseGlobalSkillFrontmatter extracts name and description from YAML
-// frontmatter at the top of a SKILL.md file.
-func parseGlobalSkillFrontmatter(content string) (name, description string) {
+// frontmatter at the top of a SKILL.md file, and returns the body after it.
+func parseGlobalSkillFrontmatter(content string) (name, description, body string) {
+	body = content
 	if !strings.HasPrefix(content, "---") {
-		return "", ""
+		return "", "", body
 	}
 	end := strings.Index(content[3:], "---")
 	if end < 0 {
-		return "", ""
+		return "", "", body
 	}
-	for _, line := range strings.Split(content[3:3+end], "\n") {
+	frontmatterBlock := content[3 : 3+end]
+	body = strings.TrimPrefix(content[3+end+3:], "\n")
+
+	for _, line := range strings.Split(frontmatterBlock, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "name:"):
@@ -78,5 +134,5 @@ func parseGlobalSkillFrontmatter(content string) (name, description string) {
 			description = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "description:")), "\"'")
 		}
 	}
-	return name, description
+	return name, description, body
 }

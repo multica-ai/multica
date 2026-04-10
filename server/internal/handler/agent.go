@@ -154,11 +154,16 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	skillMap := map[string][]SkillResponse{}
 	for _, row := range skillRows {
 		agentID := uuidToString(row.AgentID)
+		source := "workspace"
+		if row.IsGlobal {
+			source = "global"
+		}
 		skillMap[agentID] = append(skillMap[agentID], SkillResponse{
 			ID:          uuidToString(row.ID),
 			Name:        row.Name,
 			Description: row.Description,
-			Source:      "workspace",
+			Source:      source,
+			RuntimeID:   uuidToString(row.RuntimeID),
 		})
 	}
 

@@ -10,13 +10,32 @@ interface DirInputProps {
 }
 
 /**
- * A text input for filesystem paths with an optional folder-picker button.
- * In Electron the folder picker resolves the full absolute path via `file.path`.
- * In a browser context the user can still type the path manually.
+ * A text input for filesystem paths with a browse button.
+ * Uses showDirectoryPicker() — opens a native OS directory picker
+ * without enumerating any files inside the selected folder.
+ * In Electron, the handle may expose a full absolute path via _path.
+ * In a browser, falls back to the directory name; the user can type the
+ * full path manually.
  */
 export function DirInput({ value, inputKey, className, onCommit }: DirInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const pickerRef = useRef<HTMLInputElement>(null);
+
+  const handleBrowse = async () => {
+    try {
+      // showDirectoryPicker opens a native picker with no file enumeration.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const picker = (window as any).showDirectoryPicker;
+      if (!picker) return;
+      const handle = await picker({ mode: "read" });
+      // Electron exposes the real absolute path via handle._path; browsers
+      // only expose the folder name via handle.name.
+      const dir: string = handle._path ?? handle.name;
+      if (inputRef.current) inputRef.current.value = dir;
+      onCommit(dir || null);
+    } catch {
+      // User cancelled the picker — do nothing.
+    }
+  };
 
   return (
     <div className={`flex items-center gap-1 ${className ?? ""}`}>
@@ -45,27 +64,10 @@ export function DirInput({ value, inputKey, className, onCommit }: DirInputProps
         type="button"
         className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         title="Browse directory"
-        onClick={() => pickerRef.current?.click()}
+        onClick={handleBrowse}
       >
         <FolderOpen className="h-3.5 w-3.5" />
       </button>
-      <input
-        ref={pickerRef}
-        type="file"
-        className="hidden"
-        {...{ webkitdirectory: "" } as React.InputHTMLAttributes<HTMLInputElement>}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const filePath = (file as File & { path?: string }).path;
-          const dir = filePath
-            ? filePath.substring(0, Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\")))
-            : (file.webkitRelativePath.split("/")[0] ?? "");
-          if (inputRef.current) inputRef.current.value = dir;
-          onCommit(dir || null);
-          e.target.value = "";
-        }}
-      />
     </div>
   );
 }

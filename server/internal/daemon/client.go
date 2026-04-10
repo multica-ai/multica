@@ -222,13 +222,28 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 
 // SyncGlobalSkills sends the current global skills for the given runtimes to the server.
 func (c *Client) SyncGlobalSkills(ctx context.Context, runtimeIDs []string, skills []execenv.GlobalSkill) error {
+	type filePayload struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
 	type skillPayload struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name        string        `json:"name"`
+		Description string        `json:"description"`
+		Content     string        `json:"content"`
+		Files       []filePayload `json:"files"`
 	}
 	payload := make([]skillPayload, len(skills))
 	for i, s := range skills {
-		payload[i] = skillPayload{Name: s.Name, Description: s.Description}
+		files := make([]filePayload, len(s.Files))
+		for j, f := range s.Files {
+			files[j] = filePayload{Path: f.Path, Content: f.Content}
+		}
+		payload[i] = skillPayload{
+			Name:        s.Name,
+			Description: s.Description,
+			Content:     s.Content,
+			Files:       files,
+		}
 	}
 	return c.putJSON(ctx, "/api/daemon/global-skills", map[string]any{
 		"runtime_ids":   runtimeIDs,

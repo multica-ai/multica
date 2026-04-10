@@ -283,15 +283,6 @@ type Project struct {
 	WorkingDirectory pgtype.Text        `json:"working_directory"`
 }
 
-type RuntimeGlobalSkill struct {
-	ID          pgtype.UUID        `json:"id"`
-	RuntimeID   pgtype.UUID        `json:"runtime_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type RuntimeUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
@@ -316,6 +307,8 @@ type Skill struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	IsGlobal    bool               `json:"is_global"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 }
 
 type SkillFile struct {

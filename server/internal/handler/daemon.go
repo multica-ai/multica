@@ -19,6 +19,17 @@ import (
 // Daemon Registration & Heartbeat
 // ---------------------------------------------------------------------------
 
+// globalSkillInput is the wire representation of a global skill sent by the daemon.
+type globalSkillInput struct {
+	Name        string
+	Description string
+	Content     string
+	Files       []struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+}
+
 type DaemonRegisterRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	DaemonID    string `json:"daemon_id"`
@@ -36,6 +47,11 @@ type DaemonRegisterRequest struct {
 	GlobalSkills *[]struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		Content     string `json:"content"`
+		Files       []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"files"`
 	} `json:"global_skills,omitempty"`
 }
 
@@ -124,40 +140,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	// Sync global skills only when the daemon explicitly reported a list.
 	// nil means the field was absent (scan not run); skip to avoid wiping
 	// previously stored skills on a transient environment issue.
-	if req.GlobalSkills != nil {
-		skills := *req.GlobalSkills
-		if len(skills) > 0 {
-			names := make([]string, len(skills))
-			for i, gs := range skills {
-				names[i] = gs.Name
-			}
-			for _, rt := range resp {
-				rtID := parseUUID(rt.ID)
-				for _, gs := range skills {
-					if _, err := h.Queries.UpsertRuntimeGlobalSkill(r.Context(), db.UpsertRuntimeGlobalSkillParams{
-						RuntimeID:   rtID,
-						Name:        gs.Name,
-						Description: gs.Description,
-					}); err != nil {
-						slog.Warn("upsert global skill failed", "runtime_id", rt.ID, "skill", gs.Name, "error", err)
-					}
-				}
-				// Remove skills that are no longer present on disk.
-				if err := h.Queries.DeleteRuntimeGlobalSkillsNotIn(r.Context(), db.DeleteRuntimeGlobalSkillsNotInParams{
-					RuntimeID: rtID,
-					Names:     names,
-				}); err != nil {
-					slog.Warn("prune global skills failed", "runtime_id", rt.ID, "error", err)
-				}
-			}
-		} else {
-			// Explicit empty list — daemon has no skills in ~/.agents/skills/.
-			for _, rt := range resp {
-				if err := h.Queries.DeleteAllRuntimeGlobalSkills(r.Context(), parseUUID(rt.ID)); err != nil {
-					slog.Warn("clear global skills failed", "runtime_id", rt.ID, "error", err)
-				}
-			}
+	// Only sync for the FIRST runtime — global skills are workspace-scoped
+	// and syncing per-runtime creates duplicates when a workspace has
+	// multiple runtimes registered.
+	if req.GlobalSkills != nil && len(resp) > 0 {
+		skills := make([]globalSkillInput, len(*req.GlobalSkills))
+		for i, gs := range *req.GlobalSkills {
+			skills[i] = globalSkillInput{Name: gs.Name, Description: gs.Description, Content: gs.Content, Files: gs.Files}
 		}
+		h.syncGlobalSkillsForRuntime(r, resp[0].ID, skills)
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))
@@ -186,6 +177,11 @@ func (h *Handler) DaemonSyncGlobalSkills(w http.ResponseWriter, r *http.Request)
 		GlobalSkills []struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
+			Content     string `json:"content"`
+			Files       []struct {
+				Path    string `json:"path"`
+				Content string `json:"content"`
+			} `json:"files"`
 		} `json:"global_skills"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -197,37 +193,76 @@ func (h *Handler) DaemonSyncGlobalSkills(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	names := make([]string, len(req.GlobalSkills))
+	skills := make([]globalSkillInput, len(req.GlobalSkills))
 	for i, gs := range req.GlobalSkills {
-		names[i] = gs.Name
+		skills[i] = globalSkillInput{Name: gs.Name, Description: gs.Description, Content: gs.Content, Files: gs.Files}
 	}
 
 	for _, rid := range req.RuntimeIDs {
-		rtID := parseUUID(rid)
-		if len(req.GlobalSkills) > 0 {
-			for _, gs := range req.GlobalSkills {
-				if _, err := h.Queries.UpsertRuntimeGlobalSkill(r.Context(), db.UpsertRuntimeGlobalSkillParams{
-					RuntimeID:   rtID,
-					Name:        gs.Name,
-					Description: gs.Description,
-				}); err != nil {
-					slog.Warn("sync global skill upsert failed", "runtime_id", rid, "skill", gs.Name, "error", err)
-				}
-			}
-			if err := h.Queries.DeleteRuntimeGlobalSkillsNotIn(r.Context(), db.DeleteRuntimeGlobalSkillsNotInParams{
-				RuntimeID: rtID,
-				Names:     names,
+		h.syncGlobalSkillsForRuntime(r, rid, skills)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// syncGlobalSkillsForRuntime upserts all global skills for a single runtime into the
+// shared skill + skill_file tables, then prunes skills no longer on disk.
+func (h *Handler) syncGlobalSkillsForRuntime(r *http.Request, runtimeIDStr string, skills []globalSkillInput) {
+	rtID := parseUUID(runtimeIDStr)
+
+	if len(skills) == 0 {
+		if err := h.Queries.DeleteAllGlobalSkillsByRuntime(r.Context(), rtID); err != nil {
+			slog.Warn("clear global skills failed", "runtime_id", runtimeIDStr, "error", err)
+		}
+		return
+	}
+
+	// Look up workspace_id for this runtime.
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), rtID)
+	if err != nil {
+		slog.Warn("global skill sync: runtime not found", "runtime_id", runtimeIDStr)
+		return
+	}
+
+	names := make([]string, len(skills))
+	for i, gs := range skills {
+		names[i] = gs.Name
+	}
+
+	for _, gs := range skills {
+		row, err := h.Queries.UpsertGlobalSkill(r.Context(), db.UpsertGlobalSkillParams{
+			WorkspaceID: rt.WorkspaceID,
+			RuntimeID:   rtID,
+			Name:        gs.Name,
+			Description: gs.Description,
+			Content:     gs.Content,
+		})
+		if err != nil {
+			slog.Warn("upsert global skill failed", "runtime_id", runtimeIDStr, "skill", gs.Name, "error", err)
+			continue
+		}
+		// Replace files: delete then upsert each file.
+		if err := h.Queries.DeleteSkillFilesBySkill(r.Context(), row.ID); err != nil {
+			slog.Warn("delete global skill files failed", "skill_id", row.ID, "error", err)
+		}
+		for _, f := range gs.Files {
+			if _, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+				SkillID: row.ID,
+				Path:    f.Path,
+				Content: f.Content,
 			}); err != nil {
-				slog.Warn("sync global skill prune failed", "runtime_id", rid, "error", err)
-			}
-		} else {
-			if err := h.Queries.DeleteAllRuntimeGlobalSkills(r.Context(), rtID); err != nil {
-				slog.Warn("sync global skill clear failed", "runtime_id", rid, "error", err)
+				slog.Warn("upsert global skill file failed", "skill_id", row.ID, "path", f.Path, "error", err)
 			}
 		}
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	// Prune skills that are no longer present on disk.
+	if err := h.Queries.DeleteGlobalSkillsNotIn(r.Context(), db.DeleteGlobalSkillsNotInParams{
+		RuntimeID: rtID,
+		Names:     names,
+	}); err != nil {
+		slog.Warn("prune global skills failed", "runtime_id", runtimeIDStr, "error", err)
+	}
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.

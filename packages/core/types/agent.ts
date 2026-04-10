@@ -90,7 +90,7 @@ export interface Skill {
   description: string;
   content: string;
   config: Record<string, unknown>;
-  /** Only present on GetSkill responses; absent from list responses */
+  /** Present on GetSkill responses; also inline for global skills in list responses */
   files?: SkillFile[];
   created_by: string | null;
   created_at: string;

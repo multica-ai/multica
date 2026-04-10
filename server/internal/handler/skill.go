@@ -20,18 +20,20 @@ import (
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Content     string  `json:"content"`
-	Config      any     `json:"config"`
-	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID          string               `json:"id"`
+	WorkspaceID string               `json:"workspace_id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Content     string               `json:"content"`
+	Config      any                  `json:"config"`
+	CreatedBy   *string              `json:"created_by"`
+	CreatedAt   string               `json:"created_at"`
+	UpdatedAt   string               `json:"updated_at"`
 	// Source discriminates workspace-managed skills from daemon-reported global skills.
-	Source    string `json:"source"`               // "workspace" | "global"
-	RuntimeID string `json:"runtime_id,omitempty"` // set when source == "global"
+	Source    string               `json:"source"`               // "workspace" | "global"
+	RuntimeID string               `json:"runtime_id,omitempty"` // set when source == "global"
+	// Files is populated inline for global skills (no separate fetch needed).
+	Files     []SkillFileResponse  `json:"files,omitempty"`
 }
 
 type SkillFileResponse struct {
@@ -43,11 +45,6 @@ type SkillFileResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-type SkillWithFilesResponse struct {
-	SkillResponse
-	Files []SkillFileResponse `json:"files"`
-}
-
 func skillToResponse(s db.Skill) SkillResponse {
 	var config any
 	if s.Config != nil {
@@ -55,6 +52,11 @@ func skillToResponse(s db.Skill) SkillResponse {
 	}
 	if config == nil {
 		config = map[string]any{}
+	}
+
+	source := "workspace"
+	if s.IsGlobal {
+		source = "global"
 	}
 
 	return SkillResponse{
@@ -67,7 +69,8 @@ func skillToResponse(s db.Skill) SkillResponse {
 		CreatedBy:   uuidToPtr(s.CreatedBy),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
-		Source:      "workspace",
+		Source:      source,
+		RuntimeID:   uuidToString(s.RuntimeID),
 	}
 }
 
@@ -157,24 +160,15 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]SkillResponse, 0, len(skills))
 	for _, s := range skills {
-		resp = append(resp, skillToResponse(s))
-	}
-
-	// Append global skills reported by online daemon runtimes.
-	globalSkills, err := h.Queries.ListGlobalSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
-	if err == nil {
-		for _, g := range globalSkills {
-			resp = append(resp, SkillResponse{
-				ID:        uuidToString(g.ID),
-				Name:      g.Name,
-				Description: g.Description,
-				Source:    "global",
-				RuntimeID: uuidToString(g.RuntimeID),
-				CreatedAt: timestampToString(g.CreatedAt),
-				UpdatedAt: timestampToString(g.UpdatedAt),
-				Config:    map[string]any{},
-			})
+		sr := skillToResponse(s)
+		if s.IsGlobal {
+			// Inline files for global skills so the client doesn't need a separate fetch.
+			files, _ := h.Queries.ListSkillFiles(r.Context(), s.ID)
+			for _, f := range files {
+				sr.Files = append(sr.Files, skillFileToResponse(f))
+			}
 		}
+		resp = append(resp, sr)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -182,8 +176,18 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	skill, ok := h.loadSkillForUser(w, r, id)
-	if !ok {
+	workspaceID := resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "skill not found")
 		return
 	}
 
@@ -192,16 +196,12 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list skill files")
 		return
 	}
-
-	fileResps := make([]SkillFileResponse, len(files))
+	sr := skillToResponse(skill)
+	sr.Files = make([]SkillFileResponse, len(files))
 	for i, f := range files {
-		fileResps[i] = skillFileToResponse(f)
+		sr.Files[i] = skillFileToResponse(f)
 	}
-
-	writeJSON(w, http.StatusOK, SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
-	})
+	writeJSON(w, http.StatusOK, sr)
 }
 
 func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
@@ -280,10 +280,9 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
-	}
+	sr := skillToResponse(skill)
+	sr.Files = fileResps
+	resp := sr
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	writeJSON(w, http.StatusCreated, resp)
@@ -381,10 +380,9 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
-	}
+	sr := skillToResponse(skill)
+	sr.Files = fileResps
+	resp := sr
 	wsID := resolveWorkspaceID(r)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
 	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
@@ -895,10 +893,9 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
-	}
+	sr := skillToResponse(skill)
+	sr.Files = fileResps
+	resp := sr
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	writeJSON(w, http.StatusCreated, resp)

@@ -207,6 +207,21 @@ func (d *Daemon) allRuntimeIDs() []string {
 	return ids
 }
 
+// oneRuntimeIDPerWorkspace returns the first registered runtime ID for each
+// watched workspace. Used for global skill sync — global skills are
+// workspace-scoped, so syncing for every runtime would create duplicates.
+func (d *Daemon) oneRuntimeIDPerWorkspace() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var ids []string
+	for _, ws := range d.workspaces {
+		if len(ws.runtimeIDs) > 0 {
+			ids = append(ids, ws.runtimeIDs[0])
+		}
+	}
+	return ids
+}
+
 // findRuntime looks up a Runtime by its ID.
 func (d *Daemon) findRuntime(id string) *Runtime {
 	d.mu.Lock()
@@ -1207,39 +1222,48 @@ func truncateLog(s string, maxLen int) string {
 }
 
 // globalSkillsWatchLoop polls ~/.agents/skills/ every 10s and syncs any changes to
-// the server. A fingerprint (sorted name list) detects additions/removals/renames.
+// the server. It always syncs once on startup, then only when the fingerprint changes.
 func (d *Daemon) globalSkillsWatchLoop(ctx context.Context) {
 	const interval = 10 * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	var lastFingerprint string
+	// Use a sentinel so the very first scan always triggers a sync,
+	// even if nothing on disk has changed since the last daemon run.
+	lastFingerprint := "__init__"
+
+	syncIfChanged := func() {
+		skills := execenv.ScanGlobalSkills()
+		fp := globalSkillsFingerprint(skills)
+		if fp == lastFingerprint {
+			return
+		}
+		lastFingerprint = fp
+
+		runtimeIDs := d.oneRuntimeIDPerWorkspace()
+		if len(runtimeIDs) == 0 {
+			return
+		}
+
+		ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := d.client.SyncGlobalSkills(ctx2, runtimeIDs, skills)
+		cancel()
+		if err != nil {
+			d.logger.Warn("global skills sync failed", "error", err)
+		} else {
+			d.logger.Info("global skills synced", "count", len(skills))
+		}
+	}
+
+	// Sync immediately on startup.
+	syncIfChanged()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			skills := execenv.ScanGlobalSkills()
-			fp := globalSkillsFingerprint(skills)
-			if fp == lastFingerprint {
-				continue
-			}
-			lastFingerprint = fp
-
-			runtimeIDs := d.allRuntimeIDs()
-			if len(runtimeIDs) == 0 {
-				continue
-			}
-
-			ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
-			err := d.client.SyncGlobalSkills(ctx2, runtimeIDs, skills)
-			cancel()
-			if err != nil {
-				d.logger.Warn("global skills sync failed", "error", err)
-			} else {
-				d.logger.Info("global skills synced", "count", len(skills))
-			}
+			syncIfChanged()
 		}
 	}
 }
@@ -1251,7 +1275,11 @@ func globalSkillsFingerprint(skills []execenv.GlobalSkill) string {
 	}
 	parts := make([]string, len(skills))
 	for i, s := range skills {
-		parts[i] = s.Name
+		filesSig := ""
+		for _, f := range s.Files {
+			filesSig += f.Path + "=" + f.Content + ";"
+		}
+		parts[i] = s.Name + "\x00" + s.Content + "\x00" + filesSig
 	}
 	// Skills are returned in directory-read order; sort for stability.
 	for i := 0; i < len(parts)-1; i++ {

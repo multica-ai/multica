@@ -30,7 +30,7 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 const createSkill = `-- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, is_global, runtime_id
 `
 
 type CreateSkillParams struct {
@@ -62,8 +62,35 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsGlobal,
+		&i.RuntimeID,
 	)
 	return i, err
+}
+
+const deleteAllGlobalSkillsByRuntime = `-- name: DeleteAllGlobalSkillsByRuntime :exec
+DELETE FROM skill WHERE runtime_id = $1 AND is_global = true
+`
+
+func (q *Queries) DeleteAllGlobalSkillsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAllGlobalSkillsByRuntime, runtimeID)
+	return err
+}
+
+const deleteGlobalSkillsNotIn = `-- name: DeleteGlobalSkillsNotIn :exec
+DELETE FROM skill
+WHERE runtime_id = $1 AND is_global = true
+  AND name != ALL($2::text[])
+`
+
+type DeleteGlobalSkillsNotInParams struct {
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	Names     []string    `json:"names"`
+}
+
+func (q *Queries) DeleteGlobalSkillsNotIn(ctx context.Context, arg DeleteGlobalSkillsNotInParams) error {
+	_, err := q.db.Exec(ctx, deleteGlobalSkillsNotIn, arg.RuntimeID, arg.Names)
+	return err
 }
 
 const deleteSkill = `-- name: DeleteSkill :exec
@@ -94,7 +121,7 @@ func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UU
 }
 
 const getSkill = `-- name: GetSkill :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, is_global, runtime_id FROM skill
 WHERE id = $1
 `
 
@@ -111,6 +138,8 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsGlobal,
+		&i.RuntimeID,
 	)
 	return i, err
 }
@@ -135,7 +164,7 @@ func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, 
 }
 
 const getSkillInWorkspace = `-- name: GetSkillInWorkspace :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, is_global, runtime_id FROM skill
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -157,13 +186,15 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsGlobal,
+		&i.RuntimeID,
 	)
 	return i, err
 }
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM skill s
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.is_global, s.runtime_id FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC
@@ -189,6 +220,8 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsGlobal,
+			&i.RuntimeID,
 		); err != nil {
 			return nil, err
 		}
@@ -201,7 +234,7 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 }
 
 const listAgentSkillsByWorkspace = `-- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+SELECT ask.agent_id, s.id, s.name, s.description, s.is_global, s.runtime_id
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
@@ -213,6 +246,8 @@ type ListAgentSkillsByWorkspaceRow struct {
 	ID          pgtype.UUID `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
+	IsGlobal    bool        `json:"is_global"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
 }
 
 func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentSkillsByWorkspaceRow, error) {
@@ -229,6 +264,8 @@ func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pg
 			&i.ID,
 			&i.Name,
 			&i.Description,
+			&i.IsGlobal,
+			&i.RuntimeID,
 		); err != nil {
 			return nil, err
 		}
@@ -277,7 +314,7 @@ func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]Sk
 
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, is_global, runtime_id FROM skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -302,6 +339,8 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsGlobal,
+			&i.RuntimeID,
 		); err != nil {
 			return nil, err
 		}
@@ -345,7 +384,7 @@ UPDATE skill SET
     config = COALESCE($5, config),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, is_global, runtime_id
 `
 
 type UpdateSkillParams struct {
@@ -375,6 +414,53 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsGlobal,
+		&i.RuntimeID,
+	)
+	return i, err
+}
+
+const upsertGlobalSkill = `-- name: UpsertGlobalSkill :one
+
+INSERT INTO skill (workspace_id, runtime_id, name, description, content, config, is_global)
+VALUES ($1, $2, $3, $4, $5, '{}', true)
+ON CONFLICT (runtime_id, name) WHERE is_global DO UPDATE SET
+    description = EXCLUDED.description,
+    content     = EXCLUDED.content,
+    updated_at  = now()
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, is_global, runtime_id
+`
+
+type UpsertGlobalSkillParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Content     string      `json:"content"`
+}
+
+// Global skill queries (daemon-owned, is_global = true)
+func (q *Queries) UpsertGlobalSkill(ctx context.Context, arg UpsertGlobalSkillParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, upsertGlobalSkill,
+		arg.WorkspaceID,
+		arg.RuntimeID,
+		arg.Name,
+		arg.Description,
+		arg.Content,
+	)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsGlobal,
+		&i.RuntimeID,
 	)
 	return i, err
 }
