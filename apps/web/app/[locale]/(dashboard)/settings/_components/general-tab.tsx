@@ -99,6 +99,8 @@ export function AppearanceTab() {
   const switchLocale = (l: string) => {
     if (typeof window !== "undefined") {
       localStorage.setItem("multica-locale", l);
+      // Set NEXT_LOCALE cookie so middleware restores this preference on new visits
+      document.cookie = `NEXT_LOCALE=${l}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
     }
     router.replace(pathname, { locale: l });
   };

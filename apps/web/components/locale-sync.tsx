@@ -3,18 +3,20 @@
 import { useEffect } from "react";
 
 /**
- * Reads the locale cookie on the client and updates <html lang>.
- * This avoids calling cookies() in the root Server Component layout,
- * which would mark the entire app as dynamic and disable the Router Cache.
+ * Syncs <html lang> with the active locale.
+ * The locale is passed as a prop from the [locale] layout (server component),
+ * and also persisted to localStorage so middleware can restore it on re-entry.
  */
-export function LocaleSync() {
+export function LocaleSync({ locale }: { locale: string }) {
   useEffect(() => {
-    const match = document.cookie.match(/(?:^|;\s*)multica-locale=(\w+)/);
-    const locale = match?.[1];
-    if (locale === "zh") {
-      document.documentElement.lang = "zh";
+    document.documentElement.lang = locale;
+    // Persist preference so middleware/cookie can restore locale on next visit
+    try {
+      localStorage.setItem("multica-locale", locale);
+    } catch {
+      // localStorage unavailable (e.g. private browsing restrictions)
     }
-  }, []);
+  }, [locale]);
 
   return null;
 }

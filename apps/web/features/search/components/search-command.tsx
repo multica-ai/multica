@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/i18n/navigation";
 import { Loader2, MessageSquare, SearchIcon } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
 import type { SearchIssueResult } from "@multica/core/types";

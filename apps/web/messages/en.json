@@ -307,5 +307,53 @@
       "settings": "Settings"
     },
     "clickToUploadAvatar": "Click to upload avatar"
+  },
+  "issues": {
+    "title": "Issues",
+    "workspace": "Workspace",
+    "noIssuesYet": "No issues yet",
+    "createToGetStarted": "Create an issue to get started.",
+    "failedMoveIssue": "Failed to move issue",
+    "scopeAll": "All",
+    "scopeAllDesc": "All issues in this workspace",
+    "scopeMembers": "Members",
+    "scopeMembersDesc": "Issues assigned to team members",
+    "scopeAgents": "Agents",
+    "scopeAgentsDesc": "Issues assigned to AI agents",
+    "filter": "Filter",
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "creator": "Creator",
+    "noAssignee": "No assignee",
+    "members": "Members",
+    "agents": "Agents",
+    "noResults": "No results",
+    "resetAllFilters": "Reset all filters",
+    "issueCount": "{count, plural, one {# issue} other {# issues}}",
+    "displaySettings": "Display settings",
+    "ordering": "Ordering",
+    "cardProperties": "Card properties",
+    "ascending": "Ascending",
+    "descending": "Descending",
+    "view": "View",
+    "board": "Board",
+    "list": "List",
+    "boardView": "Board view",
+    "listView": "List view",
+    "filterPlaceholder": "Filter...",
+    "sortOptions": {
+      "position": "Manual",
+      "priority": "Priority",
+      "due_date": "Due date",
+      "created_at": "Created date",
+      "title": "Title"
+    },
+    "cardPropertyOptions": {
+      "priority": "Priority",
+      "description": "Description",
+      "assignee": "Assignee",
+      "dueDate": "Due date"
+    }
   }
 }

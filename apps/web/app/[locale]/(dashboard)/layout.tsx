@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname } from "@/i18n/navigation";
 import { MulticaIcon } from "@/components/multica-icon";
 import { useNavigationStore } from "@multica/core/navigation";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";

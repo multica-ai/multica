@@ -11,6 +11,14 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// Mock @/i18n/navigation (locale-aware navigation)
+vi.mock("@/i18n/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/login",
+  Link: ({ children, href, ...props }: any) => <a href={href} {...props}>{children}</a>,
+  redirect: vi.fn(),
+}));
+
 // Mock auth store
 const mockSendCode = vi.fn();
 const mockVerifyCode = vi.fn();

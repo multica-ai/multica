@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NextIntlClientProvider } from "next-intl";
 import type { Issue } from "@multica/core/types";
 import { WorkspaceIdProvider } from "@multica/core/hooks";
+import enMessages from "@/messages/en.json";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -371,11 +373,13 @@ import IssuesPage from "./page";
 function renderWithQuery(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <WorkspaceIdProvider wsId="ws-1">
-        {ui}
-      </WorkspaceIdProvider>
-    </QueryClientProvider>,
+    <NextIntlClientProvider locale="en" messages={enMessages}>
+      <QueryClientProvider client={qc}>
+        <WorkspaceIdProvider wsId="ws-1">
+          {ui}
+        </WorkspaceIdProvider>
+      </QueryClientProvider>
+    </NextIntlClientProvider>,
   );
 }
 

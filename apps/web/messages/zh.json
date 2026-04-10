@@ -307,5 +307,53 @@
       "settings": "设置"
     },
     "clickToUploadAvatar": "点击上传头像"
+  },
+  "issues": {
+    "title": "任务",
+    "workspace": "工作区",
+    "noIssuesYet": "暂无任务",
+    "createToGetStarted": "创建任务以开始使用。",
+    "failedMoveIssue": "移动任务失败",
+    "scopeAll": "全部",
+    "scopeAllDesc": "工作区中的所有任务",
+    "scopeMembers": "成员",
+    "scopeMembersDesc": "分配给团队成员的任务",
+    "scopeAgents": "智能体",
+    "scopeAgentsDesc": "分配给 AI 智能体的任务",
+    "filter": "筛选",
+    "status": "状态",
+    "priority": "优先级",
+    "assignee": "经办人",
+    "creator": "创建人",
+    "noAssignee": "未分配",
+    "members": "成员",
+    "agents": "智能体",
+    "noResults": "无结果",
+    "resetAllFilters": "清除所有筛选",
+    "issueCount": "{count, plural, other {# 个任务}}",
+    "displaySettings": "显示设置",
+    "ordering": "排序",
+    "cardProperties": "卡片属性",
+    "ascending": "升序",
+    "descending": "降序",
+    "view": "视图",
+    "board": "看板",
+    "list": "列表",
+    "boardView": "看板视图",
+    "listView": "列表视图",
+    "filterPlaceholder": "筛选...",
+    "sortOptions": {
+      "position": "手动",
+      "priority": "优先级",
+      "due_date": "截止日期",
+      "created_at": "创建日期",
+      "title": "标题"
+    },
+    "cardPropertyOptions": {
+      "priority": "优先级",
+      "description": "描述",
+      "assignee": "经办人",
+      "dueDate": "截止日期"
+    }
   }
 }

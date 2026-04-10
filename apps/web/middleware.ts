@@ -4,8 +4,9 @@ import { routing } from "./i18n/routing";
 export default createMiddleware(routing);
 
 export const config = {
-  // Match all pathnames except static files and Next.js internals
+  // Apply locale routing only to auth/dashboard pages.
+  // Excludes: root `/` (landing), /about, /changelog, /homepage, /auth/*, /api/*, _next, static assets.
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|favicon.svg|robots.txt|sitemap.xml).*)",
+    "/((?!_next|api|auth|about|changelog|homepage|favicon\\.ico|favicon\\.svg|robots\\.txt|sitemap\\.xml).+)",
   ],
 };

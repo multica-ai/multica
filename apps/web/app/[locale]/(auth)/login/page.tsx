@@ -1,7 +1,8 @@
 "use client";
 
 import { Suspense, useState, useEffect, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useRouter } from "@/i18n/navigation";
 import { useAuthStore } from "@/platform/auth";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import { useWorkspaceStore } from "@/platform/workspace";

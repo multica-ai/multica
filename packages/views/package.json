@@ -63,7 +63,8 @@
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "zustand": "catalog:"
+    "zustand": "catalog:",
+    "next-intl": ">=4.0.0"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
