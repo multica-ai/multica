@@ -89,6 +89,16 @@ function OpenClawLogo({ className }: { className: string }) {
   );
 }
 
+// Hermes (NousResearch) — caduceus-inspired mark (☤)
+function HermesLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M7.5 0h1v2h-1zM7 3h2v1H7zM6.5 4.5h3v1h-3zM6 6h4v1H6zM5.5 7.5h5v1h-5zM6 9h4v1H6zM6.5 10.5h3v1h-3zM7 12h2v1H7zM7.5 13.5h1v2h-1z" />
+      <path d="M3 5.5a2.5 2.5 0 0 1 2.5-2.5v1A1.5 1.5 0 0 0 4 5.5 1.5 1.5 0 0 0 5.5 7v1A2.5 2.5 0 0 1 3 5.5zM10.5 3A2.5 2.5 0 0 1 13 5.5 2.5 2.5 0 0 1 10.5 8v-1A1.5 1.5 0 0 0 12 5.5 1.5 1.5 0 0 0 10.5 4z" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -105,6 +115,8 @@ export function ProviderLogo({
       return <OpenCodeLogo className={className} />;
     case "openclaw":
       return <OpenClawLogo className={className} />;
+    case "hermes":
+      return <HermesLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

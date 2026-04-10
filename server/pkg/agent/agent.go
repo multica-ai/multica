@@ -1,5 +1,5 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, OpenCode, OpenClaw). It mirrors the happy-cli AgentBackend
+// coding agents (Claude Code, Codex, OpenCode, OpenClaw, Hermes). It mirrors the happy-cli AgentBackend
 // pattern, translated to idiomatic Go.
 package agent
 
@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -82,13 +83,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, opencode, or openclaw)
+	ExecutablePath string            // path to CLI binary (claude, codex, opencode, openclaw, or hermes)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "opencode", "openclaw".
+// Supported types: "claude", "codex", "opencode", "openclaw", "hermes".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -103,12 +104,27 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &opencodeBackend{cfg: cfg}, nil
 	case "openclaw":
 		return &openclawBackend{cfg: cfg}, nil
+	case "hermes":
+		return &hermesBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw, hermes)", agentType)
 	}
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.
+// For CLIs with verbose version output (e.g. Hermes), only the short
+// version string is returned.
 func DetectVersion(ctx context.Context, executablePath string) (string, error) {
-	return detectCLIVersion(ctx, executablePath)
+	version, err := detectCLIVersion(ctx, executablePath)
+	if err != nil {
+		return "", err
+	}
+	// Hermes outputs verbose version info; extract just the short version.
+	// e.g. "Hermes Agent v0.6.0 (2026.3.30) Project: /Users/..." → "Hermes Agent v0.6.0"
+	if strings.HasPrefix(version, "Hermes Agent") {
+		if idx := strings.Index(version, ")"); idx != -1 {
+			return strings.TrimSpace(version[:idx+1]), nil
+		}
+	}
+	return version, nil
 }
