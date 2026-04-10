@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { useAppLocale } from "@multica/views/i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProviderLogo } from "./provider-logo";
 
@@ -20,12 +21,14 @@ function RuntimeListItem({
   isSelected,
   ownerMember,
   hasUpdate,
+  updateAvailableLabel,
   onClick,
 }: {
   runtime: AgentRuntime;
   isSelected: boolean;
   ownerMember: MemberWithUser | null;
   hasUpdate: boolean;
+  updateAvailableLabel: string;
   onClick: () => void;
 }) {
   return (
@@ -57,7 +60,7 @@ function RuntimeListItem({
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         {hasUpdate && (
-          <span title="Update available">
+          <span title={updateAvailableLabel}>
             <ArrowUpCircle className="h-3.5 w-3.5 text-info" />
           </span>
         )}
@@ -90,6 +93,7 @@ export function RuntimeList({
   onOwnerFilterChange: (ownerId: string | null) => void;
   updatableIds?: Set<string>;
 }) {
+  const { t } = useAppLocale();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
 
@@ -121,10 +125,10 @@ export function RuntimeList({
   return (
     <div className="overflow-y-auto h-full border-r">
       <div className="flex h-12 items-center justify-between border-b px-4">
-        <h1 className="text-sm font-semibold">Runtimes</h1>
+        <h1 className="text-sm font-semibold">{t.runtimes.title}</h1>
         <span className="text-xs text-muted-foreground">
           {filteredRuntimes.filter((r) => r.status === "online").length}/
-          {filteredRuntimes.length} online
+          {filteredRuntimes.length} {t.runtimes.online}
         </span>
       </div>
 
@@ -140,7 +144,7 @@ export function RuntimeList({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Mine
+            {t.runtimes.filterMine}
           </button>
           <button
             onClick={() => { onFilterChange("all"); onOwnerFilterChange(null); }}
@@ -150,7 +154,7 @@ export function RuntimeList({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            All
+            {t.runtimes.filterAll}
           </button>
         </div>
 
@@ -168,7 +172,7 @@ export function RuntimeList({
                   <span className="max-w-20 truncate">{selectedOwner.name}</span>
                 </>
               ) : (
-                <span>Owner</span>
+                <span>{t.runtimes.owner}</span>
               )}
               <ChevronDown className="h-3 w-3 opacity-50" />
             </DropdownMenuTrigger>
@@ -177,7 +181,7 @@ export function RuntimeList({
                 onClick={() => onOwnerFilterChange(null)}
                 className="flex items-center justify-between"
               >
-                <span className="text-xs">All owners</span>
+                <span className="text-xs">{t.runtimes.allOwners}</span>
                 {!ownerFilter && <Check className="h-3.5 w-3.5 text-foreground" />}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -204,14 +208,10 @@ export function RuntimeList({
         <div className="flex flex-col items-center justify-center px-4 py-12">
           <Server className="h-8 w-8 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">
-            {filter === "mine" ? "No runtimes owned by you" : ownerFilter ? "No runtimes for this owner" : "No runtimes registered"}
+            {filter === "mine" ? t.runtimes.noRuntimesMine : ownerFilter ? t.runtimes.noRuntimesOwner : t.runtimes.noRuntimesRegistered}
           </p>
           <p className="mt-1 text-xs text-muted-foreground text-center">
-            Run{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              multica daemon start
-            </code>{" "}
-            to register a local runtime.
+            {t.runtimes.registerHint}
           </p>
         </div>
       ) : (
@@ -223,6 +223,7 @@ export function RuntimeList({
               isSelected={runtime.id === selectedId}
               ownerMember={getOwnerMember(runtime.owner_id)}
               hasUpdate={updatableIds?.has(runtime.id) ?? false}
+              updateAvailableLabel={t.runtimes.updateAvailable}
               onClick={() => onSelect(runtime.id)}
             />
           ))}

@@ -8,6 +8,7 @@
     "lint": "eslint ."
   },
   "exports": {
+    "./i18n": "./i18n/index.ts",
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
     "./common/markdown": "./common/markdown.tsx",

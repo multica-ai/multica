@@ -52,22 +52,32 @@ import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
+import { useAppLocale, locales, localeLabels } from "../i18n";
 
-const personalNav = [
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/my-issues", label: "My Issues", icon: CircleUser },
+import type { LucideIcon } from "lucide-react";
+
+type NavItem = {
+  href: string;
+  navKey: string;
+  icon: LucideIcon;
+};
+
+const personalNav: NavItem[] = [
+  { href: "/inbox", navKey: "inbox", icon: Inbox },
+  { href: "/my-issues", navKey: "myIssues", icon: CircleUser },
+
 ];
 
-const workspaceNav = [
-  { href: "/issues", label: "Issues", icon: ListTodo },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/agents", label: "Agents", icon: Bot },
+const workspaceNav: NavItem[] = [
+  { href: "/issues", navKey: "issues", icon: ListTodo },
+  { href: "/projects", navKey: "projects", icon: FolderKanban },
+  { href: "/agents", navKey: "agents", icon: Bot },
 ];
 
-const configureNav = [
-  { href: "/runtimes", label: "Runtimes", icon: Monitor },
-  { href: "/skills", label: "Skills", icon: BookOpenText },
-  { href: "/settings", label: "Settings", icon: Settings },
+const configureNav: NavItem[] = [
+  { href: "/runtimes", navKey: "runtimes", icon: Monitor },
+  { href: "/skills", navKey: "skills", icon: BookOpenText },
+  { href: "/settings", navKey: "settings", icon: Settings },
 ];
 
 function DraftDot() {
@@ -94,6 +104,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const workspace = useWorkspaceStore((s) => s.workspace);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const { locale, t, setLocale } = useAppLocale();
 
   const wsId = workspace?.id;
   const { data: inboxItems = [] } = useQuery({
@@ -145,7 +156,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup className="group/ws-section">
                     <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
-                      Workspaces
+                      {t.nav.workspaces}
                       <Tooltip>
                         <TooltipTrigger
                           className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
@@ -154,7 +165,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <Plus className="h-3.5 w-3.5" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          Create workspace
+                          {t.nav.createWorkspace}
                         </TooltipContent>
                       </Tooltip>
                     </DropdownMenuLabel>
@@ -180,7 +191,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
-                      Log out
+                      {t.nav.logOut}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
@@ -202,7 +213,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <SquarePen />
                   <DraftDot />
                 </span>
-                <span>New Issue</span>
+                <span>{t.nav.newIssue}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -215,6 +226,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {personalNav.map((item) => {
                   const isActive = pathname === item.href;
+                  const label = t.nav[item.navKey as keyof typeof t.nav];
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
@@ -223,8 +235,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Inbox" && unreadCount > 0 && (
+                        <span>{label}</span>
+                        {item.navKey === "inbox" && unreadCount > 0 && (
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
@@ -238,11 +250,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+            <SidebarGroupLabel>{t.nav.workspaceLabel}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
                   const isActive = pathname === item.href;
+                  const label = t.nav[item.navKey as keyof typeof t.nav];
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
@@ -251,7 +264,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
+                        <span>{label}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -261,11 +274,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel>Configure</SidebarGroupLabel>
+            <SidebarGroupLabel>{t.nav.configureLabel}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {configureNav.map((item) => {
                   const isActive = pathname === item.href;
+                  const label = t.nav[item.navKey as keyof typeof t.nav];
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
@@ -274,8 +288,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Runtimes" && hasRuntimeUpdates && (
+                        <span>{label}</span>
+                        {item.navKey === "runtimes" && hasRuntimeUpdates && (
                           <span className="ml-auto size-1.5 rounded-full bg-destructive" />
                         )}
                       </SidebarMenuButton>
@@ -288,6 +302,21 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
+          <div className="flex items-center justify-center gap-1 px-4 py-1">
+            {locales.map((l, i) => (
+              <button
+                key={l}
+                onClick={() => setLocale(l)}
+                className={cn(
+                  "px-1.5 py-0.5 text-[11px] font-medium transition-colors",
+                  l === locale ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                  i > 0 && "border-l border-border pl-1.5"
+                )}
+              >
+                {localeLabels[l]}
+              </button>
+            ))}
+          </div>
           <div className="border-t pt-2">
             <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
               <ActorAvatar
@@ -311,7 +340,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <DropdownMenuContent align="end" side="top" sideOffset={4}>
                   <DropdownMenuItem variant="destructive" onClick={logout}>
                     <LogOut className="h-3.5 w-3.5" />
-                    Log out
+                    {t.nav.logOut}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
