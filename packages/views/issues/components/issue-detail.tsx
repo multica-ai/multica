@@ -66,7 +66,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -137,6 +137,16 @@ function formatActivity(
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 // ---------------------------------------------------------------------------
 // Property row
@@ -232,6 +242,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const {
     subscribers, loading: subscribersLoading, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
   } = useIssueSubscribers(id, user?.id);
+
+  // Token usage
+  const { data: usage } = useQuery(issueUsageOptions(id));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -1201,6 +1214,34 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </PropRow>
             </div>}
           </div>
+
+          {/* Token usage */}
+          {usage && usage.task_count > 0 && (
+            <div>
+              <div className="text-xs font-medium mb-2 flex items-center gap-1">
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
+                Token usage
+              </div>
+              <div className="space-y-0.5 pl-2">
+                <PropRow label="Input">
+                  <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
+                </PropRow>
+                <PropRow label="Output">
+                  <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
+                </PropRow>
+                {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
+                  <PropRow label="Cache">
+                    <span className="text-muted-foreground">
+                      {formatTokenCount(usage.total_cache_read_tokens)} read / {formatTokenCount(usage.total_cache_write_tokens)} write
+                    </span>
+                  </PropRow>
+                )}
+                <PropRow label="Runs">
+                  <span className="text-muted-foreground">{usage.task_count}</span>
+                </PropRow>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>

@@ -12,6 +12,7 @@ export const issueKeys = {
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
+  usage: (issueId: string) => ["issues", "usage", issueId] as const,
 };
 
 export const CLOSED_PAGE_SIZE = 50;
@@ -77,5 +78,12 @@ export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
+  });
+}
+
+export function issueUsageOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.usage(issueId),
+    queryFn: () => api.getIssueUsage(issueId),
   });
 }

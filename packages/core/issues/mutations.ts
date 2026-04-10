@@ -180,24 +180,28 @@ export function useDeleteIssue() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       const prevList = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
+      const deleted = prevList?.issues.find((i) => i.id === id);
       qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
-        const deleted = old.issues.find((i) => i.id === id);
+        const d = old.issues.find((i) => i.id === id);
         return {
           ...old,
           issues: old.issues.filter((i) => i.id !== id),
           total: old.total - 1,
-          doneTotal: (old.doneTotal ?? 0) - (deleted?.status === "done" ? 1 : 0),
+          doneTotal: (old.doneTotal ?? 0) - (d?.status === "done" ? 1 : 0),
         };
       });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
-      return { prevList };
+      return { prevList, parentIssueId: deleted?.parent_issue_id };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.parentIssueId) {
+        qc.invalidateQueries({ queryKey: issueKeys.children(wsId, ctx.parentIssueId) });
+      }
     },
   });
 }
@@ -245,9 +249,14 @@ export function useBatchDeleteIssues() {
     onMutate: async (ids) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       const prevList = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
+      const idSet = new Set(ids);
+      const parentIssueIds = new Set(
+        prevList?.issues
+          .filter((i) => idSet.has(i.id) && i.parent_issue_id)
+          .map((i) => i.parent_issue_id!) ?? [],
+      );
       qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
-        const idSet = new Set(ids);
         const doneDeleted = old.issues.filter(
           (i) => idSet.has(i.id) && i.status === "done",
         ).length;
@@ -258,13 +267,18 @@ export function useBatchDeleteIssues() {
           doneTotal: (old.doneTotal ?? 0) - doneDeleted,
         };
       });
-      return { prevList };
+      return { prevList, parentIssueIds };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.parentIssueIds) {
+        for (const parentId of ctx.parentIssueIds) {
+          qc.invalidateQueries({ queryKey: issueKeys.children(wsId, parentId) });
+        }
+      }
     },
   });
 }

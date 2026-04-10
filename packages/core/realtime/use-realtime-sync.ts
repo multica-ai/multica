@@ -9,6 +9,7 @@ import type { WorkspaceStore } from "../workspace/store";
 import { createLogger } from "../logger";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { runtimeKeys } from "../runtimes/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -54,7 +55,8 @@ export interface RealtimeSyncStores {
  *
  * Per-issue events (comments, activity, reactions, subscribers) are handled
  * both here (invalidation fallback) and by per-page useWSEvent hooks (granular
- * updates). Daemon events are handled by individual components only.
+ * updates). Daemon register events invalidate runtimes globally; heartbeats
+ * are skipped to avoid excessive refetches.
  *
  * @param ws - WebSocket client instance (null when not yet connected)
  * @param stores - Platform-created Zustand store instances for auth and workspace
@@ -95,6 +97,10 @@ export function useRealtimeSync(
         const wsId = workspaceStore.getState().workspace?.id;
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      daemon: () => {
+        const wsId = workspaceStore.getState().workspace?.id;
+        if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      },
     };
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -118,6 +124,7 @@ export function useRealtimeSync(
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
       "subscriber:added", "subscriber:removed",
+      "daemon:heartbeat",
     ]);
 
     const unsubAny = ws.onAny((msg) => {
@@ -300,6 +307,7 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
           qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
           qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
         }
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       } catch (e) {

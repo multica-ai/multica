@@ -45,3 +45,14 @@ WHERE a.workspace_id = $1
   AND atq.created_at >= @since::timestamptz
 GROUP BY tu.model
 ORDER BY (SUM(tu.input_tokens) + SUM(tu.output_tokens)) DESC;
+
+-- name: GetIssueUsageSummary :one
+SELECT
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1;

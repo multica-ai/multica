@@ -20,6 +20,7 @@ export type {
   RuntimePingStatus,
   RuntimeUpdate,
   RuntimeUpdateStatus,
+  IssueUsageSummary,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";

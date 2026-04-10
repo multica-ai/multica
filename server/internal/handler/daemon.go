@@ -667,3 +667,22 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
+func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+
+	row, err := h.Queries.GetIssueUsageSummary(r.Context(), parseUUID(issueID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_input_tokens":       row.TotalInputTokens,
+		"total_output_tokens":      row.TotalOutputTokens,
+		"total_cache_read_tokens":  row.TotalCacheReadTokens,
+		"total_cache_write_tokens": row.TotalCacheWriteTokens,
+		"task_count":               row.TaskCount,
+	})
+}

@@ -30,7 +30,7 @@ export function AgentsPage() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(runtimeListOptions(wsId));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_agents_layout",
   });
@@ -224,6 +224,7 @@ export function AgentsPage() {
       {showCreate && (
         <CreateAgentDialog
           runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />
