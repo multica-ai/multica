@@ -4,4 +4,5 @@ export interface NavigationAdapter {
   back(): void;
   pathname: string;
   searchParams: URLSearchParams;
+  buildHref?: (path: string) => string;
 }

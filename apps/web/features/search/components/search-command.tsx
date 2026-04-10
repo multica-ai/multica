@@ -5,6 +5,7 @@ import { useRouter } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2, MessageSquare, SearchIcon } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
+import { useQuery } from "@tanstack/react-query";
 import type { SearchIssueResult } from "@multica/core/types";
 import { api } from "@/platform/api";
 import { StatusIcon } from "@multica/views/issues/components";
@@ -23,10 +24,8 @@ export function SearchCommand() {
   const tIssues = useTranslations("issues");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchIssueResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   // Global Cmd+K / Ctrl+K shortcut
   useEffect(() => {
@@ -40,11 +39,10 @@ export function SearchCommand() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Cleanup debounce/abort on unmount
+  // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
     };
   }, []);
 
@@ -52,51 +50,27 @@ export function SearchCommand() {
   useEffect(() => {
     if (!open) {
       setQuery("");
-      setResults([]);
-      setIsLoading(false);
+      setDebouncedQuery("");
     }
   }, [open]);
 
-  const search = useCallback((q: string) => {
+  const { data, isFetching } = useQuery({
+    queryKey: ["issueSearch", debouncedQuery],
+    queryFn: () =>
+      api.searchIssues({ q: debouncedQuery.trim(), limit: 20, include_closed: true }),
+    enabled: !!debouncedQuery.trim(),
+    staleTime: 30_000,
+  });
+
+  const results: SearchIssueResult[] = data?.issues ?? [];
+
+  const handleValueChange = useCallback((value: string) => {
+    setQuery(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (abortRef.current) abortRef.current.abort();
-
-    if (!q.trim()) {
-      setResults([]);
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    debounceRef.current = setTimeout(async () => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await api.searchIssues({
-          q: q.trim(),
-          limit: 20,
-          include_closed: true,
-          signal: controller.signal,
-        });
-        if (!controller.signal.aborted) {
-          setResults(res.issues);
-          setIsLoading(false);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQuery(value);
     }, 300);
   }, []);
-
-  const handleValueChange = useCallback(
-    (value: string) => {
-      setQuery(value);
-      search(value);
-    },
-    [search],
-  );
 
   const handleSelect = useCallback(
     (issueId: string) => {
@@ -105,6 +79,8 @@ export function SearchCommand() {
     },
     [router],
   );
+
+  const isLoading = isFetching && !!debouncedQuery.trim();
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -144,7 +120,7 @@ export function SearchCommand() {
               </div>
             )}
 
-            {!isLoading && query.trim() && results.length === 0 && (
+            {!isLoading && debouncedQuery.trim() && results.length === 0 && (
               <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
                 {t("noIssuesFound")}
               </CommandPrimitive.Empty>

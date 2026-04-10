@@ -19,6 +19,7 @@ import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context"
 import { StatusIcon } from "./status-icon";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
+import { useTranslations } from "next-intl";
 
 export function BoardColumn({
   status,
@@ -35,6 +36,7 @@ export function BoardColumn({
   totalCount?: number;
   footer?: ReactNode;
 }) {
+  const t = useTranslations("issues");
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const viewStoreApi = useViewStoreApi();
@@ -110,7 +112,7 @@ export function BoardColumn({
         </SortableContext>
         {issueIds.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            No issues
+            {t("noIssues")}
           </p>
         )}
         {footer}

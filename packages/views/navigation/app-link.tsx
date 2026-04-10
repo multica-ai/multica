@@ -13,7 +13,8 @@ export function AppLink({
   onClick,
   ...props
 }: AppLinkProps) {
-  const { push } = useNavigation();
+  const { push, buildHref } = useNavigation();
+  const resolvedHref = buildHref ? buildHref(href) : href;
 
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     // Allow ctrl/cmd+click to open in new tab
@@ -24,7 +25,7 @@ export function AppLink({
   };
 
   return (
-    <a href={href} onClick={handleClick} {...props}>
+    <a href={resolvedHref} onClick={handleClick} {...props}>
       {children}
     </a>
   );

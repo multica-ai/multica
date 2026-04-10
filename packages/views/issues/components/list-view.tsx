@@ -15,6 +15,7 @@ import { sortIssues } from "../utils/sort";
 import { StatusIcon } from "./status-icon";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { useTranslations } from "next-intl";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 
@@ -27,6 +28,7 @@ export function ListView({
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
 }) {
+  const t = useTranslations("issues");
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const listCollapsedStatuses = useViewStore(
@@ -145,7 +147,7 @@ export function ListView({
                   </>
                 ) : (
                   <p className="py-6 text-center text-xs text-muted-foreground">
-                    No issues
+                    {t("noIssues")}
                   </p>
                 )}
               </Accordion.Panel>

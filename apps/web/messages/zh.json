@@ -308,9 +308,36 @@
     },
     "clickToUploadAvatar": "点击上传头像"
   },
+  "myIssues": {
+    "title": "我的任务",
+    "workspace": "工作区",
+    "scopeAssigned": "已指派给我",
+    "scopeAssignedDesc": "指派给我的任务",
+    "scopeCreated": "我创建的",
+    "scopeCreatedDesc": "我创建的任务",
+    "scopeAgents": "我的 Agent",
+    "scopeAgentsDesc": "指派给我的 Agent 的任务",
+    "emptyTitle": "没有指派给你的任务",
+    "emptyDesc": "你创建或被指派的任务将显示在这里。",
+    "failedMove": "移动任务失败"
+  },
+  "batchAction": {
+    "status": "状态",
+    "priority": "优先级",
+    "assignee": "经办人",
+    "delete": "删除",
+    "deleteTitle": "删除 {count} 个任务？",
+    "deleteDescription": "此操作无法撤销，将永久删除所选的 {count} 个任务及其所有相关数据。",
+    "cancel": "取消",
+    "updatedSuccess": "已更新 {count} 个任务",
+    "deletedSuccess": "已删除 {count} 个任务",
+    "failedUpdate": "批量更新任务失败",
+    "failedDelete": "批量删除任务失败"
+  },
   "issues": {
     "title": "任务",
     "workspace": "工作区",
+    "noIssues": "暂无任务",
     "noIssuesYet": "暂无任务",
     "createToGetStarted": "创建任务以开始使用。",
     "failedMoveIssue": "移动任务失败",

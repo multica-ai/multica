@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   AlertDialog,
@@ -28,6 +29,8 @@ import { PriorityIcon } from "./priority-icon";
 import { AssigneePicker } from "./pickers";
 
 export function BatchActionToolbar() {
+  const t = useTranslations("batchAction");
+  const tIssues = useTranslations("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
   const count = selectedIds.size;
@@ -47,9 +50,9 @@ export function BatchActionToolbar() {
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
       await batchUpdate.mutateAsync({ ids, updates });
-      toast.success(`Updated ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(t("updatedSuccess", { count }));
     } catch {
-      toast.error("Failed to update issues");
+      toast.error(t("failedUpdate"));
     }
   };
 
@@ -57,9 +60,9 @@ export function BatchActionToolbar() {
     try {
       await batchDelete.mutateAsync(ids);
       clear();
-      toast.success(`Deleted ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(t("deletedSuccess", { count }));
     } catch {
-      toast.error("Failed to delete issues");
+      toast.error(t("failedDelete"));
     } finally {
       setDeleteOpen(false);
     }
@@ -87,7 +90,7 @@ export function BatchActionToolbar() {
             }
           >
             <StatusIcon status="todo" className="h-3.5 w-3.5 mr-1" />
-            Status
+            {t("status")}
           </PopoverTrigger>
           <PopoverContent align="center" className="w-44 p-1">
             {ALL_STATUSES.map((s) => {
@@ -103,7 +106,7 @@ export function BatchActionToolbar() {
                   className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${cfg.hoverBg} transition-colors`}
                 >
                   <StatusIcon status={s} className="h-3.5 w-3.5" />
-                  <span>{cfg.label}</span>
+                  <span>{tIssues(`statusLabels.${s}` as Parameters<typeof tIssues>[0])}</span>
                 </button>
               );
             })}
@@ -118,7 +121,7 @@ export function BatchActionToolbar() {
             }
           >
             <PriorityIcon priority="high" className="mr-1" />
-            Priority
+            {t("priority")}
           </PopoverTrigger>
           <PopoverContent align="center" className="w-44 p-1">
             {PRIORITY_ORDER.map((p) => {
@@ -135,7 +138,7 @@ export function BatchActionToolbar() {
                 >
                   <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${cfg.badgeBg} ${cfg.badgeText}`}>
                     <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                    {cfg.label}
+                    {tIssues(`priorityLabels.${p}` as Parameters<typeof tIssues>[0])}
                   </span>
                 </button>
               );
@@ -151,7 +154,7 @@ export function BatchActionToolbar() {
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Assignee"
+          trigger={t("assignee")}
           align="center"
         />
 
@@ -164,7 +167,7 @@ export function BatchActionToolbar() {
           className="text-destructive hover:text-destructive"
         >
           <Trash2 className="size-3.5 mr-1" />
-          Delete
+          {t("delete")}
         </Button>
       </div>
 
@@ -172,20 +175,19 @@ export function BatchActionToolbar() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {count} issue{count > 1 ? "s" : ""}?
+              {t("deleteTitle", { count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the
-              selected issue{count > 1 ? "s" : ""} and all associated data.
+              {t("deleteDescription", { count })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleBatchDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {t("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

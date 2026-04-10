@@ -308,9 +308,36 @@
     },
     "clickToUploadAvatar": "Click to upload avatar"
   },
+  "myIssues": {
+    "title": "My Issues",
+    "workspace": "Workspace",
+    "scopeAssigned": "Assigned",
+    "scopeAssignedDesc": "Issues assigned to me",
+    "scopeCreated": "Created",
+    "scopeCreatedDesc": "Issues I created",
+    "scopeAgents": "My Agents",
+    "scopeAgentsDesc": "Issues assigned to my agents",
+    "emptyTitle": "No issues assigned to you",
+    "emptyDesc": "Issues you create or are assigned to will appear here.",
+    "failedMove": "Failed to move issue"
+  },
+  "batchAction": {
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "delete": "Delete",
+    "deleteTitle": "{count, plural, one {Delete # issue?} other {Delete # issues?}}",
+    "deleteDescription": "{count, plural, one {This action cannot be undone. This will permanently delete the selected issue and all associated data.} other {This action cannot be undone. This will permanently delete the selected # issues and all associated data.}}",
+    "cancel": "Cancel",
+    "updatedSuccess": "{count, plural, one {Updated # issue} other {Updated # issues}}",
+    "deletedSuccess": "{count, plural, one {Deleted # issue} other {Deleted # issues}}",
+    "failedUpdate": "Failed to update issues",
+    "failedDelete": "Failed to delete issues"
+  },
   "issues": {
     "title": "Issues",
     "workspace": "Workspace",
+    "noIssues": "No issues",
     "noIssuesYet": "No issues yet",
     "createToGetStarted": "Create an issue to get started.",
     "failedMoveIssue": "Failed to move issue",
