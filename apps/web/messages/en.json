@@ -481,7 +481,10 @@
     "agentIsWorking": "{name} is working",
     "loadingEvents": "Loading...",
     "toolCalls": "{count} tools",
-    "cancelFailed": "Failed to cancel task"
+    "cancelFailed": "Failed to cancel task",
+    "transcriptTitle": "Agent Execution Transcript",
+    "timelineLabel": "Timeline",
+    "moreItems": "+{count} more"
   },
   "search": {
     "title": "Search Issues",

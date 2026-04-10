@@ -267,7 +267,7 @@ export function AgentTranscriptDialog({
         className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
       >
-        <DialogTitle className="sr-only">Agent Execution Transcript</DialogTitle>
+        <DialogTitle className="sr-only">{t("transcriptTitle")}</DialogTitle>
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="border-b px-4 py-3 shrink-0 space-y-2">
@@ -472,7 +472,7 @@ function TimelineBar({
   }
 
   return (
-    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
+    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label={t("timelineLabel")}>
       {segments.map((seg, segIdx) => {
         const isSelected = selectedIdx !== null && selectedIdx >= seg.startIdx && selectedIdx <= seg.endIdx;
         const color = colorClasses[seg.color];
@@ -489,13 +489,13 @@ function TimelineBar({
             )}
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
             onClick={() => onSegmentClick(seg.startIdx)}
-            title={`${getTranslatedLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
+            title={`${getTranslatedLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` ${t("moreItems", { count: seg.count - 1 })}` : ""}`}
           >
             {/* Tooltip on hover */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
               <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
                 {getTranslatedLabel(items[seg.startIdx]!)}
-                {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
+                {seg.count > 1 && <span className="text-muted-foreground ml-1">{t("moreItems", { count: seg.count - 1 })}</span>}
               </div>
             </div>
           </button>

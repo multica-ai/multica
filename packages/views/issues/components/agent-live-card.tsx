@@ -111,6 +111,7 @@ interface AgentLiveCardProps {
 }
 
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
+  const t = useTranslations("agentTranscript");
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   const seenSeqs = useRef(new Set<string>());
@@ -218,7 +219,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
           task={firstEntry.task}
           items={firstEntry.items}
           issueId={issueId}
-          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : "Agent"}
+          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t("typeAgent")}
         />
       </div>
       {/* Additional agents — scroll with the page */}
@@ -230,7 +231,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               task={task}
               items={items}
               issueId={issueId}
-              agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+              agentName={task.agent_id ? getActorName("agent", task.agent_id) : t("typeAgent")}
             />
           ))}
         </div>
@@ -321,10 +322,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          <span className="font-medium text-foreground truncate">{t("agentIsWorking", { name: agentName })}</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+            <span className="text-muted-foreground shrink-0">{t("toolCalls", { count: toolCount })}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
@@ -342,7 +343,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             title={t("stopAgent")}
           >
             {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-            <span>Stop</span>
+            <span>{t("stopAgent")}</span>
           </button>
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
         </div>
@@ -557,7 +558,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           onOpenChange={setTranscriptOpen}
           task={task}
           items={items}
-          agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+          agentName={task.agent_id ? getActorName("agent", task.agent_id) : t("typeAgent")}
         />
       )}
     </Collapsible>

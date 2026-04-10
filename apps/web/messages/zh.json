@@ -481,7 +481,10 @@
     "agentIsWorking": "{name} 正在工作",
     "loadingEvents": "加载中...",
     "toolCalls": "{count} 个工具调用",
-    "cancelFailed": "取消任务失败"
+    "cancelFailed": "取消任务失败",
+    "transcriptTitle": "Agent 执行记录",
+    "timelineLabel": "时间线",
+    "moreItems": "+{count} 更多"
   },
   "search": {
     "title": "搜索任务",
