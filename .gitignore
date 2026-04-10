@@ -45,3 +45,4 @@ _features/
 *.dmg
 *.app
 server/server
+start.sh
