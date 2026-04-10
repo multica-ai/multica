@@ -23,6 +23,7 @@ import type { NodeViewProps } from "@tiptap/react";
 import { useQuery } from "@tanstack/react-query";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useNavigation } from "../../navigation";
 import { StatusIcon } from "../../issues/components/status-icon";
 
 export function MentionView({ node }: NodeViewProps) {
@@ -52,12 +53,19 @@ function IssueMention({
 }) {
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
+  const { openInNewTab } = useNavigation();
   const issue = issues.find((i) => i.id === issueId);
 
+  const issuePath = `/issues/${issueId}`;
+  const tabTitle = issue ? `${issue.identifier}: ${issue.title}` : undefined;
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    window.open(`/issues/${issueId}`, "_blank", "noopener,noreferrer");
+    if (openInNewTab) {
+      openInNewTab(issuePath, tabTitle);
+    } else {
+      window.open(issuePath, "_blank", "noopener,noreferrer");
+    }
   };
 
   const cardClass =

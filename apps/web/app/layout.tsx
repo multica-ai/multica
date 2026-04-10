@@ -3,10 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
-import { QueryProvider } from "@multica/core/provider";
-import { AuthInitializer } from "@/features/auth";
-import { WebWSProvider } from "@/platform/ws-provider";
-import { WebNavigationProvider } from "@/platform/navigation";
+import { WebProviders } from "@/components/web-providers";
 import { LocaleSync } from "@/components/locale-sync";
 import "./globals.css";
 
@@ -41,6 +38,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
+    site: "@multica_hq",
+    creator: "@multica_hq",
   },
   alternates: {
     canonical: "/",
@@ -65,14 +64,10 @@ export default function RootLayout({
       <body className="h-full overflow-hidden">
         <LocaleSync />
         <ThemeProvider>
-          <QueryProvider>
-            <WebNavigationProvider>
-              <AuthInitializer>
-                <WebWSProvider>{children}</WebWSProvider>
-              </AuthInitializer>
-            </WebNavigationProvider>
-            <Toaster />
-          </QueryProvider>
+          <WebProviders>
+            {children}
+          </WebProviders>
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

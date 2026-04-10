@@ -9,11 +9,23 @@ import { PropertyPicker, PickerItem } from "./property-picker";
 export function StatusPicker({
   status,
   onUpdate,
+  trigger: customTrigger,
+  triggerRender,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  align,
 }: {
   status: IssueStatus;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  align?: "start" | "center" | "end";
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const cfg = STATUS_CONFIG[status];
 
   return (
@@ -21,11 +33,15 @@ export function StatusPicker({
       open={open}
       onOpenChange={setOpen}
       width="w-44"
+      align={align}
+      triggerRender={triggerRender}
       trigger={
-        <>
-          <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{cfg.label}</span>
-        </>
+        customTrigger ?? (
+          <>
+            <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{cfg.label}</span>
+          </>
+        )
       }
     >
       {ALL_STATUSES.map((s) => {

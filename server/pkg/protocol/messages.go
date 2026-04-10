@@ -57,6 +57,23 @@ type RuntimeInfo struct {
 	Status  string `json:"status"`
 }
 
+// ChatMessagePayload is broadcast when a new chat message is created.
+type ChatMessagePayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	MessageID     string `json:"message_id"`
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	TaskID        string `json:"task_id,omitempty"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// ChatDonePayload is broadcast when an agent finishes responding to a chat message.
+type ChatDonePayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id"`
+	Content       string `json:"content"`
+}
+
 // HeartbeatPayload is sent periodically from daemon to server.
 type HeartbeatPayload struct {
 	DaemonID     string `json:"daemon_id"`

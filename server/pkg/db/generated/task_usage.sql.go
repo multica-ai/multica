@@ -11,6 +11,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
+SELECT
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+`
+
+type GetIssueUsageSummaryRow struct {
+	TotalInputTokens      int64 `json:"total_input_tokens"`
+	TotalOutputTokens     int64 `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64 `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64 `json:"total_cache_write_tokens"`
+	TaskCount             int32 `json:"task_count"`
+}
+
+func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID) (GetIssueUsageSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getIssueUsageSummary, issueID)
+	var i GetIssueUsageSummaryRow
+	err := row.Scan(
+		&i.TotalInputTokens,
+		&i.TotalOutputTokens,
+		&i.TotalCacheReadTokens,
+		&i.TotalCacheWriteTokens,
+		&i.TaskCount,
+	)
+	return i, err
+}
+
 const getTaskUsage = `-- name: GetTaskUsage :many
 SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at FROM task_usage
 WHERE task_id = $1

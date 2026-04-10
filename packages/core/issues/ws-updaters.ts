@@ -17,6 +17,7 @@ export function onIssueCreated(
       doneTotal: (old.doneTotal ?? 0) + (issue.status === "done" ? 1 : 0),
     };
   });
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
   }
@@ -57,6 +58,7 @@ export function onIssueUpdated(
       doneTotal: (old.doneTotal ?? 0) + doneDelta,
     };
   });
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
     old ? { ...old, ...issue } : old,
   );
@@ -86,6 +88,7 @@ export function onIssueDeleted(
       doneTotal: (old.doneTotal ?? 0) - (del?.status === "done" ? 1 : 0),
     };
   });
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.removeQueries({ queryKey: issueKeys.detail(wsId, issueId) });
   qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
   qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });

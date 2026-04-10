@@ -617,9 +617,23 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
+	// sessions should be a symlink to the shared sessions dir.
+	sessionsPath := filepath.Join(codexHome, "sessions")
+	fi, err := os.Lstat(sessionsPath)
+	if err != nil {
+		t.Fatalf("sessions not found: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("sessions should be a symlink")
+	}
+	sessTarget, _ := os.Readlink(sessionsPath)
+	if sessTarget != filepath.Join(sharedHome, "sessions") {
+		t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+	}
+
 	// auth.json should be a symlink.
 	authPath := filepath.Join(codexHome, "auth.json")
-	fi, err := os.Lstat(authPath)
+	fi, err = os.Lstat(authPath)
 	if err != nil {
 		t.Fatalf("auth.json not found: %v", err)
 	}
@@ -675,17 +689,26 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should exist but be empty (no auth.json, no config.json, etc.).
+	// Directory should only contain the sessions symlink (no auth.json, no config.json, etc.).
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
 	}
-	if len(entries) != 0 {
+	if len(entries) != 1 {
 		names := make([]string, len(entries))
 		for i, e := range entries {
 			names[i] = e.Name()
 		}
-		t.Errorf("expected empty codex-home, got: %v", names)
+		t.Errorf("expected only sessions symlink in codex-home, got: %v", names)
+	}
+	// sessions should be a symlink to the shared sessions dir.
+	sessionsPath := filepath.Join(codexHome, "sessions")
+	fi, err := os.Lstat(sessionsPath)
+	if err != nil {
+		t.Fatalf("sessions not found: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("sessions should be a symlink")
 	}
 }
 

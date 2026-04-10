@@ -30,7 +30,6 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
-  useState,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { cn } from "@multica/ui/lib/utils";
@@ -83,7 +82,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     },
     ref,
   ) {
-    const [dragOver, setDragOver] = useState(false);
     const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
@@ -132,17 +130,29 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             const href = link?.getAttribute("href");
             if (!href || href.startsWith("mention://")) return false;
 
+            const openLink = () => {
+              if (href.startsWith("/")) {
+                // Internal path — dispatch custom event so the app can handle it
+                // (direct window.open breaks in Electron hash router)
+                window.dispatchEvent(
+                  new CustomEvent("multica:navigate", { detail: { path: href } }),
+                );
+              } else {
+                window.open(href, "_blank", "noopener,noreferrer");
+              }
+            };
+
             if (!editable) {
               // Readonly: any click on link opens new tab
               event.preventDefault();
-              window.open(href, "_blank", "noopener,noreferrer");
+              openLink();
               return true;
             }
 
             if (event.metaKey || event.ctrlKey) {
               // Edit mode: Cmd/Ctrl+click opens link
-              window.open(href, "_blank", "noopener,noreferrer");
               event.preventDefault();
+              openLink();
               return true;
             }
 
@@ -163,17 +173,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     useEffect(() => {
       return () => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
-      };
-    }, []);
-
-    // Always clear drag overlay on any drop/dragend anywhere in the document
-    useEffect(() => {
-      const clear = () => setDragOver(false);
-      document.addEventListener("drop", clear);
-      document.addEventListener("dragend", clear);
-      return () => {
-        document.removeEventListener("drop", clear);
-        document.removeEventListener("dragend", clear);
       };
     }, []);
 
@@ -209,44 +208,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <div
-        className={cn("relative min-h-full", dragOver && "editor-drag-over")}
-        onDragEnter={(e) => {
-          e.preventDefault();
-          if (editable && e.dataTransfer.types.includes("Files"))
-            setDragOver(true);
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node))
-            setDragOver(false);
-        }}
-        onDrop={(e) => {
-          const alreadyHandled = e.nativeEvent.defaultPrevented;
-          e.preventDefault();
-          setDragOver(false);
-          // Only upload if ProseMirror didn't already handle the drop.
-          // When drop lands on the editor area, ProseMirror's handleDrop
-          // processes it and calls preventDefault on the native event.
-          // This fallback only fires when the overlay intercepted the drop.
-          if (alreadyHandled) return;
-          const files = e.dataTransfer?.files;
-          if (files?.length && editor && onUploadFileRef.current) {
-            const endPos = editor.state.doc.content.size;
-            for (const file of Array.from(files)) {
-              uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
-            }
-          }
-        }}
-      >
+      <div className="relative min-h-full">
         <EditorContent editor={editor} />
-        {dragOver && (
-          <div className="editor-drop-overlay">
-            <p>Drop files to upload</p>
-          </div>
-        )}
       </div>
     );
   },

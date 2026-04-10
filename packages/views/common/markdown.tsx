@@ -3,7 +3,6 @@
 import * as React from "react";
 import {
   Markdown as MarkdownBase,
-  MemoizedMarkdown as MemoizedMarkdownBase,
   type MarkdownProps as MarkdownBaseProps,
   type RenderMode,
 } from "@multica/ui/markdown";

@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "../../../packages/ui/styles/tokens.css";
+@import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -9,21 +10,3 @@
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-  }
-  *::-webkit-scrollbar { width: 6px; height: 6px; }
-  *::-webkit-scrollbar-track { background: var(--scrollbar-track); }
-  *::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
-  *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
-  body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
-  }
-}

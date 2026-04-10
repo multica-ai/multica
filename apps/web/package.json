@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest run"
   },
   "dependencies": {
@@ -69,15 +69,15 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "@vitejs/plugin-react": "^6.0.1",
-    "jsdom": "^29.0.1",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^4.1.0"
+    "vitest": "catalog:"
   }
 }

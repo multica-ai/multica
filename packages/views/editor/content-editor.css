@@ -458,23 +458,3 @@
 .rich-text-editor .image-toolbar button:hover {
   background: color-mix(in srgb, white 15%, transparent);
 }
-
-/* Drag-and-drop overlay */
-.editor-drop-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px dashed color-mix(in srgb, var(--brand) 40%, transparent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--brand) 3%, transparent);
-  z-index: 10;
-  pointer-events: none;
-}
-
-.editor-drop-overlay p {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--brand) 60%, transparent);
-}

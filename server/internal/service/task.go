@@ -108,6 +108,36 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return task, nil
 }
 
+// EnqueueChatTask creates a queued task for a chat session.
+// Unlike issue tasks, chat tasks have no issue_id.
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
+	if err != nil {
+		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
+		AgentID:       chatSession.AgentID,
+		RuntimeID:     agent.RuntimeID,
+		Priority:      2, // medium priority for chat
+		ChatSessionID: chatSession.ID,
+	})
+	if err != nil {
+		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create chat task: %w", err)
+	}
+
+	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
+	return task, nil
+}
+
 // CancelTasksForIssue cancels all active tasks for an issue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	return s.Queries.CancelAgentTasksByIssue(ctx, issueID)
@@ -238,16 +268,38 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
-	// Post agent output as a comment, but only for assignment-triggered tasks.
+	// Post agent output as a comment, but only for issue tasks with assignment triggers.
 	// Comment-triggered tasks: the agent replies via CLI with --parent, so
 	// posting here would create a duplicate.
-	if !task.TriggerCommentID.Valid {
+	// Chat tasks: no comment posting needed.
+	if task.IssueID.Valid && !task.TriggerCommentID.Valid {
 		var payload protocol.TaskCompletedPayload
 		if err := json.Unmarshal(result, &payload); err == nil {
 			if payload.Output != "" {
 				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
 			}
 		}
+	}
+
+	// For chat tasks, save assistant reply, update session, and broadcast chat:done.
+	if task.ChatSessionID.Valid {
+		var payload protocol.TaskCompletedPayload
+		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
+			if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+				ChatSessionID: task.ChatSessionID,
+				Role:          "assistant",
+				Content:       redact.Text(payload.Output),
+				TaskID:        task.ID,
+			}); err != nil {
+				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
+			}
+		}
+		s.Queries.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
+			ID:        task.ChatSessionID,
+			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+		})
+		s.broadcastChatDone(ctx, task)
 	}
 
 	// Reconcile agent status
@@ -285,7 +337,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg)
 
-	if errMsg != "" {
+	if errMsg != "" && task.IssueID.Valid {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 	}
 	// Reconcile agent status
@@ -402,12 +454,9 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	payload["task_id"] = util.UUIDToString(task.ID)
 	payload["runtime_id"] = util.UUIDToString(task.RuntimeID)
 
-	workspaceID := ""
-	if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-		workspaceID = util.UUIDToString(issue.WorkspaceID)
-	}
+	workspaceID := s.resolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
-		return // Issue deleted; skip broadcast to avoid global leak
+		return
 	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventTaskDispatch,
@@ -419,23 +468,57 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 }
 
 func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue) {
-	workspaceID := ""
-	if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-		workspaceID = util.UUIDToString(issue.WorkspaceID)
-	}
+	workspaceID := s.resolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
-		return // Issue deleted; skip broadcast to avoid global leak
+		return
+	}
+	payload := map[string]any{
+		"task_id":  util.UUIDToString(task.ID),
+		"agent_id": util.UUIDToString(task.AgentID),
+		"issue_id": util.UUIDToString(task.IssueID),
+		"status":   task.Status,
+	}
+	if task.ChatSessionID.Valid {
+		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
 		ActorType:   "system",
 		ActorID:     "",
-		Payload: map[string]any{
-			"task_id":  util.UUIDToString(task.ID),
-			"agent_id": util.UUIDToString(task.AgentID),
-			"issue_id": util.UUIDToString(task.IssueID),
-			"status":   task.Status,
+		Payload:     payload,
+	})
+}
+
+// resolveTaskWorkspaceID determines the workspace ID for a task.
+// For issue tasks, it comes from the issue. For chat tasks, from the chat session.
+func (s *TaskService) resolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
+	if task.IssueID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			return util.UUIDToString(issue.WorkspaceID)
+		}
+	}
+	if task.ChatSessionID.Valid {
+		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
+			return util.UUIDToString(cs.WorkspaceID)
+		}
+	}
+	return ""
+}
+
+func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue) {
+	workspaceID := s.resolveTaskWorkspaceID(ctx, task)
+	if workspaceID == "" {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventChatDone,
+		WorkspaceID: workspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: protocol.ChatDonePayload{
+			ChatSessionID: util.UUIDToString(task.ChatSessionID),
+			TaskID:        util.UUIDToString(task.ID),
 		},
 	})
 }

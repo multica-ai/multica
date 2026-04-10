@@ -8,6 +8,13 @@ import (
 	"path/filepath"
 )
 
+// Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
+// The shared directory is created if it doesn't exist, ensuring Codex session
+// logs are always written to the global home where users can find them.
+var codexSymlinkedDirs = []string{
+	"sessions",
+}
+
 // Files to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
 // Symlinks share state (e.g. auth tokens) so changes propagate automatically.
 var codexSymlinkedFiles = []string{
@@ -30,6 +37,15 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
+	}
+
+	// Symlink shared directories (sessions) so logs stay in the global home.
+	for _, name := range codexSymlinkedDirs {
+		src := filepath.Join(sharedHome, name)
+		dst := filepath.Join(codexHome, name)
+		if err := ensureDirSymlink(src, dst); err != nil {
+			logger.Warn("execenv: codex-home dir symlink failed", "dir", name, "error", err)
+		}
 	}
 
 	// Symlink shared files (auth).
@@ -67,6 +83,31 @@ func resolveSharedCodexHome() string {
 		return filepath.Join("/tmp", ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+// ensureDirSymlink creates a symlink dst → src for a directory.
+// Unlike ensureSymlink, it creates the source directory if it doesn't exist,
+// so Codex can write to it immediately.
+func ensureDirSymlink(src, dst string) error {
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		return fmt.Errorf("create shared dir %s: %w", src, err)
+	}
+
+	// Check if dst already exists.
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(dst)
+			if err == nil && target == src {
+				return nil // already correct
+			}
+			os.Remove(dst)
+		} else {
+			// Regular file/dir exists — don't overwrite.
+			return nil
+		}
+	}
+
+	return os.Symlink(src, dst)
 }
 
 // ensureSymlink creates a symlink dst → src. If src doesn't exist, it's a no-op.

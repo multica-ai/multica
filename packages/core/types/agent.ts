@@ -146,6 +146,14 @@ export interface RuntimePing {
   updated_at: string;
 }
 
+export interface IssueUsageSummary {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  task_count: number;
+}
+
 export interface RuntimeUsage {
   runtime_id: string;
   date: string;

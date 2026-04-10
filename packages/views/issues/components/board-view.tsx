@@ -19,6 +19,7 @@ import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
+import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -33,6 +34,7 @@ import { StatusIcon } from "./status-icon";
 import { BoardColumn } from "./board-column";
 import { BoardCardContent } from "./board-card";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import type { ChildProgress } from "./list-row";
 
 const COLUMN_IDS = new Set<string>(ALL_STATUSES);
 
@@ -93,12 +95,18 @@ function findColumn(
   return null;
 }
 
+const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
+
 export function BoardView({
   issues,
   allIssues,
   visibleStatuses,
   hiddenStatuses,
   onMoveIssue,
+  childProgressMap = EMPTY_PROGRESS_MAP,
+  doneTotal: doneTotalOverride,
+  myIssuesScope,
+  myIssuesFilter,
 }: {
   issues: Issue[];
   allIssues: Issue[];
@@ -109,10 +117,19 @@ export function BoardView({
     newStatus: IssueStatus,
     newPosition?: number
   ) => void;
+  childProgressMap?: Map<string, ChildProgress>;
+  /** Override the done-column count (e.g. with a server-filtered total). */
+  doneTotal?: number;
+  /** When set, use the My Issues load-more hook instead of the workspace one. */
+  myIssuesScope?: string;
+  myIssuesFilter?: MyIssuesFilter;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
-  const { loadMore, hasMore, isLoading: loadingMore, doneTotal } = useLoadMoreDoneIssues();
+  const myIssuesOpts = myIssuesScope ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} } : undefined;
+  const { loadMore, hasMore, isLoading: loadingMore, doneTotal: hookDoneTotal } =
+    useLoadMoreDoneIssues(myIssuesOpts);
+  const displayDoneTotal = doneTotalOverride ?? hookDoneTotal;
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -275,7 +292,8 @@ export function BoardView({
             status={status}
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
-            totalCount={status === "done" ? doneTotal : undefined}
+            childProgressMap={childProgressMap}
+            totalCount={status === "done" ? displayDoneTotal : undefined}
             footer={
               status === "done" && hasMore ? (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={loadingMore} />
@@ -295,7 +313,7 @@ export function BoardView({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
-            <BoardCardContent issue={activeIssue} />
+            <BoardCardContent issue={activeIssue} childProgress={childProgressMap.get(activeIssue.id)} />
           </div>
         ) : null}
       </DragOverlay>

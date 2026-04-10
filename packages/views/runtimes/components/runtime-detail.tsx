@@ -22,7 +22,8 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatLastSeen } from "../utils";
-import { RuntimeModeIcon, StatusBadge, InfoField } from "./shared";
+import { StatusBadge, InfoField } from "./shared";
+import { ProviderLogo } from "./provider-logo";
 import { PingSection } from "./ping-section";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
@@ -81,12 +82,8 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       {/* Header */}
       <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <div
-            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-              runtime.status === "online" ? "bg-success/10" : "bg-muted"
-            }`}
-          >
-            <RuntimeModeIcon mode={runtime.runtime_mode} />
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+            <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
           </div>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold truncate">{runtime.name}</h2>

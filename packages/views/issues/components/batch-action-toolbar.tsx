@@ -14,18 +14,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@multica/ui/components/ui/popover";
 import type { UpdateIssueRequest } from "@multica/core/types";
-import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
-import { StatusIcon } from "./status-icon";
-import { PriorityIcon } from "./priority-icon";
-import { AssigneePicker } from "./pickers";
+import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 
 export function BatchActionToolbar() {
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -80,68 +72,26 @@ export function BatchActionToolbar() {
         </div>
 
         {/* Status */}
-        <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-          <PopoverTrigger
-            render={
-              <Button variant="ghost" size="sm" disabled={loading} />
-            }
-          >
-            <StatusIcon status="todo" className="h-3.5 w-3.5 mr-1" />
-            Status
-          </PopoverTrigger>
-          <PopoverContent align="center" className="w-44 p-1">
-            {ALL_STATUSES.map((s) => {
-              const cfg = STATUS_CONFIG[s];
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => {
-                    handleBatchUpdate({ status: s });
-                    setStatusOpen(false);
-                  }}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${cfg.hoverBg} transition-colors`}
-                >
-                  <StatusIcon status={s} className="h-3.5 w-3.5" />
-                  <span>{cfg.label}</span>
-                </button>
-              );
-            })}
-          </PopoverContent>
-        </Popover>
+        <StatusPicker
+          status="todo"
+          onUpdate={handleBatchUpdate}
+          open={statusOpen}
+          onOpenChange={setStatusOpen}
+          triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
+          trigger="Status"
+          align="center"
+        />
 
         {/* Priority */}
-        <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
-          <PopoverTrigger
-            render={
-              <Button variant="ghost" size="sm" disabled={loading} />
-            }
-          >
-            <PriorityIcon priority="high" className="mr-1" />
-            Priority
-          </PopoverTrigger>
-          <PopoverContent align="center" className="w-44 p-1">
-            {PRIORITY_ORDER.map((p) => {
-              const cfg = PRIORITY_CONFIG[p];
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => {
-                    handleBatchUpdate({ priority: p });
-                    setPriorityOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                >
-                  <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${cfg.badgeBg} ${cfg.badgeText}`}>
-                    <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                    {cfg.label}
-                  </span>
-                </button>
-              );
-            })}
-          </PopoverContent>
-        </Popover>
+        <PriorityPicker
+          priority="none"
+          onUpdate={handleBatchUpdate}
+          open={priorityOpen}
+          onOpenChange={setPriorityOpen}
+          triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
+          trigger="Priority"
+          align="center"
+        />
 
         {/* Assignee */}
         <AssigneePicker

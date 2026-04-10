@@ -94,59 +94,52 @@ FORCE=1 make worktree-env
 
 ## First-Time Setup
 
-### Main Checkout
+### Quick Start (recommended)
 
-From the main checkout:
+From any checkout (main or worktree):
+
+```bash
+make dev
+```
+
+This single command:
+
+- auto-detects whether you're in a main checkout or a worktree
+- creates the appropriate env file (`.env` or `.env.worktree`) if it doesn't exist
+- checks that prerequisites (Node.js, pnpm, Go, Docker) are installed
+- installs JavaScript dependencies
+- ensures the shared PostgreSQL container is running
+- creates the application database if it does not exist
+- runs all migrations
+- starts both backend and frontend
+
+### Explicit Setup (advanced)
+
+If you prefer separate control over setup and startup:
+
+#### Main Checkout
 
 ```bash
 cp .env.example .env
 make setup-main
-```
-
-What `make setup-main` does:
-
-- installs JavaScript dependencies with `pnpm install`
-- ensures the shared PostgreSQL container is running
-- creates the application database if it does not exist
-- runs all migrations against that database
-
-Start the app:
-
-```bash
 make start-main
 ```
 
-Stop the app processes:
+Stop:
 
 ```bash
 make stop-main
 ```
 
-This does not stop PostgreSQL.
-
-### Worktree
-
-From the worktree directory:
+#### Worktree
 
 ```bash
 make worktree-env
 make setup-worktree
-```
-
-What `make setup-worktree` does:
-
-- uses `.env.worktree`
-- ensures the shared PostgreSQL container is running
-- creates the worktree database if it does not exist
-- runs migrations against the worktree database
-
-Start the worktree app:
-
-```bash
 make start-worktree
 ```
 
-Stop the worktree app processes:
+Stop:
 
 ```bash
 make stop-worktree
@@ -171,17 +164,15 @@ Use a worktree when you want isolated data and separate app ports.
 ```bash
 git worktree add ../multica-feature -b feat/my-change main
 cd ../multica-feature
-make worktree-env
-make setup-worktree
-make start-worktree
+make dev
 ```
 
 After that, day-to-day commands are:
 
 ```bash
-make start-worktree
-make stop-worktree
-make check-worktree
+make dev              # start (re-runs setup if needed, idempotent)
+make stop-worktree    # stop
+make check-worktree   # verify
 ```
 
 ## Running Main and Worktree at the Same Time
@@ -424,9 +415,7 @@ Warning:
 ### Stable Main Environment
 
 ```bash
-cp .env.example .env
-make setup-main
-make start-main
+make dev
 ```
 
 ### Feature Worktree
@@ -434,9 +423,7 @@ make start-main
 ```bash
 git worktree add ../multica-feature -b feat/my-change main
 cd ../multica-feature
-make worktree-env
-make setup-worktree
-make start-worktree
+make dev
 ```
 
 ### Return to a Previously Configured Worktree

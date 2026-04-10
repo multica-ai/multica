@@ -1,9 +1,15 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import type { ListIssuesParams } from "../types";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  /** All "my issues" queries — use for bulk invalidation. */
+  myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
+  /** Per-scope "my issues" list with filter identity baked into the key. */
+  myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
+    [...issueKeys.myAll(wsId), scope, filter] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -12,7 +18,10 @@ export const issueKeys = {
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
+  usage: (issueId: string) => ["issues", "usage", issueId] as const,
 };
+
+export type MyIssuesFilter = Pick<ListIssuesParams, "assignee_id" | "assignee_ids" | "creator_id">;
 
 export const CLOSED_PAGE_SIZE = 50;
 
@@ -31,6 +40,37 @@ export function issueListOptions(wsId: string) {
       const [openRes, closedRes] = await Promise.all([
         api.listIssues({ open_only: true }),
         api.listIssues({ status: "done", limit: CLOSED_PAGE_SIZE, offset: 0 }),
+      ]);
+      return {
+        issues: [...openRes.issues, ...closedRes.issues],
+        total: openRes.total + closedRes.total,
+        doneTotal: closedRes.total,
+      };
+    },
+    select: (data) => data.issues,
+  });
+}
+
+/**
+ * Server-filtered issue list for the My Issues page.
+ * Each scope gets its own cache entry so switching tabs is instant after first load.
+ */
+export function myIssueListOptions(
+  wsId: string,
+  scope: string,
+  filter: MyIssuesFilter,
+) {
+  return queryOptions({
+    queryKey: issueKeys.myList(wsId, scope, filter),
+    queryFn: async () => {
+      const [openRes, closedRes] = await Promise.all([
+        api.listIssues({ open_only: true, ...filter }),
+        api.listIssues({
+          status: "done",
+          limit: CLOSED_PAGE_SIZE,
+          offset: 0,
+          ...filter,
+        }),
       ]);
       return {
         issues: [...openRes.issues, ...closedRes.issues],
@@ -77,5 +117,12 @@ export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
+  });
+}
+
+export function issueUsageOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.usage(issueId),
+    queryFn: () => api.getIssueUsage(issueId),
   });
 }

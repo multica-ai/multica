@@ -3,7 +3,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 
 /** Find and remove a fileCard node by uploadId. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function removeUploadingFileCard(editor: any, uploadId: string) {
   const { tr } = editor.state;
   let deleted = false;
@@ -14,12 +14,13 @@ function removeUploadingFileCard(editor: any, uploadId: string) {
       deleted = true;
       return false;
     }
+    return undefined;
   });
   if (deleted) editor.view.dispatch(tr);
 }
 
 /** Update a fileCard node from uploading state to final state with real URL. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function finalizeFileCard(editor: any, uploadId: string, href: string) {
   const { tr } = editor.state;
   let updated = false;
@@ -34,11 +35,12 @@ function finalizeFileCard(editor: any, uploadId: string, href: string) {
       updated = true;
       return false;
     }
+    return undefined;
   });
   if (updated) editor.view.dispatch(tr);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function removeImageBySrc(editor: any, src: string) {
   if (!editor) return;
   const { tr } = editor.state;
@@ -50,6 +52,7 @@ function removeImageBySrc(editor: any, src: string) {
       deleted = true;
       return false;
     }
+    return undefined;
   });
   if (deleted) editor.view.dispatch(tr);
 }
@@ -59,7 +62,7 @@ function removeImageBySrc(editor: any, src: string) {
  * Used by both paste/drop (at cursor) and button upload (at end of doc).
  */
 export async function uploadAndInsertFile(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   editor: any,
   file: File,
   handler: (file: File) => Promise<UploadResult | null>,
@@ -93,6 +96,7 @@ export async function uploadAndInsertFile(
             found = true;
             return false;
           }
+          return undefined;
         });
         if (found) editor.view.dispatch(tr);
       } else {

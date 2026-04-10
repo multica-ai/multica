@@ -10,12 +10,22 @@ export function PriorityPicker({
   priority,
   onUpdate,
   trigger: customTrigger,
+  triggerRender,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  align,
 }: {
   priority: IssuePriority;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  align?: "start" | "center" | "end";
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const cfg = PRIORITY_CONFIG[priority];
 
   return (
@@ -23,6 +33,8 @@ export function PriorityPicker({
       open={open}
       onOpenChange={setOpen}
       width="w-44"
+      align={align}
+      triggerRender={triggerRender}
       trigger={
         customTrigger ?? (
           <>

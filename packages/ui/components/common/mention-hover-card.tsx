@@ -17,7 +17,7 @@ interface MentionHoverCardProps {
 
 function MentionHoverCard({
   type,
-  id,
+  id: _id,
   name,
   initials,
   avatarUrl,

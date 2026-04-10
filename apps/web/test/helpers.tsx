@@ -66,7 +66,7 @@ export const mockAgents: Agent[] = [
 ];
 
 // Mock auth context value
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export const mockAuthValue: Record<string, any> = {
   user: mockUser,
   workspace: mockWorkspace,

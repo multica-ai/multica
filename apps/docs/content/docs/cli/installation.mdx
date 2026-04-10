@@ -1,0 +1,90 @@
+---
+title: CLI Installation
+description: Install the Multica CLI and start the agent daemon.
+---
+
+## Installation
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap multica-ai/tap
+brew install multica
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make build
+cp server/bin/multica /usr/local/bin/multica
+```
+
+### Download from GitHub Releases
+
+If Homebrew is not available, download the binary directly:
+
+```bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # "darwin" or "linux"
+ARCH=$(uname -m)                                # "x86_64" or "arm64"
+
+# Normalize architecture name
+if [ "$ARCH" = "x86_64" ]; then
+  ARCH="amd64"
+fi
+
+# Get the latest release tag from GitHub
+LATEST=$(curl -sI https://github.com/multica-ai/multica/releases/latest \
+  | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')
+
+# Download and extract
+curl -sL "https://github.com/multica-ai/multica/releases/download/${LATEST}/multica_${OS}_${ARCH}.tar.gz" \
+  -o /tmp/multica.tar.gz
+tar -xzf /tmp/multica.tar.gz -C /tmp multica
+sudo mv /tmp/multica /usr/local/bin/multica
+rm /tmp/multica.tar.gz
+```
+
+### Update
+
+```bash
+multica update
+```
+
+This auto-detects your installation method (Homebrew or manual) and upgrades accordingly.
+
+## Quick Start
+
+```bash
+# 1. Authenticate (opens browser for login)
+multica login
+
+# 2. Start the agent daemon
+multica daemon start
+
+# 3. Done — agents in your watched workspaces can now execute tasks on your machine
+```
+
+`multica login` automatically discovers all workspaces you belong to and adds them to the daemon watch list.
+
+## Verify
+
+```bash
+multica daemon status
+```
+
+Confirm:
+1. Status is `running`
+2. At least one agent is listed (e.g. `claude`, `codex`)
+3. At least one workspace is being watched
+
+If the agents list is empty, install at least one AI agent CLI:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
+- [Codex](https://github.com/openai/codex) (`codex`)
+
+Then restart the daemon:
+
+```bash
+multica daemon stop && multica daemon start
+```

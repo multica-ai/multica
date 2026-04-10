@@ -5,7 +5,6 @@ import {
   useContext,
   useEffect,
   useState,
-  useRef,
   useCallback,
   type ReactNode,
 } from "react";
@@ -51,7 +50,6 @@ export function WSProvider({
   const user = authStore((s) => s.user);
   const workspace = workspaceStore((s) => s.workspace);
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
-  const wsRef = useRef<WSClient | null>(null);
 
   useEffect(() => {
     if (!user || !workspace) return;
@@ -61,13 +59,11 @@ export function WSProvider({
 
     const ws = new WSClient(wsUrl, { logger: createLogger("ws") });
     ws.setAuth(token, workspace.id);
-    wsRef.current = ws;
     setWsClient(ws);
     ws.connect();
 
     return () => {
       ws.disconnect();
-      wsRef.current = null;
       setWsClient(null);
     };
   }, [user, workspace, wsUrl, storage]);
@@ -79,20 +75,18 @@ export function WSProvider({
 
   const subscribe = useCallback(
     (event: WSEventType, handler: EventHandler) => {
-      const ws = wsRef.current;
-      if (!ws) return () => {};
-      return ws.on(event, handler);
+      if (!wsClient) return () => {};
+      return wsClient.on(event, handler);
     },
-    [],
+    [wsClient],
   );
 
   const onReconnectCb = useCallback(
     (callback: () => void) => {
-      const ws = wsRef.current;
-      if (!ws) return () => {};
-      return ws.onReconnect(callback);
+      if (!wsClient) return () => {};
+      return wsClient.onReconnect(callback);
     },
-    [],
+    [wsClient],
   );
 
   return (

@@ -84,7 +84,17 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("### Workflow\n\n")
 
-	if ctx.TriggerCommentID != "" {
+	if ctx.ChatSessionID != "" {
+		// Chat task: interactive assistant mode
+		b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
+		b.WriteString("- Respond conversationally and helpfully to the user's message\n")
+		b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
+		b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
+		b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
+		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
+		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")
+		b.WriteString("- Keep responses concise and direct\n\n")
+	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)

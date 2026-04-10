@@ -5,16 +5,19 @@
   "type": "module",
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
+    "dev:desktop": "turbo dev --filter=@multica/desktop",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "lint": "turbo lint",
-    "clean": "turbo clean && rm -rf node_modules"
+    "clean": "turbo clean && rm -rf node_modules",
+    "ui:add": "cd packages/ui && npx shadcn@latest add"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "electron"
     ],
     "overrides": {
       "@types/react": "catalog:",

@@ -449,6 +449,31 @@ type githubContentEntry struct {
 	DownloadURL string `json:"download_url"`
 }
 
+type githubRepoInfo struct {
+	DefaultBranch string `json:"default_branch"`
+}
+
+// fetchGitHubDefaultBranch returns the default branch of a GitHub repository.
+// Falls back to "main" if the API call fails.
+func fetchGitHubDefaultBranch(httpClient *http.Client, owner, repo string) string {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s",
+		url.PathEscape(owner), url.PathEscape(repo))
+	resp, err := httpClient.Get(apiURL)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return "main"
+	}
+	defer resp.Body.Close()
+
+	var info githubRepoInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.DefaultBranch == "" {
+		return "main"
+	}
+	return info.DefaultBranch
+}
+
 // --- URL detection ---
 
 // importSource identifies where a URL points.
@@ -623,8 +648,9 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	//   skills/{name}/SKILL.md          (most common)
 	//   plugin/skills/{name}/SKILL.md   (e.g. microsoft repos)
 	//   {name}/SKILL.md                 (skill at repo root level)
-	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main",
-		url.PathEscape(owner), url.PathEscape(repo))
+	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
+	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
 
 	candidatePaths := []string{
 		"skills/" + skillName,
@@ -659,8 +685,8 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	}
 
 	// 2. List supporting files via GitHub API
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s",
-		url.PathEscape(owner), url.PathEscape(repo), skillDir)
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
+		url.PathEscape(owner), url.PathEscape(repo), skillDir, url.QueryEscape(defaultBranch))
 	dirResp, err := httpClient.Get(apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		// Can't list files — return what we have (SKILL.md only)

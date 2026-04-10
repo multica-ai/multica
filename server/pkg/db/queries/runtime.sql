@@ -73,5 +73,8 @@ ORDER BY created_at ASC;
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
 
--- name: CountAgentsByRuntime :one
-SELECT count(*) FROM agent WHERE runtime_id = $1;
+-- name: CountActiveAgentsByRuntime :one
+SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
+
+-- name: DeleteArchivedAgentsByRuntime :exec
+DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;

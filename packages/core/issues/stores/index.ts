@@ -7,6 +7,11 @@ export {
 } from "./view-store-context";
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
 export {
+  myIssuesViewStore,
+  type MyIssuesViewState,
+  type MyIssuesScope,
+} from "./my-issues-view-store";
+export {
   useIssueViewStore,
   createIssueViewStore,
   viewStoreSlice,

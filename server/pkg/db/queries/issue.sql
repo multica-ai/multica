@@ -7,6 +7,8 @@ WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
 ORDER BY position ASC, created_at DESC
 LIMIT $2 OFFSET $3;
 
@@ -66,6 +68,8 @@ WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
 ORDER BY position ASC, created_at DESC;
 
 -- name: CountIssues :one
@@ -73,47 +77,13 @@ SELECT count(*) FROM issue
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
-  AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'));
+  AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'));
 
 -- name: ListChildIssues :many
 SELECT * FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
--- name: SearchIssues :many
-SELECT i.*,
-  COUNT(*) OVER() AS total_count,
-  CASE
-    WHEN i.title LIKE '%' || @query || '%' THEN 'title'
-    WHEN COALESCE(i.description, '') LIKE '%' || @query || '%' THEN 'description'
-    ELSE 'comment'
-  END AS match_source,
-  CASE
-    WHEN i.title LIKE '%' || @query || '%' THEN ''
-    WHEN COALESCE(i.description, '') LIKE '%' || @query || '%' THEN ''
-    ELSE COALESCE(
-      (SELECT c.content FROM comment c
-       WHERE c.issue_id = i.id AND c.content LIKE '%' || @query || '%'
-       ORDER BY c.created_at DESC LIMIT 1),
-      ''
-    )
-  END AS matched_comment_content
-FROM issue i
-WHERE i.workspace_id = @workspace_id
-  AND (
-    i.title LIKE '%' || @query || '%'
-    OR COALESCE(i.description, '') LIKE '%' || @query || '%'
-    OR EXISTS (
-      SELECT 1 FROM comment c
-      WHERE c.issue_id = i.id AND c.content LIKE '%' || @query || '%'
-    )
-  )
-  AND (@include_closed::boolean OR i.status NOT IN ('done', 'cancelled'))
-ORDER BY
-  CASE
-    WHEN i.title LIKE '%' || @query || '%' THEN 0
-    WHEN COALESCE(i.description, '') LIKE '%' || @query || '%' THEN 1
-    ELSE 2
-  END,
-  i.updated_at DESC
-LIMIT @search_limit OFFSET @search_offset;
+-- SearchIssues: moved to handler (dynamic SQL for multi-word search support).

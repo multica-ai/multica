@@ -35,12 +35,10 @@ function ImageLightbox({
   }, [onClose]);
 
   return createPortal(
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-zoom-out"
       onClick={onClose}
     >
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <img
         src={src}
         alt={alt}
@@ -85,7 +83,6 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
 
   return (
     <NodeViewWrapper className="image-node">
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <figure
         className={cn(
           "image-figure",

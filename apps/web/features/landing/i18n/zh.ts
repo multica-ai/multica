@@ -107,7 +107,7 @@ export const zh: LandingDict = {
         {
           title: "\u81ea\u52a8\u68c0\u6d4b\u4e0e\u5373\u63d2\u5373\u7528",
           description:
-            "Multica \u81ea\u52a8\u68c0\u6d4b Claude Code \u548c Codex \u7b49\u53ef\u7528 CLI\u3002\u8fde\u63a5\u4e00\u53f0\u673a\u5668\uff0c\u5373\u53ef\u5f00\u59cb\u5de5\u4f5c\u3002",
+            "Multica \u81ea\u52a8\u68c0\u6d4b Claude Code\u3001Codex\u3001OpenClaw \u548c OpenCode \u7b49\u53ef\u7528 CLI\u3002\u8fde\u63a5\u4e00\u53f0\u673a\u5668\uff0c\u5373\u53ef\u5f00\u59cb\u5de5\u4f5c\u3002",
         },
       ],
     },
@@ -126,7 +126,7 @@ export const zh: LandingDict = {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "\u8fd0\u884c multica login \u8fdb\u884c\u8ba4\u8bc1\uff0c\u7136\u540e multica daemon start\u3002\u5b88\u62a4\u8fdb\u7a0b\u81ea\u52a8\u68c0\u6d4b\u4f60\u673a\u5668\u4e0a\u7684 Claude Code \u548c Codex\u2014\u2014\u63d2\u4e0a\u5c31\u7528\u3002",
+          "\u8fd0\u884c multica login \u8fdb\u884c\u8ba4\u8bc1\uff0c\u7136\u540e multica daemon start\u3002\u5b88\u62a4\u8fdb\u7a0b\u81ea\u52a8\u68c0\u6d4b\u4f60\u673a\u5668\u4e0a\u7684 Claude Code\u3001Codex\u3001OpenClaw \u548c OpenCode\u2014\u2014\u63d2\u4e0a\u5c31\u7528\u3002",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a Agent",
@@ -181,7 +181,7 @@ export const zh: LandingDict = {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 Agent\uff1f",
         answer:
-          "Multica \u76ee\u524d\u5f00\u7bb1\u5373\u7528\u652f\u6301 Claude Code \u548c OpenAI Codex\u3002\u5b88\u62a4\u8fdb\u7a0b\u81ea\u52a8\u68c0\u6d4b\u4f60\u5b89\u88c5\u7684 CLI\u3002\u66f4\u591a\u540e\u7aef\u5728\u8def\u7ebf\u56fe\u4e0a\u2014\u2014\u800c\u4e14\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u3002",
+          "Multica \u76ee\u524d\u5f00\u7bb1\u5373\u7528\u652f\u6301 Claude Code\u3001Codex\u3001OpenClaw \u548c OpenCode\u3002\u5b88\u62a4\u8fdb\u7a0b\u81ea\u52a8\u68c0\u6d4b\u4f60\u5b89\u88c5\u7684 CLI\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -190,7 +190,7 @@ export const zh: LandingDict = {
       },
       {
         question:
-          "\u8fd9\u548c\u76f4\u63a5\u7528 Claude Code \u6216 Codex \u6709\u4ec0\u4e48\u533a\u522b\uff1f",
+          "\u8fd9\u548c\u76f4\u63a5\u7528\u7f16\u7801 Agent \u6709\u4ec0\u4e48\u533a\u522b\uff1f",
         answer:
           "\u7f16\u7801 Agent \u64c5\u957f\u6267\u884c\u3002Multica \u6dfb\u52a0\u7684\u662f\u7ba1\u7406\u5c42\uff1a\u4efb\u52a1\u961f\u5217\u3001\u56e2\u961f\u534f\u4f5c\u3001\u6280\u80fd\u590d\u7528\u3001\u8fd0\u884c\u65f6\u76d1\u63a7\uff0c\u4ee5\u53ca\u6bcf\u4e2a Agent \u5728\u505a\u4ec0\u4e48\u7684\u7edf\u4e00\u89c6\u56fe\u3002\u628a\u5b83\u60f3\u8c61\u6210\u4f60\u7684 Agent \u7684\u9879\u76ee\u7ecf\u7406\u3002",
       },
@@ -230,7 +230,7 @@ export const zh: LandingDict = {
         links: [
           { label: "\u6587\u6863", href: githubUrl },
           { label: "API", href: githubUrl },
-          { label: "\u793e\u533a", href: githubUrl },
+          { label: "X (Twitter)", href: "https://x.com/multica_hq" },
         ],
       },
       company: {
@@ -271,9 +271,74 @@ export const zh: LandingDict = {
   changelog: {
     title: "\u66f4\u65b0\u65e5\u5fd7",
     subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
+    categories: {
+      features: "新功能",
+      improvements: "改进",
+      fixes: "问题修复",
+    },
     entries: [
       {
-        version: "0.1.9",
+        version: "0.1.22",
+        date: "2026-04-10",
+        title: "自部署、ACP 与文档站",
+        changes: [],
+        features: [
+          "全栈 Docker Compose 一键自部署",
+          "通过 ACP 协议接入 Hermes Agent Provider",
+          "基于 Fumadocs 搭建文档站（快速入门、CLI 参考、Agent 指南）",
+          "侧边栏和收件箱移动端响应式布局",
+          "Issue 详情侧边栏展示 Token 用量",
+          "支持在 UI 中切换 Agent 运行时",
+          "'C' 快捷键快速创建 Issue",
+          "聊天会话历史面板，查看已归档对话",
+          "Daemon 新增 Claude Code 和 Codex 最低版本检查",
+          "官网新增 OpenClaw 和 OpenCode 展示",
+          "`make dev` 一键本地开发环境搭建",
+        ],
+        improvements: [
+          "侧边栏重新设计——个人/工作区分组、用户档案底栏、⌘K 搜索入口",
+          "搜索排序优化——大小写无关匹配、标识符搜索（MUL-123）、多词匹配",
+          "搜索结果关键词高亮",
+          "每日 Token 用量图表优化，Y 轴标签更清晰，新增分类 Tooltip",
+          "Master Agent 支持多行输入",
+          "统一选择器组件（状态、优先级、截止日期、项目、指派人）",
+          "工作区级别存储隔离，切换工作区时自动加载对应数据",
+          "自部署环境变量缺失时给出启动警告",
+        ],
+        fixes: [
+          "删除子 Issue 后父级列表未刷新",
+          "搜索索引兼容 RDS 上的 pg_bigm 1.2",
+          "创建 Agent 对话框错误显示「无可用运行时」",
+          "Claude stream-json 启动卡住",
+          "多个 Agent 无法同时为同一 Issue 排队任务",
+          "退出登录未清除工作区和查询缓存",
+          "编辑器为空时拖放区域过小",
+          "Skills 导入硬编码 main 分支导致 404",
+          "WebSocket 端点不支持 PAT 认证",
+          "所有 Agent 已归档时无法删除运行时",
+        ],
+      },
+      {
+        version: "0.1.21",
+        date: "2026-04-09",
+        title: "项目、搜索与 Monorepo",
+        changes: [
+          "项目实体全栈 CRUD——创建、编辑项目并按项目组织 Issue",
+          "创建 Issue 弹窗新增项目选择器，CLI 新增项目命令",
+          "基于 pg_bigm 的 Issue 全文搜索",
+          "Monorepo 拆包——共享 core、UI、views 三个包（Turborepo）",
+          "全屏 Agent 执行日志视图",
+          "编辑器支持拖拽上传文件并展示文件卡片",
+          "Issue 新增附件区域，支持图片网格和文件卡片展示",
+          "运行时支持所有者追踪、筛选、头像展示和点对点更新通知",
+          "列表视图行内显示子 Issue 进度",
+          "列表视图支持已完成 Issue 分页加载",
+          "Codex 会话日志扫描以报告 token 用量",
+          "修复守护进程 repo 缓存卡在初始快照的问题",
+        ],
+      },
+      {
+        version: "0.1.20",
         date: "2026-04-08",
         title: "子 Issue、TanStack Query 与用量追踪",
         changes: [
@@ -291,7 +356,7 @@ export const zh: LandingDict = {
         ],
       },
       {
-        version: "0.1.8",
+        version: "0.1.18",
         date: "2026-04-07",
         title: "OAuth、OpenClaw 与 Issue 加载优化",
         changes: [
@@ -306,7 +371,7 @@ export const zh: LandingDict = {
         ],
       },
       {
-        version: "0.1.7",
+        version: "0.1.17",
         date: "2026-04-05",
         title: "评论分页与 CLI 优化",
         changes: [
@@ -320,7 +385,7 @@ export const zh: LandingDict = {
         ],
       },
       {
-        version: "0.1.6",
+        version: "0.1.15",
         date: "2026-04-03",
         title: "编辑器重构与 Agent 生命周期",
         changes: [
@@ -336,7 +401,7 @@ export const zh: LandingDict = {
         ],
       },
       {
-        version: "0.1.5",
+        version: "0.1.14",
         date: "2026-04-02",
         title: "提及与权限",
         changes: [
@@ -353,7 +418,7 @@ export const zh: LandingDict = {
         ],
       },
       {
-        version: "0.1.4",
+        version: "0.1.13",
         date: "2026-04-01",
         title: "\u6211\u7684 Issue \u4e0e\u56fd\u9645\u5316",
         changes: [

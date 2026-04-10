@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
   "exports": {
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
@@ -19,12 +24,20 @@
     "./modals/create-workspace": "./modals/create-workspace.tsx",
     "./my-issues": "./my-issues/index.ts",
     "./skills": "./skills/index.ts",
+    "./agents": "./agents/index.ts",
+    "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
-    "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx"
+    "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",
+    "./layout": "./layout/index.ts",
+    "./auth": "./auth/index.ts",
+    "./search": "./search/index.ts",
+    "./chat": "./chat/index.ts",
+    "./settings": "./settings/index.ts"
   },
   "dependencies": {
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
+    "cmdk": "^1.1.1",
     "@base-ui/react": "^1.3.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
@@ -67,8 +80,14 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "typescript": "catalog:"
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -20,6 +20,14 @@ import (
 func main() {
 	logger.Init()
 
+	// Warn about missing configuration
+	if os.Getenv("JWT_SECRET") == "" {
+		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
+	}
+	if os.Getenv("RESEND_API_KEY") == "" {
+		slog.Warn("RESEND_API_KEY is not set — email verification codes will be printed to the log instead of emailed.")
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

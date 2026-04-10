@@ -35,6 +35,8 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_id?: string;
+  assignee_ids?: string[];
+  creator_id?: string;
   open_only?: boolean;
 }
 

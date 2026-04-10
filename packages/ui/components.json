@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-nova",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "styles/tokens.css",
+    "baseColor": "zinc",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@multica/ui/components",
+    "ui": "@multica/ui/components/ui",
+    "hooks": "@multica/ui/hooks",
+    "lib": "@multica/ui/lib",
+    "utils": "@multica/ui/lib/utils"
+  }
+}

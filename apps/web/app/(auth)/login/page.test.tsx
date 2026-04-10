@@ -2,40 +2,54 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+const { mockSendCode, mockVerifyCode, mockHydrateWorkspace } = vi.hoisted(
+  () => ({
+    mockSendCode: vi.fn(),
+    mockVerifyCode: vi.fn(),
+    mockHydrateWorkspace: vi.fn(),
+  }),
+);
+
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/login",
   useSearchParams: () => new URLSearchParams(),
 }));
 
-// Mock auth store
-const mockSendCode = vi.fn();
-const mockVerifyCode = vi.fn();
-vi.mock("@/platform/auth", () => ({
-  useAuthStore: (selector: (s: any) => any) =>
-    selector({
-      sendCode: mockSendCode,
-      verifyCode: mockVerifyCode,
-    }),
-}));
+// Mock auth store — shared LoginPage uses getState().sendCode/verifyCode,
+// web wrapper uses useAuthStore((s) => s.user/isLoading)
+vi.mock("@multica/core/auth", () => {
+  const authState = {
+    sendCode: mockSendCode,
+    verifyCode: mockVerifyCode,
+    user: null,
+    isLoading: false,
+  };
+  const useAuthStore = Object.assign(
+    (selector: (s: typeof authState) => unknown) => selector(authState),
+    { getState: () => authState },
+  );
+  return { useAuthStore };
+});
 
 // Mock auth-cookie
 vi.mock("@/features/auth/auth-cookie", () => ({
   setLoggedInCookie: vi.fn(),
 }));
 
-// Mock workspace store
-const mockHydrateWorkspace = vi.fn();
-vi.mock("@/platform/workspace", () => ({
-  useWorkspaceStore: (selector: (s: any) => any) =>
-    selector({
-      hydrateWorkspace: mockHydrateWorkspace,
-    }),
-}));
+// Mock workspace store — shared LoginPage uses getState().hydrateWorkspace
+vi.mock("@multica/core/workspace", () => {
+  const wsState = { hydrateWorkspace: mockHydrateWorkspace };
+  const useWorkspaceStore = Object.assign(
+    (selector: (s: typeof wsState) => unknown) => selector(wsState),
+    { getState: () => wsState },
+  );
+  return { useWorkspaceStore };
+});
 
 // Mock api
-vi.mock("@/platform/api", () => ({
+vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: vi.fn().mockResolvedValue([]),
     verifyCode: vi.fn(),
@@ -54,8 +68,8 @@ describe("LoginPage", () => {
   it("renders login form with email input and continue button", () => {
     render(<LoginPage />);
 
-    expect(screen.getByText("Multica")).toBeInTheDocument();
-    expect(screen.getByText("Turn coding agents into real teammates")).toBeInTheDocument();
+    expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
+    expect(screen.getByText("Enter your email to get a login code")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Continue" })

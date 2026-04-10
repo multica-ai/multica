@@ -20,9 +20,18 @@ catalog:
   # UI & Styling
   tailwindcss: "^4"
   "@tailwindcss/postcss": "^4"
+  "@tailwindcss/vite": "^4"
   tailwind-merge: "^3.4.0"
   class-variance-authority: "^0.7.1"
   clsx: "^2.1.1"
 
   # Icons
   lucide-react: "^1.0.1"
+
+  # Testing
+  vitest: "^4.1.0"
+  jsdom: "^29.0.1"
+  "@vitejs/plugin-react": "^6.0.1"
+  "@testing-library/react": "^16.3.2"
+  "@testing-library/jest-dom": "^6.9.1"
+  "@testing-library/user-event": "^14.6.1"

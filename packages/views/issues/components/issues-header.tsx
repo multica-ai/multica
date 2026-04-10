@@ -57,7 +57,6 @@ import {
   useIssuesScopeStore,
   type IssuesScope,
 } from "@multica/core/issues/stores/issues-scope-store";
-import { filterIssues } from "../utils/filter";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 

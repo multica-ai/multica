@@ -1,6 +1,7 @@
 import { cn } from "@multica/ui/lib/utils";
 
 export const githubUrl = "https://github.com/multica-ai/multica";
+export const twitterUrl = "https://x.com/multica_hq";
 
 export function GitHubMark({ className }: { className?: string }) {
   return (
@@ -11,6 +12,19 @@ export function GitHubMark({ className }: { className?: string }) {
       fill="currentColor"
     >
       <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2 .37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 4.84c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
+export function XMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      fill="currentColor"
+    >
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>
   );
 }
@@ -57,6 +71,81 @@ export function CodexLogo({ className }: { className?: string }) {
       fill="currentColor"
     >
       <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073ZM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494ZM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646ZM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872v.024Zm16.597 3.855-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667Zm2.01-3.023-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66v.018ZM8.318 12.898l-2.024-1.168a.074.074 0 0 1-.038-.052V6.095a4.494 4.494 0 0 1 7.37-3.456l-.14.081-4.78 2.758a.795.795 0 0 0-.392.681l-.014 6.739h.018Zm1.1-2.36 2.602-1.5 2.595 1.5v2.999l-2.595 1.5-2.602-1.5v-3Z" />
+    </svg>
+  );
+}
+
+export function OpenClawLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+    >
+      <g fill="#3a0a0d">
+        <rect x="1" y="5" width="1" height="3" />
+        <rect x="2" y="4" width="1" height="1" />
+        <rect x="2" y="8" width="1" height="1" />
+        <rect x="3" y="3" width="1" height="1" />
+        <rect x="3" y="9" width="1" height="1" />
+        <rect x="4" y="2" width="1" height="1" />
+        <rect x="4" y="10" width="1" height="1" />
+        <rect x="5" y="2" width="6" height="1" />
+        <rect x="11" y="2" width="1" height="1" />
+        <rect x="12" y="3" width="1" height="1" />
+        <rect x="12" y="9" width="1" height="1" />
+        <rect x="13" y="4" width="1" height="1" />
+        <rect x="13" y="8" width="1" height="1" />
+        <rect x="14" y="5" width="1" height="3" />
+        <rect x="5" y="11" width="6" height="1" />
+        <rect x="4" y="12" width="1" height="1" />
+        <rect x="11" y="12" width="1" height="1" />
+        <rect x="3" y="13" width="1" height="1" />
+        <rect x="12" y="13" width="1" height="1" />
+        <rect x="5" y="14" width="6" height="1" />
+      </g>
+      <g fill="#ff4f40">
+        <rect x="5" y="3" width="6" height="1" />
+        <rect x="4" y="4" width="8" height="1" />
+        <rect x="3" y="5" width="10" height="1" />
+        <rect x="3" y="6" width="10" height="1" />
+        <rect x="3" y="7" width="10" height="1" />
+        <rect x="4" y="8" width="8" height="1" />
+        <rect x="5" y="9" width="6" height="1" />
+        <rect x="5" y="12" width="6" height="1" />
+        <rect x="6" y="13" width="4" height="1" />
+      </g>
+      <g fill="#ff775f">
+        <rect x="1" y="6" width="2" height="1" />
+        <rect x="2" y="5" width="1" height="1" />
+        <rect x="2" y="7" width="1" height="1" />
+        <rect x="13" y="6" width="2" height="1" />
+        <rect x="13" y="5" width="1" height="1" />
+        <rect x="13" y="7" width="1" height="1" />
+      </g>
+      <g fill="#081016">
+        <rect x="6" y="5" width="1" height="1" />
+        <rect x="9" y="5" width="1" height="1" />
+      </g>
+      <g fill="#f5fbff">
+        <rect x="6" y="4" width="1" height="1" />
+        <rect x="9" y="4" width="1" height="1" />
+      </g>
+    </svg>
+  );
+}
+
+export function OpenCodeLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+    >
+      <path d="M18 18H6V6H18V18Z" fill="#CFCECD" />
+      <path d="M18 3H6V18H18V3ZM24 24H0V0H24V24Z" fill="#656363" />
     </svg>
   );
 }

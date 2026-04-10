@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { ContentEditor, type ContentEditorRef } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -19,6 +19,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const [submitting, setSubmitting] = useState(false);
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+  });
 
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
@@ -43,7 +46,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   };
 
   return (
-    <div className="relative flex max-h-56 flex-col rounded-lg bg-card pb-8 ring-1 ring-border">
+    <div
+      {...dropZoneProps}
+      className="relative flex max-h-56 flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+    >
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
         <ContentEditor
           ref={editorRef}
@@ -71,6 +77,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           )}
         </Button>
       </div>
+      {isDragOver && <FileDropOverlay />}
     </div>
   );
 }

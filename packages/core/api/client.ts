@@ -30,12 +30,16 @@ import type {
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
+  IssueUsageSummary,
   RuntimeHourlyActivity,
   RuntimePing,
   RuntimeUpdate,
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  ChatSession,
+  ChatMessage,
+  SendChatMessageResponse,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -178,6 +182,8 @@ export class ApiClient {
     if (params?.status) search.set("status", params.status);
     if (params?.priority) search.set("priority", params.priority);
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
+    if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.open_only) search.set("open_only", "true");
     return this.fetch(`/api/issues?${search}`);
   }
@@ -415,6 +421,10 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
   }
 
+  async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
+    return this.fetch(`/api/issues/${issueId}/usage`);
+  }
+
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
@@ -602,6 +612,42 @@ export class ApiClient {
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
     return res.json() as Promise<Attachment>;
+  }
+
+  // Chat Sessions
+  async listChatSessions(params?: { status?: string }): Promise<ChatSession[]> {
+    const query = params?.status ? `?status=${params.status}` : "";
+    return this.fetch(`/api/chat/sessions${query}`);
+  }
+
+  async getChatSession(id: string): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}`);
+  }
+
+  async createChatSession(data: { agent_id: string; title?: string }): Promise<ChatSession> {
+    return this.fetch("/api/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveChatSession(id: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
+  }
+
+  async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
+  }
+
+  async sendChatMessage(sessionId: string, content: string): Promise<SendChatMessageResponse> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async cancelTaskById(taskId: string): Promise<void> {
+    await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {

@@ -1,7 +1,9 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
+import { defaultStorage } from "../../platform/storage";
 
 export type IssuesScope = "all" | "members" | "agents";
 
@@ -16,6 +18,11 @@ export const useIssuesScopeStore = create<IssuesScopeState>()(
       scope: "all",
       setScope: (scope) => set({ scope }),
     }),
-    { name: "multica_issues_scope" },
+    {
+      name: "multica_issues_scope",
+      storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+    },
   ),
 );
+
+registerForWorkspaceRehydration(() => useIssuesScopeStore.persist.rehydrate());

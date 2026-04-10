@@ -1,0 +1,29 @@
+{
+  "name": "@multica/docs",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 4000",
+    "build": "fumadocs-mdx && next build",
+    "start": "next start",
+    "typecheck": "fumadocs-mdx && tsc --noEmit",
+    "postinstall": "fumadocs-mdx"
+  },
+  "dependencies": {
+    "fumadocs-core": "^15.5.2",
+    "fumadocs-mdx": "^12.0.3",
+    "fumadocs-ui": "^15.5.2",
+    "lucide-react": "catalog:",
+    "next": "^15.3.3",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:"
+  }
+}

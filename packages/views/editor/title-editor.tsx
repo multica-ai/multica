@@ -125,6 +125,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
         }, 50);
         return () => clearTimeout(timer);
       }
+      return undefined;
     }, [autoFocus, editor]);
 
     useImperativeHandle(ref, () => ({

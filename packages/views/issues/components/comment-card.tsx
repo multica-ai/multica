@@ -30,7 +30,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent } from "../../editor";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -115,6 +115,10 @@ function CommentRow({
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
   const { uploadWithToast } = useFileUpload(api);
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
+    enabled: editing,
+  });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const isTemp = entry.id.startsWith("temp-");
@@ -221,7 +225,8 @@ function CommentRow({
 
       {editing ? (
         <div
-          className="mt-1.5 pl-8"
+          {...dropZoneProps}
+          className="relative mt-1.5 pl-8"
           onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
         >
           <div className="max-h-48 overflow-y-auto text-sm leading-relaxed">
@@ -244,6 +249,7 @@ function CommentRow({
               <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
             </div>
           </div>
+          {isDragOver && <FileDropOverlay />}
         </div>
       ) : (
         <>
@@ -287,6 +293,10 @@ function CommentCard({
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  const { isDragOver: parentDragOver, dropZoneProps: parentDropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
+    enabled: editing,
+  });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const isTemp = entry.id.startsWith("temp-");
@@ -431,7 +441,8 @@ function CommentCard({
           <div className="px-4 pb-3">
             {editing ? (
               <div
-                className="pl-10"
+                {...parentDropZoneProps}
+                className="relative pl-10"
                 onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
               >
                 <div className="max-h-48 overflow-y-auto text-sm leading-relaxed">
@@ -454,6 +465,7 @@ function CommentCard({
                     <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
                   </div>
                 </div>
+                {parentDragOver && <FileDropOverlay />}
               </div>
             ) : (
               <>

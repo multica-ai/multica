@@ -43,12 +43,6 @@ export function isFileCardUrl(url: string): boolean {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 // ---------------------------------------------------------------------------
 // React NodeView
 // ---------------------------------------------------------------------------
@@ -56,7 +50,6 @@ function formatFileSize(bytes: number): string {
 function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
-  const fileSize = node.attrs.fileSize as number;
   const uploading = node.attrs.uploading as boolean;
 
   const openFile = () => {
@@ -65,7 +58,6 @@ function FileCardView({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
         className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
         contentEditable={false}

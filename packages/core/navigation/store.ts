@@ -1,7 +1,9 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createPersistStorage } from "../platform/persist-storage";
+import { defaultStorage } from "../platform/storage";
 
 const EXCLUDED_PREFIXES = ["/login", "/pair/"];
 
@@ -23,6 +25,7 @@ export const useNavigationStore = create<NavigationState>()(
     }),
     {
       name: "multica_navigation",
+      storage: createJSONStorage(() => createPersistStorage(defaultStorage)),
       partialize: (state) => ({ lastPath: state.lastPath }),
     }
   )

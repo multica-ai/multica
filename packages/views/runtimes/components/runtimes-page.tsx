@@ -41,7 +41,7 @@ export default function RuntimesPage() {
   }, [qc, wsId]);
 
   useWSEvent("daemon:register", handleDaemonEvent);
-  const updatableIds = useUpdatableRuntimeIds();
+  const updatableIds = useUpdatableRuntimeIds(wsId);
 
   // Auto-select first runtime if nothing selected
   const effectiveSelectedId = selectedId && runtimes.some((r) => r.id === selectedId)

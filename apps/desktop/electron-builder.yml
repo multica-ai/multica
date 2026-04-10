@@ -1,0 +1,31 @@
+appId: ai.multica.desktop
+productName: Multica
+directories:
+  buildResources: build
+files:
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!electron.vite.config.*"
+  - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+asarUnpack:
+  - resources/**
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - dmg
+    - zip
+  artifactName: ${name}-${version}-${arch}.${ext}
+  notarize: false
+dmg:
+  artifactName: ${name}-${version}.${ext}
+linux:
+  target:
+    - AppImage
+    - deb
+  artifactName: ${name}-${version}-${arch}.${ext}
+win:
+  target:
+    - nsis
+  artifactName: ${name}-${version}-setup.${ext}
+npmRebuild: false

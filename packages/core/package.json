@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
   "exports": {
     ".": "./index.ts",
     "./types": "./types/index.ts",
@@ -29,6 +34,9 @@
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
     "./inbox/ws-updaters": "./inbox/ws-updaters.ts",
+    "./chat": "./chat/index.ts",
+    "./chat/queries": "./chat/queries.ts",
+    "./chat/mutations": "./chat/mutations.ts",
     "./runtimes": "./runtimes/index.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
@@ -46,7 +54,8 @@
     "./provider": "./provider.tsx",
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
-    "./constants/*": "./constants/*.ts"
+    "./constants/*": "./constants/*.ts",
+    "./platform": "./platform/index.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
@@ -59,6 +68,7 @@
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
     "@types/react": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

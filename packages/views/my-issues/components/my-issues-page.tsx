@@ -20,9 +20,9 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { registerViewStoreForWorkspaceSync } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions } from "@multica/core/issues/queries";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { myIssuesViewStore } from "../stores/my-issues-view-store";
+import { myIssueListOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { useUpdateIssue, useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
+import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { MyIssuesHeader } from "./my-issues-header";
 
 export function MyIssuesPage() {
@@ -30,7 +30,6 @@ export function MyIssuesPage() {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: allIssues = [], isLoading: loading } = useQuery(issueListOptions(wsId));
 
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
@@ -45,46 +44,34 @@ export function MyIssuesPage() {
     useIssueSelectionStore.getState().clear();
   }, [viewMode, scope]);
 
+  // Build server-side filter based on scope
   const myAgentIds = useMemo(() => {
-    if (!user) return new Set<string>();
-    return new Set(
-      agents.filter((a) => a.owner_id === user.id).map((a) => a.id),
-    );
+    if (!user) return [] as string[];
+    return agents
+      .filter((a) => a.owner_id === user.id)
+      .map((a) => a.id)
+      .sort();
   }, [agents, user]);
 
-  // Per-scope issue lists
-  const assignedToMe = useMemo(() => {
-    if (!user) return [];
-    return allIssues.filter(
-      (i) => i.assignee_type === "member" && i.assignee_id === user.id,
-    );
-  }, [allIssues, user]);
-
-  const myAgentIssues = useMemo(() => {
-    if (!user) return [];
-    return allIssues.filter(
-      (i) =>
-        i.assignee_type === "agent" &&
-        i.assignee_id &&
-        myAgentIds.has(i.assignee_id),
-    );
-  }, [allIssues, user, myAgentIds]);
-
-  const createdByMe = useMemo(() => {
-    if (!user) return [];
-    return allIssues.filter(
-      (i) => i.creator_type === "member" && i.creator_id === user.id,
-    );
-  }, [allIssues, user]);
-
-  const myIssues = useMemo(() => {
+  const filter: MyIssuesFilter = useMemo(() => {
+    if (!user) return {};
     switch (scope) {
-      case "assigned": return assignedToMe;
-      case "agents": return myAgentIssues;
-      case "created": return createdByMe;
-      default: return assignedToMe;
+      case "assigned":
+        return { assignee_id: user.id };
+      case "created":
+        return { creator_id: user.id };
+      case "agents":
+        return { assignee_ids: myAgentIds };
+      default:
+        return { assignee_id: user.id };
     }
-  }, [scope, assignedToMe, myAgentIssues, createdByMe]);
+  }, [scope, user, myAgentIds]);
+
+  const { data: myIssues = [], isLoading: loading } = useQuery(
+    myIssueListOptions(wsId, scope, filter),
+  );
+
+  const { doneTotal } = useLoadMoreDoneIssues({ scope, filter });
 
   // Apply status/priority filters from view store
   const issues = useMemo(
@@ -98,6 +85,22 @@ export function MyIssuesPage() {
       }),
     [myIssues, statusFilters, priorityFilters],
   );
+
+  const childProgressMap = useMemo(() => {
+    const map = new Map<string, { done: number; total: number }>();
+    for (const issue of myIssues) {
+      if (!issue.parent_issue_id) continue;
+      const entry = map.get(issue.parent_issue_id);
+      const isDone = issue.status === "done" || issue.status === "cancelled";
+      if (entry) {
+        entry.total++;
+        if (isDone) entry.done++;
+      } else {
+        map.set(issue.parent_issue_id, { done: isDone ? 1 : 0, total: 1 });
+      }
+    }
+    return map;
+  }, [myIssues]);
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -187,9 +190,20 @@ export function MyIssuesPage() {
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+                doneTotal={doneTotal}
+                myIssuesScope={scope}
+                myIssuesFilter={filter}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} />
+              <ListView
+                issues={issues}
+                visibleStatuses={visibleStatuses}
+                childProgressMap={childProgressMap}
+                doneTotal={doneTotal}
+                myIssuesScope={scope}
+                myIssuesFilter={filter}
+              />
             )}
           </div>
         )}

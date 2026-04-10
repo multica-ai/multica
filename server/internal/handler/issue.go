@@ -3,12 +3,15 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -128,17 +131,19 @@ func extractSnippet(content, query string) string {
 	queryRunes := []rune(strings.ToLower(query))
 
 	idx := -1
-	for i := 0; i <= len(lowerRunes)-len(queryRunes); i++ {
-		match := true
-		for j := range queryRunes {
-			if lowerRunes[i+j] != queryRunes[j] {
-				match = false
+	if len(queryRunes) > 0 && len(lowerRunes) >= len(queryRunes) {
+		for i := 0; i <= len(lowerRunes)-len(queryRunes); i++ {
+			match := true
+			for j := range queryRunes {
+				if lowerRunes[i+j] != queryRunes[j] {
+					match = false
+					break
+				}
+			}
+			if match {
+				idx = i
 				break
 			}
-		}
-		if match {
-			idx = i
-			break
 		}
 	}
 
@@ -174,6 +179,269 @@ func escapeLike(s string) string {
 	return s
 }
 
+// splitSearchTerms splits a query into individual search terms, filtering empty strings.
+func splitSearchTerms(q string) []string {
+	fields := strings.FieldsFunc(q, func(r rune) bool {
+		return unicode.IsSpace(r)
+	})
+	terms := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f != "" {
+			terms = append(terms, f)
+		}
+	}
+	return terms
+}
+
+// identifierNumberRe matches patterns like "MUL-123" or "ABC-45".
+var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+-(\d+)$`)
+
+// parseQueryNumber extracts an issue number from the query if it looks like
+// an identifier (e.g. "MUL-123") or a bare number (e.g. "123").
+func parseQueryNumber(q string) (int, bool) {
+	q = strings.TrimSpace(q)
+	// Check for identifier pattern like "MUL-123"
+	if m := identifierNumberRe.FindStringSubmatch(q); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	// Check for bare number
+	if n, err := strconv.Atoi(q); err == nil && n > 0 {
+		return n, true
+	}
+	return 0, false
+}
+
+// searchResult holds a raw row from the dynamic search query.
+type searchResult struct {
+	issue                 db.Issue
+	totalCount            int64
+	matchSource           string
+	matchedCommentContent string
+}
+
+// buildSearchQuery builds a dynamic SQL query for issue search.
+// It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
+// Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+	// Lowercase in Go so SQL only needs LOWER() on the column side.
+	phrase = strings.ToLower(phrase)
+	for i, t := range terms {
+		terms[i] = strings.ToLower(t)
+	}
+
+	// Parameter index tracker
+	argIdx := 1
+	args := []any{}
+	nextArg := func(val any) string {
+		args = append(args, val)
+		s := fmt.Sprintf("$%d", argIdx)
+		argIdx++
+		return s
+	}
+
+	escapedPhrase := escapeLike(phrase)
+	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseContains := "'%' || " + phraseParam + " || '%'"
+	phraseStartsWith := phraseParam + " || '%'"
+
+	wsParam := nextArg(nil) // $2 — workspace_id, will be filled by caller position
+
+	// Build per-term LIKE conditions only for multi-word search.
+	// For single-word queries, the phrase parameter already covers the term.
+	var termParams []string
+	if len(terms) > 1 {
+		for _, t := range terms {
+			et := escapeLike(t)
+			termParams = append(termParams, nextArg(et))
+		}
+	}
+
+	// --- WHERE clause ---
+	var whereParts []string
+
+	// Full phrase match: title, description, or comment
+	phraseMatch := fmt.Sprintf(
+		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
+		phraseContains, phraseContains, phraseContains,
+	)
+	whereParts = append(whereParts, phraseMatch)
+
+	// Multi-word AND match (each term must appear somewhere)
+	if len(termParams) > 1 {
+		var termConditions []string
+		for _, tp := range termParams {
+			tc := "'%' || " + tp + " || '%'"
+			termConditions = append(termConditions, fmt.Sprintf(
+				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
+				tc, tc, tc,
+			))
+		}
+		whereParts = append(whereParts, "("+strings.Join(termConditions, " AND ")+")")
+	}
+
+	// Number match
+	numParam := ""
+	if hasNum {
+		numParam = nextArg(queryNum)
+		whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
+	}
+
+	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
+
+	if !includeClosed {
+		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+	}
+
+	// --- ORDER BY clause ---
+	// Build ranking CASE with fine-grained tiers.
+	var rankCases []string
+
+	// Tier 0: Identifier exact match
+	if hasNum {
+		rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
+	}
+
+	// Tier 1: Exact title match
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = %s THEN 1", phraseParam))
+
+	// Tier 2: Title starts with phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 2", phraseStartsWith))
+
+	// Tier 3: Title contains phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 3", phraseContains))
+
+	// Tier 4: Title matches all words (multi-word only)
+	if len(termParams) > 1 {
+		var titleTerms []string
+		for _, tp := range termParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		}
+		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 4", strings.Join(titleTerms, " AND ")))
+	}
+
+	// Tier 5: Description contains phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 5", phraseContains))
+
+	// Tier 6: Description matches all words (multi-word only)
+	if len(termParams) > 1 {
+		var descTerms []string
+		for _, tp := range termParams {
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		}
+		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 6", strings.Join(descTerms, " AND ")))
+	}
+
+	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 7 END"
+
+	// Status priority: active issues first
+	statusRank := `CASE i.status
+		WHEN 'in_progress' THEN 0
+		WHEN 'in_review' THEN 1
+		WHEN 'todo' THEN 2
+		WHEN 'blocked' THEN 3
+		WHEN 'backlog' THEN 4
+		WHEN 'done' THEN 5
+		WHEN 'cancelled' THEN 6
+		ELSE 7
+	END`
+
+	// --- match_source expression ---
+	matchSourceExpr := fmt.Sprintf(`CASE
+		WHEN LOWER(i.title) LIKE %s THEN 'title'
+		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
+		ELSE 'comment'
+	END`, phraseContains, phraseContains)
+
+	// For multi-word: also check if all terms match in title/description
+	if len(termParams) > 1 {
+		var titleTerms []string
+		var descTerms []string
+		for _, tp := range termParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		}
+		matchSourceExpr = fmt.Sprintf(`CASE
+			WHEN LOWER(i.title) LIKE %s THEN 'title'
+			WHEN (%s) THEN 'title'
+			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
+			WHEN (%s) THEN 'description'
+			ELSE 'comment'
+		END`,
+			phraseContains, strings.Join(titleTerms, " AND "),
+			phraseContains, strings.Join(descTerms, " AND "),
+		)
+	}
+
+	// --- matched_comment_content subquery ---
+	// Find the most recent matching comment for comment-source matches.
+	commentSubquery := fmt.Sprintf(`CASE
+		WHEN LOWER(i.title) LIKE %s THEN ''
+		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
+		ELSE COALESCE(
+			(SELECT c.content FROM comment c
+			 WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s
+			 ORDER BY c.created_at DESC LIMIT 1),
+			''
+		)
+	END`, phraseContains, phraseContains, phraseContains)
+
+	// For multi-word, also find comment matching individual terms
+	if len(termParams) > 1 {
+		var titleTerms []string
+		var descTerms []string
+		var commentTerms []string
+		for _, tp := range termParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		}
+		commentSubquery = fmt.Sprintf(`CASE
+			WHEN LOWER(i.title) LIKE %s THEN ''
+			WHEN (%s) THEN ''
+			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
+			WHEN (%s) THEN ''
+			ELSE COALESCE(
+				(SELECT c.content FROM comment c
+				 WHERE c.issue_id = i.id AND (LOWER(c.content) LIKE %s OR (%s))
+				 ORDER BY c.created_at DESC LIMIT 1),
+				''
+			)
+		END`,
+			phraseContains, strings.Join(titleTerms, " AND "),
+			phraseContains, strings.Join(descTerms, " AND "),
+			phraseContains, strings.Join(commentTerms, " AND "),
+		)
+	}
+
+	limitParam := nextArg(nil)  // placeholder
+	offsetParam := nextArg(nil) // placeholder
+
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
+		i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		COUNT(*) OVER() AS total_count,
+		%s AS match_source,
+		%s AS matched_comment_content
+	FROM issue i
+	WHERE i.workspace_id = %s AND %s
+	ORDER BY %s, %s, i.updated_at DESC
+	LIMIT %s OFFSET %s`,
+		matchSourceExpr,
+		commentSubquery,
+		wsParam,
+		whereClause,
+		rankExpr,
+		statusRank,
+		limitParam,
+		offsetParam,
+	)
+
+	return query, args
+}
+
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	workspaceID := resolveWorkspaceID(r)
@@ -203,38 +471,77 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
 
 	wsUUID := parseUUID(workspaceID)
-	queryText := strToText(escapeLike(q))
+	terms := splitSearchTerms(q)
+	queryNum, hasNum := parseQueryNumber(q)
 
-	rows, err := h.Queries.SearchIssues(ctx, db.SearchIssuesParams{
-		WorkspaceID:   wsUUID,
-		Query:         queryText,
-		SearchLimit:   int32(limit),
-		SearchOffset:  int32(offset),
-		IncludeClosed: includeClosed,
-	})
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	// Fill placeholder args: $2 = workspace_id, last two = limit, offset
+	args[1] = wsUUID
+	args[len(args)-2] = limit
+	args[len(args)-1] = offset
+
+	rows, err := h.DB.Query(ctx, sqlQuery, args...)
 	if err != nil {
 		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search issues")
 		return
 	}
+	defer rows.Close()
+
+	var results []searchResult
+	for rows.Next() {
+		var sr searchResult
+		if err := rows.Scan(
+			&sr.issue.ID,
+			&sr.issue.WorkspaceID,
+			&sr.issue.Title,
+			&sr.issue.Description,
+			&sr.issue.Status,
+			&sr.issue.Priority,
+			&sr.issue.AssigneeType,
+			&sr.issue.AssigneeID,
+			&sr.issue.CreatorType,
+			&sr.issue.CreatorID,
+			&sr.issue.ParentIssueID,
+			&sr.issue.AcceptanceCriteria,
+			&sr.issue.ContextRefs,
+			&sr.issue.Position,
+			&sr.issue.DueDate,
+			&sr.issue.CreatedAt,
+			&sr.issue.UpdatedAt,
+			&sr.issue.Number,
+			&sr.issue.ProjectID,
+			&sr.totalCount,
+			&sr.matchSource,
+			&sr.matchedCommentContent,
+		); err != nil {
+			slog.Warn("search issues scan failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to search issues")
+			return
+		}
+		results = append(results, sr)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("search issues rows error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to search issues")
+		return
+	}
 
 	var total int64
-	if len(rows) > 0 {
-		total = rows[0].TotalCount
+	if len(results) > 0 {
+		total = results[0].totalCount
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
-	resp := make([]SearchIssueResponse, len(rows))
-	for i, row := range rows {
+	resp := make([]SearchIssueResponse, len(results))
+	for i, sr := range results {
 		sir := SearchIssueResponse{
-			IssueResponse: issueToResponse(searchRowToIssue(row), prefix),
-			MatchSource:   row.MatchSource,
+			IssueResponse: issueToResponse(sr.issue, prefix),
+			MatchSource:   sr.matchSource,
 		}
-		if row.MatchSource == "comment" {
-			if content, ok := row.MatchedCommentContent.(string); ok && content != "" {
-				snippet := extractSnippet(content, q)
-				sir.MatchedSnippet = &snippet
-			}
+		if sr.matchSource == "comment" && sr.matchedCommentContent != "" {
+			snippet := extractSnippet(sr.matchedCommentContent, q)
+			sir.MatchedSnippet = &snippet
 		}
 		resp[i] = sir
 	}
@@ -244,30 +551,6 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		"issues": resp,
 		"total":  total,
 	})
-}
-
-func searchRowToIssue(row db.SearchIssuesRow) db.Issue {
-	return db.Issue{
-		ID:                 row.ID,
-		WorkspaceID:        row.WorkspaceID,
-		Title:              row.Title,
-		Description:        row.Description,
-		Status:             row.Status,
-		Priority:           row.Priority,
-		AssigneeType:       row.AssigneeType,
-		AssigneeID:         row.AssigneeID,
-		CreatorType:        row.CreatorType,
-		CreatorID:          row.CreatorID,
-		ParentIssueID:      row.ParentIssueID,
-		AcceptanceCriteria: row.AcceptanceCriteria,
-		ContextRefs:        row.ContextRefs,
-		Position:           row.Position,
-		DueDate:            row.DueDate,
-		CreatedAt:          row.CreatedAt,
-		UpdatedAt:          row.UpdatedAt,
-		Number:             row.Number,
-		ProjectID:          row.ProjectID,
-	}
 }
 
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
@@ -285,6 +568,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
 		assigneeFilter = parseUUID(a)
 	}
+	var assigneeIdsFilter []pgtype.UUID
+	if ids := r.URL.Query().Get("assignee_ids"); ids != "" {
+		for _, raw := range strings.Split(ids, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				assigneeIdsFilter = append(assigneeIdsFilter, parseUUID(s))
+			}
+		}
+	}
+	var creatorFilter pgtype.UUID
+	if c := r.URL.Query().Get("creator_id"); c != "" {
+		creatorFilter = parseUUID(c)
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
@@ -292,6 +587,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 			Priority:    priorityFilter,
 			AssigneeID:  assigneeFilter,
+			AssigneeIds: assigneeIdsFilter,
+			CreatorID:   creatorFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -336,6 +633,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,
+		AssigneeIds: assigneeIdsFilter,
+		CreatorID:   creatorFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -348,6 +647,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,
+		AssigneeIds: assigneeIdsFilter,
+		CreatorID:   creatorFilter,
 	})
 	if err != nil {
 		total = int64(len(issues))

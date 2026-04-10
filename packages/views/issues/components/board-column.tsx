@@ -18,17 +18,20 @@ import { useModalStore } from "@multica/core/modals";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { StatusIcon } from "./status-icon";
 import { DraggableBoardCard } from "./board-card";
+import type { ChildProgress } from "./list-row";
 
 export function BoardColumn({
   status,
   issueIds,
   issueMap,
+  childProgressMap,
   totalCount,
   footer,
 }: {
   status: IssueStatus;
   issueIds: string[];
   issueMap: Map<string, Issue>;
+  childProgressMap?: Map<string, ChildProgress>;
   totalCount?: number;
   footer?: ReactNode;
 }) {
@@ -102,7 +105,7 @@ export function BoardColumn({
       >
         <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
           {resolvedIssues.map((issue) => (
-            <DraggableBoardCard key={issue.id} issue={issue} />
+            <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} />
           ))}
         </SortableContext>
         {issueIds.length === 0 && (

@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -122,8 +122,12 @@ check-worktree:
 
 # ---------- Individual commands ----------
 
-# Go server
+# One-command dev: auto-setup env/deps/db/migrations, then start all services
 dev:
+	@bash scripts/dev.sh
+
+# Go server only
+server:
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server

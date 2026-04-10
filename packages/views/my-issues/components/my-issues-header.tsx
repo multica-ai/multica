@@ -45,10 +45,9 @@ import {
   SORT_OPTIONS,
   CARD_PROPERTY_OPTIONS,
 } from "@multica/core/issues/stores/view-store";
-import { filterIssues } from "../../issues/utils/filter";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
-import { myIssuesViewStore, type MyIssuesScope } from "../stores/my-issues-view-store";
+import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
 
 // ---------------------------------------------------------------------------
 // HoverCheck

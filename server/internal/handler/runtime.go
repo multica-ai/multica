@@ -343,14 +343,20 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if any agents are bound to this runtime (ON DELETE RESTRICT).
-	agentCount, err := h.Queries.CountAgentsByRuntime(r.Context(), rt.ID)
+	// Check if any active (non-archived) agents are bound to this runtime.
+	activeCount, err := h.Queries.CountActiveAgentsByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime dependencies")
 		return
 	}
-	if agentCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime: it has agents bound to it. Reassign or remove the agents first.")
+	if activeCount > 0 {
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has active agents bound to it. Archive or reassign the agents first.")
+		return
+	}
+
+	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
+	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
 	}
 

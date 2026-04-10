@@ -1,0 +1,50 @@
+{
+  "name": "@multica/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
+    "preview": "electron-vite preview",
+    "package": "electron-builder",
+    "lint": "eslint .",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/modifiers": "^9.0.0",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "@fontsource/geist-mono": "^5.2.7",
+    "@fontsource/geist-sans": "^5.2.5",
+    "react-router-dom": "^7.6.0",
+    "shadcn": "^4.1.0",
+    "sonner": "^2.0.7",
+    "tw-animate-css": "^1.4.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@multica/tsconfig": "workspace:*",
+    "@tailwindcss/vite": "^4",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwindcss": "^4",
+    "typescript": "catalog:"
+  }
+}

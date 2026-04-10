@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Calendar,
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -17,7 +16,6 @@ import {
   Trash2,
   UserMinus,
   Users,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -38,16 +36,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
-import { ContentEditor, type ContentEditorRef } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { TitleEditor } from "../../editor";
 import {
   Tooltip,
   TooltipTrigger,
@@ -58,19 +53,19 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { Issue, UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
+import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -83,58 +78,7 @@ import { useModalStore } from "@multica/core/modals";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
-/**
- * Tiny circular progress ring used in the "Sub-issue of …" line and the
- * Sub-issues section header. Renders an open ring when in-progress and
- * fills to a solid arc when complete.
- */
-function ProgressRing({
-  done,
-  total,
-  size = 12,
-}: {
-  done: number;
-  total: number;
-  size?: number;
-}) {
-  const stroke = 1.5;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const ratio = total > 0 ? Math.min(done / total, 1) : 0;
-  const offset = circumference * (1 - ratio);
-  const isComplete = total > 0 && done >= total;
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className={isComplete ? "text-info" : "text-primary"}
-      aria-hidden="true"
-    >
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeOpacity="0.25"
-        strokeWidth={stroke}
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={stroke}
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-      />
-    </svg>
-  );
-}
+import { ProgressRing } from "./progress-ring";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -194,6 +138,16 @@ function formatActivity(
 
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+// ---------------------------------------------------------------------------
 // Property row
 // ---------------------------------------------------------------------------
 
@@ -249,8 +203,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const nextIssue = currentIndex < allIssues.length - 1 ? allIssues[currentIndex + 1] : null;
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
-  const queryClient = useQueryClient();
-
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
@@ -277,7 +229,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
-    timeline, loading: timelineLoading, submitting, submitComment, submitReply,
+    timeline, loading: timelineLoading, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
 
@@ -289,6 +241,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const {
     subscribers, loading: subscribersLoading, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
   } = useIssueSubscribers(id, user?.id);
+
+  // Token usage
+  const { data: usage } = useQuery(issueUsageOptions(id));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -341,6 +296,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   );
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+  });
   // Description uploads don't pass issueId — the URL lives in the markdown.
   // This avoids stale attachment records when users delete images from the editor.
   const handleDescriptionUpload = useCallback(
@@ -640,7 +598,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
                 {/* Copy link */}
                 <DropdownMenuItem onClick={() => {
-                  navigator.clipboard.writeText(window.location.href);
+                  const url = router.getShareableUrl
+                    ? router.getShareableUrl(router.pathname)
+                    : window.location.href;
+                  navigator.clipboard.writeText(url);
                   toast.success("Link copied");
                 }}>
                   <Link2 className="h-3.5 w-3.5" />
@@ -743,35 +704,37 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </AppLink>
           )}
 
-          <ContentEditor
-            ref={descEditorRef}
-            key={id}
-            defaultValue={issue.description || ""}
-            placeholder="Add description..."
-            onUpdate={(md) => handleUpdateField({ description: md || undefined })}
-            onUploadFile={handleDescriptionUpload}
-            debounceMs={1500}
-            className="mt-5"
-          />
-
-          <div className="flex items-center gap-1 mt-3">
-            {reactionsLoading ? (
-              <div className="flex items-center gap-1">
-                <Skeleton className="h-7 w-14 rounded-full" />
-                <Skeleton className="h-7 w-14 rounded-full" />
-              </div>
-            ) : (
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
-              />
-            )}
-            <FileUploadButton
-              size="sm"
-              onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+          <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+            <ContentEditor
+              ref={descEditorRef}
+              key={id}
+              defaultValue={issue.description || ""}
+              placeholder="Add description..."
+              onUpdate={(md) => handleUpdateField({ description: md || undefined })}
+              onUploadFile={handleDescriptionUpload}
+              debounceMs={1500}
             />
+
+            <div className="flex items-center gap-1 mt-3">
+              {reactionsLoading ? (
+                <div className="flex items-center gap-1">
+                  <Skeleton className="h-7 w-14 rounded-full" />
+                  <Skeleton className="h-7 w-14 rounded-full" />
+                </div>
+              ) : (
+                <ReactionBar
+                  reactions={issueReactions}
+                  currentUserId={user?.id}
+                  onToggle={handleToggleIssueReaction}
+                  getActorName={getActorName}
+                />
+              )}
+              <FileUploadButton
+                size="sm"
+                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+              />
+            </div>
+            {descDragOver && <FileDropOverlay />}
           </div>
 
           {/* Sub-issues — Linear-style */}
@@ -1081,7 +1044,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
                   return (
                     <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">
-                      {group.entries.map((entry, idx) => {
+                      {group.entries.map((entry, _idx) => {
                         const details = (entry.details ?? {}) as Record<string, string>;
                         const isStatusChange = entry.action === "status_changed";
                         const isPriorityChange = entry.action === "priority_changed";
@@ -1164,42 +1127,20 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             {propertiesOpen && <div className="space-y-0.5 pl-2">
               {/* Status */}
               <PropRow label="Status">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {ALL_STATUSES.map((s) => (
-                      <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s })}>
-                        <StatusIcon status={s} className="h-3.5 w-3.5" />
-                        {STATUS_CONFIG[s].label}
-                        {s === issue.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <StatusPicker
+                  status={issue.status}
+                  onUpdate={handleUpdateField}
+                  align="start"
+                />
               </PropRow>
 
               {/* Priority */}
               <PropRow label="Priority">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <PriorityIcon priority={issue.priority} className="shrink-0" />
-                    <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {PRIORITY_ORDER.map((p) => (
-                      <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p })}>
-                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                          <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                          {PRIORITY_CONFIG[p].label}
-                        </span>
-                        {p === issue.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <PriorityPicker
+                  priority={issue.priority}
+                  onUpdate={handleUpdateField}
+                  align="start"
+                />
               </PropRow>
 
               {/* Assignee */}
@@ -1277,6 +1218,34 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </PropRow>
             </div>}
           </div>
+
+          {/* Token usage */}
+          {usage && usage.task_count > 0 && (
+            <div>
+              <div className="text-xs font-medium mb-2 flex items-center gap-1">
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
+                Token usage
+              </div>
+              <div className="space-y-0.5 pl-2">
+                <PropRow label="Input">
+                  <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
+                </PropRow>
+                <PropRow label="Output">
+                  <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
+                </PropRow>
+                {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
+                  <PropRow label="Cache">
+                    <span className="text-muted-foreground">
+                      {formatTokenCount(usage.total_cache_read_tokens)} read / {formatTokenCount(usage.total_cache_write_tokens)} write
+                    </span>
+                  </PropRow>
+                )}
+                <PropRow label="Runs">
+                  <span className="text-muted-foreground">{usage.task_count}</span>
+                </PropRow>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>

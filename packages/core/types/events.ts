@@ -46,6 +46,8 @@ export type WSEventType =
   | "reaction:removed"
   | "issue_reaction:added"
   | "issue_reaction:removed"
+  | "chat:message"
+  | "chat:done"
   | "project:created"
   | "project:updated"
   | "project:deleted";
@@ -218,6 +220,21 @@ export interface IssueReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+}
+
+export interface ChatMessageEventPayload {
+  chat_session_id: string;
+  message_id: string;
+  role: "user" | "assistant";
+  content: string;
+  task_id?: string;
+  created_at: string;
+}
+
+export interface ChatDonePayload {
+  chat_session_id: string;
+  task_id: string;
+  content?: string;
 }
 
 export interface ProjectCreatedPayload {

@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@multica/ui/styles/tokens.css";
+@import "@multica/ui/styles/base.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Geist font: define CSS variables that tokens.css @theme inline references.
+   Web app gets these from next/font/google; desktop must set them explicitly. */
+:root {
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@source "../../../../../packages/ui/**/*.tsx";
+@source "../../../../../packages/core/**/*.{ts,tsx}";
+@source "../../../../../packages/views/**/*.{ts,tsx}";
+@source "./**/*.tsx";
+
+/* Desktop-specific: override sidebar container padding for traffic light layout */
+[data-slot="sidebar-container"] {
+  padding: 0 !important;
+}

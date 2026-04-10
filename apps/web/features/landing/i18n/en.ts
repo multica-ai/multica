@@ -107,7 +107,7 @@ export const en: LandingDict = {
         {
           title: "Auto-detection & plug-and-play",
           description:
-            "Multica detects available CLIs like Claude Code and Codex automatically. Connect a machine, and it\u2019s ready to work.",
+            "Multica detects available CLIs like Claude Code, Codex, OpenClaw, and OpenCode automatically. Connect a machine, and it\u2019s ready to work.",
         },
       ],
     },
@@ -126,7 +126,7 @@ export const en: LandingDict = {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica login to authenticate, then multica daemon start. The daemon auto-detects Claude Code and Codex on your machine \u2014 plug in and go.",
+          "Run multica login to authenticate, then multica daemon start. The daemon auto-detects Claude Code, Codex, OpenClaw, and OpenCode on your machine \u2014 plug in and go.",
       },
       {
         title: "Create your first agent",
@@ -181,7 +181,7 @@ export const en: LandingDict = {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica currently supports Claude Code and OpenAI Codex out of the box. The daemon auto-detects whichever CLIs you have installed. More backends are on the roadmap \u2014 and since it\u2019s open source, you can add your own.",
+          "Multica currently supports Claude Code, Codex, OpenClaw, and OpenCode out of the box. The daemon auto-detects whichever CLIs you have installed. Since it\u2019s open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -190,7 +190,7 @@ export const en: LandingDict = {
       },
       {
         question:
-          "How is this different from just using Claude Code or Codex directly?",
+          "How is this different from just using coding agents directly?",
         answer:
           "Coding agents are great at executing. Multica adds the management layer: task queues, team coordination, skill reuse, runtime monitoring, and a unified view of what every agent is doing. Think of it as the project manager for your agents.",
       },
@@ -230,7 +230,7 @@ export const en: LandingDict = {
         links: [
           { label: "Documentation", href: githubUrl },
           { label: "API", href: githubUrl },
-          { label: "Community", href: githubUrl },
+          { label: "X (Twitter)", href: "https://x.com/multica_hq" },
         ],
       },
       company: {
@@ -271,9 +271,74 @@ export const en: LandingDict = {
   changelog: {
     title: "Changelog",
     subtitle: "New updates and improvements to Multica.",
+    categories: {
+      features: "New Features",
+      improvements: "Improvements",
+      fixes: "Bug Fixes",
+    },
     entries: [
       {
-        version: "0.1.9",
+        version: "0.1.22",
+        date: "2026-04-10",
+        title: "Self-Hosting, ACP & Documentation",
+        changes: [],
+        features: [
+          "Full-stack Docker Compose for one-command self-hosting",
+          "Hermes Agent Provider via ACP protocol",
+          "Documentation site with Fumadocs (Getting Started, CLI reference, Agents guide)",
+          "Mobile-responsive sidebar and inbox layout",
+          "Token usage display per issue in the detail sidebar",
+          "Switch agent runtime from the UI",
+          "'C' keyboard shortcut for quick issue creation",
+          "Chat session history panel for archived conversations",
+          "Minimum CLI version check in daemon for Claude Code and Codex",
+          "OpenClaw and OpenCode added to landing page",
+          "`make dev` one-command local development setup",
+        ],
+        improvements: [
+          "Sidebar redesign — Personal / Workspace grouping, user profile footer, ⌘K search input",
+          "Search ranking — case-insensitive matching, identifier search (MUL-123), multi-word support",
+          "Search result keyword highlighting",
+          "Daily token usage chart with cleaner Y-axis and per-category tooltip",
+          "Master Agent multiline input support",
+          "Unified picker components (Status, Priority, DueDate, Project, Assignee) across all views",
+          "Workspace-scoped storage isolation with auto-rehydration on switch",
+          "Startup warnings for missing env vars in self-hosted deployments",
+        ],
+        fixes: [
+          "Sub-issue deletion not invalidating parent's children cache",
+          "Search index compatibility with pg_bigm 1.2 on RDS",
+          "Create Agent showing \"No runtime available\" when runtimes exist",
+          "Claude stream-json startup hangs",
+          "Multiple agents unable to queue tasks for the same issue",
+          "Logout not clearing workspace and query cache",
+          "Drag-drop overlay too small on empty editors",
+          "Skills import hardcoding \"main\" as default branch",
+          "PAT authentication not working on WebSocket endpoint",
+          "Runtime deletion blocked when all bound agents are archived",
+        ],
+      },
+      {
+        version: "0.1.21",
+        date: "2026-04-09",
+        title: "Projects, Search & Monorepo",
+        changes: [
+          "Project entity with full-stack CRUD — create, edit, and organize issues by project",
+          "Project picker in the create-issue modal and CLI project commands",
+          "Full-text search for issues with pg_bigm",
+          "Monorepo extraction — shared packages for core, UI, and views (Turborepo)",
+          "Fullscreen agent execution transcript view",
+          "Drag-and-drop file upload with file card display in the editor",
+          "Attachment section with image grid and file cards on issues",
+          "Runtime owner tracking, filtering, avatar display, and point-to-point update notifications",
+          "Sub-issue progress indicator in list view rows",
+          "Done issue pagination in list view",
+          "Codex session log scan for token usage reporting",
+          "Daemon repo-cache fix for stale initial snapshots",
+        ],
+      },
+      {
+        version: "0.1.20",
         date: "2026-04-08",
         title: "Sub-Issues, TanStack Query & Usage Tracking",
         changes: [
@@ -291,7 +356,7 @@ export const en: LandingDict = {
         ],
       },
       {
-        version: "0.1.8",
+        version: "0.1.18",
         date: "2026-04-07",
         title: "OAuth, OpenClaw & Issue Loading",
         changes: [
@@ -306,7 +371,7 @@ export const en: LandingDict = {
         ],
       },
       {
-        version: "0.1.7",
+        version: "0.1.17",
         date: "2026-04-05",
         title: "Comment Pagination & CLI Polish",
         changes: [
@@ -320,7 +385,7 @@ export const en: LandingDict = {
         ],
       },
       {
-        version: "0.1.6",
+        version: "0.1.15",
         date: "2026-04-03",
         title: "Editor Overhaul & Agent Lifecycle",
         changes: [
@@ -336,7 +401,7 @@ export const en: LandingDict = {
         ],
       },
       {
-        version: "0.1.5",
+        version: "0.1.14",
         date: "2026-04-02",
         title: "Mentions & Permissions",
         changes: [
@@ -353,7 +418,7 @@ export const en: LandingDict = {
         ],
       },
       {
-        version: "0.1.4",
+        version: "0.1.13",
         date: "2026-04-01",
         title: "My Issues & i18n",
         changes: [

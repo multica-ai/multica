@@ -53,7 +53,7 @@ function findCodeRanges(text: string): CodeRange[] {
   }
 
   // Find inline math ($...$)
-  const inlineMathRegex = /(?<!\$)\$(?!\$)([^\$\n]+)\$(?!\$)/g
+  const inlineMathRegex = /(?<!\$)\$(?!\$)([^$\n]+)\$(?!\$)/g
   while ((match = inlineMathRegex.exec(text)) !== null) {
     const pos = match.index
     const insideOther = ranges.some((r) => pos >= r.start && pos < r.end)

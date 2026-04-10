@@ -1,0 +1,72 @@
+# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend.
+#
+# Usage:
+#   cp .env.example .env
+#   # Edit .env — change JWT_SECRET at minimum
+#   docker compose -f docker-compose.selfhost.yml up -d
+#
+# Frontend: http://localhost:3000
+# Backend:  http://localhost:8080 (also used by CLI/daemon)
+
+name: multica
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-multica}
+      POSTGRES_USER: ${POSTGRES_USER:-multica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.ai}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-west-2}
+      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
+      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
+      CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        REMOTE_API_URL: http://backend:8080
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      HOSTNAME: "0.0.0.0"
+
+volumes:
+  pgdata:

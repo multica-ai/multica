@@ -262,25 +262,58 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Include workspace ID and repos so the daemon can set up worktrees.
-	if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-		if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-			var repos []RepoData
-			if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-				resp.Repos = repos
+	if task.IssueID.Valid {
+		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
+			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
+
+		// Look up the prior session for this (agent, issue) pair so the daemon
+		// can resume the Claude Code conversation context.
+		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
+			AgentID: task.AgentID,
+			IssueID: task.IssueID,
+		}); err == nil && prior.SessionID.Valid {
+			resp.PriorSessionID = prior.SessionID.String
+			if prior.WorkDir.Valid {
+				resp.PriorWorkDir = prior.WorkDir.String
 			}
 		}
 	}
 
-	// Look up the prior session for this (agent, issue) pair so the daemon
-	// can resume the Claude Code conversation context.
-	if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-		AgentID: task.AgentID,
-		IssueID: task.IssueID,
-	}); err == nil && prior.SessionID.Valid {
-		resp.PriorSessionID = prior.SessionID.String
-		if prior.WorkDir.Valid {
-			resp.PriorWorkDir = prior.WorkDir.String
+	// Chat task: populate workspace/session info from the chat_session table.
+	if task.ChatSessionID.Valid {
+		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
+			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
+			resp.ChatSessionID = uuidToString(cs.ID)
+			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+			// Resume from the chat session's persistent session.
+			if cs.SessionID.Valid {
+				resp.PriorSessionID = cs.SessionID.String
+			}
+			if cs.WorkDir.Valid {
+				resp.PriorWorkDir = cs.WorkDir.String
+			}
+			// Load the latest user message for the chat prompt.
+			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
+				// Find the last user message.
+				for i := len(msgs) - 1; i >= 0; i-- {
+					if msgs[i].Role == "user" {
+						resp.ChatMessage = msgs[i].Content
+						break
+					}
+				}
+			}
 		}
 	}
 
@@ -497,8 +530,15 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := ""
-	if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-		workspaceID = uuidToString(issue.WorkspaceID)
+	if task.IssueID.Valid {
+		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
+			workspaceID = uuidToString(issue.WorkspaceID)
+		}
+	}
+	if workspaceID == "" && task.ChatSessionID.Valid {
+		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
+			workspaceID = uuidToString(cs.WorkspaceID)
+		}
 	}
 
 	for _, msg := range req.Messages {
@@ -639,4 +679,23 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
+func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+
+	row, err := h.Queries.GetIssueUsageSummary(r.Context(), parseUUID(issueID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_input_tokens":       row.TotalInputTokens,
+		"total_output_tokens":      row.TotalOutputTokens,
+		"total_cache_read_tokens":  row.TotalCacheReadTokens,
+		"total_cache_write_tokens": row.TotalCacheWriteTokens,
+		"task_count":               row.TaskCount,
+	})
 }

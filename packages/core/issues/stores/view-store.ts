@@ -2,9 +2,11 @@
 
 import { create } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { IssueStatus, IssuePriority } from "../../types";
 import { ALL_STATUSES } from "../config";
+import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
+import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list";
 export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
@@ -164,6 +166,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
 
 export const viewStorePersistOptions = (name: string) => ({
   name,
+  storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
     viewMode: state.viewMode,
     statusFilters: state.statusFilters,
@@ -180,15 +183,19 @@ export const viewStorePersistOptions = (name: string) => ({
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */
 export function createIssueViewStore(persistKey: string): StoreApi<IssueViewState> {
-  return createStore<IssueViewState>()(
+  const store = createStore<IssueViewState>()(
     persist(viewStoreSlice, viewStorePersistOptions(persistKey))
   );
+  registerForWorkspaceRehydration(() => store.persist.rehydrate());
+  return store;
 }
 
 /** Global singleton for the /issues page. */
 export const useIssueViewStore = create<IssueViewState>()(
   persist(viewStoreSlice, viewStorePersistOptions("multica_issues_view"))
 );
+
+registerForWorkspaceRehydration(() => useIssueViewStore.persist.rehydrate());
 
 // Clear filters on all registered view stores when workspace switches.
 const _syncedStores = new Set<StoreApi<IssueViewState>>();

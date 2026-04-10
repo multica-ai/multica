@@ -13,8 +13,9 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config";
-import type { CardProperties } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { ProgressRing } from "./progress-ring";
+import type { ChildProgress } from "./list-row";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -39,9 +40,11 @@ function PickerWrapper({ children }: { children: React.ReactNode }) {
 export const BoardCardContent = memo(function BoardCardContent({
   issue,
   editable = false,
+  childProgress,
 }: {
   issue: Issue;
   editable?: boolean;
+  childProgress?: ChildProgress;
 }) {
   const storeProperties = useViewStore((s) => s.cardProperties);
   const priorityCfg = PRIORITY_CONFIG[issue.priority];
@@ -61,7 +64,6 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showDescription = storeProperties.description && issue.description;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
-  const showBottom = showAssignee || showDueDate;
 
   return (
     <div className="rounded-lg border bg-card p-3.5 shadow-[0_1px_2px_0_rgba(0,0,0,0.03)] transition-shadow group-hover:shadow-sm">
@@ -72,6 +74,16 @@ export const BoardCardContent = memo(function BoardCardContent({
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
         {issue.title}
       </p>
+
+      {/* Sub-issue progress */}
+      {childProgress && (
+        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+          <ProgressRing done={childProgress.done} total={childProgress.total} size={14} />
+          <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+            {childProgress.done}/{childProgress.total}
+          </span>
+        </div>
+      )}
 
       {/* Description */}
       {showDescription && (
@@ -173,7 +185,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue }: { issue: Issue }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
   const {
     attributes,
     listeners,
@@ -204,7 +216,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue }: { 
         href={`/issues/${issue.id}`}
         className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
       >
-        <BoardCardContent issue={issue} editable />
+        <BoardCardContent issue={issue} editable childProgress={childProgress} />
       </AppLink>
     </div>
   );

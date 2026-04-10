@@ -1,0 +1,21 @@
+{
+  "name": "@multica/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./base": "./base.js",
+    "./react": "./react.js",
+    "./next": "./next.js"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.28.0",
+    "typescript-eslint": "^8.35.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "@next/eslint-plugin-next": "^16.2.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  }
+}
