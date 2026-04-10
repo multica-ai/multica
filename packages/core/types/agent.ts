@@ -4,6 +4,14 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+export interface AgentRuntimeConfig {
+  env_vars?: Record<string, string>;
+  config_mode?: "global" | "project";
+  codex_config_toml?: string;
+  claude_settings_json?: string;
+  opencode_config_json?: string;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;

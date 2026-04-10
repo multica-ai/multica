@@ -25,12 +25,15 @@ import {
   Settings,
   Camera,
   Archive,
+  Braces,
+  List,
 } from "lucide-react";
 import type {
   Agent,
   AgentStatus,
   AgentVisibility,
   AgentTask,
+  AgentRuntimeConfig,
   RuntimeDevice,
   CreateAgentRequest,
   UpdateAgentRequest,
@@ -62,6 +65,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { api } from "@/platform/api";
@@ -733,9 +737,78 @@ function SettingsTab({
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
+  const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>(() => {
+    const rc = agent.runtime_config as AgentRuntimeConfig | undefined;
+    const vars = rc?.env_vars;
+    if (!vars || Object.keys(vars).length === 0) return [];
+    return Object.entries(vars).map(([key, value]) => ({ key, value: String(value) }));
+  });
+  const [envMode, setEnvMode] = useState<"list" | "json">("list");
+  const [jsonText, setJsonText] = useState("");
+  const [jsonError, setJsonError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [codexConfigToml, setCodexConfigToml] = useState(() => {
+    const rc = agent.runtime_config as AgentRuntimeConfig | undefined;
+    return rc?.codex_config_toml ?? "";
+  });
+  const [codexDocsOpen, setCodexDocsOpen] = useState(false);
+  const codexTomlRef = useRef<HTMLTextAreaElement>(null);
+  const runtimeProvider = runtimes.find((r) => r.id === agent.runtime_id)?.provider ?? "";
+  const [configMode, setConfigMode] = useState<"global" | "project">(() => {
+    const rc = agent.runtime_config as AgentRuntimeConfig | undefined;
+    return rc?.config_mode === "project" ? "project" : "global";
+  });
+  const [claudeSettingsJson, setClaudeSettingsJson] = useState(() => {
+    const rc = agent.runtime_config as AgentRuntimeConfig | undefined;
+    return rc?.claude_settings_json ?? "";
+  });
+  const [claudeDocsOpen, setClaudeDocsOpen] = useState(false);
+  const claudeSettingsRef = useRef<HTMLTextAreaElement>(null);
+  const [opencodeConfigJson, setOpencodeConfigJson] = useState(() => {
+    const rc = agent.runtime_config as AgentRuntimeConfig | undefined;
+    return rc?.opencode_config_json ?? "";
+  });
+  const [opencodeDocsOpen, setOpencodeDocsOpen] = useState(false);
+  const opencodeConfigRef = useRef<HTMLTextAreaElement>(null);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize JSON textarea when content changes.
+  useEffect(() => {
+    const el = jsonTextareaRef.current;
+    if (el && envMode === "json") {
+      el.style.height = "auto";
+      el.style.height = el.scrollHeight + "px";
+    }
+  }, [jsonText, envMode]);
+
+  // Auto-resize codex config.toml textarea.
+  useEffect(() => {
+    const el = codexTomlRef.current;
+    if (el && runtimeProvider === "codex" && configMode === "project") {
+      el.style.height = "auto";
+      el.style.height = el.scrollHeight + "px";
+    }
+  }, [codexConfigToml, configMode, runtimeProvider]);
+
+  // Auto-resize claude settings.json textarea.
+  useEffect(() => {
+    const el = claudeSettingsRef.current;
+    if (el && runtimeProvider === "claude" && configMode === "project") {
+      el.style.height = "auto";
+      el.style.height = el.scrollHeight + "px";
+    }
+  }, [claudeSettingsJson, configMode, runtimeProvider]);
+
+  // Auto-resize opencode config.json textarea.
+  useEffect(() => {
+    const el = opencodeConfigRef.current;
+    if (el && runtimeProvider === "opencode" && configMode === "project") {
+      el.style.height = "auto";
+      el.style.height = el.scrollHeight + "px";
+    }
+  }, [opencodeConfigJson, configMode, runtimeProvider]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -751,20 +824,128 @@ function SettingsTab({
     }
   };
 
+  const buildRuntimeConfig = (): Record<string, unknown> | null => {
+    const rc: Record<string, unknown> = {};
+    if ((runtimeProvider === "claude" || runtimeProvider === "codex" || runtimeProvider === "opencode") && configMode !== "global") {
+      rc.config_mode = configMode;
+    }
+    // Env vars are shown for: non-claude/codex/opencode providers always, or codex in project mode.
+    // Claude/OpenCode project modes use their own config files instead of env vars.
+    const showEnvVars = (runtimeProvider !== "claude" && runtimeProvider !== "codex" && runtimeProvider !== "opencode") || (runtimeProvider === "codex" && configMode === "project");
+    if (showEnvVars) {
+      if (envMode === "json") {
+        if (!jsonText.trim() || jsonText.trim() === "{}") {
+          // no env vars, but still might have provider config
+        } else {
+          const result = tryParseJsonEnvVars(jsonText);
+          if (!result.ok) return null;
+          const vars: Record<string, string> = {};
+          result.vars.forEach((ev) => {
+            if (ev.key.trim()) vars[ev.key.trim()] = ev.value;
+          });
+          if (Object.keys(vars).length > 0) rc.env_vars = vars;
+        }
+      } else {
+        const vars: Record<string, string> = {};
+        envVars.forEach((ev) => {
+          if (ev.key.trim()) vars[ev.key.trim()] = ev.value;
+        });
+        if (Object.keys(vars).length > 0) rc.env_vars = vars;
+      }
+    }
+    // Claude project mode: include settings.json content.
+    if (runtimeProvider === "claude" && configMode === "project" && claudeSettingsJson.trim()) {
+      rc.claude_settings_json = claudeSettingsJson;
+    }
+    // Codex project mode: include config.toml content.
+    if (runtimeProvider === "codex" && configMode === "project" && codexConfigToml.trim()) {
+      rc.codex_config_toml = codexConfigToml;
+    }
+    // OpenCode project mode: include opencode.json content.
+    if (runtimeProvider === "opencode" && configMode === "project" && opencodeConfigJson.trim()) {
+      rc.opencode_config_json = opencodeConfigJson;
+    }
+    return rc;
+  };
+
+  const envVarsToJson = (vars: { key: string; value: string }[]): string => {
+    const obj: Record<string, string> = {};
+    vars.forEach((ev) => {
+      if (ev.key.trim()) obj[ev.key.trim()] = ev.value;
+    });
+    return JSON.stringify(obj, null, 2);
+  };
+
+  const tryParseJsonEnvVars = (text: string): { ok: true; vars: { key: string; value: string }[] } | { ok: false; error: string } => {
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { ok: false, error: "Must be a JSON object" };
+      }
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v !== "string") {
+          return { ok: false, error: `Value for "${k}" must be a string` };
+        }
+      }
+      return { ok: true, vars: Object.entries(parsed as Record<string, string>).map(([key, value]) => ({ key, value })) };
+    } catch {
+      return { ok: false, error: "Invalid JSON" };
+    }
+  };
+
+  const switchToJson = () => {
+    setJsonText(envVarsToJson(envVars));
+    setJsonError(null);
+    setEnvMode("json");
+  };
+
+  const switchToList = () => {
+    if (!jsonText.trim() || jsonText.trim() === "{}") {
+      setEnvVars([]);
+      setJsonError(null);
+      setEnvMode("list");
+      return;
+    }
+    const result = tryParseJsonEnvVars(jsonText);
+    if (result.ok) {
+      setEnvVars(result.vars);
+      setJsonError(null);
+      setEnvMode("list");
+    } else {
+      setJsonError(result.error);
+    }
+  };
+
   const dirty =
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
-    maxTasks !== agent.max_concurrent_tasks;
+    maxTasks !== agent.max_concurrent_tasks ||
+    JSON.stringify(buildRuntimeConfig()) !== JSON.stringify(agent.runtime_config ?? {});
 
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error("Name is required");
       return;
     }
+    const rc = buildRuntimeConfig();
+    if (rc === null) {
+      if (envMode === "json") {
+        const result = tryParseJsonEnvVars(jsonText);
+        if (!result.ok) setJsonError(result.error);
+      }
+      toast.error("Invalid JSON in environment variables");
+      return;
+    }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
+      await onSave({
+        name: name.trim(),
+        description,
+        visibility,
+        max_concurrent_tasks: maxTasks,
+        runtime_config: rc,
+      });
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
@@ -874,6 +1055,546 @@ function SettingsTab({
           className="mt-1 w-24"
         />
       </div>
+
+      {(runtimeProvider === "claude" || runtimeProvider === "codex" || runtimeProvider === "opencode") && (
+        <div>
+          <Label className="text-xs text-muted-foreground">Config Mode</Label>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfigMode("global")}
+              className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                configMode === "global"
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:bg-muted"
+              }`}
+            >
+              <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="text-left">
+                <div className="font-medium">Global</div>
+                <div className="text-xs text-muted-foreground">
+                  {runtimeProvider === "codex" ? "Use system-wide Codex config" : runtimeProvider === "opencode" ? "Use system-wide OpenCode config" : "Use system-wide Claude config"}
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfigMode("project")}
+              className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                configMode === "project"
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:bg-muted"
+              }`}
+            >
+              <Settings className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="text-left">
+                <div className="font-medium">Project</div>
+                <div className="text-xs text-muted-foreground">
+                  {runtimeProvider === "codex" ? "Per-task config.toml" : runtimeProvider === "opencode" ? "Per-task opencode.json" : "Per-task .claude/settings.json"}
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {((runtimeProvider !== "claude" && runtimeProvider !== "codex" && runtimeProvider !== "opencode") || (runtimeProvider === "codex" && configMode === "project")) && (
+      <div>
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-xs text-muted-foreground">Environment Variables</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Custom environment variables injected into the agent&apos;s execution environment.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="flex rounded-md border">
+              <button
+                type="button"
+                onClick={() => envMode === "json" ? switchToList() : undefined}
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                  envMode === "list"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <List className="h-3 w-3" />
+                List
+              </button>
+              <button
+                type="button"
+                onClick={() => envMode === "list" ? switchToJson() : undefined}
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                  envMode === "json"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Braces className="h-3 w-3" />
+                JSON
+              </button>
+            </div>
+            {envMode === "list" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEnvVars([...envVars, { key: "", value: "" }])}
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Add
+              </Button>
+            )}
+          </div>
+        </div>
+        {envMode === "list" ? (
+          envVars.length === 0 ? (
+            <div className="mt-2 rounded-lg border border-dashed py-6 text-center">
+              <p className="text-xs text-muted-foreground">No custom environment variables</p>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {envVars.map((ev, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={ev.key}
+                    onChange={(e) => {
+                      const next = [...envVars];
+                      const current = next[index]!;
+                      next[index] = { key: e.target.value, value: current.value };
+                      setEnvVars(next);
+                    }}
+                    placeholder="KEY"
+                    className="flex-1 font-mono text-xs"
+                  />
+                  <span className="text-muted-foreground">=</span>
+                  <Input
+                    type="text"
+                    value={ev.value}
+                    onChange={(e) => {
+                      const next = [...envVars];
+                      const current = next[index]!;
+                      next[index] = { key: current.key, value: e.target.value };
+                      setEnvVars(next);
+                    }}
+                    placeholder="value"
+                    className="flex-1 font-mono text-xs"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setEnvVars(envVars.filter((_, i) => i !== index))}
+                    className="text-muted-foreground hover:text-destructive shrink-0"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          <div className="mt-2">
+            <Textarea
+              ref={jsonTextareaRef}
+              value={jsonText}
+              onChange={(e) => {
+                setJsonText(e.target.value);
+                setJsonError(null);
+              }}
+              placeholder={'{\n  "API_KEY": "your-key",\n  "DB_HOST": "localhost"\n}'}
+              className="min-h-[120px] font-mono text-xs resize-none overflow-hidden"
+              spellCheck={false}
+            />
+            {jsonError && (
+              <p className="mt-1 text-xs text-destructive">{jsonError}</p>
+            )}
+          </div>
+        )}
+      </div>
+      )}
+
+      {runtimeProvider === "claude" && configMode === "project" && (
+      <div>
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-xs text-muted-foreground">settings.json</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Written to <code className="rounded bg-muted px-1 py-0.5 text-xs">.claude/settings.json</code> in each task&apos;s workdir. Paste your CC Switch config directly.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setClaudeDocsOpen(true)}
+          >
+            <FileText className="h-3.5 w-3.5 mr-1" />
+            Config Reference
+          </Button>
+        </div>
+        <div className="mt-2">
+          <Textarea
+            ref={claudeSettingsRef}
+            value={claudeSettingsJson}
+            onChange={(e) => setClaudeSettingsJson(e.target.value)}
+            placeholder={'{\n  "env": {\n    "ANTHROPIC_AUTH_TOKEN": "sk-xxx",\n    "ANTHROPIC_BASE_URL": "http://xxx:8080",\n    "ANTHROPIC_MODEL": "glm-5.1"\n  },\n  "model": "opus[1m]",\n  "skipDangerousModePermissionPrompt": true\n}'}
+            className="min-h-[200px] font-mono text-xs resize-none overflow-hidden rounded-lg bg-muted/30 border-dashed"
+            spellCheck={false}
+          />
+        </div>
+
+        <Dialog open={claudeDocsOpen} onOpenChange={setClaudeDocsOpen}>
+          <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>settings.json Reference</DialogTitle>
+              <DialogDescription>
+                Configuration for Claude Code. This file is written to <code className="rounded bg-muted px-1 py-0.5 text-xs">.claude/settings.json</code> in the task&apos;s workdir. You can paste your CC Switch configuration directly.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-sm">
+              <section>
+                <h4 className="font-medium mb-1.5">Example Configuration</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  A complete example that you can paste directly from CC Switch.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-xxx",
+    "ANTHROPIC_BASE_URL": "http://xxx:8080",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.1",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.1",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1",
+    "ANTHROPIC_MODEL": "glm-5.1",
+    "ANTHROPIC_REASONING_MODEL": "glm-5.1",
+    "DISABLE_BUG_COMMAND": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_TELEMETRY": "1"
+  },
+  "model": "opus[1m]",
+  "skipDangerousModePermissionPrompt": true,
+  "statusLine": {
+    "command": "npx -y ccstatusline@latest",
+    "padding": 0,
+    "type": "command"
+  }
+}`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Environment Variables</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  API keys, model overrides, and other settings passed via the <code className="rounded bg-muted px-1 py-0.5 text-xs">env</code> object.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"env": {
+  "ANTHROPIC_AUTH_TOKEN": "sk-xxx",        // API key
+  "ANTHROPIC_BASE_URL": "http://xxx:8080", // Custom API endpoint
+  "ANTHROPIC_MODEL": "glm-5.1",            // Default model
+  "ANTHROPIC_REASONING_MODEL": "glm-5.1",  // Reasoning model
+  "DISABLE_TELEMETRY": "1"                 // Disable telemetry
+}`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Model & Permissions</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Control the model selection and permission prompts.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"model": "opus[1m]",                         // Model with context window
+"skipDangerousModePermissionPrompt": true      // Skip dangerous mode prompt`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Status Line</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Display a custom status line in the terminal.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"statusLine": {
+  "command": "npx -y ccstatusline@latest",
+  "padding": 0,
+  "type": "command"
+}`}</pre>
+              </section>
+
+              <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <strong className="text-foreground">Tip:</strong> You can copy your CC Switch configuration and paste it directly. Changes take effect on the next task execution. Config is written per-task to an isolated workdir.
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      )}
+
+      {runtimeProvider === "codex" && configMode === "project" && (
+      <div>
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-xs text-muted-foreground">config.toml</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Written to each task&apos;s CODEX_HOME, overrides system defaults.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setCodexDocsOpen(true)}
+          >
+            <FileText className="h-3.5 w-3.5 mr-1" />
+            Config Reference
+          </Button>
+        </div>
+        <div className="mt-2">
+          <Textarea
+            ref={codexTomlRef}
+            value={codexConfigToml}
+            onChange={(e) => setCodexConfigToml(e.target.value)}
+            placeholder={'# Example config.toml\nmodel = "gpt-5.2-codex"\nsandbox_mode = "workspace-write"\napproval_policy = "ask"'}
+            className="min-h-[160px] font-mono text-xs resize-none overflow-hidden rounded-lg bg-muted/30 border-dashed"
+            spellCheck={false}
+          />
+        </div>
+
+        <Dialog open={codexDocsOpen} onOpenChange={setCodexDocsOpen}>
+          <DialogContent className="sm:max-w-5xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>config.toml Reference</DialogTitle>
+              <DialogDescription>
+                Configuration options for Codex. This file is written to the task&apos;s CODEX_HOME directory.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-sm">
+              <section>
+                <h4 className="font-medium mb-1.5">Model Configuration</h4>
+                <p className="text-xs text-muted-foreground mb-2">Specify which model Codex should use.</p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`model = "gpt-5.2-codex"           # Model to use
+model_provider = "openai"          # Provider name
+model_context_window = 128000      # Context window (tokens)
+model_reasoning_effort = "medium"  # "low" | "medium" | "high"`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Custom Model Provider</h4>
+                <p className="text-xs text-muted-foreground mb-2">Connect to third-party or local model providers (LM Studio, Ollama, etc.).</p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`[model_providers.my-provider]
+name = "My Provider"
+base_url = "https://api.example.com/v1"
+env_key = "MY_API_KEY"            # Env var holding the API key
+wire_api = "responses"            # "responses" | "chat"`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Sandbox & Approval</h4>
+                <p className="text-xs text-muted-foreground mb-2">Control what Codex is allowed to do.</p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`sandbox_mode = "workspace-write"  # "read-only" | "workspace-write" | "danger-full-access"
+approval_policy = "ask"           # "never" | "ask" | "always"`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">MCP Servers</h4>
+                <p className="text-xs text-muted-foreground mb-2">Add external tool servers that Codex can call.</p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+enabled = true
+tool_timeout_sec = 60
+
+# HTTP-based MCP server
+[mcp_servers.github]
+transport = "http"
+url = "http://localhost:3001/mcp"
+bearer_token = "your-token"
+enabled = true`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Feature Toggles</h4>
+                <p className="text-xs text-muted-foreground mb-2">Enable or disable specific Codex capabilities.</p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`[features]
+web_search = true
+js_repl = true
+python_repl = true
+shell = true`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Environment Variables</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  API keys and secrets should <strong>not</strong> be stored in config.toml.
+                  Instead, add them in the <strong>Environment Variables</strong> section above,
+                  then reference them via <code className="rounded bg-muted px-1 py-0.5 text-xs">env_key</code> in your provider config.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`# In config.toml — just name the env var:
+[model_providers.my-provider]
+env_key = "MY_API_KEY"
+
+# In Environment Variables above — set the actual value:
+# MY_API_KEY = sk-xxxxxxxx`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Profiles</h4>
+                <p className="text-xs text-muted-foreground mb-2">Define named configuration profiles for different environments.</p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`default_profile = "development"
+
+[profiles.development]
+model = "gpt-5.2-codex"
+sandbox_mode = "workspace-write"
+
+[profiles.production]
+model = "gpt-5.2-codex"
+sandbox_mode = "read-only"
+approval_policy = "always"`}</pre>
+              </section>
+
+              <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <strong className="text-foreground">Tip:</strong> Changes take effect on the next task execution. Config is written per-task to an isolated CODEX_HOME directory.
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      )}
+
+      {runtimeProvider === "opencode" && configMode === "project" && (
+      <div>
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-xs text-muted-foreground">opencode.json</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Written to <code className="rounded bg-muted px-1 py-0.5 text-xs">opencode.json</code> in each task&apos;s workdir.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setOpencodeDocsOpen(true)}
+          >
+            <FileText className="h-3.5 w-3.5 mr-1" />
+            Config Reference
+          </Button>
+        </div>
+        <div className="mt-2">
+          <Textarea
+            ref={opencodeConfigRef}
+            value={opencodeConfigJson}
+            onChange={(e) => setOpencodeConfigJson(e.target.value)}
+            placeholder={'{\n  "$schema": "https://opencode.ai/config.json",\n  "model": "provider/model-id",\n  "provider": {\n    "myprovider": {\n      "npm": "@ai-sdk/openai-compatible",\n      "name": "My Provider",\n      "options": {\n        "baseURL": "https://api.example.com/v1",\n        "apiKey": "sk-xxx"\n      },\n      "models": {\n        "model-id": {\n          "name": "Model Name"\n        }\n      }\n    }\n  }\n}'}
+            className="min-h-[200px] font-mono text-xs resize-none overflow-hidden rounded-lg bg-muted/30 border-dashed"
+            spellCheck={false}
+          />
+        </div>
+
+        <Dialog open={opencodeDocsOpen} onOpenChange={setOpencodeDocsOpen}>
+          <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>opencode.json Reference</DialogTitle>
+              <DialogDescription>
+                Configuration for OpenCode. This file is written to <code className="rounded bg-muted px-1 py-0.5 text-xs">opencode.json</code> in the task&apos;s workdir. Project config overrides global defaults.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-sm">
+              <section>
+                <h4 className="font-medium mb-1.5">Example Configuration</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  A complete example showing model, provider, and permission settings.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-5",
+  "small_model": "anthropic/claude-haiku-4-5",
+  "provider": {
+    "openai": {
+      "options": {
+        "baseURL": "http://localhost:8080/v1",
+        "apiKey": "sk-xxx"
+      }
+    }
+  },
+  "permission": {
+    "edit": {
+      "src/generated/*": "deny"
+    }
+  }
+}`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Model Configuration</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Specify which models OpenCode should use.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"model": "anthropic/claude-sonnet-4-5",       // Main model
+"small_model": "anthropic/claude-haiku-4-5"  // Lightweight tasks`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Provider Configuration</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Configure providers with custom endpoints, timeouts, and API keys. Use <code className="rounded bg-muted px-1 py-0.5 text-xs">npm</code> to register third-party AI SDK packages.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"provider": {
+  "anthropic": {
+    "options": {
+      "timeout": 600000,
+      "chunkTimeout": 30000
+    }
+  },
+  "openai": {
+    "options": {
+      "baseURL": "http://localhost:8080/v1",
+      "apiKey": "sk-xxx"
+    }
+  },
+  "custom": {
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "My Provider",
+    "options": {
+      "baseURL": "https://api.example.com/v1",
+      "apiKey": "sk-xxx"
+    },
+    "models": {
+      "my-model": {
+        "name": "My Model"
+      }
+    }
+  }
+}`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Permissions</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Control which files can be edited. Use <code className="rounded bg-muted px-1 py-0.5 text-xs">"deny"</code> to block specific paths.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"permission": {
+  "edit": {
+    "packages/opencode/migration/*": "deny",
+    "src/generated/*": "deny"
+  }
+}`}</pre>
+              </section>
+
+              <section>
+                <h4 className="font-medium mb-1.5">Tools & MCP</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Enable or disable specific tools, or add MCP servers.
+                </p>
+                <pre className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed text-muted-foreground overflow-x-auto">{`"tools": {
+  "github-triage": false,
+  "github-pr-search": false
+},
+"mcp": {}`}</pre>
+              </section>
+
+              <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <strong className="text-foreground">Tip:</strong> Config is written per-task to an isolated workdir. Use <code className="rounded bg-muted px-1 py-0.5 text-xs">$schema</code> for editor auto-completion.
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      )}
 
       <div>
         <Label className="text-xs text-muted-foreground">Runtime</Label>

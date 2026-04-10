@@ -941,6 +941,60 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Merge agent-level env vars from runtime_config.
+	// Agent env vars override daemon-level defaults.
+	useProjectConfig := task.Agent != nil && task.Agent.ConfigMode == "project"
+	if task.Agent != nil {
+		taskLog.Info("agent data from claim",
+			"agent_id", task.Agent.ID,
+			"env_vars", task.Agent.EnvVars,
+			"config_mode", task.Agent.ConfigMode,
+			"codex_config_toml_len", len(task.Agent.CodexConfigToml),
+			"claude_settings_json_len", len(task.Agent.ClaudeSettingsJson),
+			"opencode_config_json_len", len(task.Agent.OpencodeConfigJson),
+		)
+		// For Claude/OpenCode project mode, config goes to project config files (not process env).
+		// For Codex project mode, env vars are still merged into process env (codex reads from env).
+		mergeEnvVars := len(task.Agent.EnvVars) > 0 && !(provider == "claude" && useProjectConfig) && !(provider == "opencode" && useProjectConfig)
+		if mergeEnvVars {
+			var keys []string
+			for k, v := range task.Agent.EnvVars {
+				agentEnv[k] = v
+				keys = append(keys, k)
+			}
+			taskLog.Info("merged agent-level env vars", "count", len(keys), "keys", keys)
+		}
+	} else {
+		taskLog.Warn("agent data is nil in claim response")
+	}
+	// Apply provider-specific project config.
+	if useProjectConfig {
+		if provider == "claude" {
+			// Claude: write raw settings JSON to .claude/settings.json.
+			if task.Agent.ClaudeSettingsJson != "" {
+				if err := prepareClaudeProjectConfig(env.WorkDir, task.Agent.ClaudeSettingsJson, taskLog); err != nil {
+					return TaskResult{}, fmt.Errorf("prepare claude project config: %w", err)
+				}
+				taskLog.Info("using project-level claude config", "dir", filepath.Join(env.WorkDir, ".claude"))
+			}
+		} else if provider == "codex" {
+			// Codex: write config.toml to the per-task CODEX_HOME (isolated global config).
+			if task.Agent.CodexConfigToml != "" {
+				if err := prepareCodexProjectConfig(env.CodexHome, task.Agent.CodexConfigToml, taskLog); err != nil {
+					return TaskResult{}, fmt.Errorf("prepare codex project config: %w", err)
+				}
+				taskLog.Info("using project-level codex config", "codex_home", env.CodexHome)
+			}
+		} else if provider == "opencode" {
+			// OpenCode: write opencode.json to the workdir (project-level config).
+			if task.Agent.OpencodeConfigJson != "" {
+				if err := prepareOpencodeProjectConfig(env.WorkDir, task.Agent.OpencodeConfigJson, taskLog); err != nil {
+					return TaskResult{}, fmt.Errorf("prepare opencode project config: %w", err)
+				}
+				taskLog.Info("using project-level opencode config", "dir", env.WorkDir)
+			}
+		}
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -1208,4 +1262,45 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		}
 	}
 	return result
+}
+
+// prepareClaudeProjectConfig creates a .claude directory in the workdir and writes
+// the raw settings JSON provided by the user. This isolates the Claude config per-task.
+func prepareClaudeProjectConfig(workDir string, settingsJson string, logger *slog.Logger) error {
+	claudeDir := filepath.Join(workDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("create .claude dir: %w", err)
+	}
+
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(settingsJson), 0o644); err != nil {
+		return fmt.Errorf("write settings.json: %w", err)
+	}
+
+	logger.Info("wrote claude project config", "path", settingsPath, "size", len(settingsJson))
+	return nil
+}
+
+// prepareCodexProjectConfig writes the user-provided config.toml content to the
+// per-task CODEX_HOME directory. CODEX_HOME is already isolated per task, so writing
+// to its config.toml overrides the global defaults without needing trusted-project setup.
+func prepareCodexProjectConfig(codexHome string, configToml string, logger *slog.Logger) error {
+	configPath := filepath.Join(codexHome, "config.toml")
+	if err := os.WriteFile(configPath, []byte(configToml), 0o644); err != nil {
+		return fmt.Errorf("write config.toml: %w", err)
+	}
+	logger.Info("wrote codex project config", "path", configPath, "size", len(configToml))
+	return nil
+}
+
+// prepareOpencodeProjectConfig writes the user-provided opencode.json content
+// to the workdir. OpenCode discovers project config from opencode.json in the
+// current directory, so writing it to the workdir is sufficient.
+func prepareOpencodeProjectConfig(workDir string, configJson string, logger *slog.Logger) error {
+	configPath := filepath.Join(workDir, "opencode.json")
+	if err := os.WriteFile(configPath, []byte(configJson), 0o644); err != nil {
+		return fmt.Errorf("write opencode.json: %w", err)
+	}
+	logger.Info("wrote opencode project config", "path", configPath, "size", len(configJson))
+	return nil
 }

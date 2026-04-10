@@ -739,3 +739,116 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
 	}
 }
+
+func TestExtractEnvVarsFromRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  []byte
+		want map[string]string
+	}{
+		{
+			name: "extracts env vars from valid config",
+			raw:  []byte(`{"env_vars":{"ANTHROPIC_MODEL":"claude-sonnet-4-20250514","API_KEY":"sk-123"}}`),
+			want: map[string]string{"ANTHROPIC_MODEL": "claude-sonnet-4-20250514", "API_KEY": "sk-123"},
+		},
+		{
+			name: "returns nil for nil",
+			raw:  nil,
+			want: nil,
+		},
+		{
+			name: "returns nil for empty object",
+			raw:  []byte(`{}`),
+			want: nil,
+		},
+		{
+			name: "returns nil for invalid JSON",
+			raw:  []byte(`not-json`),
+			want: nil,
+		},
+		{
+			name: "returns nil when env_vars is not an object",
+			raw:  []byte(`{"env_vars":"not-a-map"}`),
+			want: nil,
+		},
+		{
+			name: "preserves other keys",
+			raw:  []byte(`{"model":"foo","env_vars":{"KEY":"val"}}`),
+			want: map[string]string{"KEY": "val"},
+		},
+		{
+			name: "returns empty map for empty env_vars",
+			raw:  []byte(`{"env_vars":{}}`),
+			want: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractEnvVarsFromRuntimeConfig(tt.raw)
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("expected %d keys, got %d", len(tt.want), len(got))
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Fatalf("key %q: expected %q, got %q", k, v, got[k])
+				}
+			}
+		})
+	}
+}
+
+func TestExtractCodexConfigTomlFromRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  []byte
+		want string
+	}{
+		{
+			name: "extracts config toml from valid config",
+			raw:  []byte(`{"codex_config_toml":"model = \"gpt-5\"\nsandbox_mode = \"workspace-write\"","env_vars":{"KEY":"val"}}`),
+			want: "model = \"gpt-5\"\nsandbox_mode = \"workspace-write\"",
+		},
+		{
+			name: "returns empty for nil",
+			raw:  nil,
+			want: "",
+		},
+		{
+			name: "returns empty for empty object",
+			raw:  []byte(`{}`),
+			want: "",
+		},
+		{
+			name: "returns empty for invalid JSON",
+			raw:  []byte(`not-json`),
+			want: "",
+		},
+		{
+			name: "returns empty when field is absent",
+			raw:  []byte(`{"env_vars":{"KEY":"val"}}`),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractCodexConfigTomlFromRuntimeConfig(tt.raw)
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}

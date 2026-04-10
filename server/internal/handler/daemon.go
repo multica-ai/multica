@@ -241,10 +241,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
+			ID:                 uuidToString(agent.ID),
+			Name:               agent.Name,
+			Instructions:       agent.Instructions,
+			Skills:             skills,
+			EnvVars:            extractEnvVarsFromRuntimeConfig(agent.RuntimeConfig),
+			ConfigMode:         extractConfigModeFromRuntimeConfig(agent.RuntimeConfig),
+			CodexConfigToml:    extractCodexConfigTomlFromRuntimeConfig(agent.RuntimeConfig),
+			ClaudeSettingsJson: extractClaudeSettingsJsonFromRuntimeConfig(agent.RuntimeConfig),
+			OpencodeConfigJson: extractOpencodeConfigJsonFromRuntimeConfig(agent.RuntimeConfig),
+		}
+		slog.Info("claim task: runtime_config raw", "agent_id", uuidToString(agent.ID), "runtime_config", string(agent.RuntimeConfig))
+		if len(resp.Agent.EnvVars) > 0 {
+			var keys []string
+			for k := range resp.Agent.EnvVars {
+				keys = append(keys, k)
+			}
+			slog.Info("claim task: agent env vars loaded", "agent_id", uuidToString(agent.ID), "count", len(resp.Agent.EnvVars), "keys", keys)
 		}
 	}
 

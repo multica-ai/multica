@@ -96,10 +96,90 @@ type AgentTaskResponse struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	ID                 string                   `json:"id"`
+	Name               string                   `json:"name"`
+	Instructions       string                   `json:"instructions"`
+	Skills             []service.AgentSkillData `json:"skills,omitempty"`
+	EnvVars            map[string]string        `json:"env_vars,omitempty"`
+	ConfigMode         string                   `json:"config_mode,omitempty"`             // "global" (default) or "project"
+	CodexConfigToml    string                   `json:"codex_config_toml,omitempty"`       // raw TOML for codex project config
+	ClaudeSettingsJson string                   `json:"claude_settings_json,omitempty"`    // raw JSON for .claude/settings.json
+	OpencodeConfigJson string                   `json:"opencode_config_json,omitempty"`    // raw JSON for opencode.json
+}
+
+// extractEnvVarsFromRuntimeConfig returns the "env_vars" map from a
+// runtime_config JSONB blob, or nil if absent/invalid.
+func extractEnvVarsFromRuntimeConfig(raw []byte) map[string]string {
+	if raw == nil {
+		return nil
+	}
+	var rc struct {
+		EnvVars map[string]string `json:"env_vars"`
+	}
+	if json.Unmarshal(raw, &rc) != nil {
+		return nil
+	}
+	return rc.EnvVars
+}
+
+// extractConfigModeFromRuntimeConfig returns the "config_mode" value from a
+// runtime_config JSONB blob, or "" if absent/invalid.
+func extractConfigModeFromRuntimeConfig(raw []byte) string {
+	if raw == nil {
+		return ""
+	}
+	var rc struct {
+		ConfigMode string `json:"config_mode"`
+	}
+	if json.Unmarshal(raw, &rc) != nil {
+		return ""
+	}
+	return rc.ConfigMode
+}
+
+// extractCodexConfigTomlFromRuntimeConfig returns the "codex_config_toml" value
+// from a runtime_config JSONB blob, or "" if absent/invalid.
+func extractCodexConfigTomlFromRuntimeConfig(raw []byte) string {
+	if raw == nil {
+		return ""
+	}
+	var rc struct {
+		CodexConfigToml string `json:"codex_config_toml"`
+	}
+	if json.Unmarshal(raw, &rc) != nil {
+		return ""
+	}
+	return rc.CodexConfigToml
+}
+
+// extractClaudeSettingsJsonFromRuntimeConfig returns the "claude_settings_json" value
+// from a runtime_config JSONB blob, or "" if absent/invalid.
+func extractClaudeSettingsJsonFromRuntimeConfig(raw []byte) string {
+	if raw == nil {
+		return ""
+	}
+	var rc struct {
+		ClaudeSettingsJson string `json:"claude_settings_json"`
+	}
+	if json.Unmarshal(raw, &rc) != nil {
+		return ""
+	}
+	return rc.ClaudeSettingsJson
+}
+
+// extractOpencodeConfigJsonFromRuntimeConfig returns the "opencode_config_json" value
+// from a runtime_config JSONB blob, or "" if absent/invalid.
+func extractOpencodeConfigJsonFromRuntimeConfig(raw []byte) string {
+	if raw == nil {
+		return ""
+	}
+	var rc struct {
+		OpencodeConfigJson string `json:"opencode_config_json"`
+	}
+	if json.Unmarshal(raw, &rc) != nil {
+		return ""
+	}
+	return rc.OpencodeConfigJson
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
