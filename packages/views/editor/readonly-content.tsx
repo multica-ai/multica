@@ -48,6 +48,10 @@ const lowlight = createLowlight(common);
 
 const sanitizeSchema = {
   ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+  },
   attributes: {
     ...defaultSchema.attributes,
     div: [
@@ -186,7 +190,9 @@ const components: Partial<Components> = {
   div: ({ node, children, ...props }) => {
     const dataType = node?.properties?.dataType as string | undefined;
     if (dataType === "fileCard") {
-      const href = (node?.properties?.dataHref as string) || "";
+      const rawHref = (node?.properties?.dataHref as string) || "";
+      // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
+      const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
       const filename = (node?.properties?.dataFilename as string) || "";
       return (
         <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">

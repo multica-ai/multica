@@ -51,8 +51,13 @@ export interface MarkdownProps {
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
+// and the mention:// protocol used for @mentions.
 const sanitizeSchema = {
   ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), 'mention'],
+  },
   attributes: {
     ...defaultSchema.attributes,
     code: [

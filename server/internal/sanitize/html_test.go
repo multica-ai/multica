@@ -65,6 +65,21 @@ func TestHTML(t *testing.T) {
 			input: `[@User](mention://member/abc-123)`,
 			want:  `[@User](mention://member/abc-123)`,
 		},
+		{
+			name:  "file card with javascript href stripped",
+			input: `<div data-type="fileCard" data-href="javascript:alert(1)" data-filename="evil.pdf"></div>`,
+			want:  `<div data-type="fileCard" data-filename="evil.pdf"></div>`,
+		},
+		{
+			name:  "file card with data URI stripped",
+			input: `<div data-type="fileCard" data-href="data:text/html,<script>alert(1)</script>" data-filename="x.html"></div>`,
+			want:  `<div data-type="fileCard" data-filename="x.html"></div>`,
+		},
+		{
+			name:  "file card with http href preserved",
+			input: `<div data-type="fileCard" data-href="http://example.com/file.pdf" data-filename="file.pdf"></div>`,
+			want:  `<div data-type="fileCard" data-href="http://example.com/file.pdf" data-filename="file.pdf"></div>`,
+		},
 	}
 
 	for _, tt := range tests {
