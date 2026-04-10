@@ -22,10 +22,13 @@ export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  doneTotal: doneTotalOverride,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
+  /** Override the done-group count (e.g. with a client-filtered total). */
+  doneTotal?: number;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -38,7 +41,8 @@ export function ListView({
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
-  const { loadMore, hasMore, isLoading: loadingMore, doneTotal } = useLoadMoreDoneIssues();
+  const { loadMore, hasMore, isLoading: loadingMore, doneTotal: hookDoneTotal } = useLoadMoreDoneIssues();
+  const displayDoneTotal = doneTotalOverride ?? hookDoneTotal;
 
   const issuesByStatus = useMemo(() => {
     const map = new Map<IssueStatus, Issue[]>();
@@ -108,7 +112,7 @@ export function ListView({
                     {cfg.label}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {status === "done" ? doneTotal : statusIssues.length}
+                    {status === "done" ? displayDoneTotal : statusIssues.length}
                   </span>
                 </Accordion.Trigger>
                 <div className="pr-2">

@@ -103,6 +103,7 @@ export function BoardView({
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  doneTotal: doneTotalOverride,
 }: {
   issues: Issue[];
   allIssues: Issue[];
@@ -114,10 +115,13 @@ export function BoardView({
     newPosition?: number
   ) => void;
   childProgressMap?: Map<string, ChildProgress>;
+  /** Override the done-column count (e.g. with a client-filtered total). */
+  doneTotal?: number;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
-  const { loadMore, hasMore, isLoading: loadingMore, doneTotal } = useLoadMoreDoneIssues();
+  const { loadMore, hasMore, isLoading: loadingMore, doneTotal: hookDoneTotal } = useLoadMoreDoneIssues();
+  const displayDoneTotal = doneTotalOverride ?? hookDoneTotal;
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -281,7 +285,7 @@ export function BoardView({
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
-            totalCount={status === "done" ? doneTotal : undefined}
+            totalCount={status === "done" ? displayDoneTotal : undefined}
             footer={
               status === "done" && hasMore ? (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={loadingMore} />

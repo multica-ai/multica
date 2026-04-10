@@ -86,6 +86,12 @@ export function MyIssuesPage() {
     }
   }, [scope, assignedToMe, myAgentIssues, createdByMe]);
 
+  // Done count scoped to the current user (not the workspace-wide total)
+  const myDoneTotal = useMemo(
+    () => myIssues.filter((i) => i.status === "done").length,
+    [myIssues],
+  );
+
   // Apply status/priority filters from view store
   const issues = useMemo(
     () =>
@@ -204,9 +210,10 @@ export function MyIssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                doneTotal={myDoneTotal}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
+              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} doneTotal={myDoneTotal} />
             )}
           </div>
         )}
