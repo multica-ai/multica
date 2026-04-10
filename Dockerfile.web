@@ -16,6 +16,9 @@ COPY packages/eslint-config/package.json packages/eslint-config/
 
 RUN pnpm install --frozen-lockfile
 
+# Ensure node_modules dirs exist for packages that may have no dependencies
+RUN mkdir -p /app/packages/tsconfig/node_modules /app/packages/eslint-config/node_modules
+
 # --- Build ---
 FROM node:22-alpine AS builder
 
