@@ -93,3 +93,54 @@ func TestBuildSearchQuery_SpecialChars(t *testing.T) {
 		t.Errorf("expected %% to be escaped in phrase arg, got %q", args[0])
 	}
 }
+
+// --- Project search tests ---
+
+func TestBuildProjectSearchQuery_SingleTerm(t *testing.T) {
+	query, args := buildProjectSearchQuery("Hello", []string{"Hello"}, false)
+
+	if args[0] != "hello" {
+		t.Errorf("expected phrase arg to be lowercased, got %q", args[0])
+	}
+
+	if strings.Contains(query, "ILIKE") {
+		t.Error("query should not contain ILIKE")
+	}
+	if !strings.Contains(query, "LOWER(p.title) LIKE") {
+		t.Error("query should contain LOWER(p.title) LIKE")
+	}
+	if !strings.Contains(query, "LOWER(COALESCE(p.description, '')) LIKE") {
+		t.Error("query should contain LOWER(COALESCE(p.description, '')) LIKE")
+	}
+
+	// Should exclude completed/cancelled by default.
+	if !strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
+		t.Error("query should exclude completed/cancelled when includeClosed=false")
+	}
+}
+
+func TestBuildProjectSearchQuery_MultiTerm(t *testing.T) {
+	query, args := buildProjectSearchQuery("Foo Bar", []string{"Foo", "Bar"}, false)
+
+	if args[0] != "foo bar" {
+		t.Errorf("expected phrase arg lowercased, got %q", args[0])
+	}
+	if args[2] != "foo" {
+		t.Errorf("expected first term arg lowercased, got %q", args[2])
+	}
+	if args[3] != "bar" {
+		t.Errorf("expected second term arg lowercased, got %q", args[3])
+	}
+
+	if !strings.Contains(query, " AND ") {
+		t.Error("multi-word query should contain AND conditions for per-term matching")
+	}
+}
+
+func TestBuildProjectSearchQuery_IncludeClosed(t *testing.T) {
+	query, _ := buildProjectSearchQuery("test", []string{"test"}, true)
+
+	if strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
+		t.Error("query should not exclude completed/cancelled when includeClosed=true")
+	}
+}

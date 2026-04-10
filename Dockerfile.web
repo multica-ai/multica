@@ -28,7 +28,6 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY --from=deps /app/packages/views/node_modules ./packages/views/node_modules
-COPY --from=deps /app/packages/tsconfig/node_modules ./packages/tsconfig/node_modules
 COPY --from=deps /app/packages/eslint-config/node_modules ./packages/eslint-config/node_modules
 
 # Copy source

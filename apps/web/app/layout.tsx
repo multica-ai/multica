@@ -22,7 +22,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.multica.ai"),
   title: {
-    default: "Multica — AI-Native Task Management",
+    default: "Multica — Project Management for Human + Agent Teams",
     template: "%s | Multica",
   },
   description:

@@ -210,6 +210,18 @@ vi.mock("@multica/core/issues/config", () => ({
   },
 }));
 
+// Mock recent issues store
+const mockRecordVisit = vi.fn();
+vi.mock("@multica/core/issues/stores", () => ({
+  useRecentIssuesStore: Object.assign(
+    (selector?: any) => {
+      const state = { items: [], recordVisit: mockRecordVisit };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ items: [], recordVisit: mockRecordVisit }) },
+  ),
+}));
+
 // Mock modals
 vi.mock("@multica/core/modals", () => ({
   useModalStore: Object.assign(

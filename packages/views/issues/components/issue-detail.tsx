@@ -70,6 +70,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
+import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
@@ -230,6 +231,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       return cached?.description != null ? cached : undefined;
     },
   });
+
+  // Record recent visit
+  const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  useEffect(() => {
+    if (issue) {
+      recordVisit({
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        status: issue.status,
+      });
+    }
+  }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {

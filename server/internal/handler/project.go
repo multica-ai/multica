@@ -1,9 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -41,6 +46,14 @@ func projectToResponse(p db.Project) ProjectResponse {
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
+}
+
+func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UUID) (int64, int64) {
+	stats, err := h.Queries.GetProjectIssueStats(ctx, []pgtype.UUID{projectID})
+	if err != nil || len(stats) == 0 {
+		return 0, 0
+	}
+	return stats[0].TotalCount, stats[0].DoneCount
 }
 
 type CreateProjectRequest struct {
@@ -119,7 +132,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, projectToResponse(project))
+	resp := projectToResponse(project)
+	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
@@ -272,4 +287,271 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": id})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SearchProjectResponse extends ProjectResponse with search metadata.
+type SearchProjectResponse struct {
+	ProjectResponse
+	MatchSource    string  `json:"match_source"`
+	MatchedSnippet *string `json:"matched_snippet,omitempty"`
+}
+
+// buildProjectSearchQuery builds a dynamic SQL query for project search.
+func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) (string, []any) {
+	phrase = strings.ToLower(phrase)
+	for i, t := range terms {
+		terms[i] = strings.ToLower(t)
+	}
+
+	argIdx := 1
+	args := []any{}
+	nextArg := func(val any) string {
+		args = append(args, val)
+		s := fmt.Sprintf("$%d", argIdx)
+		argIdx++
+		return s
+	}
+
+	escapedPhrase := escapeLike(phrase)
+	phraseParam := nextArg(escapedPhrase)
+	phraseContains := "'%' || " + phraseParam + " || '%'"
+	phraseStartsWith := phraseParam + " || '%'"
+
+	wsParam := nextArg(nil) // workspace_id placeholder
+
+	var termParams []string
+	if len(terms) > 1 {
+		for _, t := range terms {
+			et := escapeLike(t)
+			termParams = append(termParams, nextArg(et))
+		}
+	}
+
+	// --- WHERE clause ---
+	var whereParts []string
+
+	// Full phrase match: title or description
+	phraseMatch := fmt.Sprintf(
+		"(LOWER(p.title) LIKE %s OR LOWER(COALESCE(p.description, '')) LIKE %s)",
+		phraseContains, phraseContains,
+	)
+	whereParts = append(whereParts, phraseMatch)
+
+	// Multi-word AND match
+	if len(termParams) > 1 {
+		var termConditions []string
+		for _, tp := range termParams {
+			tc := "'%' || " + tp + " || '%'"
+			termConditions = append(termConditions, fmt.Sprintf(
+				"(LOWER(p.title) LIKE %s OR LOWER(COALESCE(p.description, '')) LIKE %s)",
+				tc, tc,
+			))
+		}
+		whereParts = append(whereParts, "("+strings.Join(termConditions, " AND ")+")")
+	}
+
+	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
+
+	if !includeClosed {
+		whereClause += " AND p.status NOT IN ('completed', 'cancelled')"
+	}
+
+	// --- ORDER BY ranking ---
+	var rankCases []string
+
+	// Tier 0: Exact title match
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(p.title) = %s THEN 0", phraseParam))
+
+	// Tier 1: Title starts with phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(p.title) LIKE %s THEN 1", phraseStartsWith))
+
+	// Tier 2: Title contains phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(p.title) LIKE %s THEN 2", phraseContains))
+
+	// Tier 3: Title matches all words (multi-word only)
+	if len(termParams) > 1 {
+		var titleTerms []string
+		for _, tp := range termParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(p.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		}
+		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 3", strings.Join(titleTerms, " AND ")))
+	}
+
+	// Tier 4: Description contains phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(p.description, '')) LIKE %s THEN 4", phraseContains))
+
+	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 5 END"
+
+	// --- match_source expression ---
+	matchSourceExpr := fmt.Sprintf(`CASE
+		WHEN LOWER(p.title) LIKE %s THEN 'title'
+		ELSE 'description'
+	END`, phraseContains)
+
+	if len(termParams) > 1 {
+		var titleTerms []string
+		for _, tp := range termParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(p.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		}
+		matchSourceExpr = fmt.Sprintf(`CASE
+			WHEN LOWER(p.title) LIKE %s THEN 'title'
+			WHEN (%s) THEN 'title'
+			ELSE 'description'
+		END`,
+			phraseContains, strings.Join(titleTerms, " AND "),
+		)
+	}
+
+	limitParam := nextArg(nil)
+	offsetParam := nextArg(nil)
+
+	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
+		p.status, p.priority, p.lead_type, p.lead_id,
+		p.created_at, p.updated_at,
+		COUNT(*) OVER() AS total_count,
+		%s AS match_source
+	FROM project p
+	WHERE p.workspace_id = %s AND %s
+	ORDER BY %s, p.updated_at DESC
+	LIMIT %s OFFSET %s`,
+		matchSourceExpr,
+		wsParam,
+		whereClause,
+		rankExpr,
+		limitParam,
+		offsetParam,
+	)
+
+	return query, args
+}
+
+func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workspaceID := resolveWorkspaceID(r)
+
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q parameter is required")
+		return
+	}
+
+	limit := 20
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+
+	includeClosed := r.URL.Query().Get("include_closed") == "true"
+
+	wsUUID := parseUUID(workspaceID)
+	terms := splitSearchTerms(q)
+
+	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
+	args[1] = wsUUID
+	args[len(args)-2] = limit
+	args[len(args)-1] = offset
+
+	rows, err := h.DB.Query(ctx, sqlQuery, args...)
+	if err != nil {
+		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
+		writeError(w, http.StatusInternalServerError, "failed to search projects")
+		return
+	}
+	defer rows.Close()
+
+	type projectSearchRow struct {
+		project     db.Project
+		totalCount  int64
+		matchSource string
+	}
+
+	var results []projectSearchRow
+	for rows.Next() {
+		var row projectSearchRow
+		if err := rows.Scan(
+			&row.project.ID,
+			&row.project.WorkspaceID,
+			&row.project.Title,
+			&row.project.Description,
+			&row.project.Icon,
+			&row.project.Status,
+			&row.project.Priority,
+			&row.project.LeadType,
+			&row.project.LeadID,
+			&row.project.CreatedAt,
+			&row.project.UpdatedAt,
+			&row.totalCount,
+			&row.matchSource,
+		); err != nil {
+			slog.Warn("search projects scan failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to search projects")
+			return
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("search projects rows error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to search projects")
+		return
+	}
+
+	var total int64
+	if len(results) > 0 {
+		total = results[0].totalCount
+	}
+
+	// Batch-fetch issue stats
+	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	if len(results) > 0 {
+		projectIDs := make([]pgtype.UUID, len(results))
+		for i, r := range results {
+			projectIDs[i] = r.project.ID
+		}
+		stats, err := h.Queries.GetProjectIssueStats(ctx, projectIDs)
+		if err == nil {
+			for _, s := range stats {
+				statsMap[uuidToString(s.ProjectID)] = s
+			}
+		}
+	}
+
+	resp := make([]SearchProjectResponse, len(results))
+	for i, row := range results {
+		pr := projectToResponse(row.project)
+		if s, ok := statsMap[pr.ID]; ok {
+			pr.IssueCount = s.TotalCount
+			pr.DoneCount = s.DoneCount
+		}
+		spr := SearchProjectResponse{
+			ProjectResponse: pr,
+			MatchSource:     row.matchSource,
+		}
+		if row.matchSource == "description" {
+			desc := ""
+			if row.project.Description.Valid {
+				desc = row.project.Description.String
+			}
+			if desc != "" {
+				snippet := extractSnippet(desc, q)
+				spr.MatchedSnippet = &snippet
+			}
+		}
+		resp[i] = spr
+	}
+
+	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"projects": resp,
+		"total":    total,
+	})
 }

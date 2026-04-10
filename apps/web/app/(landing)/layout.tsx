@@ -30,7 +30,7 @@ const jsonLd = {
       applicationCategory: "ProjectManagement",
       operatingSystem: "Web",
       description:
-        "AI-native task management platform that turns coding agents into real teammates.",
+        "Open-source project management platform that turns coding agents into real teammates.",
       offers: {
         "@type": "Offer",
         price: "0",
