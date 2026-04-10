@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -50,18 +50,30 @@ export function AssigneePicker({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
 
+  // Build a lookup map from frequency data for sorting.
+  const freqMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of frequency) {
+      map.set(`${entry.assignee_type}:${entry.assignee_id}`, entry.frequency);
+    }
+    return map;
+  }, [frequency]);
+
+  const getFreq = (type: string, id: string) => freqMap.get(`${type}:${id}`) ?? 0;
+
   const query = filter.toLowerCase();
-  const filteredMembers = members.filter((m) =>
-    m.name.toLowerCase().includes(query),
-  );
-  const filteredAgents = agents.filter((a) =>
-    !a.archived_at && a.name.toLowerCase().includes(query),
-  );
+  const filteredMembers = members
+    .filter((m) => m.name.toLowerCase().includes(query))
+    .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
+  const filteredAgents = agents
+    .filter((a) => !a.archived_at && a.name.toLowerCase().includes(query))
+    .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
 
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;

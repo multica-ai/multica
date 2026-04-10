@@ -11,6 +11,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAssigneeChangesByActor = `-- name: CountAssigneeChangesByActor :many
+SELECT
+  details->>'to_type' as assignee_type,
+  details->>'to_id' as assignee_id,
+  COUNT(*)::bigint as frequency
+FROM activity_log
+WHERE workspace_id = $1
+  AND actor_id = $2
+  AND actor_type = 'member'
+  AND action = 'assignee_changed'
+  AND details->>'to_type' IS NOT NULL
+  AND details->>'to_id' IS NOT NULL
+GROUP BY details->>'to_type', details->>'to_id'
+`
+
+type CountAssigneeChangesByActorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ActorID     pgtype.UUID `json:"actor_id"`
+}
+
+type CountAssigneeChangesByActorRow struct {
+	AssigneeType interface{} `json:"assignee_type"`
+	AssigneeID   interface{} `json:"assignee_id"`
+	Frequency    int64       `json:"frequency"`
+}
+
+// Count how many times a user assigned each target via assignee_changed activities.
+func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssigneeChangesByActorParams) ([]CountAssigneeChangesByActorRow, error) {
+	rows, err := q.db.Query(ctx, countAssigneeChangesByActor, arg.WorkspaceID, arg.ActorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAssigneeChangesByActorRow{}
+	for rows.Next() {
+		var i CountAssigneeChangesByActorRow
+		if err := rows.Scan(&i.AssigneeType, &i.AssigneeID, &i.Frequency); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
     workspace_id, issue_id, actor_type, actor_id, action, details

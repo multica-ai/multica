@@ -35,6 +35,7 @@ import type {
   RuntimePing,
   RuntimeUpdate,
   TimelineEntry,
+  AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
   ChatSession,
@@ -257,6 +258,10 @@ export class ApiClient {
 
   async listTimeline(issueId: string): Promise<TimelineEntry[]> {
     return this.fetch(`/api/issues/${issueId}/timeline`);
+  }
+
+  async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
+    return this.fetch("/api/assignee-frequency");
   }
 
   async updateComment(commentId: string, content: string): Promise<Comment> {

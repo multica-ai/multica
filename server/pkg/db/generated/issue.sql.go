@@ -11,6 +11,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countCreatedIssueAssignees = `-- name: CountCreatedIssueAssignees :many
+SELECT
+  assignee_type,
+  assignee_id,
+  COUNT(*)::bigint as frequency
+FROM issue
+WHERE workspace_id = $1
+  AND creator_id = $2
+  AND creator_type = 'member'
+  AND assignee_type IS NOT NULL
+  AND assignee_id IS NOT NULL
+GROUP BY assignee_type, assignee_id
+`
+
+type CountCreatedIssueAssigneesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+type CountCreatedIssueAssigneesRow struct {
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+	Frequency    int64       `json:"frequency"`
+}
+
+// Count assignees on issues created by a specific user.
+func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreatedIssueAssigneesParams) ([]CountCreatedIssueAssigneesRow, error) {
+	rows, err := q.db.Query(ctx, countCreatedIssueAssignees, arg.WorkspaceID, arg.CreatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountCreatedIssueAssigneesRow{}
+	for rows.Next() {
+		var i CountCreatedIssueAssigneesRow
+		if err := rows.Scan(&i.AssigneeType, &i.AssigneeID, &i.Frequency); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countIssues = `-- name: CountIssues :one
 SELECT count(*) FROM issue
 WHERE workspace_id = $1

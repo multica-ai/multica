@@ -86,4 +86,18 @@ SELECT * FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
+-- name: CountCreatedIssueAssignees :many
+-- Count assignees on issues created by a specific user.
+SELECT
+  assignee_type,
+  assignee_id,
+  COUNT(*)::bigint as frequency
+FROM issue
+WHERE workspace_id = $1
+  AND creator_id = $2
+  AND creator_type = 'member'
+  AND assignee_type IS NOT NULL
+  AND assignee_id IS NOT NULL
+GROUP BY assignee_type, assignee_id;
+
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
