@@ -114,7 +114,7 @@ function LoginPageContent() {
   const handleSendCode = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!email) {
-      setError(t.auth.email + " is required");
+      setError(t.auth.emailRequired);
       return;
     }
     setError("");
@@ -144,7 +144,7 @@ function LoginPageContent() {
         const cliCallback = searchParams.get("cli_callback");
         if (cliCallback) {
           if (!validateCliCallback(cliCallback)) {
-            setError("Invalid callback URL");
+            setError(t.auth.invalidCallback);
             setSubmitting(false);
             return;
           }
@@ -193,9 +193,9 @@ function LoginPageContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Authorize CLI</CardTitle>
+            <CardTitle className="text-2xl">{t.auth.cliTitle}</CardTitle>
             <CardDescription>
-              Allow the CLI to access Multica as{" "}
+              {t.auth.cliDescription}{" "}
               <span className="font-medium text-foreground">
                 {existingUser.email}
               </span>
@@ -209,7 +209,7 @@ function LoginPageContent() {
               className="w-full"
               size="lg"
             >
-              {submitting ? "Authorizing..." : "Authorize"}
+              {submitting ? t.auth.authorizing : t.auth.authorize}
             </Button>
             <Button
               variant="ghost"
@@ -219,7 +219,7 @@ function LoginPageContent() {
                 setStep("email");
               }}
             >
-              Use a different account
+              {t.auth.useDifferentAccount}
             </Button>
           </CardContent>
         </Card>
@@ -267,7 +267,7 @@ function LoginPageContent() {
                 disabled={cooldown > 0}
                 className="text-primary underline-offset-4 hover:underline disabled:text-muted-foreground disabled:no-underline disabled:cursor-not-allowed"
               >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+              {cooldown > 0 ? t.auth.resendIn.replace("{n}", String(cooldown)) : t.auth.resendCode}
               </button>
             </div>
           </CardContent>
@@ -347,7 +347,7 @@ function LoginPageContent() {
                   <span className="w-full border-t" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">or</span>
+                  <span className="bg-card px-2 text-muted-foreground">{t.auth.or}</span>
                 </div>
               </div>
               <Button
@@ -376,7 +376,7 @@ function LoginPageContent() {
                     fill="#EA4335"
                   />
                 </svg>
-                Continue with Google
+                {t.auth.continueWithGoogle}
               </Button>
             </>
           )}

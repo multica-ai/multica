@@ -189,6 +189,7 @@ export type DashboardDict = {
     signInDescription: string;
     email: string;
     emailPlaceholder: string;
+    emailRequired: string;
     sendCode: string;
     sending: string;
     verificationCode: string;
@@ -196,8 +197,18 @@ export type DashboardDict = {
     verifying: string;
     backToEmail: string;
     codeDescription: string;
+    resendCode: string;
+    resendIn: string;
     failedSendCode: string;
     failedVerifyCode: string;
+    invalidCallback: string;
+    cliTitle: string;
+    cliDescription: string;
+    authorize: string;
+    authorizing: string;
+    useDifferentAccount: string;
+    or: string;
+    continueWithGoogle: string;
   };
   agents: {
     title: string;
@@ -259,8 +270,15 @@ export type DashboardDict = {
     selectAgent: string;
     tasks: string;
     taskQueue: string;
+    taskQueueDesc: string;
     noTasks: string;
     noTasksDesc: string;
+    characters: string;
+    taskStartedAt: string;
+    taskDispatchedAt: string;
+    taskCompletedAt: string;
+    taskFailedAt: string;
+    taskQueuedAt: string;
     skills: string;
     skillsDesc: string;
     noSkills: string;

@@ -403,13 +403,13 @@ function InstructionsTab({
       <textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder={`Define this agent's role, expertise, and working style.\n\nExample:\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/`}
+        placeholder={t.agents.instructionsPlaceholder}
         className="w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
       />
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {value.length > 0 ? `${value.length} characters` : t.agents.noInstructions}
+          {value.length > 0 ? `${value.length} ${t.agents.characters}` : t.agents.noInstructions}
         </span>
         <Button
           size="xs"
@@ -597,7 +597,7 @@ function SkillsTab({
 // ---------------------------------------------------------------------------
 
 function TasksTab({ agent }: { agent: Agent }) {
-  const { t } = useDashboardLocale();
+  const { t, formatDateTime } = useDashboardLocale();
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
@@ -649,7 +649,7 @@ function TasksTab({ agent }: { agent: Agent }) {
       <div>
         <h3 className="text-sm font-semibold">{t.agents.taskQueue}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Issues assigned to this agent and their execution status.
+          {t.agents.taskQueueDesc}
         </p>
       </div>
 
@@ -700,14 +700,14 @@ function TasksTab({ agent }: { agent: Agent }) {
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
                     {isRunning && task.started_at
-                      ? `Started ${new Date(task.started_at).toLocaleString()}`
+                      ? `${t.agents.taskStartedAt} ${formatDateTime(task.started_at)}`
                       : task.status === "dispatched" && task.dispatched_at
-                        ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
+                        ? `${t.agents.taskDispatchedAt} ${formatDateTime(task.dispatched_at)}`
                         : task.status === "completed" && task.completed_at
-                          ? `Completed ${new Date(task.completed_at).toLocaleString()}`
+                          ? `${t.agents.taskCompletedAt} ${formatDateTime(task.completed_at)}`
                           : task.status === "failed" && task.completed_at
-                            ? `Failed ${new Date(task.completed_at).toLocaleString()}`
-                            : `Queued ${new Date(task.created_at).toLocaleString()}`}
+                            ? `${t.agents.taskFailedAt} ${formatDateTime(task.completed_at)}`
+                            : `${t.agents.taskQueuedAt} ${formatDateTime(task.created_at)}`}
                   </div>
                 </div>
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>

@@ -22,6 +22,7 @@ type DashboardLocaleContextValue = {
   t: DashboardDict;
   setLocale: (locale: Locale) => void;
   formatDate: (dateStr: string) => string;
+  formatDateTime: (dateStr: string) => string;
 };
 
 const DashboardLocaleContext = createContext<DashboardLocaleContextValue | null>(null);
@@ -54,9 +55,22 @@ export function DashboardLocaleProvider({
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   }, [locale]);
 
+  const formatDateTime = useCallback((dateStr: string) => {
+    const date = new Date(dateStr);
+    if (locale === "zh") {
+      const y = date.getFullYear();
+      const m = date.getMonth() + 1;
+      const d = date.getDate();
+      const h = String(date.getHours()).padStart(2, "0");
+      const min = String(date.getMinutes()).padStart(2, "0");
+      return `${y}年${m}月${d}日 ${h}:${min}`;
+    }
+    return date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  }, [locale]);
+
   return (
     <DashboardLocaleContext.Provider
-      value={{ locale, t: dictionaries[locale], setLocale, formatDate }}
+      value={{ locale, t: dictionaries[locale], setLocale, formatDate, formatDateTime }}
     >
       {children}
     </DashboardLocaleContext.Provider>
