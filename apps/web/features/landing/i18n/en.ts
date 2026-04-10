@@ -273,6 +273,28 @@ export const en: LandingDict = {
     subtitle: "New updates and improvements to Multica.",
     entries: [
       {
+        version: "0.1.22",
+        date: "2026-04-10",
+        title: "Desktop App, Self-Hosting & ACP",
+        changes: [
+          "Electron desktop app — frameless window, tab system with per-tab routing, tab persistence across restarts, and project detail view",
+          "Full-stack Docker Compose for self-hosting",
+          "Hermes Agent Provider via ACP (Agent Communication Protocol)",
+          "Documentation site powered by Fumadocs",
+          "Mobile-responsive layout for sidebar and inbox",
+          "Token usage display per issue in the detail sidebar",
+          "Switch agent runtime from the UI",
+          "'C' keyboard shortcut for quick issue creation",
+          "Session history panel for viewing archived conversations",
+          "Search improvements — keyword highlighting, ILIKE ranking, identifier search, and multi-word support",
+          "Sidebar redesign with better spacing and grouping",
+          "Master Agent multiline input support",
+          "`make dev` one-command local setup for developers",
+          "Minimum Claude Code version check in daemon",
+          "Cross-platform shared packages — chat, auth, search, and layout extracted for web + desktop reuse",
+        ],
+      },
+      {
         version: "0.1.21",
         date: "2026-04-09",
         title: "Projects, Search & Monorepo",

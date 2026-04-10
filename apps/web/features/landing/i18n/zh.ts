@@ -273,6 +273,28 @@ export const zh: LandingDict = {
     subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
     entries: [
       {
+        version: "0.1.22",
+        date: "2026-04-10",
+        title: "桌面应用、自部署与 ACP",
+        changes: [
+          "Electron 桌面应用——无边框窗口、标签页系统（独立路由）、标签页状态持久化、项目详情页",
+          "全栈 Docker Compose 支持自部署",
+          "通过 ACP（Agent Communication Protocol）接入 Hermes Agent Provider",
+          "基于 Fumadocs 搭建文档站",
+          "侧边栏和收件箱移动端响应式布局",
+          "Issue 详情侧边栏展示 Token 用量",
+          "支持在 UI 中切换 Agent 运行时",
+          "'C' 快捷键快速创建 Issue",
+          "会话历史面板，查看已归档的对话",
+          "搜索优化——关键词高亮、ILIKE 排序、标识符搜索、多词匹配",
+          "侧边栏重新设计，优化间距和分组",
+          "Master Agent 支持多行输入",
+          "`make dev` 一键本地开发环境搭建",
+          "Daemon 新增 Claude Code 最低版本检查",
+          "跨平台共享包——聊天、认证、搜索、布局等模块提取为 Web + 桌面共用",
+        ],
+      },
+      {
         version: "0.1.21",
         date: "2026-04-09",
         title: "项目、搜索与 Monorepo",
