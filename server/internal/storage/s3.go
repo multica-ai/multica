@@ -16,9 +16,10 @@ import (
 )
 
 type S3Storage struct {
-	client    *s3.Client
-	bucket    string
-	cdnDomain string // if set, returned URLs use this instead of bucket name
+	client      *s3.Client
+	bucket      string
+	cdnDomain   string // if set, returned URLs use this instead of bucket name
+	endpointURL string // if set, use path-style URLs (e.g. MinIO)
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -60,12 +61,31 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
+	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	s3Opts := []func(*s3.Options){}
+	if endpointURL != "" {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpointURL)
+			o.UsePathStyle = true
+		})
+	}
+
 	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain)
 	return &S3Storage{
-		client:    s3.NewFromConfig(cfg),
-		bucket:    bucket,
-		cdnDomain: cdnDomain,
+		client:      s3.NewFromConfig(cfg, s3Opts...),
+		bucket:      bucket,
+		cdnDomain:   cdnDomain,
+		endpointURL: endpointURL,
 	}
+}
+
+// storageClass returns the appropriate S3 storage class.
+// Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
+func (s *S3Storage) storageClass() types.StorageClass {
+	if s.endpointURL != "" {
+		return types.StorageClassStandard
+	}
+	return types.StorageClassIntelligentTiering
 }
 
 // sanitizeFilename removes characters that could cause header injection in Content-Disposition.
@@ -146,12 +166,16 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
-		StorageClass:       types.StorageClassIntelligentTiering,
+		StorageClass:       s.storageClass(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 
+	if s.endpointURL != "" {
+		link := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+		return link, nil
+	}
 	domain := s.bucket
 	if s.cdnDomain != "" {
 		domain = s.cdnDomain
