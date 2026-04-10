@@ -6,7 +6,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { QueryProvider } from "@multica/core/provider";
 import { AuthInitializer } from "@/features/auth";
 import { WebWSProvider } from "@/platform/ws-provider";
-import { WebNavigationProvider } from "@/platform/navigation";
 import { getLocale } from "next-intl/server";
 import "./globals.css";
 
@@ -73,11 +72,9 @@ export default async function RootLayout({
       <body className="h-full overflow-hidden">
         <ThemeProvider>
           <QueryProvider>
-            <WebNavigationProvider>
-              <AuthInitializer>
-                <WebWSProvider>{children}</WebWSProvider>
-              </AuthInitializer>
-            </WebNavigationProvider>
+            <AuthInitializer>
+              <WebWSProvider>{children}</WebWSProvider>
+            </AuthInitializer>
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

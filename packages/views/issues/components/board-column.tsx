@@ -58,7 +58,7 @@ export function BoardColumn({
         <div className="flex items-center gap-2">
           <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
             <StatusIcon status={status} className="h-3 w-3" inheritColor />
-            {cfg.label}
+            {t(`statusLabels.${status}` as Parameters<typeof t>[0])}
           </span>
           <span className="text-xs text-muted-foreground">
             {totalCount ?? issueIds.length}
@@ -78,7 +78,7 @@ export function BoardColumn({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
-                Hide column
+                {t("hideColumn")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -95,7 +95,7 @@ export function BoardColumn({
                 </Button>
               }
             />
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t("addIssue")}</TooltipContent>
           </Tooltip>
         </div>
       </div>

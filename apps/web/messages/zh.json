@@ -326,6 +326,7 @@
     "priority": "优先级",
     "assignee": "经办人",
     "delete": "删除",
+    "selectedCount": "已选 {count} 个",
     "deleteTitle": "删除 {count} 个任务？",
     "deleteDescription": "此操作无法撤销，将永久删除所选的 {count} 个任务及其所有相关数据。",
     "cancel": "取消",
@@ -398,6 +399,8 @@
       "low": "低",
       "none": "无优先级"
     },
+    "addIssue": "添加任务",
+    "hideColumn": "隐藏列",
     "project": "项目",
     "createdBy": "创建者",
     "created": "创建时间",
@@ -459,6 +462,26 @@
     "failedSendReply": "发送回复失败",
     "failedUpdateComment": "更新评论失败",
     "failedDeleteComment": "删除评论失败"
+  },
+  "agentTranscript": {
+    "typeAgent": "Agent",
+    "typeThinking": "思考中",
+    "typeTool": "工具",
+    "typeResult": "结果",
+    "typeError": "错误",
+    "typeEvent": "事件",
+    "copied": "已复制",
+    "copyAll": "复制全部",
+    "waitingForEvents": "等待事件...",
+    "noExecutionData": "暂无执行记录。",
+    "expandTranscript": "展开完整记录",
+    "stopAgent": "停止 Agent",
+    "latest": "最新",
+    "executionHistory": "执行历史（{count}）",
+    "agentIsWorking": "{name} 正在工作",
+    "loadingEvents": "加载中...",
+    "toolCalls": "{count} 个工具调用",
+    "cancelFailed": "取消任务失败"
   },
   "search": {
     "title": "搜索任务",

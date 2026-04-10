@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import {
   Bot,
   ChevronRight,
@@ -163,6 +164,7 @@ export function AgentTranscriptDialog({
   agentName,
   isLive = false,
 }: AgentTranscriptDialogProps) {
+  const t = useTranslations("agentTranscript");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
@@ -290,7 +292,7 @@ export function AgentTranscriptDialog({
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? "Copied" : "Copy all"}
+                {copied ? t("copied") : t("copyAll")}
               </button>
               <button
                 onClick={() => onOpenChange(false)}
@@ -375,10 +377,10 @@ export function AgentTranscriptDialog({
               {isLive ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for events...
+                  {t("waitingForEvents")}
                 </div>
               ) : (
-                "No execution data recorded."
+                t("noExecutionData")
               )}
             </div>
           ) : (
@@ -437,6 +439,18 @@ function TimelineBar({
   selectedIdx: number | null;
   onSegmentClick: (idx: number) => void;
 }) {
+  const t = useTranslations("agentTranscript");
+
+  function getTranslatedLabel(item: TimelineItem): string {
+    switch (item.type) {
+      case "text": return t("typeAgent");
+      case "thinking": return t("typeThinking");
+      case "tool_use": return item.tool ?? t("typeTool");
+      case "tool_result": return item.tool ? `${item.tool}` : t("typeResult");
+      case "error": return t("typeError");
+      default: return t("typeEvent");
+    }
+  }
   // Group consecutive items of the same color into segments for cleaner display
   const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
   let currentColor: EventColor | null = null;
@@ -475,12 +489,12 @@ function TimelineBar({
             )}
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
             onClick={() => onSegmentClick(seg.startIdx)}
-            title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
+            title={`${getTranslatedLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
           >
             {/* Tooltip on hover */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
               <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
-                {getEventLabel(items[seg.startIdx]!)}
+                {getTranslatedLabel(items[seg.startIdx]!)}
                 {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
               </div>
             </div>
@@ -507,9 +521,19 @@ const TranscriptEventRow = ({
   isSelected,
   onClick,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
+  const t = useTranslations("agentTranscript");
   const [expanded, setExpanded] = useState(false);
   const color = getEventColor(item);
-  const label = getEventLabel(item);
+  const label = (() => {
+    switch (item.type) {
+      case "text": return t("typeAgent");
+      case "thinking": return t("typeThinking");
+      case "tool_use": return item.tool ?? t("typeTool");
+      case "tool_result": return item.tool ? `${item.tool}` : t("typeResult");
+      case "error": return t("typeError");
+      default: return t("typeEvent");
+    }
+  })();
   const summary = getEventSummary(item);
 
   const hasDetail =

@@ -326,6 +326,7 @@
     "priority": "Priority",
     "assignee": "Assignee",
     "delete": "Delete",
+    "selectedCount": "{count} selected",
     "deleteTitle": "{count, plural, one {Delete # issue?} other {Delete # issues?}}",
     "deleteDescription": "{count, plural, one {This action cannot be undone. This will permanently delete the selected issue and all associated data.} other {This action cannot be undone. This will permanently delete the selected # issues and all associated data.}}",
     "cancel": "Cancel",
@@ -398,6 +399,8 @@
       "low": "Low",
       "none": "No priority"
     },
+    "addIssue": "Add issue",
+    "hideColumn": "Hide column",
     "project": "Project",
     "createdBy": "Created by",
     "created": "Created",
@@ -459,6 +462,26 @@
     "failedSendReply": "Failed to send reply",
     "failedUpdateComment": "Failed to update comment",
     "failedDeleteComment": "Failed to delete comment"
+  },
+  "agentTranscript": {
+    "typeAgent": "Agent",
+    "typeThinking": "Thinking",
+    "typeTool": "Tool",
+    "typeResult": "Result",
+    "typeError": "Error",
+    "typeEvent": "Event",
+    "copied": "Copied",
+    "copyAll": "Copy all",
+    "waitingForEvents": "Waiting for events...",
+    "noExecutionData": "No execution data recorded.",
+    "expandTranscript": "Expand transcript",
+    "stopAgent": "Stop agent",
+    "latest": "Latest",
+    "executionHistory": "Execution history ({count})",
+    "agentIsWorking": "{name} is working",
+    "loadingEvents": "Loading...",
+    "toolCalls": "{count} tools",
+    "cancelFailed": "Failed to cancel task"
   },
   "search": {
     "title": "Search Issues",
