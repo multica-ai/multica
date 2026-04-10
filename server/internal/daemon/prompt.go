@@ -12,10 +12,24 @@ func BuildPrompt(task Task) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
+	if task.TriggerCommentID != "" {
+		return buildCommentPrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+	return b.String()
+}
+
+// buildCommentPrompt constructs a prompt for comment-triggered tasks.
+// In resumed sessions the agent already has prior context and may conclude the
+// issue is "already done". This prompt must clearly signal there is a new
+// comment to act on — the detailed workflow lives in CLAUDE.md / AGENTS.md.
+func buildCommentPrompt(task Task) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Respond to comment %s on issue %s.\n\n", task.TriggerCommentID, task.IssueID)
+	fmt.Fprintf(&b, "Run `multica issue comment list %s --output json`, find the comment, act on its request, and reply.\n", task.IssueID)
 	return b.String()
 }
 

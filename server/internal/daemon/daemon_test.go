@@ -50,6 +50,34 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	}
 }
 
+func TestBuildPromptCommentTriggered(t *testing.T) {
+	t.Parallel()
+
+	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	commentID := "c0mment-1d00-0000-0000-000000000000"
+	prompt := BuildPrompt(Task{
+		IssueID:          issueID,
+		TriggerCommentID: commentID,
+		Agent:            &AgentData{Name: "Test"},
+	})
+
+	// Comment-triggered prompt must mention the comment and instruct to read it.
+	for _, want := range []string{
+		commentID,
+		"comment",
+		"multica issue comment list",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("comment-triggered prompt missing %q\nprompt: %s", want, prompt)
+		}
+	}
+
+	// Should NOT contain the generic assignment phrasing.
+	if strings.Contains(prompt, "Start by running `multica issue get") {
+		t.Fatal("comment-triggered prompt should not use the assignment-style phrasing")
+	}
+}
+
 func TestBuildPromptNoIssueDetails(t *testing.T) {
 	t.Parallel()
 
