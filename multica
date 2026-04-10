@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""
+multica — project CLI
+
+Install dependency:
+    pip install "typer[all]"
+
+Usage:
+    ./multica up
+    ./multica dev
+    ./multica down
+    ./multica build
+    ./multica logs [service]
+    ./multica shell [service]
+    ./multica migrate
+    ./multica test
+    ./multica check
+    ./multica cli [args...]
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+def _ensure_deps() -> None:
+    try:
+        import typer  # noqa: F401
+        import rich    # noqa: F401
+    except ImportError:
+        print("Installing dependencies...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "typer[all]"],
+            check=False,
+        )
+        if result.returncode != 0:
+            # pip may be restricted; try with --user
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--user", "typer[all]"],
+                check=False,
+            )
+        if result.returncode != 0:
+            print("Failed to install dependencies. Run manually:  pip install 'typer[all]'", file=sys.stderr)
+            sys.exit(1)
+        # Re-exec so the freshly installed packages are importable
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+_ensure_deps()
+
+import typer  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.text import Text  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
+app = typer.Typer(
+    name="multica",
+    help="Multica project CLI.",
+    add_completion=False,
+    no_args_is_help=True,
+)
+console = Console()
+
+# Resolve project root (directory containing this script)
+ROOT = Path(__file__).resolve().parent
+COMPOSE_FILE = ROOT / "docker-compose.selfhost.yml"
+COMPOSE_CMD = ["docker", "compose", "-f", str(COMPOSE_FILE)]
+
+
+def run(*args: str, cwd: Path = ROOT, check: bool = True, env: Optional[dict] = None) -> int:
+    """Run a command, streaming output to the terminal."""
+    merged_env = {**os.environ, **(env or {})}
+    result = subprocess.run(list(args), cwd=str(cwd), env=merged_env)
+    if check and result.returncode != 0:
+        raise typer.Exit(result.returncode)
+    return result.returncode
+
+
+def exec_into(*args: str, cwd: Path = ROOT) -> None:
+    """Replace the current process (for interactive commands like shell)."""
+    os.chdir(str(cwd))
+    os.execvpe(args[0], list(args), os.environ)
+
+
+def compose(*args: str, **kwargs) -> int:
+    return run(*COMPOSE_CMD, *args, **kwargs)
+
+
+def make(*targets: str, **kwargs) -> int:
+    return run("make", *targets, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+@app.command()
+def up(
+    build: bool = typer.Option(False, "--build", "-b", help="Rebuild images before starting."),
+    detach: bool = typer.Option(True, "--detach/--no-detach", "-d/-D", help="Run in background."),
+    service: Optional[list[str]] = typer.Argument(default=None, help="Specific service(s) to start."),
+):
+    """Start services via docker compose (self-hosted stack)."""
+    args = ["up"]
+    if build:
+        args.append("--build")
+    if detach:
+        args.append("-d")
+    if service:
+        args.extend(service)
+    compose(*args)
+
+
+@app.command()
+def down(
+    volumes: bool = typer.Option(False, "--volumes", "-v", help="Also remove named volumes."),
+):
+    """Stop and remove containers."""
+    args = ["down"]
+    if volumes:
+        args.append("-v")
+    compose(*args)
+
+
+@app.command()
+def dev():
+    """Start infra in Docker, run frontend with HMR on the host.
+
+    Starts postgres + backend via docker compose, then launches the
+    Next.js dev server (pnpm dev:web) in the foreground with hot reload.
+    """
+    console.print("[bold green]Starting postgres + backend in Docker...[/bold green]")
+    compose("up", "-d", "postgres", "backend")
+
+    console.print("[bold green]Starting frontend with HMR...[/bold green]")
+    console.print("[dim]Frontend: http://localhost:3000[/dim]")
+    run("pnpm", "dev:web")
+
+
+@app.command()
+def build(
+    service: Optional[list[str]] = typer.Argument(default=None, help="Specific service(s) to build."),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Do not use cache when building."),
+):
+    """Build (or rebuild) Docker images."""
+    args = ["build"]
+    if no_cache:
+        args.append("--no-cache")
+    if service:
+        args.extend(service)
+    compose(*args)
+
+
+@app.command()
+def logs(
+    service: Optional[list[str]] = typer.Argument(default=None, help="Service(s) to tail (default: all)."),
+    follow: bool = typer.Option(True, "--follow/--no-follow", "-f/-F", help="Follow log output."),
+    tail: int = typer.Option(100, "--tail", "-n", help="Number of lines to show from the end."),
+):
+    """Tail container logs."""
+    args = ["logs", f"--tail={tail}"]
+    if follow:
+        args.append("-f")
+    if service:
+        args.extend(service)
+    compose(*args)
+
+
+@app.command()
+def ps():
+    """Show status of running containers."""
+    compose("ps")
+
+
+@app.command()
+def shell(
+    service: str = typer.Argument(default="backend", help="Container to open a shell in."),
+    shell_cmd: str = typer.Option("/bin/sh", "--shell", help="Shell binary to use."),
+):
+    """Open an interactive shell in a running container."""
+    exec_into(*COMPOSE_CMD, "exec", service, shell_cmd)
+
+
+@app.command()
+def migrate(
+    direction: str = typer.Argument(default="up", help="Direction: up or down."),
+):
+    """Run database migrations (up or down)."""
+    if direction not in ("up", "down"):
+        console.print(f"[red]Unknown direction '{direction}'. Use 'up' or 'down'.[/red]")
+        raise typer.Exit(1)
+    make(f"migrate-{direction}")
+
+
+@app.command()
+def test(
+    go: bool = typer.Option(False, "--go", help="Run only Go tests."),
+    ts: bool = typer.Option(False, "--ts", help="Run only TypeScript tests."),
+    e2e: bool = typer.Option(False, "--e2e", help="Run only E2E tests."),
+):
+    """Run the test suite.
+
+    With no flags, runs all tests (equivalent to make check).
+    """
+    if not any([go, ts, e2e]):
+        make("check")
+        return
+
+    if go:
+        console.print("[bold]Running Go tests...[/bold]")
+        make("test")
+    if ts:
+        console.print("[bold]Running TypeScript tests...[/bold]")
+        run("pnpm", "test")
+    if e2e:
+        console.print("[bold]Running E2E tests...[/bold]")
+        run("pnpm", "exec", "playwright", "test")
+
+
+@app.command()
+def typecheck():
+    """Run TypeScript type checking across all packages."""
+    run("pnpm", "typecheck")
+
+
+@app.command()
+def sqlc():
+    """Regenerate sqlc Go code from SQL queries."""
+    make("sqlc")
+
+
+@app.command()
+def cli(
+    args: Optional[list[str]] = typer.Argument(default=None, help="Arguments passed to the multica CLI binary."),
+):
+    """Run the multica CLI (server/bin/multica or go run)."""
+    cli_bin = ROOT / "server" / "bin" / "multica"
+    if cli_bin.exists():
+        exec_into(str(cli_bin), *(args or []))
+    else:
+        exec_into("go", "run", "./cmd/multica", *(args or []), cwd=ROOT / "server")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    app()
