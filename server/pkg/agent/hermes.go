@@ -159,7 +159,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			_ = result
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
-				"cwd": cwd,
+				"cwd":        cwd,
+				"mcpServers": []any{},
 			})
 			if err != nil {
 				finalStatus = "failed"
