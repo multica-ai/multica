@@ -1,13 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  Cloud,
-  Monitor,
-  ChevronDown,
-  Globe,
-  Lock,
-} from "lucide-react";
+import { Cloud, ChevronDown, Globe, Lock } from "lucide-react";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import type {
   AgentVisibility,
   RuntimeDevice,
@@ -82,7 +77,7 @@ export function CreateAgentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
           <div>
             <Label className="text-xs text-muted-foreground">Name</Label>
             <Input
@@ -143,17 +138,17 @@ export function CreateAgentDialog({
             </div>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <Label className="text-xs text-muted-foreground">Runtime</Label>
             <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
               <PopoverTrigger
                 disabled={runtimes.length === 0}
-                className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
               >
-                {selectedRuntime?.runtime_mode === "cloud" ? (
-                  <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
+                {selectedRuntime ? (
+                  <ProviderLogo provider={selectedRuntime.provider} className="h-4 w-4 shrink-0" />
                 ) : (
-                  <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -184,11 +179,7 @@ export function CreateAgentDialog({
                       device.id === selectedRuntimeId ? "bg-accent" : "hover:bg-accent/50"
                     }`}
                   >
-                    {device.runtime_mode === "cloud" ? (
-                      <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
+                    <ProviderLogo provider={device.provider} className="h-4 w-4 shrink-0" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium">{device.name}</span>

@@ -28,64 +28,48 @@ function OpenCodeLogo({ className }: { className: string }) {
   );
 }
 
-// OpenClaw — official pixel lobster mascot from openclaw/openclaw
+// OpenClaw — lobster mascot, vector version based on official branding
 function OpenClawLogo({ className }: { className: string }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" className={className}>
-      {/* outline */}
-      <g fill="#3a0a0d">
-        <rect x="1" y="5" width="1" height="3" />
-        <rect x="2" y="4" width="1" height="1" />
-        <rect x="2" y="8" width="1" height="1" />
-        <rect x="3" y="3" width="1" height="1" />
-        <rect x="3" y="9" width="1" height="1" />
-        <rect x="4" y="2" width="1" height="1" />
-        <rect x="4" y="10" width="1" height="1" />
-        <rect x="5" y="2" width="6" height="1" />
-        <rect x="11" y="2" width="1" height="1" />
-        <rect x="12" y="3" width="1" height="1" />
-        <rect x="12" y="9" width="1" height="1" />
-        <rect x="13" y="4" width="1" height="1" />
-        <rect x="13" y="8" width="1" height="1" />
-        <rect x="14" y="5" width="1" height="3" />
-        <rect x="5" y="11" width="6" height="1" />
-        <rect x="4" y="12" width="1" height="1" />
-        <rect x="11" y="12" width="1" height="1" />
-        <rect x="3" y="13" width="1" height="1" />
-        <rect x="12" y="13" width="1" height="1" />
-        <rect x="5" y="14" width="6" height="1" />
-      </g>
-      {/* body */}
-      <g fill="#ff4f40">
-        <rect x="5" y="3" width="6" height="1" />
-        <rect x="4" y="4" width="8" height="1" />
-        <rect x="3" y="5" width="10" height="1" />
-        <rect x="3" y="6" width="10" height="1" />
-        <rect x="3" y="7" width="10" height="1" />
-        <rect x="4" y="8" width="8" height="1" />
-        <rect x="5" y="9" width="6" height="1" />
-        <rect x="5" y="12" width="6" height="1" />
-        <rect x="6" y="13" width="4" height="1" />
-      </g>
-      {/* claws */}
-      <g fill="#ff775f">
-        <rect x="1" y="6" width="2" height="1" />
-        <rect x="2" y="5" width="1" height="1" />
-        <rect x="2" y="7" width="1" height="1" />
-        <rect x="13" y="6" width="2" height="1" />
-        <rect x="13" y="5" width="1" height="1" />
-        <rect x="13" y="7" width="1" height="1" />
-      </g>
-      {/* eyes */}
-      <g fill="#081016">
-        <rect x="6" y="5" width="1" height="1" />
-        <rect x="9" y="5" width="1" height="1" />
-      </g>
-      <g fill="#f5fbff">
-        <rect x="6" y="4" width="1" height="1" />
-        <rect x="9" y="4" width="1" height="1" />
-      </g>
+      {/* Body */}
+      <path
+        d="M8 2C5.5 2 3.5 4 3.5 6.5S5 10.5 6.5 11v1.5H8V11c.3.1.7.1 1 0v1.5h1.5V11c1.5-.5 3-2.5 3-4.5S10.5 2 8 2Z"
+        fill="#E8453A"
+      />
+      {/* Left claw */}
+      <path
+        d="M3.5 5.5C2 5 1 6 1.5 7s2 .5 2.2-.7"
+        fill="#FF6B5A"
+      />
+      {/* Right claw */}
+      <path
+        d="M12.5 5.5c1.5-.5 2.5.5 2 1.5s-2 .5-2.2-.7"
+        fill="#FF6B5A"
+      />
+      {/* Antennae */}
+      <path d="M6.5 3Q5 1.2 4.3 1.5" stroke="#FF6B5A" strokeWidth="0.8" strokeLinecap="round" />
+      <path d="M9.5 3Q11 1.2 11.7 1.5" stroke="#FF6B5A" strokeWidth="0.8" strokeLinecap="round" />
+      {/* Eyes */}
+      <circle cx="6.2" cy="5.2" r="0.9" fill="#050810" />
+      <circle cx="9.8" cy="5.2" r="0.9" fill="#050810" />
+      <circle cx="6.4" cy="5" r="0.3" fill="#00E5CC" />
+      <circle cx="10" cy="5" r="0.3" fill="#00E5CC" />
     </svg>
+  );
+}
+
+// Hermes (NousResearch) — official anime mascot, 48×48 webp embedded as data URI
+const HERMES_ICON =
+  "data:image/webp;base64,UklGRuYDAABXRUJQVlA4INoDAADQEwCdASowADAAPm0uk0ckIiGhKrqpWIANiWkAEyQea/fD8IewvGL5V7Nb3H8u/MA8G9rT+4flL+UfIe42/23GB8zPqF/o3E0UAP5h/h/+F6ZX+x5evnX/r+4T/K/67/u/zg7znogfrusMANZLkn1gvlY/vNsKubtj/9xLSzxTsLr7K9GLdFNs5rwtISRcPXvH4z57n2fg0XR3aQ2D+pPpycwyl7TwAAD+/2DbjivnePzfyHCsdOgJXKlUR/OgAkofD7K4AdmsPKyP5Ml4/4HBYmIm5/efn/H+X3IZtngyaUOvwbFuRS/1yODFYO3vf3qeXGgPdfgIROXd/EPT7K2jysfvY9N71+w6g2gBPs+P6lxYkPf6S9QfpvH/7Pp7i8xRh0nVDBTEQyczSz7V9hoqo4nDJuii+SfibZRR/d5zB+9jkcb1DNN7YnC5Y7+WfGrE3eseXt3hSm+NS5++m1MHbjsrd9z/Q4HPRP/C85Po41XObalGyIUcFUL2j2n3uI/Yh6U8r6trCUJFB4kT3fsv6+8ylX/d96y2hq869FCXLjq4YqEO8vs5BtT52sf7KyDxPAWkH/b06YbfVXf4/7y5THL6Sr/4mOrrY9P2LW81f05HHFN8n0jcyqKOH7AluMm0AHPgFyz8RVrfBdmnPiC2FLMQfNDte5yGFzGC3fMlDed/tS/PO3Q/hjsNLvAXUUjqHyCo3JeN69jyNgWjjf8iUqoBsXT+lJyp2r8p60ad1jxhNyTblyJwda8aWEw1hFDeGjpMGguDF66RL4c+ZO+PhculC6WxvCsZ7IPAsdD7/ywx3w3AowJ66hAAK7k+m6X2QV06OVOCwyIGERex/AUyuBbLUK93X58+M+Si7YfYjVYGpoJ7JvSgD8ExaA21z9OY+si+1wreacDanKnFDmhwBQC3t6MLeXCOGp3VURDKl10K7tdKHQcb4hr48ba+1x/MrMRwHfq3IQrDIXPYCg4b0OLnVN9JyXttKGM63B5imIdKuU0r6hhSslT10lGLjnIJuwO5WKR0RHs+BX5vs6H63y3K7IuuZ1eRN+Aczvbs4QuDs6ZRuzjJ/1DJ5R/3ZrFPrtxvMwT06vAXIgcbhLGNLhOQUYRPdUN5MgyCtL5NH71ArTPLRRkIjhGwoCYXKKqlqIKKT9NX3vwp/nlh4SX71dlYg/mPXbJ9bMeVugyjqFahjFTJ/rT3HtBCWG8h+OvvbOFDFKurCG9BOhO9B719OS7zsP0KPqoymnv7hVvoJyZp0iziCbBvaJpmF9Cvfs8/vWqWr7TUo616WfMW+X9nkgpuqtnfAAAAAA==";
+
+function HermesLogo({ className }: { className: string }) {
+  return (
+    <img
+      src={HERMES_ICON}
+      alt="Hermes"
+      className={`${className} rounded-sm`}
+    />
   );
 }
 
@@ -105,6 +89,8 @@ export function ProviderLogo({
       return <OpenCodeLogo className={className} />;
     case "openclaw":
       return <OpenClawLogo className={className} />;
+    case "hermes":
+      return <HermesLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
