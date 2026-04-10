@@ -131,7 +131,11 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Agent Skills\n\n")
 		b.WriteString("The following skills are available to you:\n\n")
 		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			if skill.Description != "" {
+				fmt.Fprintf(&b, "- **%s** — %s\n", skill.Name, skill.Description)
+			} else {
+				fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			}
 		}
 		b.WriteString("\n")
 	}

@@ -48,9 +48,10 @@ type AgentData struct {
 
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
-	Name    string          `json:"name"`
-	Content string          `json:"content"`
-	Files   []SkillFileData `json:"files,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Content     string          `json:"content"`
+	Files       []SkillFileData `json:"files,omitempty"`
 }
 
 // SkillFileData represents a supporting file within a skill.

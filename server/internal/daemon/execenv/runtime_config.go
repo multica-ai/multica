@@ -150,7 +150,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}
 		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			if skill.Description != "" {
+				fmt.Fprintf(&b, "- **%s** — %s\n", skill.Name, skill.Description)
+			} else {
+				fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			}
 		}
 		b.WriteString("\n")
 	}
