@@ -9,6 +9,7 @@ import {
   Save,
   AlertCircle,
   Download,
+  Globe,
 } from "lucide-react";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
 import {
@@ -230,6 +231,7 @@ function SkillListItem({
   isSelected: boolean;
   onClick: () => void;
 }) {
+  const isGlobal = skill.source === "global";
   return (
     <button
       onClick={onClick}
@@ -238,7 +240,10 @@ function SkillListItem({
       }`}
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Sparkles className="h-4 w-4 text-muted-foreground" />
+        {isGlobal
+          ? <Globe className="h-4 w-4 text-muted-foreground" />
+          : <Sparkles className="h-4 w-4 text-muted-foreground" />
+        }
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{skill.name}</div>
@@ -248,7 +253,7 @@ function SkillListItem({
           </div>
         )}
       </div>
-      {(skill.files?.length ?? 0) > 0 && (
+      {!isGlobal && (skill.files?.length ?? 0) > 0 && (
         <Badge variant="secondary">
           {skill.files.length} file{skill.files.length !== 1 ? "s" : ""}
         </Badge>
@@ -609,6 +614,40 @@ function SkillDetail({
 }
 
 // ---------------------------------------------------------------------------
+// Global Skill Detail (read-only)
+// ---------------------------------------------------------------------------
+
+function GlobalSkillDetail({ skill }: { skill: Skill }) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+          <Globe className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">{skill.name}</div>
+          {skill.description && (
+            <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
+          )}
+        </div>
+        <Badge variant="secondary" className="shrink-0 text-xs">Global</Badge>
+      </div>
+      <div className="flex flex-1 items-center justify-center p-8 text-center text-muted-foreground">
+        <div>
+          <Globe className="mx-auto h-8 w-8 text-muted-foreground/30" />
+          <p className="mt-3 text-sm font-medium">Read-only skill</p>
+          <p className="mt-1 text-xs max-w-xs">
+            This skill is provided by your local daemon from{" "}
+            <code className="font-mono text-[11px]">~/.agents/skills</code>.
+            Edit it directly on disk.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -623,11 +662,14 @@ export default function SkillsPage() {
     id: "multica_skills_layout",
   });
 
+  const workspaceSkills = skills.filter((s) => s.source !== "global");
+  const globalSkills = skills.filter((s) => s.source === "global");
+
   useEffect(() => {
-    if (skills.length > 0 && !selectedId) {
-      setSelectedId(skills[0]!.id);
+    if (workspaceSkills.length > 0 && !selectedId) {
+      setSelectedId(workspaceSkills[0]!.id);
     }
-  }, [skills, selectedId]);
+  }, [workspaceSkills, selectedId]);
 
   const handleCreate = async (data: CreateSkillRequest) => {
     const skill = await api.createSkill(data);
@@ -658,7 +700,7 @@ export default function SkillsPage() {
     try {
       await api.deleteSkill(id);
       if (selectedId === id) {
-        const remaining = skills.filter((s) => s.id !== id);
+        const remaining = workspaceSkills.filter((s) => s.id !== id);
         setSelectedId(remaining[0]?.id ?? "");
       }
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
@@ -741,7 +783,7 @@ export default function SkillsPage() {
               <TooltipContent side="bottom">Create skill</TooltipContent>
             </Tooltip>
           </div>
-          {skills.length === 0 ? (
+          {workspaceSkills.length === 0 && globalSkills.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Sparkles className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
@@ -758,15 +800,39 @@ export default function SkillsPage() {
               </Button>
             </div>
           ) : (
-            <div className="divide-y">
-              {skills.map((skill) => (
-                <SkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  isSelected={skill.id === selectedId}
-                  onClick={() => setSelectedId(skill.id)}
-                />
-              ))}
+            <div>
+              {workspaceSkills.length > 0 && (
+                <div className="divide-y">
+                  {workspaceSkills.map((skill) => (
+                    <SkillListItem
+                      key={skill.id}
+                      skill={skill}
+                      isSelected={skill.id === selectedId}
+                      onClick={() => setSelectedId(skill.id)}
+                    />
+                  ))}
+                </div>
+              )}
+              {globalSkills.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 border-t px-4 py-2">
+                    <Globe className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Global
+                    </span>
+                  </div>
+                  <div className="divide-y">
+                    {globalSkills.map((skill) => (
+                      <SkillListItem
+                        key={skill.id}
+                        skill={skill}
+                        isSelected={skill.id === selectedId}
+                        onClick={() => setSelectedId(skill.id)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -778,12 +844,16 @@ export default function SkillsPage() {
         {/* Right column — skill detail */}
         <div className="flex-1 overflow-hidden h-full">
           {selected ? (
-            <SkillDetail
-              key={selected.id}
-              skill={selected}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
-            />
+            selected.source === "global" ? (
+              <GlobalSkillDetail key={selected.id} skill={selected} />
+            ) : (
+              <SkillDetail
+                key={selected.id}
+                skill={selected}
+                onUpdate={handleUpdate}
+                onDelete={handleDelete}
+              />
+            )
           ) : (
             <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
               <Sparkles className="h-10 w-10 text-muted-foreground/30" />

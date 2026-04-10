@@ -255,11 +255,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 
 	req := map[string]any{
-		"workspace_id": workspaceID,
-		"daemon_id":    d.cfg.DaemonID,
-		"device_name":  d.cfg.DeviceName,
-		"cli_version":  d.cfg.CLIVersion,
-		"runtimes":     runtimes,
+		"workspace_id":  workspaceID,
+		"daemon_id":     d.cfg.DaemonID,
+		"device_name":   d.cfg.DeviceName,
+		"cli_version":   d.cfg.CLIVersion,
+		"runtimes":      runtimes,
+		"global_skills": execenv.ScanGlobalSkills(),
 	}
 
 	resp, err := d.client.Register(ctx, req)

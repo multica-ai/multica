@@ -30,6 +30,11 @@ type DaemonRegisterRequest struct {
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
 	} `json:"runtimes"`
+	// GlobalSkills are skills found in ~/.agents/skills/ on the daemon's machine.
+	GlobalSkills []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"global_skills,omitempty"`
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +117,40 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp = append(resp, runtimeToResponse(registered))
+	}
+
+	// Sync global skills for each registered runtime.
+	if len(req.GlobalSkills) > 0 {
+		names := make([]string, len(req.GlobalSkills))
+		for i, gs := range req.GlobalSkills {
+			names[i] = gs.Name
+		}
+		for _, rt := range resp {
+			rtID := parseUUID(rt.ID)
+			for _, gs := range req.GlobalSkills {
+				if _, err := h.Queries.UpsertRuntimeGlobalSkill(r.Context(), db.UpsertRuntimeGlobalSkillParams{
+					RuntimeID:   rtID,
+					Name:        gs.Name,
+					Description: gs.Description,
+				}); err != nil {
+					slog.Warn("upsert global skill failed", "runtime_id", rt.ID, "skill", gs.Name, "error", err)
+				}
+			}
+			// Remove skills that are no longer present on disk.
+			if err := h.Queries.DeleteRuntimeGlobalSkillsNotIn(r.Context(), db.DeleteRuntimeGlobalSkillsNotInParams{
+				RuntimeID: rtID,
+				Names:     names,
+			}); err != nil {
+				slog.Warn("prune global skills failed", "runtime_id", rt.ID, "error", err)
+			}
+		}
+	} else {
+		// No global skills reported — clear any stale entries for these runtimes.
+		for _, rt := range resp {
+			if err := h.Queries.DeleteAllRuntimeGlobalSkills(r.Context(), parseUUID(rt.ID)); err != nil {
+				slog.Warn("clear global skills failed", "runtime_id", rt.ID, "error", err)
+			}
+		}
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))

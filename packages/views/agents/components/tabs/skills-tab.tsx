@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, FileText, Trash2 } from "lucide-react";
+import { Plus, FileText, Trash2, Globe } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import {
   Dialog,
@@ -25,9 +25,12 @@ export function SkillsTab({
 }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { data: allSkills = [] } = useQuery(skillListOptions(wsId));
   const [saving, setSaving] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+
+  const workspaceSkills = allSkills.filter((s) => s.source !== "global");
+  const globalSkills = allSkills.filter((s) => s.source === "global");
 
   const agentSkillIds = new Set(agent.skills.map((s) => s.id));
   const availableSkills = workspaceSkills.filter((s) => !agentSkillIds.has(s.id));
@@ -60,73 +63,110 @@ export function SkillsTab({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Skills</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Reusable skills assigned to this agent. Manage skills on the Skills page.
-          </p>
+    <div className="space-y-6">
+      {/* Assigned workspace skills */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Skills</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Reusable skills assigned to this agent. Manage skills on the Skills page.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => setShowPicker(true)}
+            disabled={saving || availableSkills.length === 0}
+          >
+            <Plus className="h-3 w-3" />
+            Add Skill
+          </Button>
         </div>
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => setShowPicker(true)}
-          disabled={saving || availableSkills.length === 0}
-        >
-          <Plus className="h-3 w-3" />
-          Add Skill
-        </Button>
+
+        {agent.skills.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
+            <FileText className="h-8 w-8 text-muted-foreground/40" />
+            <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Add skills from the workspace to this agent.
+            </p>
+            {availableSkills.length > 0 && (
+              <Button
+                onClick={() => setShowPicker(true)}
+                size="xs"
+                className="mt-3"
+                disabled={saving}
+              >
+                <Plus className="h-3 w-3" />
+                Add Skill
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {agent.skills.map((skill) => (
+              <div
+                key={skill.id}
+                className="flex items-center gap-3 rounded-lg border px-4 py-3"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{skill.name}</div>
+                  {skill.description && (
+                    <div className="text-xs text-muted-foreground truncate">
+                      {skill.description}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => handleRemove(skill.id)}
+                  disabled={saving}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {agent.skills.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
-          <FileText className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Add skills from the workspace to this agent.
+      {/* Global skills — read-only, from daemon ~/.agents/skills */}
+      {globalSkills.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Global Skills</h3>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            Available to all agents from{" "}
+            <code className="font-mono text-[11px]">~/.agents/skills</code> on the daemon machine.
           </p>
-          {availableSkills.length > 0 && (
-            <Button
-              onClick={() => setShowPicker(true)}
-              size="xs"
-              className="mt-3"
-              disabled={saving}
-            >
-              <Plus className="h-3 w-3" />
-              Add Skill
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {agent.skills.map((skill) => (
-            <div
-              key={skill.id}
-              className="flex items-center gap-3 rounded-lg border px-4 py-3"
-            >
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{skill.name}</div>
-                {skill.description && (
-                  <div className="text-xs text-muted-foreground truncate">
-                    {skill.description}
-                  </div>
-                )}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => handleRemove(skill.id)}
-                disabled={saving}
-                className="text-muted-foreground hover:text-destructive"
+          <div className="space-y-2">
+            {globalSkills.map((skill) => (
+              <div
+                key={skill.id}
+                className="flex items-center gap-3 rounded-lg border border-dashed px-4 py-3 opacity-80"
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ))}
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{skill.name}</div>
+                  {skill.description && (
+                    <div className="text-xs text-muted-foreground truncate">
+                      {skill.description}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

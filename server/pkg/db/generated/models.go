@@ -281,6 +281,15 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type RuntimeGlobalSkill struct {
+	ID          pgtype.UUID        `json:"id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`

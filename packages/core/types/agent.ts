@@ -90,10 +90,15 @@ export interface Skill {
   description: string;
   content: string;
   config: Record<string, unknown>;
-  files: SkillFile[];
+  /** Only present on GetSkill responses; absent from list responses */
+  files?: SkillFile[];
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** "workspace" for managed skills, "global" for daemon-reported ~/.agents/skills */
+  source: "workspace" | "global";
+  /** Set when source === "global"; identifies which runtime reported the skill */
+  runtime_id?: string;
 }
 
 export interface SkillFile {

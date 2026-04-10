@@ -20,15 +20,18 @@ import (
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-	Config      any    `json:"config"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Content     string  `json:"content"`
+	Config      any     `json:"config"`
 	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+	// Source discriminates workspace-managed skills from daemon-reported global skills.
+	Source    string `json:"source"`               // "workspace" | "global"
+	RuntimeID string `json:"runtime_id,omitempty"` // set when source == "global"
 }
 
 type SkillFileResponse struct {
@@ -64,6 +67,7 @@ func skillToResponse(s db.Skill) SkillResponse {
 		CreatedBy:   uuidToPtr(s.CreatedBy),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
+		Source:      "workspace",
 	}
 }
 
@@ -151,9 +155,26 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
-	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+	resp := make([]SkillResponse, 0, len(skills))
+	for _, s := range skills {
+		resp = append(resp, skillToResponse(s))
+	}
+
+	// Append global skills reported by online daemon runtimes.
+	globalSkills, err := h.Queries.ListGlobalSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err == nil {
+		for _, g := range globalSkills {
+			resp = append(resp, SkillResponse{
+				ID:        uuidToString(g.ID),
+				Name:      g.Name,
+				Description: g.Description,
+				Source:    "global",
+				RuntimeID: uuidToString(g.RuntimeID),
+				CreatedAt: timestampToString(g.CreatedAt),
+				UpdatedAt: timestampToString(g.UpdatedAt),
+				Config:    map[string]any{},
+			})
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
