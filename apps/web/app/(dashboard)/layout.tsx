@@ -10,7 +10,6 @@ import { useWorkspaceStore } from "@/platform/workspace";
 import { WorkspaceIdProvider } from "@multica/core/hooks";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { SearchCommand } from "@/features/search";
-import { DashboardLocaleProvider } from "@/features/dashboard/i18n";
 import { AppSidebar } from "./_components/app-sidebar";
 
 export default function DashboardLayout({
@@ -57,17 +56,15 @@ export default function DashboardLayout({
   }
 
   return (
-    <DashboardLocaleProvider>
-      <WorkspaceIdProvider wsId={workspace.id}>
-        <SidebarProvider className="h-svh">
-          <AppSidebar />
-          <SidebarInset className="overflow-hidden">
-            {children}
-            <ModalRegistry />
-          </SidebarInset>
-          <SearchCommand />
-        </SidebarProvider>
-      </WorkspaceIdProvider>
-    </DashboardLocaleProvider>
+    <WorkspaceIdProvider wsId={workspace.id}>
+      <SidebarProvider className="h-svh">
+        <AppSidebar />
+        <SidebarInset className="overflow-hidden">
+          {children}
+          <ModalRegistry />
+        </SidebarInset>
+        <SearchCommand />
+      </SidebarProvider>
+    </WorkspaceIdProvider>
   );
 }

@@ -80,7 +80,7 @@ export function RepositoriesTab() {
                     value={repo.url}
                     onChange={(e) => handleRepoChange(index, "url", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="https://github.com/org/repo"
+                    placeholder={t.repositories.repoUrlPlaceholder}
                     className="text-sm"
                   />
                   <Input
@@ -88,7 +88,7 @@ export function RepositoriesTab() {
                     value={repo.description}
                     onChange={(e) => handleRepoChange(index, "description", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="Description (e.g. Go backend + Next.js frontend)"
+                    placeholder={t.repositories.repoDescriptionPlaceholder}
                     className="text-sm"
                   />
                 </div>
@@ -124,7 +124,7 @@ export function RepositoriesTab() {
 
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can manage repositories.
+                {t.repositories.onlyAdminsCanManage}
               </p>
             )}
           </CardContent>

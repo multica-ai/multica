@@ -8,6 +8,7 @@ import { AuthInitializer } from "@/features/auth";
 import { WebWSProvider } from "@/platform/ws-provider";
 import { WebNavigationProvider } from "@/platform/navigation";
 import { LocaleSync } from "@/components/locale-sync";
+import { DashboardLocaleProvider } from "@/features/dashboard/i18n";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -64,16 +65,18 @@ export default function RootLayout({
     >
       <body className="h-full overflow-hidden">
         <LocaleSync />
-        <ThemeProvider>
-          <QueryProvider>
-            <WebNavigationProvider>
-              <AuthInitializer>
-                <WebWSProvider>{children}</WebWSProvider>
-              </AuthInitializer>
-            </WebNavigationProvider>
-            <Toaster />
-          </QueryProvider>
-        </ThemeProvider>
+        <DashboardLocaleProvider>
+          <ThemeProvider>
+            <QueryProvider>
+              <WebNavigationProvider>
+                <AuthInitializer>
+                  <WebWSProvider>{children}</WebWSProvider>
+                </AuthInitializer>
+              </WebNavigationProvider>
+              <Toaster />
+            </QueryProvider>
+          </ThemeProvider>
+        </DashboardLocaleProvider>
       </body>
     </html>
   );

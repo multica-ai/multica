@@ -142,7 +142,7 @@ export function WorkspaceTab() {
                 rows={3}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder={t.workspace.description}
+                placeholder={t.workspace.workspaceDescriptionPlaceholder}
               />
             </div>
             <div>

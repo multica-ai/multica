@@ -152,9 +152,9 @@ export function MembersTab() {
   const { t } = useDashboardLocale();
 
   const roleConfig: Record<MemberRole, RoleConfig> = {
-    owner: { label: t.members.roles.owner, icon: Crown, description: "Full access, manage all settings" },
-    admin: { label: t.members.roles.admin, icon: Shield, description: "Manage members and settings" },
-    member: { label: t.members.roles.member, icon: User, description: "Create and work on issues" },
+    owner: { label: t.members.roles.owner, icon: Crown, description: t.members.roleDescriptions.owner },
+    admin: { label: t.members.roles.admin, icon: Shield, description: t.members.roleDescriptions.admin },
+    member: { label: t.members.roles.member, icon: User, description: t.members.roleDescriptions.member },
   };
 
   const [inviteEmail, setInviteEmail] = useState("");
@@ -197,7 +197,7 @@ export function MembersTab() {
       await api.updateMember(workspace.id, memberId, { role });
       qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update member");
+      toast.error(e instanceof Error ? e.message : t.members.failedUpdateRole);
     } finally {
       setMemberActionId(null);
     }
@@ -287,7 +287,7 @@ export function MembersTab() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No members found.</p>
+          <p className="text-sm text-muted-foreground">{t.members.noMembersFound}</p>
         )}
       </section>
 

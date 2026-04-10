@@ -104,7 +104,7 @@ export function AccountTab() {
                 onChange={handleAvatarUpload}
               />
               <div className="text-xs text-muted-foreground">
-                Click to upload avatar
+                {t.account.clickToUploadAvatar}
               </div>
             </div>
 

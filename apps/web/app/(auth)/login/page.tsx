@@ -23,6 +23,7 @@ import {
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
 import type { User } from "@multica/core/types";
+import { useDashboardLocale } from "@/features/dashboard/i18n";
 
 function validateCliCallback(cliCallback: string): boolean {
   try {
@@ -53,6 +54,7 @@ function LoginPageContent() {
   const verifyCode = useAuthStore((s) => s.verifyCode);
   const hydrateWorkspace = useWorkspaceStore((s) => s.hydrateWorkspace);
   const searchParams = useSearchParams();
+  const { t } = useDashboardLocale();
 
   // Already authenticated — redirect to dashboard
   useEffect(() => {
@@ -112,7 +114,7 @@ function LoginPageContent() {
   const handleSendCode = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!email) {
-      setError("Email is required");
+      setError(t.auth.email + " is required");
       return;
     }
     setError("");
@@ -126,7 +128,7 @@ function LoginPageContent() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to send code. Make sure the server is running."
+          : t.auth.failedSendCode
       );
     } finally {
       setSubmitting(false);
@@ -163,13 +165,13 @@ function LoginPageContent() {
         router.push(searchParams.get("next") || "/issues");
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Invalid or expired code"
+          err instanceof Error ? err.message : t.auth.failedVerifyCode
         );
         setCode("");
         setSubmitting(false);
       }
     },
-    [email, verifyCode, hydrateWorkspace, router, searchParams]
+    [email, verifyCode, hydrateWorkspace, router, searchParams, t]
   );
 
   const handleResend = async () => {
@@ -180,7 +182,7 @@ function LoginPageContent() {
       setCooldown(10);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to resend code"
+        err instanceof Error ? err.message : t.auth.failedSendCode
       );
     }
   };
@@ -230,9 +232,9 @@ function LoginPageContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Check your email</CardTitle>
+            <CardTitle className="text-2xl">{t.auth.verificationCode}</CardTitle>
             <CardDescription>
-              We sent a verification code to{" "}
+              {t.auth.codeDescription}{" "}
               <span className="font-medium text-foreground">{email}</span>
             </CardDescription>
           </CardHeader>
@@ -279,7 +281,7 @@ function LoginPageContent() {
                 setError("");
               }}
             >
-              Back
+              {t.auth.backToEmail}
             </Button>
           </CardFooter>
         </Card>
@@ -308,16 +310,16 @@ function LoginPageContent() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Multica</CardTitle>
-          <CardDescription>Turn coding agents into real teammates</CardDescription>
+          <CardDescription>{t.auth.signInDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t.auth.email}</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder={t.auth.emailPlaceholder}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -336,7 +338,7 @@ function LoginPageContent() {
             className="w-full"
             size="lg"
           >
-            {submitting ? "Sending code..." : "Continue"}
+            {submitting ? t.auth.sending : t.auth.sendCode}
           </Button>
           {googleClientId && (
             <>

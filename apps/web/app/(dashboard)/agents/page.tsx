@@ -74,27 +74,28 @@ import { issueListOptions } from "@multica/core/issues/queries";
 import { skillListOptions, agentListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useDashboardLocale } from "@/features/dashboard/i18n";
 
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const statusConfig: Record<AgentStatus, { label: string; color: string; dot: string }> = {
-  idle: { label: "Idle", color: "text-muted-foreground", dot: "bg-muted-foreground" },
-  working: { label: "Working", color: "text-success", dot: "bg-success" },
-  blocked: { label: "Blocked", color: "text-warning", dot: "bg-warning" },
-  error: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
-  offline: { label: "Offline", color: "text-muted-foreground/50", dot: "bg-muted-foreground/40" },
+const statusConfig: Record<AgentStatus, { color: string; dot: string }> = {
+  idle: { color: "text-muted-foreground", dot: "bg-muted-foreground" },
+  working: { color: "text-success", dot: "bg-success" },
+  blocked: { color: "text-warning", dot: "bg-warning" },
+  error: { color: "text-destructive", dot: "bg-destructive" },
+  offline: { color: "text-muted-foreground/50", dot: "bg-muted-foreground/40" },
 };
 
-const taskStatusConfig: Record<string, { label: string; icon: typeof CheckCircle2; color: string }> = {
-  queued: { label: "Queued", icon: Clock, color: "text-muted-foreground" },
-  dispatched: { label: "Dispatched", icon: Play, color: "text-info" },
-  running: { label: "Running", icon: Loader2, color: "text-success" },
-  completed: { label: "Completed", icon: CheckCircle2, color: "text-success" },
-  failed: { label: "Failed", icon: XCircle, color: "text-destructive" },
-  cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground" },
+const taskStatusIcons: Record<string, { icon: typeof CheckCircle2; color: string }> = {
+  queued: { icon: Clock, color: "text-muted-foreground" },
+  dispatched: { icon: Play, color: "text-info" },
+  running: { icon: Loader2, color: "text-success" },
+  completed: { icon: CheckCircle2, color: "text-success" },
+  failed: { icon: XCircle, color: "text-destructive" },
+  cancelled: { icon: XCircle, color: "text-muted-foreground" },
 };
 
 
@@ -119,6 +120,7 @@ function CreateAgentDialog({
   onClose: () => void;
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
+  const { t } = useDashboardLocale();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimes[0]?.id ?? "");
@@ -146,7 +148,7 @@ function CreateAgentDialog({
       });
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create agent");
+      toast.error(err instanceof Error ? err.message : t.agents.failedCreate);
       setCreating(false);
     }
   };
@@ -155,39 +157,39 @@ function CreateAgentDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Agent</DialogTitle>
+          <DialogTitle>{t.agents.createAgent}</DialogTitle>
           <DialogDescription>
-            Create a new AI agent for your workspace.
+            {t.agents.createAgentDesc}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <Label className="text-xs text-muted-foreground">Name</Label>
+            <Label className="text-xs text-muted-foreground">{t.agents.name}</Label>
             <Input
               autoFocus
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Deep Research Agent"
+              placeholder={t.agents.namePlaceholder}
               className="mt-1"
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             />
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Description</Label>
+            <Label className="text-xs text-muted-foreground">{t.agents.description}</Label>
             <Input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this agent do?"
+              placeholder={t.agents.descriptionPlaceholder}
               className="mt-1"
             />
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Visibility</Label>
+            <Label className="text-xs text-muted-foreground">{t.agents.visibility}</Label>
             <div className="mt-1.5 flex gap-2">
               <button
                 type="button"
@@ -200,8 +202,8 @@ function CreateAgentDialog({
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Workspace</div>
-                  <div className="text-xs text-muted-foreground">All members can assign</div>
+                  <div className="font-medium">{t.agents.visibilityPublic}</div>
+                  <div className="text-xs text-muted-foreground">{t.agents.visibilityPublicDesc}</div>
                 </div>
               </button>
               <button
@@ -215,15 +217,15 @@ function CreateAgentDialog({
               >
                 <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Private</div>
-                  <div className="text-xs text-muted-foreground">Only you can assign</div>
+                  <div className="font-medium">{t.agents.visibilityPrivate}</div>
+                  <div className="text-xs text-muted-foreground">{t.agents.visibilityPrivateDesc}</div>
                 </div>
               </button>
             </div>
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Runtime</Label>
+            <Label className="text-xs text-muted-foreground">{t.agents.runtime}</Label>
             <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
               <PopoverTrigger
                 disabled={runtimes.length === 0}
@@ -237,16 +239,16 @@ function CreateAgentDialog({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">
-                      {selectedRuntime?.name ?? "No runtime available"}
+                      {selectedRuntime?.name ?? t.agents.noRuntime}
                     </span>
                     {selectedRuntime?.runtime_mode === "cloud" && (
                       <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                        Cloud
+                        {t.agents.cloud}
                       </span>
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {selectedRuntime?.device_info ?? "Register a runtime before creating an agent"}
+                    {selectedRuntime?.device_info ?? t.agents.registerRuntime}
                   </div>
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
@@ -273,7 +275,7 @@ function CreateAgentDialog({
                         <span className="truncate font-medium">{device.name}</span>
                         {device.runtime_mode === "cloud" && (
                           <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                            Cloud
+                            {t.agents.cloud}
                           </span>
                         )}
                       </div>
@@ -293,13 +295,13 @@ function CreateAgentDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.agents.cancel}
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={creating || !name.trim() || !selectedRuntime}
           >
-            {creating ? "Creating..." : "Create"}
+            {creating ? t.agents.creating : t.agents.create}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -320,6 +322,7 @@ function AgentListItem({
   isSelected: boolean;
   onClick: () => void;
 }) {
+  const { t } = useDashboardLocale();
   const st = statusConfig[agent.status];
   const isArchived = !!agent.archived_at;
 
@@ -343,11 +346,11 @@ function AgentListItem({
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
           {isArchived ? (
-            <span className="text-xs text-muted-foreground">Archived</span>
+            <span className="text-xs text-muted-foreground">{t.agents.archived}</span>
           ) : (
             <>
               <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-              <span className={`text-xs ${st.color}`}>{st.label}</span>
+              <span className={`text-xs ${st.color}`}>{t.agents.statusLabels[agent.status]}</span>
             </>
           )}
         </div>
@@ -367,6 +370,7 @@ function InstructionsTab({
   agent: Agent;
   onSave: (instructions: string) => Promise<void>;
 }) {
+  const { t } = useDashboardLocale();
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const isDirty = value !== (agent.instructions ?? "");
@@ -390,10 +394,9 @@ function InstructionsTab({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Agent Instructions</h3>
+        <h3 className="text-sm font-semibold">{t.agents.instructionsTitle}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Define this agent&apos;s identity and working style. These instructions are
-          injected into the agent&apos;s context for every task.
+          {t.agents.instructionsDesc}
         </p>
       </div>
 
@@ -406,7 +409,7 @@ function InstructionsTab({
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {value.length > 0 ? `${value.length} characters` : "No instructions set"}
+          {value.length > 0 ? `${value.length} characters` : t.agents.noInstructions}
         </span>
         <Button
           size="xs"
@@ -418,7 +421,7 @@ function InstructionsTab({
           ) : (
             <Save className="h-3 w-3" />
           )}
-          Save
+          {t.agents.save}
         </Button>
       </div>
     </div>
@@ -434,6 +437,7 @@ function SkillsTab({
 }: {
   agent: Agent;
 }) {
+  const { t } = useDashboardLocale();
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
@@ -450,7 +454,7 @@ function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add skill");
+      toast.error(e instanceof Error ? e.message : t.agents.failedAddSkill);
     } finally {
       setSaving(false);
       setShowPicker(false);
@@ -464,7 +468,7 @@ function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to remove skill");
+      toast.error(e instanceof Error ? e.message : t.agents.failedRemoveSkill);
     } finally {
       setSaving(false);
     }
@@ -474,9 +478,9 @@ function SkillsTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Skills</h3>
+          <h3 className="text-sm font-semibold">{t.agents.skills}</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Reusable skills assigned to this agent. Manage skills on the Skills page.
+            {t.agents.skillsDesc}
           </p>
         </div>
         <Button
@@ -486,16 +490,16 @@ function SkillsTab({
           disabled={saving || availableSkills.length === 0}
         >
           <Plus className="h-3 w-3" />
-          Add Skill
+          {t.agents.addSkill}
         </Button>
       </div>
 
       {agent.skills.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t.agents.noSkillsAssigned}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Add skills from the workspace to this agent.
+            {t.agents.addSkillsFrom}
           </p>
           {availableSkills.length > 0 && (
             <Button
@@ -505,7 +509,7 @@ function SkillsTab({
               disabled={saving}
             >
               <Plus className="h-3 w-3" />
-              Add Skill
+              {t.agents.addSkill}
             </Button>
           )}
         </div>
@@ -546,9 +550,9 @@ function SkillsTab({
         <Dialog open onOpenChange={(v) => { if (!v) setShowPicker(false); }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-sm">Add Skill</DialogTitle>
+              <DialogTitle className="text-sm">{t.agents.addSkill}</DialogTitle>
               <DialogDescription className="text-xs">
-                Select a skill to assign to this agent.
+                {t.agents.selectSkill}
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-64 overflow-y-auto space-y-1">
@@ -572,13 +576,13 @@ function SkillsTab({
               ))}
               {availableSkills.length === 0 && (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  All workspace skills are already assigned.
+                  {t.agents.allSkillsAssigned}
                 </p>
               )}
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setShowPicker(false)}>
-                Cancel
+                {t.agents.cancel}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -593,6 +597,7 @@ function SkillsTab({
 // ---------------------------------------------------------------------------
 
 function TasksTab({ agent }: { agent: Agent }) {
+  const { t } = useDashboardLocale();
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
@@ -642,7 +647,7 @@ function TasksTab({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Task Queue</h3>
+        <h3 className="text-sm font-semibold">{t.agents.taskQueue}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
           Issues assigned to this agent and their execution status.
         </p>
@@ -651,15 +656,16 @@ function TasksTab({ agent }: { agent: Agent }) {
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <ListTodo className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">No tasks in queue</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t.agents.noTasks}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Assign an issue to this agent to get started.
+            {t.agents.noTasksDesc}
           </p>
         </div>
       ) : (
         <div className="space-y-1.5">
           {sortedTasks.map((task) => {
-            const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
+            const config = taskStatusIcons[task.status] ?? taskStatusIcons.queued!;
+            const label = t.agents.taskStatusLabels[task.status as keyof typeof t.agents.taskStatusLabels] ?? task.status;
             const Icon = config.icon;
             const issue = issueMap.get(task.issue_id);
             const isActive = task.status === "running" || task.status === "dispatched";
@@ -705,7 +711,7 @@ function TasksTab({ agent }: { agent: Agent }) {
                   </div>
                 </div>
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>
-                  {config.label}
+                  {label}
                 </span>
               </div>
             );
@@ -729,6 +735,7 @@ function SettingsTab({
   runtimes: RuntimeDevice[];
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
+  const { t } = useDashboardLocale();
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
@@ -745,9 +752,9 @@ function SettingsTab({
       const result = await upload(file);
       if (!result) return;
       await onSave({ avatar_url: result.link });
-      toast.success("Avatar updated");
+      toast.success(t.agents.avatarUpdated);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+      toast.error(err instanceof Error ? err.message : t.agents.failedUploadAvatar);
     }
   };
 
@@ -759,15 +766,15 @@ function SettingsTab({
 
   const handleSave = async () => {
     if (!name.trim()) {
-      toast.error("Name is required");
+      toast.error(t.agents.nameRequired);
       return;
     }
     setSaving(true);
     try {
       await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
-      toast.success("Settings saved");
+      toast.success(t.agents.settingsSaved);
     } catch {
-      toast.error("Failed to save settings");
+      toast.error(t.agents.failedSave);
     } finally {
       setSaving(false);
     }
@@ -803,13 +810,13 @@ function SettingsTab({
             onChange={handleAvatarUpload}
           />
           <div className="text-xs text-muted-foreground">
-            Click to upload avatar
+            {t.account.clickToUploadAvatar}
           </div>
         </div>
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">Name</Label>
+        <Label className="text-xs text-muted-foreground">{t.agents.name}</Label>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -818,17 +825,17 @@ function SettingsTab({
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">Description</Label>
+        <Label className="text-xs text-muted-foreground">{t.agents.description}</Label>
         <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="What does this agent do?"
+          placeholder={t.agents.descriptionPlaceholder}
           className="mt-1"
         />
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">Visibility</Label>
+        <Label className="text-xs text-muted-foreground">{t.agents.visibility}</Label>
         <div className="mt-1.5 flex gap-2">
           <button
             type="button"
@@ -841,8 +848,8 @@ function SettingsTab({
           >
             <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="text-left">
-              <div className="font-medium">Workspace</div>
-              <div className="text-xs text-muted-foreground">All members can assign</div>
+              <div className="font-medium">{t.agents.visibilityPublic}</div>
+              <div className="text-xs text-muted-foreground">{t.agents.visibilityPublicDesc}</div>
             </div>
           </button>
           <button
@@ -856,15 +863,15 @@ function SettingsTab({
           >
             <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="text-left">
-              <div className="font-medium">Private</div>
-              <div className="text-xs text-muted-foreground">Only you can assign</div>
+              <div className="font-medium">{t.agents.visibilityPrivate}</div>
+              <div className="text-xs text-muted-foreground">{t.agents.visibilityPrivateDesc}</div>
             </div>
           </button>
         </div>
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">Max Concurrent Tasks</Label>
+        <Label className="text-xs text-muted-foreground">{t.agents.maxConcurrentTasks}</Label>
         <Input
           type="number"
           min={1}
@@ -876,20 +883,20 @@ function SettingsTab({
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">Runtime</Label>
+        <Label className="text-xs text-muted-foreground">{t.agents.runtime}</Label>
         <div className="mt-1 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm text-muted-foreground">
           {agent.runtime_mode === "cloud" ? (
             <Cloud className="h-4 w-4" />
           ) : (
             <Monitor className="h-4 w-4" />
           )}
-          {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
+          {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? t.agents.cloud : t.agents.local)}
         </div>
       </div>
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-        Save Changes
+        {t.agents.saveChanges}
       </Button>
     </div>
   );
@@ -900,13 +907,6 @@ function SettingsTab({
 // ---------------------------------------------------------------------------
 
 type DetailTab = "instructions" | "skills" | "tasks" | "settings";
-
-const detailTabs: { id: DetailTab; label: string; icon: typeof FileText }[] = [
-  { id: "instructions", label: "Instructions", icon: FileText },
-  { id: "skills", label: "Skills", icon: BookOpenText },
-  { id: "tasks", label: "Tasks", icon: ListTodo },
-  { id: "settings", label: "Settings", icon: Settings },
-];
 
 function AgentDetail({
   agent,
@@ -921,11 +921,19 @@ function AgentDetail({
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
 }) {
+  const { t } = useDashboardLocale();
   const st = statusConfig[agent.status];
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
   const isArchived = !!agent.archived_at;
+
+  const detailTabs: { id: DetailTab; label: string; icon: typeof FileText }[] = [
+    { id: "instructions", label: t.agents.detailTabs.instructions, icon: FileText },
+    { id: "skills", label: t.agents.detailTabs.skills, icon: BookOpenText },
+    { id: "tasks", label: t.agents.detailTabs.tasks, icon: ListTodo },
+    { id: "settings", label: t.agents.detailTabs.settings, icon: Settings },
+  ];
 
   return (
     <div className="flex h-full flex-col">
@@ -933,9 +941,9 @@ function AgentDetail({
       {isArchived && (
         <div className="flex items-center gap-2 bg-muted/50 px-4 py-2 text-xs text-muted-foreground border-b">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">This agent is archived. It cannot be assigned or mentioned.</span>
+          <span className="flex-1">{t.agents.archivedBanner}</span>
           <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
-            Restore
+            {t.agents.restore}
           </Button>
         </div>
       )}
@@ -948,12 +956,12 @@ function AgentDetail({
             <h2 className={`text-sm font-semibold truncate ${isArchived ? "text-muted-foreground" : ""}`}>{agent.name}</h2>
             {isArchived ? (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                Archived
+                {t.agents.archived}
               </span>
             ) : (
               <span className={`flex items-center gap-1.5 text-xs ${st.color}`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                {st.label}
+                {t.agents.statusLabels[agent.status]}
               </span>
             )}
             <span className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
@@ -962,7 +970,7 @@ function AgentDetail({
               ) : (
                 <Monitor className="h-3 w-3" />
               )}
-              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
+              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? t.agents.cloud : t.agents.local)}
             </span>
           </div>
         </div>
@@ -981,7 +989,7 @@ function AgentDetail({
                 onClick={() => setConfirmArchive(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Archive Agent
+                {t.agents.archiveMenu}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1036,15 +1044,15 @@ function AgentDetail({
                 <AlertCircle className="h-5 w-5 text-destructive" />
               </div>
               <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-sm font-semibold">Archive agent?</DialogTitle>
+                <DialogTitle className="text-sm font-semibold">{t.agents.archiveConfirmTitle}</DialogTitle>
                 <DialogDescription className="text-xs">
-                  &quot;{agent.name}&quot; will be archived. It won&apos;t be assignable or mentionable, but all history is preserved. You can restore it later.
+                  &quot;{agent.name}&quot; {t.agents.archiveConfirmDesc}
                 </DialogDescription>
               </DialogHeader>
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setConfirmArchive(false)}>
-                Cancel
+                {t.agents.cancel}
               </Button>
               <Button
                 variant="destructive"
@@ -1053,7 +1061,7 @@ function AgentDetail({
                   onArchive(agent.id);
                 }}
               >
-                Archive
+                {t.agents.archive}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1068,6 +1076,7 @@ function AgentDetail({
 // ---------------------------------------------------------------------------
 
 export default function AgentsPage() {
+  const { t } = useDashboardLocale();
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const qc = useQueryClient();
@@ -1105,9 +1114,9 @@ export default function AgentsPage() {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent updated");
+      toast.success(t.agents.agentUpdated);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update agent");
+      toast.error(e instanceof Error ? e.message : t.agents.failedUpdate);
       throw e;
     }
   };
@@ -1116,9 +1125,9 @@ export default function AgentsPage() {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent archived");
+      toast.success(t.agents.agentArchived);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to archive agent");
+      toast.error(e instanceof Error ? e.message : t.agents.failedArchive);
     }
   };
 
@@ -1126,9 +1135,9 @@ export default function AgentsPage() {
     try {
       await api.restoreAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent restored");
+      toast.success(t.agents.agentRestored);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to restore agent");
+      toast.error(e instanceof Error ? e.message : t.agents.failedRestore);
     }
   };
 
@@ -1185,14 +1194,14 @@ export default function AgentsPage() {
         {/* Left column — agent list */}
         <div className="overflow-y-auto h-full border-r">
           <div className="flex h-12 items-center justify-between border-b px-4">
-            <h1 className="text-sm font-semibold">Agents</h1>
+            <h1 className="text-sm font-semibold">{t.agents.title}</h1>
             <div className="flex items-center gap-1">
               {archivedCount > 0 && (
                 <Button
                   variant={showArchived ? "secondary" : "ghost"}
                   size="icon-xs"
                   onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? "Show active agents" : "Show archived agents"}
+                  title={showArchived ? t.agents.showActive : t.agents.showArchived}
                 >
                   <Archive className="h-4 w-4 text-muted-foreground" />
                 </Button>
@@ -1210,7 +1219,7 @@ export default function AgentsPage() {
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
+                {showArchived ? t.agents.noArchivedAgents : archivedCount > 0 ? t.agents.noActiveAgents : t.agents.noAgents}
               </p>
               {!showArchived && (
                 <Button
@@ -1219,7 +1228,7 @@ export default function AgentsPage() {
                   className="mt-3"
                 >
                   <Plus className="h-3 w-3" />
-                  Create Agent
+                  {t.agents.createAgent}
                 </Button>
               )}
             </div>
@@ -1254,14 +1263,14 @@ export default function AgentsPage() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Bot className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select an agent to view details</p>
+            <p className="mt-3 text-sm">{t.agents.selectAgent}</p>
             <Button
               onClick={() => setShowCreate(true)}
               size="xs"
               className="mt-3"
             >
               <Plus className="h-3 w-3" />
-              Create Agent
+              {t.agents.createAgent}
             </Button>
           </div>
         )}

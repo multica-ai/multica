@@ -47,7 +47,7 @@ export function TokensTab() {
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [tokensLoading, setTokensLoading] = useState(true);
-  const { t } = useDashboardLocale();
+  const { t, formatDate } = useDashboardLocale();
 
   const loadTokens = useCallback(async () => {
     try {
@@ -155,8 +155,8 @@ export function TokensTab() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{tok.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {tok.token_prefix}... · {t.tokens.created} {new Date(tok.created_at).toLocaleDateString()} · {tok.last_used_at ? `${t.tokens.lastUsed} ${new Date(tok.last_used_at).toLocaleDateString()}` : t.tokens.neverUsed}
-                      {tok.expires_at && ` · Expires ${new Date(tok.expires_at).toLocaleDateString()}`}
+                      {tok.token_prefix}... · {t.tokens.created} {formatDate(tok.created_at)} · {tok.last_used_at ? `${t.tokens.lastUsed} ${formatDate(tok.last_used_at)}` : t.tokens.neverUsed}
+                      {tok.expires_at && ` · ${t.tokens.expires} ${formatDate(tok.expires_at)}`}
                     </div>
                   </div>
                   <Tooltip>
@@ -229,7 +229,7 @@ export function TokensTab() {
             </Tooltip>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>Done</Button>
+            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>{t.tokens.done}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
