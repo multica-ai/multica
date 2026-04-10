@@ -21,6 +21,8 @@ export type AppDict = {
     createWorkspace: string;
     newIssue: string;
     logOut: string;
+    workspaceLabel: string;
+    configureLabel: string;
   };
   status: {
     backlog: string;

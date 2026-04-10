@@ -45,12 +45,6 @@ import { api } from "@multica/core/api";
 import { useAppLocale } from "../../i18n";
 import type { AppDict } from "../../i18n";
 
-const roleIcons: Record<MemberRole, typeof Crown> = {
-  owner: Crown,
-  admin: Shield,
-  member: User,
-};
-
 function getRoleConfig(t: AppDict): Record<MemberRole, { label: string; icon: typeof Crown; description: string }> {
   return {
     owner: { label: t.settings.roleOwner, icon: Crown, description: t.settings.roleOwnerDescription },

@@ -38,9 +38,7 @@ import {
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   ALL_STATUSES,
-  STATUS_CONFIG,
   PRIORITY_ORDER,
-  PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";

@@ -14,6 +14,8 @@ export const zh = {
     createWorkspace: "\u521b\u5efa\u5de5\u4f5c\u7a7a\u95f4",
     newIssue: "\u65b0\u5efa\u4efb\u52a1",
     logOut: "\u9000\u51fa\u767b\u5f55",
+    workspaceLabel: "工作空间",
+    configureLabel: "配置",
   },
 
   status: {

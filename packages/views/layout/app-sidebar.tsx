@@ -250,7 +250,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel>{t.nav.workspaceLabel ?? "Workspace"}</SidebarGroupLabel>
+            <SidebarGroupLabel>{t.nav.workspaceLabel}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
@@ -274,7 +274,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel>{t.nav.configureLabel ?? "Configure"}</SidebarGroupLabel>
+            <SidebarGroupLabel>{t.nav.configureLabel}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {configureNav.map((item) => {

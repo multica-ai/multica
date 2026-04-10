@@ -55,7 +55,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
-import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { ALL_STATUSES, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";

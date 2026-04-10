@@ -14,6 +14,8 @@ export const en = {
     createWorkspace: "Create workspace",
     newIssue: "New issue",
     logOut: "Log out",
+    workspaceLabel: "Workspace",
+    configureLabel: "Configure",
   },
 
   status: {
