@@ -162,11 +162,16 @@ Agent-specific overrides:
 
 ### Self-Hosted Server
 
-When connecting to a self-hosted Multica instance, point the CLI to your server before logging in:
+When connecting to a self-hosted Multica instance, you **must** point the CLI to your server before logging in. The CLI defaults to the hosted Multica service — skipping this step means the daemon will authenticate against the wrong server.
 
 ```bash
-export MULTICA_APP_URL=https://app.example.com
-export MULTICA_SERVER_URL=wss://api.example.com/ws
+# Local Docker Compose (default ports):
+export MULTICA_APP_URL=http://localhost:3000
+export MULTICA_SERVER_URL=ws://localhost:8080/ws
+
+# Production with TLS:
+# export MULTICA_APP_URL=https://app.example.com
+# export MULTICA_SERVER_URL=wss://api.example.com/ws
 
 multica login
 multica daemon start
@@ -175,8 +180,8 @@ multica daemon start
 Or set them persistently:
 
 ```bash
-multica config set app_url https://app.example.com
-multica config set server_url wss://api.example.com/ws
+multica config set app_url http://localhost:3000
+multica config set server_url ws://localhost:8080/ws
 ```
 
 ### Profiles

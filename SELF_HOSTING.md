@@ -36,12 +36,14 @@ Then start everything:
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-That's it. This builds and starts PostgreSQL, the backend (with auto-migration), and the frontend:
+This builds and starts PostgreSQL, the backend (with auto-migration), and the frontend:
 
 - **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8080
 
 The backend automatically runs database migrations on startup — no manual migration step needed.
+
+To run AI agents, you also need to set up the daemon on your local machine. See [Setting Up the Agent Daemon](#setting-up-the-agent-daemon) below.
 
 ### Rebuilding After Updates
 
@@ -264,6 +266,8 @@ Use this for load balancer health checks or monitoring.
 
 ## Setting Up the Agent Daemon
 
+The daemon runs on your local machine (not inside Docker). It detects installed AI agent CLIs, registers them as runtimes with the server, and executes tasks when agents are assigned work.
+
 Each team member who wants to run AI agents locally needs to:
 
 1. **Install the CLI**
@@ -277,29 +281,46 @@ Each team member who wants to run AI agents locally needs to:
    - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
    - [Codex](https://github.com/openai/codex) (`codex` on PATH)
 
-3. **Authenticate and start**
+3. **Point the CLI to your server**
+
+   The CLI defaults to the hosted Multica service. For self-hosted setups, you **must** set the server URLs before logging in:
 
    ```bash
-   # Point CLI to your server
-   #
-   # For production deployments with TLS:
-   export MULTICA_APP_URL=https://app.example.com
-   export MULTICA_SERVER_URL=wss://api.example.com/ws
-   #
-   # For local deployments without TLS:
-   # export MULTICA_APP_URL=http://localhost:3000
-   # export MULTICA_SERVER_URL=ws://localhost:8080/ws
+   # Local Docker Compose deployment (default ports):
+   export MULTICA_APP_URL=http://localhost:3000
+   export MULTICA_SERVER_URL=ws://localhost:8080/ws
 
-   # Login (opens browser)
+   # Production deployment with TLS:
+   # export MULTICA_APP_URL=https://app.example.com
+   # export MULTICA_SERVER_URL=wss://api.example.com/ws
+   ```
+
+   > **Note:** Use `http://` and `ws://` for local deployments without TLS. Use `https://` and `wss://` for production deployments behind a TLS-terminating reverse proxy.
+
+   You can also set these persistently so you don't need to export them each time:
+
+   ```bash
+   multica config set app_url http://localhost:3000
+   multica config set server_url ws://localhost:8080/ws
+   ```
+
+4. **Authenticate and start**
+
+   ```bash
+   # Login (opens browser to your frontend)
    multica login
 
    # Start the daemon
    multica daemon start
    ```
 
-   > **Note:** Use `https://` and `wss://` for production deployments behind a TLS-terminating reverse proxy. For local or development deployments without TLS, use `http://` and `ws://` instead.
+   The login flow opens your browser, authenticates you via the frontend, and stores a personal access token locally. The daemon then uses this token to register with the backend.
 
-The daemon auto-detects installed agent CLIs and registers itself with the server. When an agent is assigned a task in Multica, the daemon picks it up, creates an isolated workspace, runs the agent, and reports results back.
+   To verify the daemon is running:
+
+   ```bash
+   multica daemon status
+   ```
 
 ## Upgrading
 
