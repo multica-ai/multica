@@ -2,7 +2,8 @@
 
 import { useTheme } from "next-themes";
 import { cn } from "@multica/ui/lib/utils";
-import { useDashboardLocale, locales, localeLabels } from "@/features/dashboard/i18n";
+import { useTranslations, useLocale } from "next-intl";
+import { usePathname, useRouter } from "@/i18n/navigation";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
@@ -19,6 +20,9 @@ const DARK_COLORS = {
   bar: "#3f3f46",
   barMuted: "#52525b",
 };
+
+const locales = ["en", "zh"] as const;
+const localeLabels: Record<string, string> = { en: "EN", zh: "中文" };
 
 function WindowMockup({
   variant,
@@ -81,19 +85,29 @@ function WindowMockup({
 
 export function AppearanceTab() {
   const { theme, setTheme } = useTheme();
-  const { t, locale, setLocale } = useDashboardLocale();
+  const t = useTranslations("appearance");
+  const locale = useLocale();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const themeOptions = [
-    { value: "light" as const, label: t.appearance.light },
-    { value: "dark" as const, label: t.appearance.dark },
-    { value: "system" as const, label: t.appearance.system },
+    { value: "light" as const, label: t("light") },
+    { value: "dark" as const, label: t("dark") },
+    { value: "system" as const, label: t("system") },
   ];
+
+  const switchLocale = (l: string) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("multica-locale", l);
+    }
+    router.replace(pathname, { locale: l });
+  };
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t.appearance.theme}</h2>
-        <div className="flex gap-6" role="radiogroup" aria-label={t.appearance.theme}>
+        <h2 className="text-sm font-semibold">{t("theme")}</h2>
+        <div className="flex gap-6" role="radiogroup" aria-label={t("theme")}>
           {themeOptions.map((opt) => {
             const active = theme === opt.value;
             return (
@@ -101,7 +115,7 @@ export function AppearanceTab() {
                 key={opt.value}
                 role="radio"
                 aria-checked={active}
-                aria-label={`Select ${opt.label} theme`}
+                aria-label={t("selectTheme", { theme: opt.label })}
                 onClick={() => setTheme(opt.value)}
                 className="group flex flex-col items-center gap-2"
               >
@@ -145,12 +159,12 @@ export function AppearanceTab() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t.appearance.language}</h2>
+        <h2 className="text-sm font-semibold">{t("language")}</h2>
         <div className="flex gap-3">
           {locales.map((l) => (
             <button
               key={l}
-              onClick={() => setLocale(l)}
+              onClick={() => switchLocale(l)}
               className={cn(
                 "px-4 py-1.5 rounded-md text-sm border transition-all",
                 locale === l

@@ -7,8 +7,6 @@ import { QueryProvider } from "@multica/core/provider";
 import { AuthInitializer } from "@/features/auth";
 import { WebWSProvider } from "@/platform/ws-provider";
 import { WebNavigationProvider } from "@/platform/navigation";
-import { LocaleSync } from "@/components/locale-sync";
-import { DashboardLocaleProvider } from "@/features/dashboard/i18n";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -64,19 +62,16 @@ export default function RootLayout({
       className={cn("antialiased font-sans h-full", geist.variable, geistMono.variable)}
     >
       <body className="h-full overflow-hidden">
-        <LocaleSync />
-        <DashboardLocaleProvider>
-          <ThemeProvider>
-            <QueryProvider>
-              <WebNavigationProvider>
-                <AuthInitializer>
-                  <WebWSProvider>{children}</WebWSProvider>
-                </AuthInitializer>
-              </WebNavigationProvider>
-              <Toaster />
-            </QueryProvider>
-          </ThemeProvider>
-        </DashboardLocaleProvider>
+        <ThemeProvider>
+          <QueryProvider>
+            <WebNavigationProvider>
+              <AuthInitializer>
+                <WebWSProvider>{children}</WebWSProvider>
+              </AuthInitializer>
+            </WebNavigationProvider>
+            <Toaster />
+          </QueryProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

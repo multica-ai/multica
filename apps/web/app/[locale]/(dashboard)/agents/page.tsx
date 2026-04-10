@@ -74,7 +74,7 @@ import { issueListOptions } from "@multica/core/issues/queries";
 import { skillListOptions, agentListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { useDashboardLocale } from "@/features/dashboard/i18n";
+import { useTranslations, useLocale } from "next-intl";
 
 
 // ---------------------------------------------------------------------------
@@ -99,6 +99,19 @@ const taskStatusIcons: Record<string, { icon: typeof CheckCircle2; color: string
 };
 
 
+function formatDateTime(dateStr: string, locale: string): string {
+  const date = new Date(dateStr);
+  if (locale === "zh") {
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+    const d = date.getDate();
+    const h = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+    return `${y}年${m}月${d}日 ${h}:${min}`;
+  }
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -120,7 +133,7 @@ function CreateAgentDialog({
   onClose: () => void;
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimes[0]?.id ?? "");
@@ -148,7 +161,7 @@ function CreateAgentDialog({
       });
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t.agents.failedCreate);
+      toast.error(err instanceof Error ? err.message : t("failedCreate"));
       setCreating(false);
     }
   };
@@ -157,39 +170,39 @@ function CreateAgentDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t.agents.createAgent}</DialogTitle>
+          <DialogTitle>{t("createAgent")}</DialogTitle>
           <DialogDescription>
-            {t.agents.createAgentDesc}
+            {t("createAgentDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <Label className="text-xs text-muted-foreground">{t.agents.name}</Label>
+            <Label className="text-xs text-muted-foreground">{t("name")}</Label>
             <Input
               autoFocus
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={t.agents.namePlaceholder}
+              placeholder={t("namePlaceholder")}
               className="mt-1"
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             />
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">{t.agents.description}</Label>
+            <Label className="text-xs text-muted-foreground">{t("description")}</Label>
             <Input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={t.agents.descriptionPlaceholder}
+              placeholder={t("descriptionPlaceholder")}
               className="mt-1"
             />
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">{t.agents.visibility}</Label>
+            <Label className="text-xs text-muted-foreground">{t("visibility")}</Label>
             <div className="mt-1.5 flex gap-2">
               <button
                 type="button"
@@ -202,8 +215,8 @@ function CreateAgentDialog({
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">{t.agents.visibilityPublic}</div>
-                  <div className="text-xs text-muted-foreground">{t.agents.visibilityPublicDesc}</div>
+                  <div className="font-medium">{t("visibilityPublic")}</div>
+                  <div className="text-xs text-muted-foreground">{t("visibilityPublicDesc")}</div>
                 </div>
               </button>
               <button
@@ -217,15 +230,15 @@ function CreateAgentDialog({
               >
                 <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">{t.agents.visibilityPrivate}</div>
-                  <div className="text-xs text-muted-foreground">{t.agents.visibilityPrivateDesc}</div>
+                  <div className="font-medium">{t("visibilityPrivate")}</div>
+                  <div className="text-xs text-muted-foreground">{t("visibilityPrivateDesc")}</div>
                 </div>
               </button>
             </div>
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">{t.agents.runtime}</Label>
+            <Label className="text-xs text-muted-foreground">{t("runtime")}</Label>
             <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
               <PopoverTrigger
                 disabled={runtimes.length === 0}
@@ -239,16 +252,16 @@ function CreateAgentDialog({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">
-                      {selectedRuntime?.name ?? t.agents.noRuntime}
+                      {selectedRuntime?.name ?? t("noRuntime")}
                     </span>
                     {selectedRuntime?.runtime_mode === "cloud" && (
                       <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                        {t.agents.cloud}
+                        {t("cloud")}
                       </span>
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {selectedRuntime?.device_info ?? t.agents.registerRuntime}
+                    {selectedRuntime?.device_info ?? t("registerRuntime")}
                   </div>
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
@@ -275,7 +288,7 @@ function CreateAgentDialog({
                         <span className="truncate font-medium">{device.name}</span>
                         {device.runtime_mode === "cloud" && (
                           <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                            {t.agents.cloud}
+                            {t("cloud")}
                           </span>
                         )}
                       </div>
@@ -295,13 +308,13 @@ function CreateAgentDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            {t.agents.cancel}
+            {t("cancel")}
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={creating || !name.trim() || !selectedRuntime}
           >
-            {creating ? t.agents.creating : t.agents.create}
+            {creating ? t("creating") : t("create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -322,7 +335,7 @@ function AgentListItem({
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const st = statusConfig[agent.status];
   const isArchived = !!agent.archived_at;
 
@@ -346,11 +359,11 @@ function AgentListItem({
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
           {isArchived ? (
-            <span className="text-xs text-muted-foreground">{t.agents.archived}</span>
+            <span className="text-xs text-muted-foreground">{t("archived")}</span>
           ) : (
             <>
               <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-              <span className={`text-xs ${st.color}`}>{t.agents.statusLabels[agent.status]}</span>
+              <span className={`text-xs ${st.color}`}>{t(`statusLabels.${agent.status}`)}</span>
             </>
           )}
         </div>
@@ -370,7 +383,7 @@ function InstructionsTab({
   agent: Agent;
   onSave: (instructions: string) => Promise<void>;
 }) {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const isDirty = value !== (agent.instructions ?? "");
@@ -394,22 +407,22 @@ function InstructionsTab({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">{t.agents.instructionsTitle}</h3>
+        <h3 className="text-sm font-semibold">{t("instructionsTitle")}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          {t.agents.instructionsDesc}
+          {t("instructionsDesc")}
         </p>
       </div>
 
       <textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder={t.agents.instructionsPlaceholder}
+        placeholder={t("instructionsPlaceholder")}
         className="w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
       />
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {value.length > 0 ? `${value.length} ${t.agents.characters}` : t.agents.noInstructions}
+          {value.length > 0 ? `${value.length} ${t("characters")}` : t("noInstructions")}
         </span>
         <Button
           size="xs"
@@ -421,7 +434,7 @@ function InstructionsTab({
           ) : (
             <Save className="h-3 w-3" />
           )}
-          {t.agents.save}
+          {t("save")}
         </Button>
       </div>
     </div>
@@ -437,7 +450,7 @@ function SkillsTab({
 }: {
   agent: Agent;
 }) {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
@@ -454,7 +467,7 @@ function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.agents.failedAddSkill);
+      toast.error(e instanceof Error ? e.message : t("failedAddSkill"));
     } finally {
       setSaving(false);
       setShowPicker(false);
@@ -468,7 +481,7 @@ function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.agents.failedRemoveSkill);
+      toast.error(e instanceof Error ? e.message : t("failedRemoveSkill"));
     } finally {
       setSaving(false);
     }
@@ -478,9 +491,9 @@ function SkillsTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold">{t.agents.skills}</h3>
+          <h3 className="text-sm font-semibold">{t("skills")}</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {t.agents.skillsDesc}
+            {t("skillsDesc")}
           </p>
         </div>
         <Button
@@ -490,16 +503,16 @@ function SkillsTab({
           disabled={saving || availableSkills.length === 0}
         >
           <Plus className="h-3 w-3" />
-          {t.agents.addSkill}
+          {t("addSkill")}
         </Button>
       </div>
 
       {agent.skills.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">{t.agents.noSkillsAssigned}</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t("noSkillsAssigned")}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t.agents.addSkillsFrom}
+            {t("addSkillsFrom")}
           </p>
           {availableSkills.length > 0 && (
             <Button
@@ -509,7 +522,7 @@ function SkillsTab({
               disabled={saving}
             >
               <Plus className="h-3 w-3" />
-              {t.agents.addSkill}
+              {t("addSkill")}
             </Button>
           )}
         </div>
@@ -550,9 +563,9 @@ function SkillsTab({
         <Dialog open onOpenChange={(v) => { if (!v) setShowPicker(false); }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-sm">{t.agents.addSkill}</DialogTitle>
+              <DialogTitle className="text-sm">{t("addSkill")}</DialogTitle>
               <DialogDescription className="text-xs">
-                {t.agents.selectSkill}
+                {t("selectSkill")}
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-64 overflow-y-auto space-y-1">
@@ -576,13 +589,13 @@ function SkillsTab({
               ))}
               {availableSkills.length === 0 && (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  {t.agents.allSkillsAssigned}
+                  {t("allSkillsAssigned")}
                 </p>
               )}
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setShowPicker(false)}>
-                {t.agents.cancel}
+                {t("cancel")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -597,7 +610,8 @@ function SkillsTab({
 // ---------------------------------------------------------------------------
 
 function TasksTab({ agent }: { agent: Agent }) {
-  const { t, formatDateTime } = useDashboardLocale();
+  const t = useTranslations("agents");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const { data: tasks = [], isLoading: loading } = useQuery({
@@ -640,25 +654,25 @@ function TasksTab({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">{t.agents.taskQueue}</h3>
+        <h3 className="text-sm font-semibold">{t("taskQueue")}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          {t.agents.taskQueueDesc}
+          {t("taskQueueDesc")}
         </p>
       </div>
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <ListTodo className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">{t.agents.noTasks}</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t("noTasks")}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t.agents.noTasksDesc}
+            {t("noTasksDesc")}
           </p>
         </div>
       ) : (
         <div className="space-y-1.5">
           {sortedTasks.map((task) => {
             const config = taskStatusIcons[task.status] ?? taskStatusIcons.queued!;
-            const label = t.agents.taskStatusLabels[task.status as keyof typeof t.agents.taskStatusLabels] ?? task.status;
+            const label = t(`taskStatusLabels.${task.status}`) ?? task.status;
             const Icon = config.icon;
             const issue = issueMap.get(task.issue_id);
             const isActive = task.status === "running" || task.status === "dispatched";
@@ -688,19 +702,19 @@ function TasksTab({ agent }: { agent: Agent }) {
                       </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? `${t.agents.issueIdFallback} ${task.issue_id.slice(0, 8)}...`}
+                      {issue?.title ?? `${t("issueIdFallback")} ${task.issue_id.slice(0, 8)}...`}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
                     {isRunning && task.started_at
-                      ? `${t.agents.taskStartedAt} ${formatDateTime(task.started_at)}`
+                      ? `${t("taskStartedAt")} ${formatDateTime(task.started_at, locale)}`
                       : task.status === "dispatched" && task.dispatched_at
-                        ? `${t.agents.taskDispatchedAt} ${formatDateTime(task.dispatched_at)}`
+                        ? `${t("taskDispatchedAt")} ${formatDateTime(task.dispatched_at, locale)}`
                         : task.status === "completed" && task.completed_at
-                          ? `${t.agents.taskCompletedAt} ${formatDateTime(task.completed_at)}`
+                          ? `${t("taskCompletedAt")} ${formatDateTime(task.completed_at, locale)}`
                           : task.status === "failed" && task.completed_at
-                            ? `${t.agents.taskFailedAt} ${formatDateTime(task.completed_at)}`
-                            : `${t.agents.taskQueuedAt} ${formatDateTime(task.created_at)}`}
+                            ? `${t("taskFailedAt")} ${formatDateTime(task.completed_at, locale)}`
+                            : `${t("taskQueuedAt")} ${formatDateTime(task.created_at, locale)}`}
                   </div>
                 </div>
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>
@@ -728,7 +742,7 @@ function SettingsTab({
   runtimes: RuntimeDevice[];
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
@@ -745,9 +759,9 @@ function SettingsTab({
       const result = await upload(file);
       if (!result) return;
       await onSave({ avatar_url: result.link });
-      toast.success(t.agents.avatarUpdated);
+      toast.success(t("avatarUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t.agents.failedUploadAvatar);
+      toast.error(err instanceof Error ? err.message : t("failedUploadAvatar"));
     }
   };
 
@@ -759,15 +773,15 @@ function SettingsTab({
 
   const handleSave = async () => {
     if (!name.trim()) {
-      toast.error(t.agents.nameRequired);
+      toast.error(t("nameRequired"));
       return;
     }
     setSaving(true);
     try {
       await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
-      toast.success(t.agents.settingsSaved);
+      toast.success(t("settingsSaved"));
     } catch {
-      toast.error(t.agents.failedSave);
+      toast.error(t("failedSave"));
     } finally {
       setSaving(false);
     }
@@ -778,7 +792,7 @@ function SettingsTab({
   return (
     <div className="max-w-lg space-y-6">
       <div>
-        <Label className="text-xs text-muted-foreground">{t.agents.avatar}</Label>
+        <Label className="text-xs text-muted-foreground">{t("avatar")}</Label>
         <div className="mt-1.5 flex items-center gap-4">
           <button
             type="button"
@@ -803,13 +817,13 @@ function SettingsTab({
             onChange={handleAvatarUpload}
           />
           <div className="text-xs text-muted-foreground">
-            {t.account.clickToUploadAvatar}
+            {t("clickToUploadAvatar")}
           </div>
         </div>
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">{t.agents.name}</Label>
+        <Label className="text-xs text-muted-foreground">{t("name")}</Label>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -818,17 +832,17 @@ function SettingsTab({
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">{t.agents.description}</Label>
+        <Label className="text-xs text-muted-foreground">{t("description")}</Label>
         <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder={t.agents.descriptionPlaceholder}
+          placeholder={t("descriptionPlaceholder")}
           className="mt-1"
         />
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">{t.agents.visibility}</Label>
+        <Label className="text-xs text-muted-foreground">{t("visibility")}</Label>
         <div className="mt-1.5 flex gap-2">
           <button
             type="button"
@@ -841,8 +855,8 @@ function SettingsTab({
           >
             <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="text-left">
-              <div className="font-medium">{t.agents.visibilityPublic}</div>
-              <div className="text-xs text-muted-foreground">{t.agents.visibilityPublicDesc}</div>
+              <div className="font-medium">{t("visibilityPublic")}</div>
+              <div className="text-xs text-muted-foreground">{t("visibilityPublicDesc")}</div>
             </div>
           </button>
           <button
@@ -856,15 +870,15 @@ function SettingsTab({
           >
             <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="text-left">
-              <div className="font-medium">{t.agents.visibilityPrivate}</div>
-              <div className="text-xs text-muted-foreground">{t.agents.visibilityPrivateDesc}</div>
+              <div className="font-medium">{t("visibilityPrivate")}</div>
+              <div className="text-xs text-muted-foreground">{t("visibilityPrivateDesc")}</div>
             </div>
           </button>
         </div>
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">{t.agents.maxConcurrentTasks}</Label>
+        <Label className="text-xs text-muted-foreground">{t("maxConcurrentTasks")}</Label>
         <Input
           type="number"
           min={1}
@@ -876,20 +890,20 @@ function SettingsTab({
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">{t.agents.runtime}</Label>
+        <Label className="text-xs text-muted-foreground">{t("runtime")}</Label>
         <div className="mt-1 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm text-muted-foreground">
           {agent.runtime_mode === "cloud" ? (
             <Cloud className="h-4 w-4" />
           ) : (
             <Monitor className="h-4 w-4" />
           )}
-          {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? t.agents.cloud : t.agents.local)}
+          {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? t("cloud") : t("local"))}
         </div>
       </div>
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-        {t.agents.saveChanges}
+        {t("saveChanges")}
       </Button>
     </div>
   );
@@ -914,7 +928,7 @@ function AgentDetail({
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
 }) {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const st = statusConfig[agent.status];
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
@@ -922,10 +936,10 @@ function AgentDetail({
   const isArchived = !!agent.archived_at;
 
   const detailTabs: { id: DetailTab; label: string; icon: typeof FileText }[] = [
-    { id: "instructions", label: t.agents.detailTabs.instructions, icon: FileText },
-    { id: "skills", label: t.agents.detailTabs.skills, icon: BookOpenText },
-    { id: "tasks", label: t.agents.detailTabs.tasks, icon: ListTodo },
-    { id: "settings", label: t.agents.detailTabs.settings, icon: Settings },
+    { id: "instructions", label: t("detailTabs.instructions"), icon: FileText },
+    { id: "skills", label: t("detailTabs.skills"), icon: BookOpenText },
+    { id: "tasks", label: t("detailTabs.tasks"), icon: ListTodo },
+    { id: "settings", label: t("detailTabs.settings"), icon: Settings },
   ];
 
   return (
@@ -934,9 +948,9 @@ function AgentDetail({
       {isArchived && (
         <div className="flex items-center gap-2 bg-muted/50 px-4 py-2 text-xs text-muted-foreground border-b">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">{t.agents.archivedBanner}</span>
+          <span className="flex-1">{t("archivedBanner")}</span>
           <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
-            {t.agents.restore}
+            {t("restore")}
           </Button>
         </div>
       )}
@@ -949,12 +963,12 @@ function AgentDetail({
             <h2 className={`text-sm font-semibold truncate ${isArchived ? "text-muted-foreground" : ""}`}>{agent.name}</h2>
             {isArchived ? (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                {t.agents.archived}
+                {t("archived")}
               </span>
             ) : (
               <span className={`flex items-center gap-1.5 text-xs ${st.color}`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                {t.agents.statusLabels[agent.status]}
+                {t(`statusLabels.${agent.status}`)}
               </span>
             )}
             <span className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
@@ -963,7 +977,7 @@ function AgentDetail({
               ) : (
                 <Monitor className="h-3 w-3" />
               )}
-              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? t.agents.cloud : t.agents.local)}
+              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? t("cloud") : t("local"))}
             </span>
           </div>
         </div>
@@ -982,7 +996,7 @@ function AgentDetail({
                 onClick={() => setConfirmArchive(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                {t.agents.archiveMenu}
+                {t("archiveMenu")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1037,15 +1051,15 @@ function AgentDetail({
                 <AlertCircle className="h-5 w-5 text-destructive" />
               </div>
               <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-sm font-semibold">{t.agents.archiveConfirmTitle}</DialogTitle>
+                <DialogTitle className="text-sm font-semibold">{t("archiveConfirmTitle")}</DialogTitle>
                 <DialogDescription className="text-xs">
-                  &quot;{agent.name}&quot; {t.agents.archiveConfirmDesc}
+                  &quot;{agent.name}&quot; {t("archiveConfirmDesc")}
                 </DialogDescription>
               </DialogHeader>
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setConfirmArchive(false)}>
-                {t.agents.cancel}
+                {t("cancel")}
               </Button>
               <Button
                 variant="destructive"
@@ -1054,7 +1068,7 @@ function AgentDetail({
                   onArchive(agent.id);
                 }}
               >
-                {t.agents.archive}
+                {t("archive")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1069,7 +1083,7 @@ function AgentDetail({
 // ---------------------------------------------------------------------------
 
 export default function AgentsPage() {
-  const { t } = useDashboardLocale();
+  const t = useTranslations("agents");
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const qc = useQueryClient();
@@ -1107,9 +1121,9 @@ export default function AgentsPage() {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(t.agents.agentUpdated);
+      toast.success(t("agentUpdated"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.agents.failedUpdate);
+      toast.error(e instanceof Error ? e.message : t("failedUpdate"));
       throw e;
     }
   };
@@ -1118,9 +1132,9 @@ export default function AgentsPage() {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(t.agents.agentArchived);
+      toast.success(t("agentArchived"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.agents.failedArchive);
+      toast.error(e instanceof Error ? e.message : t("failedArchive"));
     }
   };
 
@@ -1128,9 +1142,9 @@ export default function AgentsPage() {
     try {
       await api.restoreAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(t.agents.agentRestored);
+      toast.success(t("agentRestored"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.agents.failedRestore);
+      toast.error(e instanceof Error ? e.message : t("failedRestore"));
     }
   };
 
@@ -1187,14 +1201,14 @@ export default function AgentsPage() {
         {/* Left column — agent list */}
         <div className="overflow-y-auto h-full border-r">
           <div className="flex h-12 items-center justify-between border-b px-4">
-            <h1 className="text-sm font-semibold">{t.agents.title}</h1>
+            <h1 className="text-sm font-semibold">{t("title")}</h1>
             <div className="flex items-center gap-1">
               {archivedCount > 0 && (
                 <Button
                   variant={showArchived ? "secondary" : "ghost"}
                   size="icon-xs"
                   onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? t.agents.showActive : t.agents.showArchived}
+                  title={showArchived ? t("showActive") : t("showArchived")}
                 >
                   <Archive className="h-4 w-4 text-muted-foreground" />
                 </Button>
@@ -1212,7 +1226,7 @@ export default function AgentsPage() {
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived ? t.agents.noArchivedAgents : archivedCount > 0 ? t.agents.noActiveAgents : t.agents.noAgents}
+                {showArchived ? t("noArchivedAgents") : archivedCount > 0 ? t("noActiveAgents") : t("noAgents")}
               </p>
               {!showArchived && (
                 <Button
@@ -1221,7 +1235,7 @@ export default function AgentsPage() {
                   className="mt-3"
                 >
                   <Plus className="h-3 w-3" />
-                  {t.agents.createAgent}
+                  {t("createAgent")}
                 </Button>
               )}
             </div>
@@ -1256,14 +1270,14 @@ export default function AgentsPage() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Bot className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">{t.agents.selectAgent}</p>
+            <p className="mt-3 text-sm">{t("selectAgent")}</p>
             <Button
               onClick={() => setShowCreate(true)}
               size="xs"
               className="mt-3"
             >
               <Plus className="h-3 w-3" />
-              {t.agents.createAgent}
+              {t("createAgent")}
             </Button>
           </div>
         )}

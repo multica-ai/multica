@@ -24,7 +24,7 @@ import { useWorkspaceStore } from "@/platform/workspace";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { api } from "@/platform/api";
-import { useDashboardLocale } from "@/features/dashboard/i18n";
+import { useTranslations } from "next-intl";
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);
@@ -34,7 +34,8 @@ export function WorkspaceTab() {
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
   const leaveWorkspace = useWorkspaceStore((s) => s.leaveWorkspace);
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
-  const { t } = useDashboardLocale();
+  const t = useTranslations("workspace");
+  const tSettings = useTranslations("settings");
 
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
@@ -62,15 +63,11 @@ export function WorkspaceTab() {
     if (!workspace) return;
     setSaving(true);
     try {
-      const updated = await api.updateWorkspace(workspace.id, {
-        name,
-        description,
-        context,
-      });
+      const updated = await api.updateWorkspace(workspace.id, { name, description, context });
       updateWorkspace(updated);
-      toast.success(t.workspace.workspaceSaved);
+      toast.success(t("workspaceSaved"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.workspace.failedSave);
+      toast.error(e instanceof Error ? e.message : t("failedSave"));
     } finally {
       setSaving(false);
     }
@@ -79,15 +76,15 @@ export function WorkspaceTab() {
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
-      title: t.workspace.leaveWorkspace,
-      description: t.workspace.leaveDescription,
+      title: t("leaveWorkspace"),
+      description: t("leaveDescription"),
       variant: "destructive",
       onConfirm: async () => {
         setActionId("leave");
         try {
           await leaveWorkspace(workspace.id);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : t.workspace.failedLeave);
+          toast.error(e instanceof Error ? e.message : t("failedLeave"));
         } finally {
           setActionId(null);
         }
@@ -98,15 +95,15 @@ export function WorkspaceTab() {
   const handleDeleteWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
-      title: t.workspace.deleteWorkspace,
-      description: t.workspace.deleteDescription,
+      title: t("deleteWorkspace"),
+      description: t("deleteDescription"),
       variant: "destructive",
       onConfirm: async () => {
         setActionId("delete-workspace");
         try {
           await deleteWorkspace(workspace.id);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : t.workspace.failedDelete);
+          toast.error(e instanceof Error ? e.message : t("failedDelete"));
         } finally {
           setActionId(null);
         }
@@ -120,12 +117,12 @@ export function WorkspaceTab() {
     <div className="space-y-8">
       {/* Workspace settings */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t.settings.general}</h2>
+        <h2 className="text-sm font-semibold">{tSettings("general")}</h2>
 
         <Card>
           <CardContent className="space-y-3">
             <div>
-              <Label className="text-xs text-muted-foreground">{t.workspace.workspaceName}</Label>
+              <Label className="text-xs text-muted-foreground">{t("workspaceName")}</Label>
               <Input
                 type="text"
                 value={name}
@@ -135,29 +132,29 @@ export function WorkspaceTab() {
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">{t.workspace.description}</Label>
+              <Label className="text-xs text-muted-foreground">{t("description")}</Label>
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder={t.workspace.workspaceDescriptionPlaceholder}
+                placeholder={t("workspaceDescriptionPlaceholder")}
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">{t.workspace.aiContext}</Label>
+              <Label className="text-xs text-muted-foreground">{t("aiContext")}</Label>
               <Textarea
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
                 rows={4}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder={t.workspace.aiContextPlaceholder}
+                placeholder={t("aiContextPlaceholder")}
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Slug</Label>
+              <Label className="text-xs text-muted-foreground">{t("slug")}</Label>
               <div className="mt-1 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 {workspace.slug}
               </div>
@@ -169,7 +166,7 @@ export function WorkspaceTab() {
                 disabled={saving || !name.trim() || !canManageWorkspace}
               >
                 <Save className="h-3 w-3" />
-                {saving ? t.workspace.saving : t.workspace.save}
+                {saving ? t("saving") : t("save")}
               </Button>
             </div>
           </CardContent>
@@ -180,17 +177,15 @@ export function WorkspaceTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <LogOut className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{t.workspace.dangerZone}</h2>
+          <h2 className="text-sm font-semibold">{t("dangerZone")}</h2>
         </div>
 
         <Card>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium">{t.workspace.leaveWorkspace}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t.workspace.leaveDescription}
-                </p>
+                <p className="text-sm font-medium">{t("leaveWorkspace")}</p>
+                <p className="text-xs text-muted-foreground">{t("leaveDescription")}</p>
               </div>
               <Button
                 variant="outline"
@@ -198,17 +193,15 @@ export function WorkspaceTab() {
                 onClick={handleLeaveWorkspace}
                 disabled={actionId === "leave"}
               >
-                {actionId === "leave" ? t.workspace.leaving : t.workspace.leave}
+                {actionId === "leave" ? t("leaving") : t("leave")}
               </Button>
             </div>
 
             {isOwner && (
               <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-destructive">{t.workspace.deleteWorkspace}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t.workspace.deleteDescription}
-                  </p>
+                  <p className="text-sm font-medium text-destructive">{t("deleteWorkspace")}</p>
+                  <p className="text-xs text-muted-foreground">{t("deleteDescription")}</p>
                 </div>
                 <Button
                   variant="destructive"
@@ -216,7 +209,7 @@ export function WorkspaceTab() {
                   onClick={handleDeleteWorkspace}
                   disabled={actionId === "delete-workspace"}
                 >
-                  {actionId === "delete-workspace" ? t.workspace.deleting : t.workspace.delete}
+                  {actionId === "delete-workspace" ? t("deleting") : t("delete")}
                 </Button>
               </div>
             )}
@@ -231,7 +224,7 @@ export function WorkspaceTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t.workspace.cancel}</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -239,7 +232,7 @@ export function WorkspaceTab() {
                 setConfirmAction(null);
               }}
             >
-              {t.workspace.confirm}
+              {t("confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

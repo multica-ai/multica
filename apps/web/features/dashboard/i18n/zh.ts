@@ -31,6 +31,7 @@ export const zh: DashboardDict = {
     dark: "深色",
     system: "跟随系统",
     language: "语言",
+    selectTheme: "选择{theme}主题",
   },
   account: {
     profile: "个人资料",
@@ -47,6 +48,7 @@ export const zh: DashboardDict = {
   workspace: {
     workspaceName: "工作区名称",
     description: "描述",
+    slug: "标识符",
     aiContext: "AI 上下文",
     aiContextPlaceholder: "为在此工作区工作的 AI Agent 提供背景信息和上下文",
     workspaceDescriptionPlaceholder: "这个工作区专注于什么？",
@@ -119,6 +121,7 @@ export const zh: DashboardDict = {
     creating: "创建中...",
     revoke: "撤销",
     revoking: "撤销中...",
+    revokeLabel: "撤销 {name}",
     revokeConfirmTitle: "撤销令牌",
     revokeConfirmDescription: "此令牌将被永久撤销。",
     confirm: "确认",
@@ -261,6 +264,8 @@ export const zh: DashboardDict = {
     failedUploadAvatar: "头像上传失败",
     maxConcurrentTasks: "最大并发任务数",
     selectAgent: "选择一个 Agent 查看详情",
+    avatar: "头像",
+    issueIdFallback: "任务",
     tasks: "任务",
     taskQueue: "任务队列",
     taskQueueDesc: "指派给此 Agent 的任务及其执行状态。",

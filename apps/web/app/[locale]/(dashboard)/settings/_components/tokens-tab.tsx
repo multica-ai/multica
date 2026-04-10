@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Key, Trash2, Copy, Check } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { PersonalAccessToken } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -36,12 +35,23 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@/platform/api";
 import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
-import { useDashboardLocale } from "@/features/dashboard/i18n";
+import { useTranslations, useLocale } from "next-intl";
 
 const tokenListOptions = queryOptions({
   queryKey: ["tokens"] as const,
   queryFn: () => api.listPersonalAccessTokens(),
 });
+
+function formatDate(dateStr: string, locale: string): string {
+  const date = new Date(dateStr);
+  if (locale === "zh") {
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+    const d = date.getDate();
+    return `${y}年${m}月${d}日`;
+  }
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
 export function TokensTab() {
   const qc = useQueryClient();
@@ -53,7 +63,8 @@ export function TokensTab() {
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
-  const { t, formatDate } = useDashboardLocale();
+  const t = useTranslations("tokens");
+  const locale = useLocale();
 
   const handleCreateToken = async () => {
     setTokenCreating(true);
@@ -65,7 +76,7 @@ export function TokensTab() {
       setTokenExpiry("90");
       await qc.invalidateQueries({ queryKey: ["tokens"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.tokens.failedCreate);
+      toast.error(e instanceof Error ? e.message : t("failedCreate"));
     } finally {
       setTokenCreating(false);
     }
@@ -77,7 +88,7 @@ export function TokensTab() {
       await api.revokePersonalAccessToken(id);
       await qc.invalidateQueries({ queryKey: ["tokens"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.tokens.failedRevoke);
+      toast.error(e instanceof Error ? e.message : t("failedRevoke"));
     } finally {
       setTokenRevoking(null);
     }
@@ -95,32 +106,30 @@ export function TokensTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Key className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{t.tokens.title}</h2>
+          <h2 className="text-sm font-semibold">{t("title")}</h2>
         </div>
 
         <Card>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              {t.tokens.description}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("description")}</p>
             <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
               <Input
                 type="text"
                 value={tokenName}
                 onChange={(e) => setTokenName(e.target.value)}
-                placeholder={t.tokens.tokenNamePlaceholder}
+                placeholder={t("tokenNamePlaceholder")}
               />
               <Select value={tokenExpiry} onValueChange={(v) => { if (v) setTokenExpiry(v); }}>
                 <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="30">{t.tokens.expiryOptions["30"]}</SelectItem>
-                  <SelectItem value="90">{t.tokens.expiryOptions["90"]}</SelectItem>
-                  <SelectItem value="365">{t.tokens.expiryOptions["365"]}</SelectItem>
-                  <SelectItem value="never">{t.tokens.expiryOptions["-1"]}</SelectItem>
+                  <SelectItem value="30">{t("expiryOptions.30")}</SelectItem>
+                  <SelectItem value="90">{t("expiryOptions.90")}</SelectItem>
+                  <SelectItem value="365">{t("expiryOptions.365")}</SelectItem>
+                  <SelectItem value="never">{t("expiryOptions.-1")}</SelectItem>
                 </SelectContent>
               </Select>
               <Button onClick={handleCreateToken} disabled={tokenCreating || !tokenName.trim()}>
-                {tokenCreating ? t.tokens.creating : t.tokens.create}
+                {tokenCreating ? t("creating") : t("create")}
               </Button>
             </div>
           </CardContent>
@@ -148,8 +157,8 @@ export function TokensTab() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{tok.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {tok.token_prefix}... · {t.tokens.created} {formatDate(tok.created_at)} · {tok.last_used_at ? `${t.tokens.lastUsed} ${formatDate(tok.last_used_at)}` : t.tokens.neverUsed}
-                      {tok.expires_at && ` · ${t.tokens.expires} ${formatDate(tok.expires_at)}`}
+                      {tok.token_prefix}... · {t("created")} {formatDate(tok.created_at, locale)} · {tok.last_used_at ? `${t("lastUsed")} ${formatDate(tok.last_used_at, locale)}` : t("neverUsed")}
+                      {tok.expires_at && ` · ${t("expires")} ${formatDate(tok.expires_at, locale)}`}
                     </div>
                   </div>
                   <Tooltip>
@@ -160,13 +169,13 @@ export function TokensTab() {
                           size="icon-sm"
                           onClick={() => setRevokeConfirmId(tok.id)}
                           disabled={tokenRevoking === tok.id}
-                          aria-label={t.tokens.revokeLabel.replace("{name}", tok.name)}
+                          aria-label={t("revokeLabel", { name: tok.name })}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       }
                     />
-                    <TooltipContent>{t.tokens.revoke}</TooltipContent>
+                    <TooltipContent>{t("revoke")}</TooltipContent>
                   </Tooltip>
                 </CardContent>
               </Card>
@@ -178,13 +187,11 @@ export function TokensTab() {
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t.tokens.revokeConfirmTitle}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t.tokens.revokeConfirmDescription}
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t("revokeConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("revokeConfirmDescription")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t.tokens.cancel}</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={async () => {
@@ -192,7 +199,7 @@ export function TokensTab() {
                 setRevokeConfirmId(null);
               }}
             >
-              {t.tokens.revoke}
+              {t("revoke")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -201,10 +208,8 @@ export function TokensTab() {
       <Dialog open={!!newToken} onOpenChange={(v) => { if (!v) { setNewToken(null); setTokenCopied(false); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t.tokens.newTokenTitle}</DialogTitle>
-            <DialogDescription>
-              {t.tokens.newTokenDescription}
-            </DialogDescription>
+            <DialogTitle>{t("newTokenTitle")}</DialogTitle>
+            <DialogDescription>{t("newTokenDescription")}</DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded-md border bg-muted/50 px-3 py-2 text-sm break-all select-all">
@@ -218,11 +223,11 @@ export function TokensTab() {
                   </Button>
                 }
               />
-              <TooltipContent>{tokenCopied ? t.tokens.copied : t.tokens.copy}</TooltipContent>
+              <TooltipContent>{tokenCopied ? t("copied") : t("copy")}</TooltipContent>
             </Tooltip>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>{t.tokens.done}</Button>
+            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>{t("done")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

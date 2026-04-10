@@ -42,7 +42,7 @@ import { useWorkspaceStore } from "@/platform/workspace";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@/platform/api";
-import { useDashboardLocale } from "@/features/dashboard/i18n";
+import { useTranslations } from "next-intl";
 
 type RoleConfig = { label: string; icon: typeof Crown; description: string };
 
@@ -104,10 +104,7 @@ function MemberRow({
                       if (role === "owner" && !canManageOwners) return null;
                       const Icon = config.icon;
                       return (
-                        <DropdownMenuItem
-                          key={role}
-                          onClick={() => onRoleChange(role)}
-                        >
+                        <DropdownMenuItem key={role} onClick={() => onRoleChange(role)}>
                           <Icon className="h-3.5 w-3.5" />
                           <div className="flex flex-col">
                             <span>{config.label}</span>
@@ -149,12 +146,12 @@ export function MembersTab() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { t } = useDashboardLocale();
+  const t = useTranslations("members");
 
   const roleConfig: Record<MemberRole, RoleConfig> = {
-    owner: { label: t.members.roles.owner, icon: Crown, description: t.members.roleDescriptions.owner },
-    admin: { label: t.members.roles.admin, icon: Shield, description: t.members.roleDescriptions.admin },
-    member: { label: t.members.roles.member, icon: User, description: t.members.roleDescriptions.member },
+    owner: { label: t("roles.owner"), icon: Crown, description: t("roleDescriptions.owner") },
+    admin: { label: t("roles.admin"), icon: Shield, description: t("roleDescriptions.admin") },
+    member: { label: t("roles.member"), icon: User, description: t("roleDescriptions.member") },
   };
 
   const [inviteEmail, setInviteEmail] = useState("");
@@ -176,15 +173,12 @@ export function MembersTab() {
     if (!workspace) return;
     setInviteLoading(true);
     try {
-      await api.createMember(workspace.id, {
-        email: inviteEmail,
-        role: inviteRole,
-      });
+      await api.createMember(workspace.id, { email: inviteEmail, role: inviteRole });
       setInviteEmail("");
       setInviteRole("member");
       qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.members.failedInvite);
+      toast.error(e instanceof Error ? e.message : t("failedInvite"));
     } finally {
       setInviteLoading(false);
     }
@@ -197,7 +191,7 @@ export function MembersTab() {
       await api.updateMember(workspace.id, memberId, { role });
       qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.members.failedUpdateRole);
+      toast.error(e instanceof Error ? e.message : t("failedUpdateRole"));
     } finally {
       setMemberActionId(null);
     }
@@ -206,17 +200,17 @@ export function MembersTab() {
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
     setConfirmAction({
-      title: t.members.removeMember,
-      description: t.members.removeDescription,
+      title: t("removeMember"),
+      description: t("removeDescription"),
       variant: "destructive",
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {
           await api.deleteMember(workspace.id, member.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          toast.success(t.members.memberRemoved);
+          toast.success(t("memberRemoved"));
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : t.members.failedRemove);
+          toast.error(e instanceof Error ? e.message : t("failedRemove"));
         } finally {
           setMemberActionId(null);
         }
@@ -231,7 +225,7 @@ export function MembersTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{t.members.title} ({members.length})</h2>
+          <h2 className="text-sm font-semibold">{t("title")} ({members.length})</h2>
         </div>
 
         {canManageWorkspace && (
@@ -239,28 +233,25 @@ export function MembersTab() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">{t.members.inviteByEmail}</h3>
+                <h3 className="text-sm font-medium">{t("inviteByEmail")}</h3>
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
                   type="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder={t.members.emailPlaceholder}
+                  placeholder={t("emailPlaceholder")}
                 />
                 <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
                   <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">{t.members.roles.member}</SelectItem>
-                    <SelectItem value="admin">{t.members.roles.admin}</SelectItem>
-                    {isOwner && <SelectItem value="owner">{t.members.roles.owner}</SelectItem>}
+                    <SelectItem value="member">{t("roles.member")}</SelectItem>
+                    <SelectItem value="admin">{t("roles.admin")}</SelectItem>
+                    {isOwner && <SelectItem value="owner">{t("roles.owner")}</SelectItem>}
                   </SelectContent>
                 </Select>
-                <Button
-                  onClick={handleAddMember}
-                  disabled={inviteLoading || !inviteEmail.trim()}
-                >
-                  {inviteLoading ? t.members.adding : t.members.add}
+                <Button onClick={handleAddMember} disabled={inviteLoading || !inviteEmail.trim()}>
+                  {inviteLoading ? t("adding") : t("add")}
                 </Button>
               </div>
             </CardContent>
@@ -280,14 +271,14 @@ export function MembersTab() {
                   busy={memberActionId === m.id}
                   onRoleChange={(role) => handleRoleChange(m.id, role)}
                   onRemove={() => handleRemoveMember(m)}
-                  changeRoleLabel={t.members.changeRole}
-                  removeLabel={t.members.remove}
+                  changeRoleLabel={t("changeRole")}
+                  removeLabel={t("remove")}
                 />
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">{t.members.noMembersFound}</p>
+          <p className="text-sm text-muted-foreground">{t("noMembersFound")}</p>
         )}
       </section>
 
@@ -298,7 +289,7 @@ export function MembersTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t.members.cancel}</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -306,7 +297,7 @@ export function MembersTab() {
                 setConfirmAction(null);
               }}
             >
-              {t.members.confirm}
+              {t("confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -10,12 +10,12 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/platform/auth";
 import { api } from "@/platform/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { useDashboardLocale } from "@/features/dashboard/i18n";
+import { useTranslations } from "next-intl";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const { t } = useDashboardLocale();
+  const t = useTranslations("account");
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -36,16 +36,15 @@ export function AccountTab() {
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Reset input so the same file can be re-selected
     e.target.value = "";
     try {
       const result = await upload(file);
       if (!result) return;
       const updated = await api.updateMe({ avatar_url: result.link });
       setUser(updated);
-      toast.success(t.account.avatarUpdated);
+      toast.success(t("avatarUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t.account.failedUploadAvatar);
+      toast.error(err instanceof Error ? err.message : t("failedUploadAvatar"));
     }
   };
 
@@ -54,9 +53,9 @@ export function AccountTab() {
     try {
       const updated = await api.updateMe({ name: profileName });
       setUser(updated);
-      toast.success(t.account.profileUpdated);
+      toast.success(t("profileUpdated"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t.account.failedUpdateProfile);
+      toast.error(e instanceof Error ? e.message : t("failedUpdateProfile"));
     } finally {
       setProfileSaving(false);
     }
@@ -65,7 +64,7 @@ export function AccountTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t.account.profile}</h2>
+        <h2 className="text-sm font-semibold">{t("profile")}</h2>
 
         <Card>
           <CardContent className="space-y-4">
@@ -104,12 +103,12 @@ export function AccountTab() {
                 onChange={handleAvatarUpload}
               />
               <div className="text-xs text-muted-foreground">
-                {t.account.clickToUploadAvatar}
+                {t("clickToUploadAvatar")}
               </div>
             </div>
 
             <div>
-              <Label className="text-xs text-muted-foreground">{t.account.displayName}</Label>
+              <Label className="text-xs text-muted-foreground">{t("displayName")}</Label>
               <Input
                 type="search"
                 value={profileName}
@@ -124,7 +123,7 @@ export function AccountTab() {
                 disabled={profileSaving || !profileName.trim()}
               >
                 <Save className="h-3 w-3" />
-                {profileSaving ? t.account.updating : t.account.updateProfile}
+                {profileSaving ? t("updating") : t("updateProfile")}
               </Button>
             </div>
           </CardContent>

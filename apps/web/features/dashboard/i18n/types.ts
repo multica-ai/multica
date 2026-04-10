@@ -38,6 +38,7 @@ export type DashboardDict = {
     dark: string;
     system: string;
     language: string;
+    selectTheme: string;
   };
   account: {
     profile: string;
@@ -54,6 +55,7 @@ export type DashboardDict = {
   workspace: {
     workspaceName: string;
     description: string;
+    slug: string;
     aiContext: string;
     aiContextPlaceholder: string;
     workspaceDescriptionPlaceholder: string;
@@ -126,6 +128,7 @@ export type DashboardDict = {
     creating: string;
     revoke: string;
     revoking: string;
+    revokeLabel: string;
     revokeConfirmTitle: string;
     revokeConfirmDescription: string;
     confirm: string;
@@ -268,6 +271,8 @@ export type DashboardDict = {
     failedUploadAvatar: string;
     maxConcurrentTasks: string;
     selectAgent: string;
+    avatar: string;
+    issueIdFallback: string;
     tasks: string;
     taskQueue: string;
     taskQueueDesc: string;

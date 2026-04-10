@@ -2,7 +2,8 @@
 
 import React from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useTranslations, useLocale } from "next-intl";
+import { usePathname, useRouter } from "@/i18n/navigation";
 import {
   Inbox,
   ListTodo,
@@ -50,7 +51,9 @@ import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@/platform/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
-import { useDashboardLocale, locales, localeLabels } from "@/features/dashboard/i18n";
+
+const locales = ["en", "zh"] as const;
+const localeLabels: Record<string, string> = { en: "EN", zh: "中文" };
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
@@ -61,25 +64,27 @@ function DraftDot() {
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const locale = useLocale();
+  const sidebar = useTranslations("sidebar");
+  const appearance = useTranslations("appearance");
   const user = useAuthStore((s) => s.user);
   const authLogout = useAuthStore((s) => s.logout);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
-  const { t, locale, setLocale } = useDashboardLocale();
 
   const primaryNav = [
-    { href: "/inbox", label: t.sidebar.inbox, key: "inbox", icon: Inbox },
-    { href: "/my-issues", label: t.sidebar.myIssues, key: "my-issues", icon: CircleUser },
-    { href: "/issues", label: t.sidebar.issues, key: "issues", icon: ListTodo },
-    { href: "/projects", label: t.sidebar.projects, key: "projects", icon: FolderKanban },
+    { href: "/inbox", label: sidebar("inbox"), key: "inbox", icon: Inbox },
+    { href: "/my-issues", label: sidebar("myIssues"), key: "my-issues", icon: CircleUser },
+    { href: "/issues", label: sidebar("issues"), key: "issues", icon: ListTodo },
+    { href: "/projects", label: sidebar("projects"), key: "projects", icon: FolderKanban },
   ];
 
   const workspaceNav = [
-    { href: "/agents", label: t.sidebar.agents, key: "agents", icon: Bot },
-    { href: "/runtimes", label: t.sidebar.runtimes, key: "runtimes", icon: Monitor },
-    { href: "/skills", label: t.sidebar.skills, key: "skills", icon: BookOpenText },
-    { href: "/settings", label: t.sidebar.settings, key: "settings", icon: Settings },
+    { href: "/agents", label: sidebar("agents"), key: "agents", icon: Bot },
+    { href: "/runtimes", label: sidebar("runtimes"), key: "runtimes", icon: Monitor },
+    { href: "/skills", label: sidebar("skills"), key: "skills", icon: BookOpenText },
+    { href: "/settings", label: sidebar("settings"), key: "settings", icon: Settings },
   ];
 
   const wsId = workspace?.id;
@@ -98,6 +103,13 @@ export function AppSidebar() {
     router.push("/");
     authLogout();
     useWorkspaceStore.getState().clearWorkspace();
+  };
+
+  const switchLocale = (l: string) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("multica-locale", l);
+    }
+    router.replace(pathname, { locale: l });
   };
 
   return (
@@ -133,7 +145,7 @@ export function AppSidebar() {
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup className="group/ws-section">
                     <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
-                      {t.sidebar.workspaces}
+                      {sidebar("workspaces")}
                       <Tooltip>
                         <TooltipTrigger
                           className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
@@ -142,7 +154,7 @@ export function AppSidebar() {
                           <Plus className="h-3.5 w-3.5" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          {t.sidebar.createWorkspace}
+                          {sidebar("createWorkspace")}
                         </TooltipContent>
                       </Tooltip>
                     </DropdownMenuLabel>
@@ -168,12 +180,12 @@ export function AppSidebar() {
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
                       <Languages className="h-3.5 w-3.5 mr-1" />
-                      {t.appearance.language}
+                      {appearance("language")}
                     </DropdownMenuLabel>
                     {locales.map((l) => (
                       <DropdownMenuItem
                         key={l}
-                        onClick={() => setLocale(l)}
+                        onClick={() => switchLocale(l)}
                       >
                         <span className="flex-1">{localeLabels[l]}</span>
                         {locale === l && <Check className="h-3.5 w-3.5 text-primary" />}
@@ -184,7 +196,7 @@ export function AppSidebar() {
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
-                      {t.sidebar.logOut}
+                      {sidebar("logOut")}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
@@ -199,7 +211,7 @@ export function AppSidebar() {
                 <SquarePen className="size-3.5" />
                 <DraftDot />
               </TooltipTrigger>
-              <TooltipContent side="bottom">{t.sidebar.newIssue}</TooltipContent>
+              <TooltipContent side="bottom">{sidebar("newIssue")}</TooltipContent>
             </Tooltip>
           </div>
         </SidebarHeader>

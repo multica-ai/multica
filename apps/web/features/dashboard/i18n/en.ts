@@ -31,6 +31,7 @@ export const en: DashboardDict = {
     dark: "Dark",
     system: "System",
     language: "Language",
+    selectTheme: "Select {theme} theme",
   },
   account: {
     profile: "Profile",
@@ -47,6 +48,7 @@ export const en: DashboardDict = {
   workspace: {
     workspaceName: "Workspace name",
     description: "Description",
+    slug: "Slug",
     aiContext: "AI context",
     aiContextPlaceholder: "Background information and context for AI agents working in this workspace",
     workspaceDescriptionPlaceholder: "What does this workspace focus on?",
@@ -119,6 +121,7 @@ export const en: DashboardDict = {
     creating: "Creating...",
     revoke: "Revoke",
     revoking: "Revoking...",
+    revokeLabel: "Revoke {name}",
     revokeConfirmTitle: "Revoke token",
     revokeConfirmDescription: "This token will be permanently revoked.",
     confirm: "Confirm",
@@ -261,6 +264,8 @@ export const en: DashboardDict = {
     failedUploadAvatar: "Failed to upload avatar",
     maxConcurrentTasks: "Max Concurrent Tasks",
     selectAgent: "Select an agent to view details",
+    avatar: "Avatar",
+    issueIdFallback: "Issue",
     tasks: "Tasks",
     taskQueue: "Task Queue",
     taskQueueDesc: "Issues assigned to this agent and their execution status.",

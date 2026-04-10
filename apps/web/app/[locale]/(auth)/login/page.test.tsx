@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DashboardLocaleProvider } from "@/features/dashboard/i18n";
+import { NextIntlClientProvider } from "next-intl";
+import enMessages from "@/messages/en.json";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -50,7 +51,11 @@ vi.mock("@/platform/api", () => ({
 import LoginPage from "./page";
 
 function renderWithProviders(ui: React.ReactElement) {
-  return render(<DashboardLocaleProvider>{ui}</DashboardLocaleProvider>);
+  return render(
+    <NextIntlClientProvider locale="en" messages={enMessages}>
+      {ui}
+    </NextIntlClientProvider>
+  );
 }
 
 describe("LoginPage", () => {
