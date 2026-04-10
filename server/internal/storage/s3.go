@@ -16,9 +16,10 @@ import (
 )
 
 type S3Storage struct {
-	client    *s3.Client
-	bucket    string
-	cdnDomain string // if set, returned URLs use this instead of bucket name
+	client       *s3.Client
+	bucket       string
+	cdnDomain    string // if set, returned URLs use this instead of bucket name
+	endpointHost string // hostname portion of S3_ENDPOINT for URL construction
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -64,6 +65,14 @@ func NewS3StorageFromEnv() *S3Storage {
 	endpoint := os.Getenv("S3_ENDPOINT")
 	forcePathStyle, _ := strconv.ParseBool(os.Getenv("S3_FORCE_PATH_STYLE"))
 
+	// Extract hostname from endpoint for URL construction.
+	var endpointHost string
+	if endpoint != "" {
+		endpointHost = strings.TrimPrefix(endpoint, "https://")
+		endpointHost = strings.TrimPrefix(endpointHost, "http://")
+		endpointHost = strings.TrimRight(endpointHost, "/")
+	}
+
 	var client *s3.Client
 	if endpoint != "" {
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
@@ -81,9 +90,10 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "endpoint", endpoint, "cdn_domain", cdnDomain)
 	return &S3Storage{
-		client:    client,
-		bucket:    bucket,
-		cdnDomain: cdnDomain,
+		client:       client,
+		bucket:       bucket,
+		cdnDomain:    cdnDomain,
+		endpointHost: endpointHost,
 	}
 }
 
@@ -110,7 +120,13 @@ func (s *S3Storage) KeyFromURL(rawURL string) string {
 		"https://" + s.cdnDomain + "/",
 		"https://" + s.bucket + "/",
 	} {
-		if strings.HasPrefix(rawURL, prefix) {
+		if prefix != "https:///" && strings.HasPrefix(rawURL, prefix) {
+			return strings.TrimPrefix(rawURL, prefix)
+		}
+	}
+	// Also try endpoint-based URL: https://bucket.endpoint-host/key
+	if s.endpointHost != "" {
+		if prefix := "https://" + s.bucket + "." + s.endpointHost + "/"; strings.HasPrefix(rawURL, prefix) {
 			return strings.TrimPrefix(rawURL, prefix)
 		}
 	}
@@ -173,10 +189,19 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 
-	domain := s.bucket
+	return s.objectURL(key), nil
+}
+
+// objectURL builds the public URL for an object. Priority:
+//  1. cdnDomain  → https://cdnDomain/key
+//  2. endpoint   → https://bucket.endpointHost/key  (virtual-hosted style)
+//  3. AWS S3     → https://bucket/key (typically overridden by CLOUDFRONT_DOMAIN)
+func (s *S3Storage) objectURL(key string) string {
 	if s.cdnDomain != "" {
-		domain = s.cdnDomain
+		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
-	link := fmt.Sprintf("https://%s/%s", domain, key)
-	return link, nil
+	if s.endpointHost != "" {
+		return fmt.Sprintf("https://%s.%s/%s", s.bucket, s.endpointHost, key)
+	}
+	return fmt.Sprintf("https://%s/%s", s.bucket, key)
 }
