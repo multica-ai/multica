@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -13,13 +14,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Storage struct {
-	client       *s3.Client
-	bucket       string
-	cdnDomain    string // if set, returned URLs use this instead of bucket name
-	endpointHost string // hostname portion of S3_ENDPOINT for URL construction
+	client         *s3.Client
+	bucket         string
+	cdnDomain      string
+	endpoint       *url.URL // parsed S3_ENDPOINT for URL construction
+	forcePathStyle bool     // if true, use path-style URLs
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -65,12 +68,15 @@ func NewS3StorageFromEnv() *S3Storage {
 	endpoint := os.Getenv("S3_ENDPOINT")
 	forcePathStyle, _ := strconv.ParseBool(os.Getenv("S3_FORCE_PATH_STYLE"))
 
-	// Extract hostname from endpoint for URL construction.
-	var endpointHost string
+	// Parse endpoint URL for URL construction.
+	var endpointURL *url.URL
 	if endpoint != "" {
-		endpointHost = strings.TrimPrefix(endpoint, "https://")
-		endpointHost = strings.TrimPrefix(endpointHost, "http://")
-		endpointHost = strings.TrimRight(endpointHost, "/")
+		var err error
+		endpointURL, err = url.Parse(endpoint)
+		if err != nil {
+			slog.Error("failed to parse S3_ENDPOINT", "endpoint", endpoint, "error", err)
+			return nil
+		}
 	}
 
 	var client *s3.Client
@@ -90,10 +96,11 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "endpoint", endpoint, "cdn_domain", cdnDomain)
 	return &S3Storage{
-		client:       client,
-		bucket:       bucket,
-		cdnDomain:    cdnDomain,
-		endpointHost: endpointHost,
+		client:         client,
+		bucket:         bucket,
+		cdnDomain:      cdnDomain,
+		endpoint:       endpointURL,
+		forcePathStyle: forcePathStyle,
 	}
 }
 
@@ -115,21 +122,35 @@ func sanitizeFilename(name string) string {
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
 // e.g. "https://multica-static.copilothub.ai/abc123.png" → "abc123.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
-	// Strip the "https://domain/" prefix.
-	for _, prefix := range []string{
-		"https://" + s.cdnDomain + "/",
-		"https://" + s.bucket + "/",
-	} {
-		if prefix != "https:///" && strings.HasPrefix(rawURL, prefix) {
+	// Try CDN domain prefix.
+	if s.cdnDomain != "" {
+		if prefix := "https://" + s.cdnDomain + "/"; strings.HasPrefix(rawURL, prefix) {
 			return strings.TrimPrefix(rawURL, prefix)
 		}
 	}
-	// Also try endpoint-based URL: https://bucket.endpoint-host/key
-	if s.endpointHost != "" {
-		if prefix := "https://" + s.bucket + "." + s.endpointHost + "/"; strings.HasPrefix(rawURL, prefix) {
-			return strings.TrimPrefix(rawURL, prefix)
+
+	// Try bucket name prefix (AWS S3 standard).
+	if prefix := "https://" + s.bucket + "/"; strings.HasPrefix(rawURL, prefix) {
+		return strings.TrimPrefix(rawURL, prefix)
+	}
+
+	// Try endpoint-based URLs.
+	if s.endpoint != nil {
+		scheme := s.endpoint.Scheme
+		host := s.endpoint.Host
+		if s.forcePathStyle {
+			// Path-style: scheme://host/bucket/key
+			if prefix := scheme + "://" + host + "/" + s.bucket + "/"; strings.HasPrefix(rawURL, prefix) {
+				return strings.TrimPrefix(rawURL, prefix)
+			}
+		} else {
+			// Virtual-hosted: scheme://bucket.host/key
+			if prefix := scheme + "://" + s.bucket + "." + host + "/"; strings.HasPrefix(rawURL, prefix) {
+				return strings.TrimPrefix(rawURL, prefix)
+			}
 		}
 	}
+
 	// Fallback: take everything after the last "/".
 	if i := strings.LastIndex(rawURL, "/"); i >= 0 {
 		return rawURL[i+1:]
@@ -175,16 +196,23 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		disposition = "inline"
 	}
 
-	reader := bytes.NewReader(data)
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
-		Body:               reader,
+		Body:               bytes.NewReader(data),
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		ContentLength:      aws.Int64(int64(len(data))),
-	})
+	}
+
+	// Only set StorageClass for AWS S3 (no custom endpoint).
+	// S3-compatible services may not support IntelligentTiering.
+	if s.endpoint == nil {
+		input.StorageClass = types.StorageClassIntelligentTiering
+	}
+
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
@@ -193,15 +221,21 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 }
 
 // objectURL builds the public URL for an object. Priority:
-//  1. cdnDomain  → https://cdnDomain/key
-//  2. endpoint   → https://bucket.endpointHost/key  (virtual-hosted style)
-//  3. AWS S3     → https://bucket/key (typically overridden by CLOUDFRONT_DOMAIN)
+//  1. cdnDomain       → https://cdnDomain/key
+//  2. path-style      → scheme://endpoint/bucket/key (when forcePathStyle)
+//  3. virtual-hosted  → scheme://bucket.endpoint/key (default for S3-compatible)
+//  4. AWS S3          → https://bucket/key (typically overridden by CLOUDFRONT_DOMAIN)
 func (s *S3Storage) objectURL(key string) string {
 	if s.cdnDomain != "" {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
-	if s.endpointHost != "" {
-		return fmt.Sprintf("https://%s.%s/%s", s.bucket, s.endpointHost, key)
+	if s.endpoint != nil {
+		if s.forcePathStyle {
+			// Path-style: scheme://host/bucket/key
+			return fmt.Sprintf("%s://%s/%s/%s", s.endpoint.Scheme, s.endpoint.Host, s.bucket, key)
+		}
+		// Virtual-hosted: scheme://bucket.host/key
+		return fmt.Sprintf("%s://%s.%s/%s", s.endpoint.Scheme, s.endpoint.Host, s.bucket, key)
 	}
 	return fmt.Sprintf("https://%s/%s", s.bucket, key)
 }
