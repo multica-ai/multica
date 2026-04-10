@@ -222,9 +222,15 @@ type searchResult struct {
 }
 
 // buildSearchQuery builds a dynamic SQL query for issue search.
-// It supports ILIKE matching, identifier search, multi-word search,
-// and refined ranking.
+// It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
+// Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+	// Lowercase in Go so SQL only needs LOWER() on the column side.
+	phrase = strings.ToLower(phrase)
+	for i, t := range terms {
+		terms[i] = strings.ToLower(t)
+	}
+
 	// Parameter index tracker
 	argIdx := 1
 	args := []any{}
@@ -242,7 +248,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	wsParam := nextArg(nil) // $2 — workspace_id, will be filled by caller position
 
-	// Build per-term ILIKE conditions only for multi-word search.
+	// Build per-term LIKE conditions only for multi-word search.
 	// For single-word queries, the phrase parameter already covers the term.
 	var termParams []string
 	if len(terms) > 1 {
@@ -257,7 +263,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Full phrase match: title, description, or comment
 	phraseMatch := fmt.Sprintf(
-		"(i.title ILIKE %s OR COALESCE(i.description, '') ILIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.content ILIKE %s))",
+		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
 		phraseContains, phraseContains, phraseContains,
 	)
 	whereParts = append(whereParts, phraseMatch)
@@ -268,7 +274,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		for _, tp := range termParams {
 			tc := "'%' || " + tp + " || '%'"
 			termConditions = append(termConditions, fmt.Sprintf(
-				"(i.title ILIKE %s OR COALESCE(i.description, '') ILIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.content ILIKE %s))",
+				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
 				tc, tc, tc,
 			))
 		}
@@ -298,31 +304,31 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	// Tier 1: Exact title match
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = LOWER(%s) THEN 1", phraseParam))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = %s THEN 1", phraseParam))
 
 	// Tier 2: Title starts with phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN i.title ILIKE %s THEN 2", phraseStartsWith))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 2", phraseStartsWith))
 
 	// Tier 3: Title contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN i.title ILIKE %s THEN 3", phraseContains))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 3", phraseContains))
 
 	// Tier 4: Title matches all words (multi-word only)
 	if len(termParams) > 1 {
 		var titleTerms []string
 		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("i.title ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 4", strings.Join(titleTerms, " AND ")))
 	}
 
 	// Tier 5: Description contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN COALESCE(i.description, '') ILIKE %s THEN 5", phraseContains))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 5", phraseContains))
 
 	// Tier 6: Description matches all words (multi-word only)
 	if len(termParams) > 1 {
 		var descTerms []string
 		for _, tp := range termParams {
-			descTerms = append(descTerms, fmt.Sprintf("COALESCE(i.description, '') ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 6", strings.Join(descTerms, " AND ")))
 	}
@@ -343,8 +349,8 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// --- match_source expression ---
 	matchSourceExpr := fmt.Sprintf(`CASE
-		WHEN i.title ILIKE %s THEN 'title'
-		WHEN COALESCE(i.description, '') ILIKE %s THEN 'description'
+		WHEN LOWER(i.title) LIKE %s THEN 'title'
+		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
 		ELSE 'comment'
 	END`, phraseContains, phraseContains)
 
@@ -353,13 +359,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		var titleTerms []string
 		var descTerms []string
 		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("i.title ILIKE '%s' || %s || '%s'", "%", tp, "%"))
-			descTerms = append(descTerms, fmt.Sprintf("COALESCE(i.description, '') ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		matchSourceExpr = fmt.Sprintf(`CASE
-			WHEN i.title ILIKE %s THEN 'title'
+			WHEN LOWER(i.title) LIKE %s THEN 'title'
 			WHEN (%s) THEN 'title'
-			WHEN COALESCE(i.description, '') ILIKE %s THEN 'description'
+			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
 			WHEN (%s) THEN 'description'
 			ELSE 'comment'
 		END`,
@@ -371,11 +377,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// --- matched_comment_content subquery ---
 	// Find the most recent matching comment for comment-source matches.
 	commentSubquery := fmt.Sprintf(`CASE
-		WHEN i.title ILIKE %s THEN ''
-		WHEN COALESCE(i.description, '') ILIKE %s THEN ''
+		WHEN LOWER(i.title) LIKE %s THEN ''
+		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
 		ELSE COALESCE(
 			(SELECT c.content FROM comment c
-			 WHERE c.issue_id = i.id AND c.content ILIKE %s
+			 WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s
 			 ORDER BY c.created_at DESC LIMIT 1),
 			''
 		)
@@ -387,18 +393,18 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		var descTerms []string
 		var commentTerms []string
 		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("i.title ILIKE '%s' || %s || '%s'", "%", tp, "%"))
-			descTerms = append(descTerms, fmt.Sprintf("COALESCE(i.description, '') ILIKE '%s' || %s || '%s'", "%", tp, "%"))
-			commentTerms = append(commentTerms, fmt.Sprintf("c.content ILIKE '%s' || %s || '%s'", "%", tp, "%"))
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE '%s' || %s || '%s'", "%", tp, "%"))
 		}
 		commentSubquery = fmt.Sprintf(`CASE
-			WHEN i.title ILIKE %s THEN ''
+			WHEN LOWER(i.title) LIKE %s THEN ''
 			WHEN (%s) THEN ''
-			WHEN COALESCE(i.description, '') ILIKE %s THEN ''
+			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
 			WHEN (%s) THEN ''
 			ELSE COALESCE(
 				(SELECT c.content FROM comment c
-				 WHERE c.issue_id = i.id AND (c.content ILIKE %s OR (%s))
+				 WHERE c.issue_id = i.id AND (LOWER(c.content) LIKE %s OR (%s))
 				 ORDER BY c.created_at DESC LIMIT 1),
 				''
 			)
