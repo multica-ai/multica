@@ -12,6 +12,7 @@ catalog:
   # TypeScript & Node
   typescript: "^5.9.3"
   "@types/node": "^25.0.10"
+  "@types/minimatch": "^6.0.0"
   dotenv: "^17.3.1"
 
   # State Management

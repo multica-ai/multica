@@ -253,6 +253,11 @@ function SkillListItem({
           </div>
         )}
       </div>
+      {isGlobal && (
+        <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
+          global
+        </Badge>
+      )}
       {!isGlobal && (skill.files?.length ?? 0) > 0 && (
         <Badge variant="secondary">
           {skill.files!.length} file{skill.files!.length !== 1 ? "s" : ""}

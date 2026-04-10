@@ -70,6 +70,7 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@types/minimatch": "catalog:",
     "@types/react": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
