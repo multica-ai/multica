@@ -83,16 +83,52 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 
 ### File Storage (Optional)
 
-For file uploads and attachments, configure S3 and CloudFront:
+For file uploads and attachments, configure S3 or an S3-compatible storage service.
+
+#### AWS S3 + CloudFront
 
 | Variable | Description |
 |----------|-------------|
 | `S3_BUCKET` | S3 bucket name |
 | `S3_REGION` | AWS region (default: `us-west-2`) |
-| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain |
+| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain (optional; if set, returned URLs use this domain) |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
 | `COOKIE_DOMAIN` | Domain for CloudFront auth cookies |
+
+#### S3-Compatible Storage (Aliyun OSS, MinIO, etc.)
+
+In addition to the standard AWS S3 configuration, set these variables to connect to an S3-compatible service:
+
+| Variable | Description |
+|----------|-------------|
+| `S3_ENDPOINT` | Custom endpoint URL (e.g. `https://oss-cn-hongkong.aliyuncs.com` for Aliyun OSS) |
+| `S3_FORCE_PATH_STYLE` | Set to `true` for services that require path-style URLs (e.g. MinIO). Defaults to `false`. |
+| `AWS_ACCESS_KEY_ID` | Access key (falls back to default AWS credential chain if unset) |
+| `AWS_SECRET_ACCESS_KEY` | Secret key |
+
+**Aliyun OSS example** (`.env` or `docker-compose.yml`):
+
+```bash
+S3_BUCKET=your-bucket-name
+S3_REGION=cn-hongkong
+S3_ENDPOINT=https://oss-cn-hongkong.aliyuncs.com
+S3_FORCE_PATH_STYLE=false
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+CLOUDFRONT_DOMAIN=your-cdn-domain.com   # optional: custom domain for returned URLs
+```
+
+**MinIO example:**
+
+```bash
+S3_BUCKET=multica
+S3_REGION=us-east-1
+S3_ENDPOINT=http://minio:9000
+S3_FORCE_PATH_STYLE=true
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
 
 ### Server
 
