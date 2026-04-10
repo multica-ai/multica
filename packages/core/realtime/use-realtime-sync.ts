@@ -102,7 +102,8 @@ export function useRealtimeSync(
       },
       pin: () => {
         const wsId = workspaceStore.getState().workspace?.id;
-        if (wsId) qc.invalidateQueries({ queryKey: pinKeys.all(wsId) });
+        const userId = authStore.getState().user?.id;
+        if (wsId && userId) qc.invalidateQueries({ queryKey: pinKeys.all(wsId, userId) });
       },
       daemon: () => {
         const wsId = workspaceStore.getState().workspace?.id;
