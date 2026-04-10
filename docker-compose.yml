@@ -8,9 +8,44 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-multica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://multica:${POSTGRES_PASSWORD:-multica}@postgres:5432/multica?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://192.168.1.44:8080}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.ai}
+      # S3-compatible storage (Aliyun OSS)
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-cn-hongkong}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      REMOTE_API_URL: http://server:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
 
 volumes:
   pgdata:

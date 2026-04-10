@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Storage struct {
@@ -27,6 +27,8 @@ type S3Storage struct {
 // Environment variables:
 //   - S3_BUCKET (required)
 //   - S3_REGION (default: us-west-2)
+//   - S3_ENDPOINT (optional; for S3-compatible services like Aliyun OSS, MinIO)
+//   - S3_FORCE_PATH_STYLE (optional; default false)
 //   - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional; falls back to default credential chain)
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
@@ -58,11 +60,28 @@ func NewS3StorageFromEnv() *S3Storage {
 		return nil
 	}
 
+	// Custom endpoint for S3-compatible services (Aliyun OSS, MinIO, etc.)
+	endpoint := os.Getenv("S3_ENDPOINT")
+	forcePathStyle, _ := strconv.ParseBool(os.Getenv("S3_FORCE_PATH_STYLE"))
+
+	var client *s3.Client
+	if endpoint != "" {
+		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpoint)
+			o.UsePathStyle = forcePathStyle
+			// S3-compatible services (Aliyun OSS, MinIO) don't support aws-chunked
+			// content encoding. Only calculate checksums when the operation requires it.
+			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+		})
+	} else {
+		client = s3.NewFromConfig(cfg)
+	}
+
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain)
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "endpoint", endpoint, "cdn_domain", cdnDomain)
 	return &S3Storage{
-		client:    s3.NewFromConfig(cfg),
+		client:    client,
 		bucket:    bucket,
 		cdnDomain: cdnDomain,
 	}
@@ -139,14 +158,16 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 	if isInlineContentType(contentType) {
 		disposition = "inline"
 	}
+
+	reader := bytes.NewReader(data)
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
-		Body:               bytes.NewReader(data),
+		Body:               reader,
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
-		StorageClass:       types.StorageClassIntelligentTiering,
+		ContentLength:      aws.Int64(int64(len(data))),
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
