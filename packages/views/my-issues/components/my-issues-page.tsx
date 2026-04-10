@@ -82,6 +82,8 @@ export function MyIssuesPage() {
         assigneeFilters: [],
         includeNoAssignee: false,
         creatorFilters: [],
+        projectFilters: [],
+        includeNoProject: false,
       }),
     [myIssues, statusFilters, priorityFilters],
   );

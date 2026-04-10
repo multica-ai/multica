@@ -99,7 +99,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
   const creatorFilters = useViewStore((s) => s.creatorFilters);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters }),
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
     [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
   );
   const doneColumnCount = useMemo(

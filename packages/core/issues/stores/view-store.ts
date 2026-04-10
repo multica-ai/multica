@@ -46,6 +46,8 @@ export interface IssueViewState {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -56,6 +58,8 @@ export interface IssueViewState {
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;
   toggleCreatorFilter: (value: ActorFilterValue) => void;
+  toggleProjectFilter: (projectId: string) => void;
+  toggleNoProject: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -72,6 +76,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   assigneeFilters: [],
   includeNoAssignee: false,
   creatorFilters: [],
+  projectFilters: [],
+  includeNoProject: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -123,6 +129,14 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
           : [...state.creatorFilters, value],
       };
     }),
+  toggleProjectFilter: (projectId) =>
+    set((state) => ({
+      projectFilters: state.projectFilters.includes(projectId)
+        ? state.projectFilters.filter((id) => id !== projectId)
+        : [...state.projectFilters, projectId],
+    })),
+  toggleNoProject: () =>
+    set((state) => ({ includeNoProject: !state.includeNoProject })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -146,6 +160,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       assigneeFilters: [],
       includeNoAssignee: false,
       creatorFilters: [],
+      projectFilters: [],
+      includeNoProject: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -174,6 +190,8 @@ export const viewStorePersistOptions = (name: string) => ({
     assigneeFilters: state.assigneeFilters,
     includeNoAssignee: state.includeNoAssignee,
     creatorFilters: state.creatorFilters,
+    projectFilters: state.projectFilters,
+    includeNoProject: state.includeNoProject,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

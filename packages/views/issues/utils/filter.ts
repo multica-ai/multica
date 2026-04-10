@@ -7,6 +7,8 @@ export interface IssueFilters {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
 }
 
 /**
@@ -19,8 +21,9 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
+  const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
 
   return issues.filter((issue) => {
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
@@ -51,6 +54,17 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       )
     ) {
       return false;
+    }
+
+    if (hasProjectFilter) {
+      if (!issue.project_id) {
+        if (!includeNoProject) return false;
+      } else if (projectFilters.length > 0) {
+        if (!projectFilters.includes(issue.project_id)) return false;
+      } else {
+        // Only "No project" is checked → hide issues that have a project
+        return false;
+      }
     }
 
     return true;
