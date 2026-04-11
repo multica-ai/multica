@@ -9,8 +9,8 @@ import (
 
 func TestLocalStorage_Upload(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	os.Unsetenv("LOCAL_UPLOAD_BASE_URL")
 	// No LOCAL_UPLOAD_BASE_URL set - should return relative path
 
 	store := NewLocalStorageFromEnv()
@@ -45,10 +45,8 @@ func TestLocalStorage_Upload(t *testing.T) {
 
 func TestLocalStorage_Upload_WithBaseURL(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
-	os.Setenv("LOCAL_UPLOAD_BASE_URL", "http://localhost:8080")
-	defer os.Unsetenv("LOCAL_UPLOAD_BASE_URL")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "http://localhost:8080")
 
 	store := NewLocalStorageFromEnv()
 	if store == nil {
@@ -83,8 +81,7 @@ func TestLocalStorage_Upload_WithBaseURL(t *testing.T) {
 
 func TestLocalStorage_Delete(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
 
 	store := NewLocalStorageFromEnv()
 	if store == nil {
@@ -113,8 +110,7 @@ func TestLocalStorage_Delete(t *testing.T) {
 
 func TestLocalStorage_KeyFromURL(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
 	// No baseURL set
 
 	store := NewLocalStorageFromEnv()
@@ -145,10 +141,8 @@ func TestLocalStorage_KeyFromURL(t *testing.T) {
 
 func TestLocalStorage_KeyFromURL_WithBaseURL(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
-	os.Setenv("LOCAL_UPLOAD_BASE_URL", "http://localhost:8080")
-	defer os.Unsetenv("LOCAL_UPLOAD_BASE_URL")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "http://localhost:8080")
 
 	store := NewLocalStorageFromEnv()
 	if store == nil {
@@ -177,8 +171,7 @@ func TestLocalStorage_KeyFromURL_WithBaseURL(t *testing.T) {
 
 func TestLocalStorage_DeleteKeys(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
 
 	store := NewLocalStorageFromEnv()
 	if store == nil {
@@ -208,8 +201,7 @@ func TestLocalStorage_DeleteKeys(t *testing.T) {
 
 func TestLocalStorage_KeyFromURL_Empty(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
-	defer os.Unsetenv("LOCAL_UPLOAD_DIR")
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
 
 	store := NewLocalStorageFromEnv()
 	if store == nil {

@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -17,7 +17,7 @@ type LocalStorage struct {
 }
 
 // NewLocalStorageFromEnv creates a LocalStorage from environment variables.
-// Returns nil if LOCAL_UPLOAD_DIR is explicitly set to empty string.
+// Returns nil if upload directory cannot be created.
 //
 // Environment variables:
 //   - LOCAL_UPLOAD_DIR (default: "./data/uploads")
@@ -65,8 +65,8 @@ func (s *LocalStorage) Delete(ctx context.Context, key string) {
 	if key == "" {
 		return
 	}
-	filepath := path.Join(s.uploadDir, key)
-	if err := os.Remove(filepath); err != nil {
+	filePath := filepath.Join(s.uploadDir, key)
+	if err := os.Remove(filePath); err != nil {
 		if !os.IsNotExist(err) {
 			slog.Error("local storage Delete failed", "key", key, "error", err)
 		}
@@ -80,9 +80,7 @@ func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
 }
 
 func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
-	_ = sanitizeFilename(filename)
-
-	filepath := path.Join(s.uploadDir, key)
+	filepath := filepath.Join(s.uploadDir, key)
 	if err := os.WriteFile(filepath, data, 0644); err != nil {
 		return "", fmt.Errorf("local storage WriteFile: %w", err)
 	}
@@ -94,28 +92,16 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 }
 
 func (s *LocalStorage) GetFilePath(key string) string {
-	return path.Join(s.uploadDir, key)
+	return filepath.Join(s.uploadDir, key)
 }
 
 func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filename string) {
-	filepath := path.Join(s.uploadDir, filename)
-	slog.Info("serving file", "filename", filename, "filepath", filepath)
+	filePath := filepath.Join(s.uploadDir, filename)
+	slog.Info("serving file", "filename", filename, "filepath", filePath)
 
-	data, err := os.ReadFile(filepath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			http.NotFound(w, r)
-			return
-		}
-		slog.Error("local storage serve file failed", "file", filename, "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	contentType := detectContentType(data, filename)
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "max-age=432000,public")
-	w.Write(data)
+	// Use http.ServeFile which has built-in path traversal protection
+	// It sanitizes the path and prevents access outside the directory
+	http.ServeFile(w, r, filePath)
 }
 
 func (s *LocalStorage) UploadFromReader(ctx context.Context, key string, reader io.Reader, contentType string, filename string) (string, error) {
