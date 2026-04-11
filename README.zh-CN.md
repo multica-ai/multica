@@ -146,7 +146,7 @@ cp .env.example .env
 make setup
 make start
 
-# 可选：用 air 启动后端热重载，并一并拉起所有本地服务
+# 可选：用 air 启动后端热重载，并一并拉起后端和 workplace
 go install github.com/air-verse/air@latest
 pnpm dev:air
 # 或者

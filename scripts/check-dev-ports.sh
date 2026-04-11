@@ -17,6 +17,11 @@ set +a
 PORT="${PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 MARKETING_PORT="${MARKETING_PORT:-3001}"
+SERVICES=("${@:2}")
+
+if [ "${#SERVICES[@]}" -eq 0 ]; then
+  SERVICES=(backend workspace marketing)
+fi
 
 check_port_available() {
   local port="$1"
@@ -29,6 +34,20 @@ check_port_available() {
   fi
 }
 
-check_port_available "$PORT" "Backend"
-check_port_available "$FRONTEND_PORT" "Workspace"
-check_port_available "$MARKETING_PORT" "Marketing"
+for service in "${SERVICES[@]}"; do
+  case "$service" in
+    backend)
+      check_port_available "$PORT" "Backend"
+      ;;
+    workspace)
+      check_port_available "$FRONTEND_PORT" "Workspace"
+      ;;
+    marketing)
+      check_port_available "$MARKETING_PORT" "Marketing"
+      ;;
+    *)
+      echo "Unknown service '$service'. Expected one of: backend, workspace, marketing."
+      exit 1
+      ;;
+  esac
+done

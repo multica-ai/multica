@@ -146,7 +146,7 @@ cp .env.example .env
 make setup
 make start
 
-# Optional: use air for Go hot reload while starting everything together
+# Optional: use air for Go hot reload while starting backend and workspace together
 go install github.com/air-verse/air@latest
 pnpm dev:air
 # or

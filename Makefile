@@ -54,19 +54,18 @@ setup:
 	@echo ""
 	@echo "✓ Setup complete! Run 'make start' to launch the app."
 
-# Start all services (backend + frontend)
+# Start app services (backend + workspace)
 start:
 	$(REQUIRE_ENV)
 	@echo "Using env file: $(ENV_FILE)"
 	@echo "Backend/API: http://localhost:$(PORT)"
 	@echo "Workspace: http://localhost:$(FRONTEND_PORT)"
-	@echo "Marketing: http://localhost:$(MARKETING_PORT)"
-	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	@bash scripts/check-dev-ports.sh "$(ENV_FILE)"
-	@echo "Starting backend, workspace SPA, and marketing site..."
+	@bash scripts/check-postgres.sh "$(ENV_FILE)"
+	@bash scripts/check-dev-ports.sh "$(ENV_FILE)" backend workspace
+	@echo "Starting backend and workspace SPA..."
+# pnpm dev:marketing & \
 	@trap 'kill 0' EXIT; \
 		(cd server && go run ./cmd/server) & \
-		pnpm dev:marketing & \
 		pnpm dev:workspace & \
 		wait
 
@@ -138,7 +137,7 @@ check-worktree:
 # Go server
 dev:
 	$(REQUIRE_ENV)
-	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@bash scripts/check-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server
 
 daemon:
