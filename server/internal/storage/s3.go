@@ -31,7 +31,7 @@ type S3Storage struct {
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
-		slog.Info("S3_BUCKET not set, file upload disabled")
+		slog.Info("S3_BUCKET not set, cloud upload disabled")
 		return nil
 	}
 
@@ -66,21 +66,6 @@ func NewS3StorageFromEnv() *S3Storage {
 		bucket:    bucket,
 		cdnDomain: cdnDomain,
 	}
-}
-
-// sanitizeFilename removes characters that could cause header injection in Content-Disposition.
-func sanitizeFilename(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		// Strip control chars, newlines, null bytes, quotes, semicolons, backslashes
-		if r < 0x20 || r == 0x7f || r == '"' || r == ';' || r == '\\' || r == '\x00' {
-			b.WriteRune('_')
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
@@ -121,16 +106,6 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	for _, key := range keys {
 		s.Delete(ctx, key)
 	}
-}
-
-// isInlineContentType returns true for media types that browsers should
-// display inline (images, video, audio, PDF). Everything else triggers a
-// download via Content-Disposition: attachment.
-func isInlineContentType(ct string) bool {
-	return strings.HasPrefix(ct, "image/") ||
-		strings.HasPrefix(ct, "video/") ||
-		strings.HasPrefix(ct, "audio/") ||
-		ct == "application/pdf"
 }
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
