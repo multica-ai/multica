@@ -29,6 +29,14 @@ export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
+export type {
+  Project,
+  ProjectStatus,
+  ProjectLeadType,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  ListProjectsResponse,
+} from "./project";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";

@@ -17,6 +17,7 @@ import { useIssueViewStore } from "@/features/issues/stores/view-store";
 import { IssueDetail } from "@/features/issues/components/issue-detail";
 import { MyIssuesPage } from "@/features/my-issues";
 import AgentsPage from "@/features/agents/components/agents-page";
+import { ProjectsPage } from "@/features/projects";
 import SettingsPage from "@/features/settings/components/settings-page";
 import { RuntimesPage } from "@/features/runtimes";
 import { SkillsPage } from "@/features/skills";
@@ -85,6 +86,11 @@ function AgentDetailPage() {
   return <AgentsPage selectedAgentId={id} syncSelectionToPath />;
 }
 
+function ProjectDetailPage() {
+  const { id } = projectDetailRoute.useParams();
+  return <ProjectsPage selectedProjectId={id} syncSelectionToPath />;
+}
+
 const rootRoute = createRootRoute({
   component: AppShell,
   notFoundComponent: NotFoundRedirect,
@@ -124,6 +130,18 @@ const boardRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "board",
   component: BoardPage,
+});
+
+const projectsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "projects",
+  component: ProjectsPage,
+});
+
+const projectDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "projects/$id",
+  component: ProjectDetailPage,
 });
 
 const inboxRoute = createRoute({
@@ -175,6 +193,8 @@ const routeTree = rootRoute.addChildren([
     issuesRoute,
     issueDetailRoute,
     boardRoute,
+    projectsRoute,
+    projectDetailRoute,
     inboxRoute,
     myIssuesRoute,
     agentsRoute,

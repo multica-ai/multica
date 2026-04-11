@@ -10,6 +10,7 @@ export interface CreateIssueRequest {
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
+  project_id?: string;
   due_date?: string;
   start_date?: string;
   end_date?: string;
@@ -23,6 +24,7 @@ export interface UpdateIssueRequest {
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
   position?: number;
+  project_id?: string | null;
   due_date?: string | null;
   start_date?: string | null;
   end_date?: string | null;
@@ -35,6 +37,7 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_id?: string;
+  project_id?: string;
 }
 
 export interface ListIssuesResponse {

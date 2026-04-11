@@ -70,6 +70,7 @@ import { useIssueReactions } from "@/features/issues/hooks/use-issue-reactions";
 import { useIssueSubscribers } from "@/features/issues/hooks/use-issue-subscribers";
 import { ReactionBar } from "@/components/common/reaction-bar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
+import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { Link, useRouter } from "@/shared/router";
 import { timeAgo } from "@/shared/utils";
 
@@ -1024,6 +1025,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <AssigneePicker
                   assigneeType={issue.assignee_type}
                   assigneeId={issue.assignee_id}
+                  onUpdate={handleUpdateField}
+                  align="start"
+                />
+              </PropRow>
+
+              {/* Project */}
+              <PropRow label="Project">
+                <ProjectPicker
+                  projectId={issue.project_id}
                   onUpdate={handleUpdateField}
                   align="start"
                 />

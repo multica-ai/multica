@@ -3,6 +3,7 @@
 import {
   Inbox,
   ListTodo,
+  FolderKanban,
   Bot,
   Monitor,
   Settings,
@@ -14,6 +15,7 @@ export const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/my-issues", label: "My Issues", icon: CircleUser },
   { href: "/issues", label: "Issues", icon: ListTodo },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
 ];
 
 export const workspaceNav = [
@@ -29,6 +31,8 @@ export function isWorkspaceNavActive(pathname: string, href: string): boolean {
       return pathname === "/" || pathname === "/inbox";
     case "/issues":
       return pathname === "/issues" || pathname === "/board" || pathname.startsWith("/issues/");
+    case "/projects":
+      return pathname === "/projects" || pathname.startsWith("/projects/");
     case "/agents":
       return pathname === "/agents" || pathname.startsWith("/agents/");
     default:

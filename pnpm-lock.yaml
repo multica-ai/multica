@@ -155,7 +155,7 @@ importers:
         version: 1.0.1(react@19.2.3)
       next:
         specifier: ^16.1.6
-        version: 16.2.0(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+        version: 16.2.0(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -259,6 +259,9 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
+      '@tanstack/react-query':
+        specifier: ^5.90.5
+        version: 5.97.0(react@19.2.3)
       '@tanstack/react-router':
         specifier: ^1.132.0
         version: 1.168.10(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -1478,6 +1481,14 @@ packages:
   '@tanstack/history@1.161.6':
     resolution: {integrity: sha512-NaOGLRrddszbQj9upGat6HG/4TKvXLvu+osAIgfxPYA+eIvYKv8GKDJOrY2D3/U9MRnKfMWD7bU4jeD4xmqyIg==}
     engines: {node: '>=20.19'}
+
+  '@tanstack/query-core@5.97.0':
+    resolution: {integrity: sha512-QdpLP5VzVMgo4VtaPppRA2W04UFjIqX+bxke/ZJhE5cfd5UPkRzqIAJQt9uXkQJjqE8LBOMbKv7f8HCsZltXlg==}
+
+  '@tanstack/react-query@5.97.0':
+    resolution: {integrity: sha512-y4So4eGcQoK2WVMAcDNZE9ofB/p5v1OlKvtc1F3uqHwrtifobT7q+ZnXk2mRkc8E84HKYSlAE9z6HXl2V0+ySQ==}
+    peerDependencies:
+      react: ^18 || ^19
 
   '@tanstack/react-router@1.168.10':
     resolution: {integrity: sha512-/RmDlOwDkCug609KdPB3U+U1zmrtadJpvsmRg2zEn8TRCKRNri7dYZIjQZbNg8PgUiRL4T6njrZBV1ChzblNaA==}
@@ -5148,6 +5159,13 @@ snapshots:
 
   '@tanstack/history@1.161.6': {}
 
+  '@tanstack/query-core@5.97.0': {}
+
+  '@tanstack/react-query@5.97.0(react@19.2.3)':
+    dependencies:
+      '@tanstack/query-core': 5.97.0
+      react: 19.2.3
+
   '@tanstack/react-router@1.168.10(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@tanstack/history': 1.161.6
@@ -6970,7 +6988,7 @@ snapshots:
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
 
-  next@16.2.0(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
+  next@16.2.0(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
     dependencies:
       '@next/env': 16.2.0
       '@swc/helpers': 0.5.15
@@ -6979,7 +6997,7 @@ snapshots:
       postcss: 8.4.31
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
-      styled-jsx: 5.1.6(@babel/core@7.29.0)(react@19.2.3)
+      styled-jsx: 5.1.6(react@19.2.3)
     optionalDependencies:
       '@next/swc-darwin-arm64': 16.2.0
       '@next/swc-darwin-x64': 16.2.0
@@ -7807,12 +7825,10 @@ snapshots:
     dependencies:
       inline-style-parser: 0.2.7
 
-  styled-jsx@5.1.6(@babel/core@7.29.0)(react@19.2.3):
+  styled-jsx@5.1.6(react@19.2.3):
     dependencies:
       client-only: 0.0.1
       react: 19.2.3
-    optionalDependencies:
-      '@babel/core': 7.29.0
 
   symbol-tree@3.2.4: {}
 
