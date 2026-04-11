@@ -273,6 +273,213 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestProjectCRUDAndIssueLinking(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Project Alpha",
+		"description": "Initial project description",
+		"icon":        "🚀",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var createdProject ProjectResponse
+	json.NewDecoder(w.Body).Decode(&createdProject)
+	if createdProject.Title != "Project Alpha" {
+		t.Fatalf("CreateProject: expected title 'Project Alpha', got %q", createdProject.Title)
+	}
+	if createdProject.Status != "planned" {
+		t.Fatalf("CreateProject: expected default status 'planned', got %q", createdProject.Status)
+	}
+
+	projectID := createdProject.ID
+	projectDeleted := false
+	issueID := ""
+	t.Cleanup(func() {
+		if issueID != "" {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/api/issues/"+issueID, nil)
+			req = withURLParam(req, "id", issueID)
+			testHandler.DeleteIssue(w, req)
+		}
+		if !projectDeleted {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/api/projects/"+projectID, nil)
+			req = withURLParam(req, "id", projectID)
+			testHandler.DeleteProject(w, req)
+		}
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects/"+projectID, nil)
+	req = withURLParam(req, "id", projectID)
+	testHandler.GetProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetProject: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var fetchedProject ProjectResponse
+	json.NewDecoder(w.Body).Decode(&fetchedProject)
+	if fetchedProject.ID != projectID {
+		t.Fatalf("GetProject: expected id %q, got %q", projectID, fetchedProject.ID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+projectID, map[string]any{
+		"status":      "in_progress",
+		"description": "Updated project description",
+	})
+	req = withURLParam(req, "id", projectID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateProject: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updatedProject ProjectResponse
+	json.NewDecoder(w.Body).Decode(&updatedProject)
+	if updatedProject.Status != "in_progress" {
+		t.Fatalf("UpdateProject: expected status 'in_progress', got %q", updatedProject.Status)
+	}
+	if updatedProject.Description == nil || *updatedProject.Description != "Updated project description" {
+		t.Fatalf("UpdateProject: expected updated description, got %#v", updatedProject.Description)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListProjects(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListProjects: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var projectListResp struct {
+		Projects []ProjectResponse `json:"projects"`
+		Total    int               `json:"total"`
+	}
+	json.NewDecoder(w.Body).Decode(&projectListResp)
+	foundProject := false
+	for _, project := range projectListResp.Projects {
+		if project.ID == projectID {
+			foundProject = true
+			break
+		}
+	}
+	if !foundProject {
+		t.Fatalf("ListProjects: expected project %q in response", projectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Project-linked issue",
+		"project_id": projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue with project: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var createdIssue IssueResponse
+	json.NewDecoder(w.Body).Decode(&createdIssue)
+	issueID = createdIssue.ID
+	if createdIssue.ProjectID == nil || *createdIssue.ProjectID != projectID {
+		t.Fatalf("CreateIssue with project: expected project_id %q, got %#v", projectID, createdIssue.ProjectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&project_id="+projectID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues by project_id: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var issueListResp struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	json.NewDecoder(w.Body).Decode(&issueListResp)
+	foundIssue := false
+	for _, issue := range issueListResp.Issues {
+		if issue.ID == issueID {
+			foundIssue = true
+			break
+		}
+	}
+	if !foundIssue {
+		t.Fatalf("ListIssues by project_id: expected issue %q in response", issueID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/projects/"+projectID, nil)
+	req = withURLParam(req, "id", projectID)
+	testHandler.DeleteProject(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteProject: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	projectDeleted = true
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+issueID, nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue after project delete: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var fetchedIssue IssueResponse
+	json.NewDecoder(w.Body).Decode(&fetchedIssue)
+	if fetchedIssue.ProjectID != nil {
+		t.Fatalf("GetIssue after project delete: expected cleared project_id, got %#v", fetchedIssue.ProjectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects/"+projectID, nil)
+	req = withURLParam(req, "id", projectID)
+	testHandler.GetProject(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GetProject after delete: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateIssueRejectsProjectFromDifferentWorkspace(t *testing.T) {
+	ctx := context.Background()
+	otherSlug := fmt.Sprintf("handler-project-foreign-%d", time.Now().UnixNano())
+
+	var otherWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "Foreign Project Workspace", otherSlug, "Foreign workspace for project validation", "FPW").Scan(&otherWorkspaceID); err != nil {
+		t.Fatalf("failed to create foreign workspace: %v", err)
+	}
+
+	var foreignProjectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, status)
+		VALUES ($1, $2, 'planned')
+		RETURNING id
+	`, otherWorkspaceID, "Foreign project").Scan(&foreignProjectID); err != nil {
+		t.Fatalf("failed to create foreign project: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Invalid foreign project issue",
+		"project_id": foreignProjectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue with foreign project: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "project not found") {
+		t.Fatalf("CreateIssue with foreign project: unexpected body %s", w.Body.String())
+	}
+}
+
 func TestIssueScheduleDates(t *testing.T) {
 	createStartDate := "2026-04-10T00:00:00Z"
 	createEndDate := "2026-04-15T00:00:00Z"
@@ -426,6 +633,218 @@ func TestIssueScheduleDatesRejectInvalidRange(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "start_date must be on or before end_date") {
 		t.Fatalf("UpdateIssue invalid range: unexpected body %s", w.Body.String())
+	}
+}
+
+func TestListIssuesViewSemanticsAndCompatibility(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID string
+	err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	otherEmail := fmt.Sprintf("handler-list-%d@multica.ai", time.Now().UnixNano())
+	var otherUserID string
+	err = testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Handler List Other User", otherEmail).Scan(&otherUserID)
+	if err != nil {
+		t.Fatalf("failed to create secondary user: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("failed to add secondary member: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, otherUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, otherUserID)
+	})
+
+	todayStart := time.Now().UTC().Truncate(24 * time.Hour)
+	todayDue := todayStart.Add(12 * time.Hour).Format(time.RFC3339)
+	rangeStart := todayStart.Add(-24 * time.Hour).Format(time.RFC3339)
+	rangeEnd := todayStart.Add(24 * time.Hour).Format(time.RFC3339)
+	upcomingStart := todayStart.Add(48 * time.Hour).Format(time.RFC3339)
+
+	type seededIssue struct {
+		id    string
+		title string
+	}
+
+	seeded := map[string]seededIssue{}
+	nextNumber := int32(20000)
+
+	insertIssue := func(title, status string, assigneeType, assigneeID *string, creatorID string, dueDate, startDate, endDate *string) string {
+		nextNumber++
+		var issueID string
+		err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, status, priority, assignee_type, assignee_id,
+				creator_type, creator_id, number, position, due_date, start_date, end_date
+			)
+			VALUES ($1, $2, $3, 'none', $4, $5, 'member', $6, $7, $8, $9, $10, $11)
+			RETURNING id
+		`, testWorkspaceID, title, status, assigneeType, assigneeID, creatorID, nextNumber, float64(nextNumber), dueDate, startDate, endDate).Scan(&issueID)
+		if err != nil {
+			t.Fatalf("failed to insert issue %q: %v", title, err)
+		}
+		seeded[title] = seededIssue{id: issueID, title: title}
+		return issueID
+	}
+
+	cleanupIDs := []string{
+		insertIssue("List Backlog", "backlog", nil, nil, otherUserID, nil, nil, nil),
+		insertIssue("List Today Due", "todo", nil, nil, otherUserID, &todayDue, nil, nil),
+		insertIssue("List Today Range", "in_progress", nil, nil, otherUserID, nil, &rangeStart, &rangeEnd),
+		insertIssue("List Upcoming", "todo", nil, nil, otherUserID, nil, &upcomingStart, nil),
+		insertIssue("List Done Today", "done", nil, nil, otherUserID, &todayDue, nil, nil),
+	}
+
+	memberType := "member"
+	agentType := "agent"
+	cleanupIDs = append(cleanupIDs,
+		insertIssue("List Assigned Member", "todo", &memberType, &testUserID, otherUserID, nil, nil, nil),
+		insertIssue("List Assigned Agent", "todo", &agentType, &agentID, otherUserID, nil, nil, nil),
+		insertIssue("List Created By Me", "todo", nil, nil, testUserID, nil, nil, nil),
+	)
+
+	t.Cleanup(func() {
+		for _, issueID := range cleanupIDs {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	})
+
+	decodeList := func(t *testing.T, recorder *httptest.ResponseRecorder) []IssueResponse {
+		t.Helper()
+		var resp struct {
+			Issues []IssueResponse `json:"issues"`
+			Total  int             `json:"total"`
+		}
+		if err := json.NewDecoder(recorder.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode list response: %v", err)
+		}
+		return resp.Issues
+	}
+
+	assertContainsTitle := func(t *testing.T, issues []IssueResponse, title string) {
+		t.Helper()
+		for _, issue := range issues {
+			if issue.Title == title {
+				return
+			}
+		}
+		t.Fatalf("expected response to contain title %q", title)
+	}
+
+	assertNotContainsTitle := func(t *testing.T, issues []IssueResponse, title string) {
+		t.Helper()
+		for _, issue := range issues {
+			if issue.Title == title {
+				t.Fatalf("expected response to exclude title %q", title)
+			}
+		}
+	}
+
+	// Compatibility: old issue listing with no new params still returns seeded issues.
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues default: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues := decodeList(t, w)
+	assertContainsTitle(t, issues, "List Backlog")
+	assertContainsTitle(t, issues, "List Today Due")
+	assertContainsTitle(t, issues, "List Upcoming")
+
+	// Backlog view only returns backlog issues.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&view=backlog", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues backlog view: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues = decodeList(t, w)
+	assertContainsTitle(t, issues, "List Backlog")
+	assertNotContainsTitle(t, issues, "List Today Due")
+	assertNotContainsTitle(t, issues, "List Upcoming")
+
+	// Today view includes due-today and overlapping scheduled issues, but not done or upcoming issues.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&view=today", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues today view: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues = decodeList(t, w)
+	assertContainsTitle(t, issues, "List Today Due")
+	assertContainsTitle(t, issues, "List Today Range")
+	assertNotContainsTitle(t, issues, "List Upcoming")
+	assertNotContainsTitle(t, issues, "List Done Today")
+
+	// Upcoming view includes future scheduled issues only.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&view=upcoming", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues upcoming view: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues = decodeList(t, w)
+	assertContainsTitle(t, issues, "List Upcoming")
+	assertNotContainsTitle(t, issues, "List Today Due")
+	assertNotContainsTitle(t, issues, "List Backlog")
+
+	// My-work-compatible filters: creator filters and assignee type filters remain additive.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&creator_id="+testUserID+"&creator_type=member", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues creator filters: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues = decodeList(t, w)
+	assertContainsTitle(t, issues, "List Created By Me")
+	assertNotContainsTitle(t, issues, "List Backlog")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&assignee_id="+testUserID+"&assignee_type=member", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues member assignee filters: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues = decodeList(t, w)
+	assertContainsTitle(t, issues, "List Assigned Member")
+	assertNotContainsTitle(t, issues, "List Assigned Agent")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&assignee_id="+agentID+"&assignee_type=agent", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues agent assignee filters: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	issues = decodeList(t, w)
+	assertContainsTitle(t, issues, "List Assigned Agent")
+	assertNotContainsTitle(t, issues, "List Assigned Member")
+
+	// Invalid view values fail fast instead of silently changing list behavior.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&view=invalid", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ListIssues invalid view: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid view") {
+		t.Fatalf("ListIssues invalid view: unexpected body %s", w.Body.String())
 	}
 }
 

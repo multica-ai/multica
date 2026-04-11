@@ -32,6 +32,7 @@ type IssueResponse struct {
 	CreatorType   string                  `json:"creator_type"`
 	CreatorID     string                  `json:"creator_id"`
 	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
 	Position      float64                 `json:"position"`
 	DueDate       *string                 `json:"due_date"`
 	StartDate     *string                 `json:"start_date"`
@@ -40,6 +41,27 @@ type IssueResponse struct {
 	UpdatedAt     string                  `json:"updated_at"`
 	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
+}
+
+type issueListView string
+
+const (
+	issueListViewBacklog  issueListView = "backlog"
+	issueListViewToday    issueListView = "today"
+	issueListViewUpcoming issueListView = "upcoming"
+)
+
+func parseIssueListView(value string) (pgtype.Text, error) {
+	if value == "" {
+		return pgtype.Text{}, nil
+	}
+
+	switch issueListView(value) {
+	case issueListViewBacklog, issueListViewToday, issueListViewUpcoming:
+		return pgtype.Text{String: value, Valid: true}, nil
+	default:
+		return pgtype.Text{}, fmt.Errorf("invalid view, expected one of: backlog, today, upcoming")
+	}
 }
 
 type agentTriggerSnapshot struct {
@@ -145,6 +167,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorType:   i.CreatorType,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
+		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
 		DueDate:       timestampToPtr(i.DueDate),
 		StartDate:     timestampToPtr(i.StartDate),
@@ -185,14 +208,40 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
 		assigneeFilter = parseUUID(a)
 	}
+	var assigneeTypeFilter pgtype.Text
+	if at := r.URL.Query().Get("assignee_type"); at != "" {
+		assigneeTypeFilter = pgtype.Text{String: at, Valid: true}
+	}
+	var creatorFilter pgtype.UUID
+	if creatorID := r.URL.Query().Get("creator_id"); creatorID != "" {
+		creatorFilter = parseUUID(creatorID)
+	}
+	var projectFilter pgtype.UUID
+	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
+		projectFilter = parseUUID(projectID)
+	}
+	var creatorTypeFilter pgtype.Text
+	if creatorType := r.URL.Query().Get("creator_type"); creatorType != "" {
+		creatorTypeFilter = pgtype.Text{String: creatorType, Valid: true}
+	}
+	viewFilter, err := parseIssueListView(r.URL.Query().Get("view"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Limit:       int32(limit),
-		Offset:      int32(offset),
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
+		WorkspaceID:  parseUUID(workspaceID),
+		Limit:        int32(limit),
+		Offset:       int32(offset),
+		Status:       statusFilter,
+		Priority:     priorityFilter,
+		AssigneeID:   assigneeFilter,
+		AssigneeType: assigneeTypeFilter,
+		CreatorID:    creatorFilter,
+		ProjectID:    projectFilter,
+		CreatorType:  creatorTypeFilter,
+		View:         viewFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -252,6 +301,7 @@ type CreateIssueRequest struct {
 	AssigneeType  *string `json:"assignee_type"`
 	AssigneeID    *string `json:"assignee_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
 	DueDate       *string `json:"due_date"`
 	StartDate     *string `json:"start_date"`
 	EndDate       *string `json:"end_date"`
@@ -307,6 +357,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.ParentIssueID != nil {
 		parentIssueID = parseUUID(*req.ParentIssueID)
 	}
+	projectID, err := h.validateIssueProject(r.Context(), workspaceID, req.ProjectID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	dueDate, err := parseOptionalRFC3339Timestamp(req.DueDate, "due_date")
 	if err != nil {
@@ -359,6 +414,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		CreatorType:   creatorType,
 		CreatorID:     parseUUID(actualCreatorID),
 		ParentIssueID: parentIssueID,
+		ProjectID:     projectID,
 		Position:      0,
 		DueDate:       dueDate,
 		StartDate:     startDate,
@@ -399,6 +455,7 @@ type UpdateIssueRequest struct {
 	AssigneeType *string  `json:"assignee_type"`
 	AssigneeID   *string  `json:"assignee_id"`
 	Position     *float64 `json:"position"`
+	ProjectID    *string  `json:"project_id"`
 	DueDate      *string  `json:"due_date"`
 	StartDate    *string  `json:"start_date"`
 	EndDate      *string  `json:"end_date"`
@@ -435,6 +492,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ID:           prevIssue.ID,
 		AssigneeType: prevIssue.AssigneeType,
 		AssigneeID:   prevIssue.AssigneeID,
+		ProjectID:    prevIssue.ProjectID,
 		DueDate:      prevIssue.DueDate,
 		StartDate:    prevIssue.StartDate,
 		EndDate:      prevIssue.EndDate,
@@ -469,6 +527,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.AssigneeID = parseUUID(*req.AssigneeID)
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+		}
+	}
+	if _, ok := rawFields["project_id"]; ok {
+		if req.ProjectID != nil {
+			validatedProjectID, err := h.validateIssueProject(r.Context(), workspaceID, req.ProjectID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			params.ProjectID = validatedProjectID
+		} else {
+			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
@@ -731,6 +801,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:           prevIssue.ID,
 			AssigneeType: prevIssue.AssigneeType,
 			AssigneeID:   prevIssue.AssigneeID,
+			ProjectID:    prevIssue.ProjectID,
 			DueDate:      prevIssue.DueDate,
 			StartDate:    prevIssue.StartDate,
 			EndDate:      prevIssue.EndDate,
@@ -763,6 +834,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.AssigneeID = parseUUID(*req.Updates.AssigneeID)
 			} else {
 				params.AssigneeID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["project_id"]; ok {
+			if req.Updates.ProjectID != nil {
+				validatedProjectID, err := h.validateIssueProject(r.Context(), workspaceID, req.Updates.ProjectID)
+				if err != nil {
+					continue
+				}
+				params.ProjectID = validatedProjectID
+			} else {
+				params.ProjectID = pgtype.UUID{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
