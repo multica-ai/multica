@@ -33,7 +33,7 @@ export interface SandboxConfig {
 }
 
 export interface UpsertSandboxConfigRequest {
-  provider: string;
+  provider: SandboxProvider;
   provider_api_key: string;
   ai_gateway_api_key?: string;
   git_pat?: string;

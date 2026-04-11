@@ -114,7 +114,8 @@ func (p *E2BProvider) Exec(ctx context.Context, sb *Sandbox, cmd []string) (stri
 		return "", fmt.Errorf("e2b: empty command")
 	}
 
-	// Use envdAccessToken if available, otherwise fall back to the provider API key
+	// Use envdAccessToken if available, otherwise fall back to the provider API key.
+	// The fallback is needed because E2B doesn't always return envdAccessToken in the create response.
 	accessToken := sb.metadata["envdAccessToken"]
 	if accessToken == "" {
 		accessToken = p.apiKey

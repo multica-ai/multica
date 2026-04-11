@@ -110,16 +110,29 @@ func (h *Handler) UpsertSandboxConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Provider == "" || req.ProviderAPIKey == "" {
-		writeError(w, http.StatusBadRequest, "provider and provider_api_key are required")
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
 
-	// Encrypt sensitive fields
-	encProviderKey, err := encryptField(req.ProviderAPIKey, encKey, "provider-api-key")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "encryption failed")
-		return
+	// If provider_api_key is empty on update, keep the existing encrypted value.
+	// This allows the frontend to omit the key when it hasn't changed (it only has the redacted version).
+	var encProviderKey string
+	if req.ProviderAPIKey != "" {
+		var err error
+		encProviderKey, err = encryptField(req.ProviderAPIKey, encKey, "provider-api-key")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "encryption failed")
+			return
+		}
+	} else {
+		// Try to load existing encrypted key
+		existing, err := h.Queries.GetSandboxConfig(r.Context(), parseUUID(wsID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "provider_api_key is required for new configuration")
+			return
+		}
+		encProviderKey = existing.ProviderApiKey
 	}
 	encGatewayKey := encryptOptionalField(req.AIGatewayAPIKey, encKey, "ai-gateway-api-key")
 	encGitPat := encryptOptionalField(req.GitPAT, encKey, "git-pat")

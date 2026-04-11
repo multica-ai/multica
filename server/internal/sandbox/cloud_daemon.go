@@ -218,7 +218,12 @@ func (d *CloudDaemon) handleTask(ctx context.Context, task db.AgentTaskQueue, ru
 	}
 
 	// 5. Create or connect sandbox
-	providerKey, _ := d.decryptField(sandboxCfg.ProviderApiKey, "provider-api-key")
+	providerKey, err := d.decryptField(sandboxCfg.ProviderApiKey, "provider-api-key")
+	if err != nil {
+		log.Error("cloud daemon: decrypt provider key", "error", err)
+		d.failTask(ctx, task.ID, fmt.Sprintf("provider key decryption failed: %v", err), log)
+		return
+	}
 	provider := NewE2BProvider(providerKey)
 
 	sandboxID := fmt.Sprintf("multica-%s", taskID[:8])
@@ -493,12 +498,20 @@ func (d *CloudDaemon) loadSandboxConfig(ctx context.Context, workspaceID pgtype.
 
 	gitPat := ""
 	if cfg.GitPat.Valid {
-		gitPat, _ = d.decryptField(cfg.GitPat.String, "git-pat")
+		var err error
+		gitPat, err = d.decryptField(cfg.GitPat.String, "git-pat")
+		if err != nil {
+			return nil, "", "", fmt.Errorf("decrypt git pat: %w", err)
+		}
 	}
 
 	aiGatewayKey := ""
 	if cfg.AiGatewayApiKey.Valid {
-		aiGatewayKey, _ = d.decryptField(cfg.AiGatewayApiKey.String, "ai-gateway-api-key")
+		var err error
+		aiGatewayKey, err = d.decryptField(cfg.AiGatewayApiKey.String, "ai-gateway-api-key")
+		if err != nil {
+			return nil, "", "", fmt.Errorf("decrypt ai gateway key: %w", err)
+		}
 	}
 
 	return &cfg, gitPat, aiGatewayKey, nil

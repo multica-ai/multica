@@ -11,6 +11,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, sandboxConfigOptions } from "@multica/core/workspace/queries";
 import { useUpsertSandboxConfig, useDeleteSandboxConfig } from "@multica/core/workspace/mutations";
+import type { SandboxProvider } from "@multica/core/types";
 
 export function SandboxTab() {
   const user = useAuthStore((s) => s.user);
@@ -20,7 +21,7 @@ export function SandboxTab() {
   const upsert = useUpsertSandboxConfig(wsId);
   const remove = useDeleteSandboxConfig(wsId);
 
-  const [provider, setProvider] = useState("e2b");
+  const [provider, setProvider] = useState<SandboxProvider>("e2b");
   const [providerApiKey, setProviderApiKey] = useState("");
   const [aiGatewayApiKey, setAiGatewayApiKey] = useState("");
   const [gitPat, setGitPat] = useState("");
@@ -48,7 +49,9 @@ export function SandboxTab() {
     upsert.mutate(
       {
         provider,
-        provider_api_key: providerApiKey || config?.provider_api_key || "",
+        // Only send the key if user entered a new one; omit to keep existing.
+        // Never send the redacted value (e.g. "****abcd") back to the server.
+        provider_api_key: providerApiKey,
         ai_gateway_api_key: aiGatewayApiKey || undefined,
         git_pat: gitPat || undefined,
         template_id: templateId || undefined,
@@ -100,7 +103,7 @@ export function SandboxTab() {
           <label className="text-sm font-medium">Provider</label>
           <select
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
+            onChange={(e) => setProvider(e.target.value as SandboxProvider)}
             disabled={!canManage}
             className="flex h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           >
