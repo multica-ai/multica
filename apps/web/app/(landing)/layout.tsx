@@ -1,19 +1,7 @@
 import { cookies, headers } from "next/headers";
-import { Instrument_Serif, Noto_Serif_SC } from "next/font/google";
+import type { CSSProperties, ReactNode } from "react";
 import { LocaleProvider } from "@/features/landing/i18n";
 import type { Locale } from "@/features/landing/i18n";
-
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-serif",
-});
-
-const notoSerifSC = Noto_Serif_SC({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-serif-zh",
-});
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -57,7 +45,7 @@ async function getInitialLocale(): Promise<Locale> {
 export default async function LandingLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const initialLocale = await getInitialLocale();
 
@@ -67,7 +55,14 @@ export default async function LandingLayout({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <div className={`${instrumentSerif.variable} ${notoSerifSC.variable} h-full overflow-x-hidden overflow-y-auto bg-white`}>
+      <div
+        className="h-full overflow-x-hidden overflow-y-auto bg-white"
+        // Use system serif stacks so the landing page builds without Google Fonts.
+        style={{
+          "--font-serif": '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif',
+          "--font-serif-zh": '"Songti SC", "STSong", "Noto Serif CJK SC", serif',
+        } as CSSProperties}
+      >
         <LocaleProvider initialLocale={initialLocale}>{children}</LocaleProvider>
       </div>
     </>

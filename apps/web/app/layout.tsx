@@ -1,14 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { CSSProperties, ReactNode } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { LocaleSync } from "@/components/locale-sync";
 import "./globals.css";
-
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
-const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -53,13 +50,18 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased font-sans h-full", geist.variable, geistMono.variable)}
+      className={cn("antialiased font-sans h-full")}
+      // Self-hosted Docker builds should not depend on external font CDNs.
+      style={{
+        "--font-sans": '"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif',
+        "--font-mono": '"IBM Plex Mono", "SFMono-Regular", Menlo, monospace',
+      } as CSSProperties}
     >
       <body className="h-full overflow-hidden">
         <LocaleSync />
