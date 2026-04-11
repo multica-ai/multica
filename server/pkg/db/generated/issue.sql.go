@@ -65,6 +65,7 @@ WHERE workspace_id = $1
   AND ($4::uuid IS NULL OR assignee_id = $4)
   AND ($5::uuid[] IS NULL OR assignee_id = ANY($5::uuid[]))
   AND ($6::uuid IS NULL OR creator_id = $6)
+  AND ($7::uuid IS NULL OR project_id = $7)
 `
 
 type CountIssuesParams struct {
@@ -74,6 +75,7 @@ type CountIssuesParams struct {
 	AssigneeID  pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds []pgtype.UUID `json:"assignee_ids"`
 	CreatorID   pgtype.UUID   `json:"creator_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
 }
 
 func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64, error) {
@@ -84,6 +86,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.CreatorID,
+		arg.ProjectID,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -331,6 +334,7 @@ WHERE workspace_id = $1
   AND ($6::uuid IS NULL OR assignee_id = $6)
   AND ($7::uuid[] IS NULL OR assignee_id = ANY($7::uuid[]))
   AND ($8::uuid IS NULL OR creator_id = $8)
+  AND ($9::uuid IS NULL OR project_id = $9)
 ORDER BY position ASC, created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -344,6 +348,7 @@ type ListIssuesParams struct {
 	AssigneeID  pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds []pgtype.UUID `json:"assignee_ids"`
 	CreatorID   pgtype.UUID   `json:"creator_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
 }
 
 type ListIssuesRow struct {
@@ -375,6 +380,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.CreatorID,
+		arg.ProjectID,
 	)
 	if err != nil {
 		return nil, err
@@ -422,6 +428,7 @@ WHERE workspace_id = $1
   AND ($3::uuid IS NULL OR assignee_id = $3)
   AND ($4::uuid[] IS NULL OR assignee_id = ANY($4::uuid[]))
   AND ($5::uuid IS NULL OR creator_id = $5)
+  AND ($6::uuid IS NULL OR project_id = $6)
 ORDER BY position ASC, created_at DESC
 `
 
@@ -431,6 +438,7 @@ type ListOpenIssuesParams struct {
 	AssigneeID  pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds []pgtype.UUID `json:"assignee_ids"`
 	CreatorID   pgtype.UUID   `json:"creator_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
 }
 
 type ListOpenIssuesRow struct {
@@ -459,6 +467,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.CreatorID,
+		arg.ProjectID,
 	)
 	if err != nil {
 		return nil, err
