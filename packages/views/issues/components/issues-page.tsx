@@ -38,7 +38,14 @@ export function IssuesPage() {
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
 
   useEffect(() => {
-    initFilterWorkspaceSync();
+    initFilterWorkspaceSync((onWorkspaceId) => {
+      onWorkspaceId(useWorkspaceStore.getState().workspace?.id);
+      useWorkspaceStore.subscribe((state, prevState) => {
+        if (state.workspace?.id !== prevState.workspace?.id) {
+          onWorkspaceId(state.workspace?.id);
+        }
+      });
+    });
   }, []);
 
   useEffect(() => {
