@@ -35,3 +35,6 @@ catalog:
   "@testing-library/react": "^16.3.2"
   "@testing-library/jest-dom": "^6.9.1"
   "@testing-library/user-event": "^14.6.1"
+
+  # Diagrams
+  mermaid: "^11.14.0"

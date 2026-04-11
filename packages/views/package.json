@@ -66,6 +66,7 @@
     "lowlight": "^3.3.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
+    "mermaid": "catalog:",
     "recharts": "3.8.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",

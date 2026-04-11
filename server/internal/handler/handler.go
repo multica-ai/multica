@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -43,6 +44,9 @@ type Handler struct {
 	UpdateStore  *UpdateStore
 	Storage      storage.Storage
 	CFSigner     *auth.CloudFrontSigner
+	// fileTreeCache stores the latest file tree snapshot per task ID so the
+	// frontend can fetch it via REST on page load instead of relying solely on WS.
+	fileTreeCache sync.Map // map[taskID string → json.RawMessage]
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {

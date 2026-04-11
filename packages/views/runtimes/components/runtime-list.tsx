@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProviderLogo } from "./provider-logo";
 
@@ -120,8 +121,11 @@ export function RuntimeList({
 
   return (
     <div className="overflow-y-auto h-full border-r">
-      <div className="flex h-12 items-center justify-between border-b px-4">
-        <h1 className="text-sm font-semibold">Runtimes</h1>
+      <div className="flex h-12 items-center justify-between border-b pl-2 pr-4">
+        <div className="flex items-center gap-2">
+          <SidebarTrigger className="text-muted-foreground" />
+          <h1 className="text-sm font-semibold">Runtimes</h1>
+        </div>
         <span className="text-xs text-muted-foreground">
           {filteredRuntimes.filter((r) => r.status === "online").length}/
           {filteredRuntimes.length} online

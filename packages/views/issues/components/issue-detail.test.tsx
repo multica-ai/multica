@@ -4,6 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { WorkspaceIdProvider } from "@multica/core/hooks";
+import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -343,7 +344,9 @@ function renderIssueDetail(issueId = "issue-1") {
   return render(
     <QueryClientProvider client={queryClient}>
       <WorkspaceIdProvider wsId="ws-1">
-        <IssueDetail issueId={issueId} />
+        <SidebarProvider>
+          <IssueDetail issueId={issueId} />
+        </SidebarProvider>
       </WorkspaceIdProvider>
     </QueryClientProvider>,
   );

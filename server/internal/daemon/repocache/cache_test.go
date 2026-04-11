@@ -33,6 +33,34 @@ func TestBareDirName(t *testing.T) {
 	}
 }
 
+func TestNormalizeRepoURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input, want string
+	}{
+		// GitHub HTTP(S) → SSH.
+		{"https://github.com/org/repo", "git@github.com:org/repo.git"},
+		{"https://github.com/org/repo.git", "git@github.com:org/repo.git"},
+		{"http://github.com/org/repo", "git@github.com:org/repo.git"},
+		{"http://github.com/org/repo.git", "git@github.com:org/repo.git"},
+		{"https://github.com/org/repo/", "git@github.com:org/repo.git"},
+		// Already SSH — unchanged.
+		{"git@github.com:org/repo.git", "git@github.com:org/repo.git"},
+		{"git@github.com:org/repo", "git@github.com:org/repo"},
+		// Non-GitHub — unchanged (we don't know what auth they've set up).
+		{"https://gitlab.com/org/repo.git", "https://gitlab.com/org/repo.git"},
+		{"https://bitbucket.org/org/repo.git", "https://bitbucket.org/org/repo.git"},
+		// Degenerate.
+		{"", ""},
+		{"https://github.com/", "https://github.com/"},
+	}
+	for _, tt := range tests {
+		if got := normalizeRepoURL(tt.input); got != tt.want {
+			t.Errorf("normalizeRepoURL(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestIsBareRepo(t *testing.T) {
 	t.Parallel()
 

@@ -71,6 +71,9 @@ const (
 	EventPinCreated = "pin:created"
 	EventPinDeleted = "pin:deleted"
 
+	// File tree events (daemon -> frontend via server)
+	EventTaskFileTree = "task:file_tree"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

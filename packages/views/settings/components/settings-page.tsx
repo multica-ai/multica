@@ -2,6 +2,7 @@
 
 import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
@@ -29,7 +30,10 @@ export function SettingsPage() {
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
       {/* Left nav */}
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
-        <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
+        <div className="mb-4 flex items-center gap-2 px-1">
+          <SidebarTrigger className="text-muted-foreground" />
+          <h1 className="text-sm font-semibold">Settings</h1>
+        </div>
         <TabsList variant="line" className="flex-col items-stretch">
           {/* My Account group */}
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">

@@ -1,0 +1,87 @@
+/* ──────────────────────────────────────────────────────────────────────
+   Workspace markdown preview — monochrome heading ladder + dark prose dim.
+
+   Inspired by agent-orchestrator#35. Scoped to the workspace file preview
+   only, so it does not affect comment rendering, issue descriptions, or
+   any other shared Markdown usage.
+
+   Design intent:
+   - Headings walk a white → grey brightness ladder (no hue), differentiated
+     by size/weight/letter-spacing.
+   - In dark mode, body prose (p, li, td) is dimmed to muted-foreground so
+     h1, bold and inline code — which stay at foreground — visibly pop.
+   - h5/h6 are kept one step brighter than the dimmed body so the smallest
+     headings stay distinguishable from prose.
+   - Bold picks up a subtle monochrome highlight strip for in-prose emphasis.
+   - Inline code sits on a flat muted surface with no accent tint.
+   ────────────────────────────────────────────────────────────────────── */
+
+.workspace-markdown-preview {
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+/* Headings — monochrome grey ladder, size + weight differentiate */
+.workspace-markdown-preview h1 {
+  color: var(--foreground);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35em;
+  letter-spacing: -0.015em;
+}
+
+.workspace-markdown-preview h2 {
+  color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground));
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+
+.workspace-markdown-preview h3 {
+  color: color-mix(in srgb, var(--foreground) 70%, var(--muted-foreground));
+}
+
+.workspace-markdown-preview h4 {
+  color: color-mix(in srgb, var(--foreground) 50%, var(--muted-foreground));
+}
+
+.workspace-markdown-preview h5,
+.workspace-markdown-preview h6 {
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Bold — monochrome: weight + subtle highlight strip for distinction */
+.workspace-markdown-preview strong {
+  color: var(--foreground);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 0 3px;
+  margin: 0 -1px;
+  border-radius: 2px;
+}
+
+/* Inline code — flat mono surface on muted background.
+   Higher specificity than Tailwind utilities on InlineCode so these win. */
+.workspace-markdown-preview :not(pre) > code {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+/* Dark-mode only: dim body prose so headings, bold and inline code
+   (all at foreground) visibly pop above the surrounding paragraphs.
+   Light mode already has strong contrast between foreground/muted-foreground
+   so no override there. */
+.dark .workspace-markdown-preview,
+.dark .workspace-markdown-preview p,
+.dark .workspace-markdown-preview li,
+.dark .workspace-markdown-preview table td {
+  color: var(--muted-foreground);
+}
+
+/* Keep h5/h6 one step brighter than the newly-dimmed body so the
+   smallest headings stay distinguishable from prose. */
+.dark .workspace-markdown-preview h5,
+.dark .workspace-markdown-preview h6 {
+  color: color-mix(in srgb, var(--foreground) 38%, var(--muted-foreground));
+}

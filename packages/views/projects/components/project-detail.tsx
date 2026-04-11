@@ -34,6 +34,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import {
   DropdownMenu,
@@ -274,8 +275,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   return (
     <div className="flex h-full flex-col">
       {/* Header bar — breadcrumb */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-4 text-sm">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b bg-background pl-2 pr-4 text-sm">
         <div className="flex items-center gap-1.5 min-w-0">
+          <SidebarTrigger className="text-muted-foreground mr-0.5 shrink-0" />
           <AppLink href="/projects" className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
             {workspaceName ?? "Projects"}
           </AppLink>

@@ -23,6 +23,7 @@ export type WSEventType =
   | "task:completed"
   | "task:failed"
   | "task:message"
+  | "task:file_tree"
   | "task:cancelled"
   | "inbox:new"
   | "inbox:read"
@@ -222,6 +223,23 @@ export interface IssueReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+}
+
+// File tree types for agent worktree file browsing
+export interface FileNode {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  children?: FileNode[];
+}
+
+export type GitFileStatus = "M" | "A" | "D" | "?" | "R";
+
+export interface TaskFileTreePayload {
+  task_id: string;
+  issue_id: string;
+  tree: FileNode[];
+  git_status: Record<string, GitFileStatus>;
 }
 
 export interface ChatMessageEventPayload {

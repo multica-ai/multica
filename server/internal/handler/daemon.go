@@ -3,10 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -116,7 +118,8 @@ type DaemonRegisterRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	DaemonID    string `json:"daemon_id"`
 	DeviceName  string `json:"device_name"`
-	CLIVersion  string `json:"cli_version"` // multica CLI version
+	CLIVersion  string `json:"cli_version"`  // multica CLI version
+	HealthPort  int    `json:"health_port"`  // daemon's local health server port
 	Runtimes    []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -197,10 +200,14 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
-		metadata, _ := json.Marshal(map[string]any{
+		metaMap := map[string]any{
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
-		})
+		}
+		if req.HealthPort > 0 {
+			metaMap["health_port"] = req.HealthPort
+		}
+		metadata, _ := json.Marshal(metaMap)
 
 		registered, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: parseUUID(req.WorkspaceID),
@@ -816,12 +823,188 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cache agent lookups so we don't hit the DB for every task row.
+	agentCache := make(map[string]*TaskAgentData)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t)
+
+		agentID := uuidToString(t.AgentID)
+		if agentID == "" {
+			continue
+		}
+		if cached, ok := agentCache[agentID]; ok {
+			resp[i].Agent = cached
+		} else {
+			if agent, err := h.Queries.GetAgent(r.Context(), t.AgentID); err == nil {
+				avatarURL := ""
+				if agent.AvatarUrl.Valid {
+					avatarURL = agent.AvatarUrl.String
+				}
+				data := &TaskAgentData{
+					ID:        uuidToString(agent.ID),
+					Name:      agent.Name,
+					AvatarURL: avatarURL,
+				}
+				agentCache[agentID] = data
+				resp[i].Agent = data
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// File Tree (daemon → server → frontend via WS)
+// ---------------------------------------------------------------------------
+
+// ReportTaskFileTree receives a file tree snapshot from the daemon and broadcasts it.
+func (h *Handler) ReportTaskFileTree(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	var payload json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	workspaceID := ""
+	issueID := uuidToString(task.IssueID)
+	if task.IssueID.Valid {
+		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
+			workspaceID = uuidToString(issue.WorkspaceID)
+		}
+	}
+
+	if workspaceID != "" {
+		// Wrap the raw snapshot with task and issue IDs.
+		wrapped := map[string]any{
+			"task_id":  taskID,
+			"issue_id": issueID,
+		}
+		// Merge the snapshot fields into the wrapper.
+		var snapshot map[string]json.RawMessage
+		if json.Unmarshal(payload, &snapshot) == nil {
+			for k, v := range snapshot {
+				wrapped[k] = v
+			}
+		}
+		h.publish(protocol.EventTaskFileTree, workspaceID, "system", "", wrapped)
+	}
+
+	// Cache the raw snapshot so it can be retrieved via GET without relying on WS.
+	h.fileTreeCache.Store(taskID, payload)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// GetTaskFileTree returns the most recently cached file tree for a task.
+// This allows the frontend to load the tree on page open without waiting for a WS event.
+func (h *Handler) GetTaskFileTree(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	if _, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id")); !ok {
+		return
+	}
+
+	cached, ok := h.fileTreeCache.Load(taskID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "file tree not available")
+		return
+	}
+
+	payload := cached.(json.RawMessage)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(payload)
+}
+
+// ProxyTaskFileContent proxies a file content request to the daemon's health server.
+func (h *Handler) ProxyTaskFileContent(w http.ResponseWriter, r *http.Request) {
+	h.proxyTaskFileRequest(w, r, "files")
+}
+
+// ProxyTaskFileDiff proxies a file diff request to the daemon's health server.
+func (h *Handler) ProxyTaskFileDiff(w http.ResponseWriter, r *http.Request) {
+	h.proxyTaskFileRequest(w, r, "diff")
+}
+
+// proxyTaskFileRequest is the shared implementation for the /files/ and
+// /diff/ task endpoints — they both need to look up the task's runtime,
+// find the daemon's health port, and forward the request with ETag support.
+func (h *Handler) proxyTaskFileRequest(w http.ResponseWriter, r *http.Request, kind string) {
+	taskID := chi.URLParam(r, "taskId")
+
+	filePath := chi.URLParam(r, "*")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "file path is required")
+		return
+	}
+
+	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	runtime, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	var metadata map[string]any
+	if runtime.Metadata != nil {
+		json.Unmarshal(runtime.Metadata, &metadata)
+	}
+
+	healthPort := 0
+	if port, ok := metadata["health_port"]; ok {
+		switch p := port.(type) {
+		case float64:
+			healthPort = int(p)
+		case string:
+			healthPort, _ = strconv.Atoi(p)
+		}
+	}
+	if healthPort == 0 {
+		writeError(w, http.StatusBadGateway, "daemon health port not available")
+		return
+	}
+
+	targetURL := fmt.Sprintf("http://127.0.0.1:%d/tasks/%s/%s/%s", healthPort, taskID, kind, filePath)
+	proxyReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create proxy request")
+		return
+	}
+
+	if etag := r.Header.Get("If-None-Match"); etag != "" {
+		proxyReq.Header.Set("If-None-Match", etag)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "daemon not reachable")
+		return
+	}
+	defer resp.Body.Close()
+
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.

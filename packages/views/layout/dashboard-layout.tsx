@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { SidebarProvider, SidebarInset, SidebarTrigger } from "@multica/ui/components/ui/sidebar";
+import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "../modals/registry";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
@@ -34,9 +34,6 @@ export function DashboardLayout({
       <SidebarProvider className="h-svh">
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="overflow-hidden">
-          <div className="flex h-10 shrink-0 items-center border-b px-2 md:hidden">
-            <SidebarTrigger />
-          </div>
           {children}
           <ModalRegistry />
         </SidebarInset>

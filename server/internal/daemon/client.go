@@ -218,6 +218,11 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 	return &resp, nil
 }
 
+// ReportFileTree sends a file tree snapshot for a running task.
+func (c *Client) ReportFileTree(ctx context.Context, taskID string, snapshot any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/file-tree", taskID), snapshot, nil)
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {

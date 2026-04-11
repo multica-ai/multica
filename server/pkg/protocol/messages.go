@@ -43,6 +43,14 @@ type TaskMessagePayload struct {
 	Output  string         `json:"output,omitempty"`   // tool output (tool_result only)
 }
 
+// TaskFileTreePayload is broadcast when the daemon reports a file tree update.
+type TaskFileTreePayload struct {
+	TaskID    string         `json:"task_id"`
+	IssueID   string         `json:"issue_id,omitempty"`
+	Tree      json.RawMessage `json:"tree"`
+	GitStatus json.RawMessage `json:"git_status"`
+}
+
 // DaemonRegisterPayload is sent from daemon to server on connection.
 type DaemonRegisterPayload struct {
 	DaemonID string        `json:"daemon_id"`
