@@ -52,6 +52,7 @@ import type {
   ReorderPinsRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
+import { createRequestId } from "../utils";
 
 export interface ApiClientOptions {
   logger?: Logger;
@@ -108,7 +109,7 @@ export class ApiClient {
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
@@ -610,7 +611,7 @@ export class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = createRequestId();
     const start = Date.now();
     this.logger.info("→ POST /api/upload-file", { rid });
 
