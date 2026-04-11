@@ -1,12 +1,12 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageSquare, Archive, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { allChatSessionsOptions } from "@multica/core/chat/queries";
+import { allChatSessionsOptions, chatKeys } from "@multica/core/chat/queries";
 import { useArchiveChatSession } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { ChatSession, Agent } from "@multica/core/types";
@@ -19,6 +19,7 @@ export function ChatSessionHistory() {
   const setPendingTask = useChatStore((s) => s.setPendingTask);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
 
+  const qc = useQueryClient();
   const { data: sessions = [] } = useQuery(allChatSessionsOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const archiveSession = useArchiveChatSession();
@@ -26,6 +27,10 @@ export function ChatSessionHistory() {
   const agentMap = new Map(agents.map((a) => [a.id, a]));
 
   const handleSelectSession = (session: ChatSession) => {
+    // Invalidate cached messages so we fetch the latest from the server.
+    // Without this, stale cache (staleTime: Infinity) would hide messages
+    // that arrived after the cache was originally populated.
+    qc.invalidateQueries({ queryKey: chatKeys.messages(session.id) });
     setActiveSession(session.id);
     clearTimeline();
     setPendingTask(null);

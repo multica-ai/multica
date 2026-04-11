@@ -287,6 +287,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Delete("/", h.ArchiveChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
+					r.Get("/active-task", h.GetActiveChatTask)
 				})
 			})
 
