@@ -19,7 +19,7 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListAttachmentsByCommentIDs :many
 SELECT * FROM attachment
-WHERE comment_id = ANY($1::uuid[])
+WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
 -- name: ListAttachmentURLsByIssueOrComments :many

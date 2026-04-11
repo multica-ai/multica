@@ -278,6 +278,47 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.24",
+        date: "2026-04-11",
+        title: "安全加固与通知",
+        changes: [],
+        features: [
+          "子 Issue 变更时通知父 Issue 的订阅者",
+          "CLI `--project` 筛选 Issue 列表",
+        ],
+        improvements: [
+          "Meta-skill 工作流改为委托 Agent Skills 而非硬编码逻辑",
+        ],
+        fixes: [
+          "Daemon API 路由新增工作区所有权校验",
+          "附件上传和查询新增工作区所有权验证",
+          "回复评论不再继承父级线程的 Agent 提及",
+          "Agent 创建评论缺少 workspace ID",
+          "自部署 Docker 构建问题修复（文件权限、CRLF 换行、缺失依赖）",
+        ],
+      },
+      {
+        version: "0.1.23",
+        date: "2026-04-11",
+        title: "置顶、Cmd+K 与项目增强",
+        changes: [],
+        features: [
+          "Issue 和项目置顶到侧边栏，支持拖拽排序",
+          "Cmd+K 命令面板——最近访问的 Issue、页面导航、项目搜索",
+          "项目详情侧边栏属性面板（替代原概览标签页）",
+          "Issues 列表新增项目筛选",
+          "项目列表显示完成进度",
+          "在项目页按 'C' 创建 Issue 时自动填充项目",
+          "指派人下拉按用户分配频率排序",
+        ],
+        fixes: [
+          "Markdown XSS 漏洞——评论渲染增加 rehype-sanitize 和服务端 bluemonday 清洗",
+          "项目看板 Issue 计数不正确",
+          "自部署 Docker 构建缺少 tsconfig 依赖",
+          "Cmd+K 需要按两次 ESC 才能关闭",
+        ],
+      },
+      {
         version: "0.1.22",
         date: "2026-04-10",
         title: "自部署、ACP 与文档站",

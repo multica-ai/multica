@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
+	"github.com/multica-ai/multica/server/internal/sanitize"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -218,6 +219,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
+	// Sanitize HTML to prevent stored XSS.
+	req.Content = sanitize.HTML(req.Content)
+
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -365,34 +369,13 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
-	// When replying in a thread, also include mentions from the parent comment
-	// so that agents mentioned in the thread root are triggered by replies.
-	// However, skip inheritance when the reply explicitly @mentions only
-	// non-agent entities (members, issues) — the user is directing the reply
-	// at other people, not requesting work from agents in the parent thread.
-	if parentComment != nil {
-		hasAgentMention := false
-		hasNonAgentMention := false
-		for _, m := range mentions {
-			if m.Type == "agent" {
-				hasAgentMention = true
-			} else {
-				hasNonAgentMention = true
-			}
-		}
-		if hasAgentMention || !hasNonAgentMention {
-			parentMentions := util.ParseMentions(parentComment.Content)
-			seen := make(map[string]bool, len(mentions))
-			for _, m := range mentions {
-				seen[m.Type+":"+m.ID] = true
-			}
-			for _, m := range parentMentions {
-				if !seen[m.Type+":"+m.ID] {
-					mentions = append(mentions, m)
-					seen[m.Type+":"+m.ID] = true
-				}
-			}
-		}
+	// When replying in a thread, inherit mentions from the parent comment
+	// so that agents mentioned in the thread root are triggered by replies —
+	// but only when the reply contains no mentions at all (a plain follow-up).
+	// If the reply explicitly @mentions anyone (agents or members), the user
+	// is making a deliberate choice about who to involve; don't auto-inherit.
+	if parentComment != nil && len(mentions) == 0 {
+		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
 		if m.Type != "agent" {
@@ -480,6 +463,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+
+	// Sanitize HTML to prevent stored XSS.
+	req.Content = sanitize.HTML(req.Content)
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      parseUUID(commentId),

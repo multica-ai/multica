@@ -80,11 +80,16 @@ type RuntimeUsageResponse struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }
 
-// ReportRuntimeUsage receives usage data from the daemon (unauthenticated daemon route).
+// ReportRuntimeUsage receives usage data from the daemon.
 func (h *Handler) ReportRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	if runtimeID == "" {
 		writeError(w, http.StatusBadRequest, "runtimeId is required")
+		return
+	}
+
+	// Verify the caller owns this runtime's workspace.
+	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
 		return
 	}
 

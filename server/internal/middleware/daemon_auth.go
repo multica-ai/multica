@@ -31,6 +31,14 @@ func DaemonIDFromContext(ctx context.Context) string {
 	return id
 }
 
+// WithDaemonContext returns a new context with the daemon workspace ID and daemon ID set.
+// This is used by tests to simulate daemon token authentication.
+func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) context.Context {
+	ctx = context.WithValue(ctx, ctxKeyDaemonWorkspaceID, workspaceID)
+	ctx = context.WithValue(ctx, ctxKeyDaemonID, daemonID)
+	return ctx
+}
+
 // DaemonAuth validates daemon auth tokens (mdt_ prefix) or falls back to
 // JWT/PAT validation for backward compatibility with daemons that
 // authenticate via user tokens.

@@ -70,6 +70,38 @@ func getAgentID(t *testing.T) string {
 	return agents[0]["id"].(string)
 }
 
+// createSecondAgent creates a second agent in the test workspace and returns its ID.
+// It reuses the same runtime as the first agent.
+func createSecondAgent(t *testing.T) string {
+	t.Helper()
+	// Fetch the first agent to get its runtime_id.
+	resp := authRequest(t, "GET", "/api/agents?workspace_id="+testWorkspaceID, nil)
+	var agents []map[string]any
+	readJSON(t, resp, &agents)
+	if len(agents) == 0 {
+		t.Fatal("no agents in test workspace")
+	}
+	runtimeID := agents[0]["runtime_id"].(string)
+
+	resp = authRequest(t, "POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":       "Second Test Agent",
+		"runtime_id": runtimeID,
+		"visibility": "workspace",
+	})
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var agent map[string]any
+	readJSON(t, resp, &agent)
+	id := agent["id"].(string)
+	t.Cleanup(func() {
+		authRequest(t, "POST", "/api/agents/"+id+"/archive?workspace_id="+testWorkspaceID, nil)
+	})
+	return id
+}
+
 // createIssueAssignedToAgent creates a todo issue assigned to the given agent.
 func createIssueAssignedToAgent(t *testing.T, title, agentID string) string {
 	t.Helper()
@@ -396,13 +428,28 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		}
 	})
 
-	t.Run("reply mentioning agent and member still inherits", func(t *testing.T) {
+	t.Run("reply mentioning a different agent does not inherit parent agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		agentB := createSecondAgent(t)
+		// Top-level comment @mentions agent A.
+		content := fmt.Sprintf("[@AgentA](mention://agent/%s) please review", agentID)
+		threadID := postComment(t, issueID, content, nil)
+		clearTasks(t, issueID)
+		// Reply @mentions agent B — should trigger ONLY agent B, not agent A.
+		reply := fmt.Sprintf("[@AgentB](mention://agent/%s) can you also look?", agentB)
+		postComment(t, issueID, reply, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (only agent B), got %d", n)
+		}
+	})
+
+	t.Run("reply mentioning same agent and member triggers via explicit mention", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Top-level comment @mentions the agent.
 		content := fmt.Sprintf("[@Agent](mention://agent/%s) review this", agentID)
 		threadID := postComment(t, issueID, content, nil)
 		clearTasks(t, issueID)
-		// Reply mentions both agent and member — should still trigger.
+		// Reply re-mentions the same agent along with a member — triggers via the reply's own mention.
 		reply := fmt.Sprintf("[@Agent](mention://agent/%s) and cc [@Someone](mention://member/%s)", agentID, testUserID)
 		postComment(t, issueID, reply, strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 1 {

@@ -191,6 +191,13 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 
 // ReportUpdateResult receives the update result from the daemon.
 func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	// Verify the caller owns this runtime's workspace.
+	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+		return
+	}
+
 	updateID := chi.URLParam(r, "updateId")
 
 	var req struct {

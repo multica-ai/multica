@@ -278,6 +278,47 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.24",
+        date: "2026-04-11",
+        title: "Security & Notifications",
+        changes: [],
+        features: [
+          "Parent issue subscribers notified on sub-issue changes",
+          "CLI `--project` filter for issue list",
+        ],
+        improvements: [
+          "Meta-skill workflow defers to agent Skills instead of hardcoded logic",
+        ],
+        fixes: [
+          "Workspace ownership checks on all daemon API routes",
+          "Workspace ownership validation for attachment uploads and queries",
+          "Reply mentions no longer inherit parent thread's agent mentions",
+          "Agent comment creation missing workspace ID",
+          "Self-hosting Docker build failures (file permissions, CRLF, missing deps)",
+        ],
+      },
+      {
+        version: "0.1.23",
+        date: "2026-04-11",
+        title: "Pinning, Cmd+K & Projects",
+        changes: [],
+        features: [
+          "Pin issues and projects to sidebar with drag-and-drop reordering",
+          "Cmd+K command palette — recent issues, page navigation, and project search",
+          "Project detail sidebar with properties panel (replaces overview tab)",
+          "Project filter in Issues tab",
+          "Project completion progress in project list",
+          "Auto-fill project when creating issue via 'C' shortcut on project page",
+          "Assignee dropdown sorted by user's assignment frequency",
+        ],
+        fixes: [
+          "Markdown XSS — sanitize HTML rendering in comments with rehype-sanitize and server-side bluemonday",
+          "Project kanban issue counts incorrect",
+          "Self-hosting Docker build missing tsconfig dependencies",
+          "Cmd+K requiring double ESC to close",
+        ],
+      },
+      {
         version: "0.1.22",
         date: "2026-04-10",
         title: "Self-Hosting, ACP & Documentation",

@@ -237,12 +237,17 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 
 const listAttachmentsByCommentIDs = `-- name: ListAttachmentsByCommentIDs :many
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
-WHERE comment_id = ANY($1::uuid[])
+WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]Attachment, error) {
-	rows, err := q.db.Query(ctx, listAttachmentsByCommentIDs, dollar_1)
+type ListAttachmentsByCommentIDsParams struct {
+	Column1     []pgtype.UUID `json:"column_1"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttachmentsByCommentIDsParams) ([]Attachment, error) {
+	rows, err := q.db.Query(ctx, listAttachmentsByCommentIDs, arg.Column1, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
