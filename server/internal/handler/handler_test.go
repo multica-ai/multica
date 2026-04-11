@@ -252,6 +252,56 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+// TestCreateIssueDefaultStatusIsTodo verifies that issues created without an
+// explicit status default to "todo" so the daemon picks them up immediately.
+// Before this fix the default was "backlog", which daemons ignore.
+func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Issue with no explicit status",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.Status != "todo" {
+		t.Fatalf("CreateIssue: expected default status 'todo', got '%s'", created.Status)
+	}
+
+	// Cleanup
+	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+}
+
+// TestCreateIssueExplicitBacklogPreserved verifies that explicitly requesting
+// "backlog" status is still respected — only the implicit default changed.
+func TestCreateIssueExplicitBacklogPreserved(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Explicit backlog issue",
+		"status": "backlog",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.Status != "backlog" {
+		t.Fatalf("CreateIssue: expected explicit 'backlog' to be preserved, got '%s'", created.Status)
+	}
+
+	// Cleanup
+	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	w := httptest.NewRecorder()
