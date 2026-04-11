@@ -61,6 +61,8 @@ services:
       dockerfile: Dockerfile.web
       args:
         REMOTE_API_URL: http://backend:8080
+        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
     depends_on:
       - backend
     ports:
