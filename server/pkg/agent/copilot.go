@@ -38,9 +38,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
-	if opts.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
-	}
+	// Note: Copilot CLI does not support --max-turns; ignore opts.MaxTurns.
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume="+opts.ResumeSessionID)
 	}
