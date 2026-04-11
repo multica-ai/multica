@@ -554,12 +554,13 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:    issueID,
-		AuthorType: "agent",
-		AuthorID:   agentID,
-		Content:    content,
-		Type:       commentType,
-		ParentID:   parentID,
+		IssueID:     issueID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    agentID,
+		Content:     content,
+		Type:        commentType,
+		ParentID:    parentID,
 	})
 	if err != nil {
 		return
