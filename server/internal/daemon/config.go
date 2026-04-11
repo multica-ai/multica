@@ -120,6 +120,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_GEMINI_MODEL")),
 		}
 	}
+	piAcpPath := envOrDefault("MULTICA_PI_ACP_PATH", "pi-acp")
+	if _, err := exec.LookPath(piAcpPath); err == nil {
+		agents["pi-acp"] = AgentEntry{
+			Path:  piAcpPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_PI_ACP_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, openclaw, hermes, or gemini and ensure it is on PATH")
 	}

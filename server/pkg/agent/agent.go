@@ -103,6 +103,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &opencodeBackend{cfg: cfg}, nil
 	case "openclaw":
 		return &openclawBackend{cfg: cfg}, nil
+	case "pi-acp":
+		return &piBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
 	case "gemini":
