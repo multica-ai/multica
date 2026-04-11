@@ -21,6 +21,8 @@ import type {
   IssueReaction,
   Workspace,
   WorkspaceRepo,
+  SandboxConfig,
+  UpsertSandboxConfigRequest,
   MemberWithUser,
   User,
   Skill,
@@ -502,6 +504,24 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Sandbox Config
+  async getSandboxConfig(workspaceId: string): Promise<SandboxConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/sandbox-config`);
+  }
+
+  async upsertSandboxConfig(workspaceId: string, data: UpsertSandboxConfigRequest): Promise<SandboxConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/sandbox-config`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSandboxConfig(workspaceId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/sandbox-config`, {
+      method: "DELETE",
     });
   }
 

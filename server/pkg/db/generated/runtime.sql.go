@@ -220,6 +220,46 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 	return items, nil
 }
 
+const listCloudRuntimes = `-- name: ListCloudRuntimes :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id FROM agent_runtime
+WHERE runtime_mode = 'cloud' AND status = 'online'
+ORDER BY workspace_id
+`
+
+func (q *Queries) ListCloudRuntimes(ctx context.Context) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listCloudRuntimes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markStaleRuntimesOffline = `-- name: MarkStaleRuntimesOffline :many
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
@@ -290,6 +330,17 @@ func (q *Queries) UpdateAgentRuntimeHeartbeat(ctx context.Context, id pgtype.UUI
 		&i.OwnerID,
 	)
 	return i, err
+}
+
+const updateCloudRuntimesHeartbeat = `-- name: UpdateCloudRuntimesHeartbeat :exec
+UPDATE agent_runtime
+SET last_seen_at = now(), updated_at = now()
+WHERE runtime_mode = 'cloud' AND status = 'online'
+`
+
+func (q *Queries) UpdateCloudRuntimesHeartbeat(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, updateCloudRuntimesHeartbeat)
+	return err
 }
 
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one

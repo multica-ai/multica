@@ -78,3 +78,13 @@ SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 
 -- name: DeleteArchivedAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+
+-- name: ListCloudRuntimes :many
+SELECT * FROM agent_runtime
+WHERE runtime_mode = 'cloud' AND status = 'online'
+ORDER BY workspace_id;
+
+-- name: UpdateCloudRuntimesHeartbeat :exec
+UPDATE agent_runtime
+SET last_seen_at = now(), updated_at = now()
+WHERE runtime_mode = 'cloud' AND status = 'online';

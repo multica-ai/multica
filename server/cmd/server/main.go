@@ -14,6 +14,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/sandbox"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/pkg/crypto"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -66,11 +69,37 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
-	r := NewRouter(pool, hub, bus)
+	// Parse encryption key (used by both router/handler and CloudDaemon)
+	var encKey []byte
+	if hexKey := os.Getenv("ENCRYPTION_KEY"); hexKey != "" {
+		var keyErr error
+		encKey, keyErr = crypto.ParseHexKey(hexKey)
+		if keyErr != nil {
+			slog.Error("invalid ENCRYPTION_KEY", "error", keyErr)
+			os.Exit(1)
+		}
+	}
+
+	r := NewRouter(pool, hub, bus, encKey)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
+	}
+
+	// Start CloudDaemon BEFORE sweeper so first heartbeat runs before first sweep tick.
+	var cloudDaemon *sandbox.CloudDaemon
+
+	taskService := service.NewTaskService(queries, hub, bus)
+	cloudDaemon = sandbox.NewCloudDaemon(sandbox.CloudDaemonConfig{
+		Queries:       queries,
+		TaskService:   taskService,
+		Bus:           bus,
+		EncryptionKey: encKey,
+	})
+	cloudDaemonCtx, cloudDaemonCancel := context.WithCancel(context.Background())
+	if cloudDaemon != nil {
+		cloudDaemon.Start(cloudDaemonCtx)
 	}
 
 	// Start background sweeper to mark stale runtimes as offline.
@@ -91,6 +120,13 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server")
+
+	// Stop CloudDaemon first (drains active tasks)
+	cloudDaemonCancel()
+	if cloudDaemon != nil {
+		cloudDaemon.Stop()
+	}
+
 	sweepCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

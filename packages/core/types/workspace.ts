@@ -18,6 +18,29 @@ export interface Workspace {
   updated_at: string;
 }
 
+export type SandboxProvider = "e2b" | "daytona";
+
+export interface SandboxConfig {
+  workspace_id: string;
+  provider: SandboxProvider;
+  provider_api_key: string; // redacted on GET (e.g. "****abcd")
+  ai_gateway_api_key: string | null;
+  git_pat: string | null;
+  template_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpsertSandboxConfigRequest {
+  provider: string;
+  provider_api_key: string;
+  ai_gateway_api_key?: string;
+  git_pat?: string;
+  template_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface Member {
   id: string;
   workspace_id: string;

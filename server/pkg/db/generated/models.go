@@ -372,3 +372,15 @@ type Workspace struct {
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 }
+
+type WorkspaceSandboxConfig struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	ProviderApiKey  string             `json:"provider_api_key"`
+	AiGatewayApiKey pgtype.Text        `json:"ai_gateway_api_key"`
+	GitPat          pgtype.Text        `json:"git_pat"`
+	TemplateID      pgtype.Text        `json:"template_id"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}

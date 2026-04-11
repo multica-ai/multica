@@ -32,17 +32,18 @@ type dbExecutor interface {
 }
 
 type Handler struct {
-	Queries      *db.Queries
-	DB           dbExecutor
-	TxStarter    txStarter
-	Hub          *realtime.Hub
-	Bus          *events.Bus
-	TaskService  *service.TaskService
-	EmailService *service.EmailService
-	PingStore    *PingStore
-	UpdateStore  *UpdateStore
-	Storage      storage.Storage
-	CFSigner     *auth.CloudFrontSigner
+	Queries       *db.Queries
+	DB            dbExecutor
+	TxStarter     txStarter
+	Hub           *realtime.Hub
+	Bus           *events.Bus
+	TaskService   *service.TaskService
+	EmailService  *service.EmailService
+	PingStore     *PingStore
+	UpdateStore   *UpdateStore
+	Storage       storage.Storage
+	CFSigner      *auth.CloudFrontSigner
+	EncryptionKey []byte // for sandbox config encryption; nil if not configured
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
