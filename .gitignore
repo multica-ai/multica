@@ -48,3 +48,6 @@ _features/
 *.dmg
 *.app
 server/server
+
+
+.claude_config_glm/

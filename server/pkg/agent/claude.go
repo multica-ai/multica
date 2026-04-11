@@ -42,6 +42,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
+	// Log ANTHROPIC_* env vars being passed to claude process for debugging.
+	var anthropicVars []string
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "ANTHROPIC_") || strings.HasPrefix(e, "OPENAI_") {
+			// Redact values that look like API keys.
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 && (strings.Contains(parts[0], "KEY") || strings.Contains(parts[0], "TOKEN") || strings.Contains(parts[0], "AUTH")) {
+				anthropicVars = append(anthropicVars, parts[0]+"=***redacted***")
+			} else {
+				anthropicVars = append(anthropicVars, e)
+			}
+		}
+	}
+	b.cfg.Logger.Info("claude env vars", "vars", anthropicVars)
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()

@@ -39,10 +39,15 @@ type Task struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name"`
-	Instructions string      `json:"instructions"`
-	Skills       []SkillData `json:"skills"`
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	Instructions       string            `json:"instructions"`
+	Skills             []SkillData       `json:"skills"`
+	EnvVars            map[string]string `json:"env_vars,omitempty"`
+	ConfigMode         string            `json:"config_mode,omitempty"`             // "global" (default) or "project"
+	CodexConfigToml    string            `json:"codex_config_toml,omitempty"`       // raw TOML for codex project config
+	ClaudeSettingsJson string            `json:"claude_settings_json,omitempty"`    // raw JSON for .claude/settings.json
+	OpencodeConfigJson string            `json:"opencode_config_json,omitempty"`    // raw JSON for opencode.json
 }
 
 // SkillData represents a structured skill for task execution.
