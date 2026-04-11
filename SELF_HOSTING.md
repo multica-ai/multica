@@ -82,6 +82,9 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Optional frontend override. If empty, Docker frontend build falls back to `GOOGLE_CLIENT_ID`. |
+
+For Docker Compose, `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is also passed to the running frontend container. Set it explicitly in `.env` to ensure the Google login button is rendered.
 
 ### File Storage (Optional)
 
