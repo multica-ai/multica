@@ -73,9 +73,20 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	agents := map[string]AgentEntry{}
 	claudePath := envOrDefault("MULTICA_CLAUDE_PATH", "claude")
 	if _, err := exec.LookPath(claudePath); err == nil {
+		claudeExtra := map[string]string{}
+		// Allow overriding the Anthropic API endpoint at the daemon level — useful
+		// for pointing Claude Code at a compatible provider (e.g. MiniMax's
+		// Anthropic-compatible API at https://api.minimax.io/anthropic).
+		if v := strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_API_KEY")); v != "" {
+			claudeExtra["ANTHROPIC_AUTH_TOKEN"] = v
+		}
+		if v := strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_BASE_URL")); v != "" {
+			claudeExtra["ANTHROPIC_BASE_URL"] = v
+		}
 		agents["claude"] = AgentEntry{
-			Path:  claudePath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+			Path:     claudePath,
+			Model:    strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+			ExtraEnv: claudeExtra,
 		}
 	}
 	codexPath := envOrDefault("MULTICA_CODEX_PATH", "codex")
@@ -94,16 +105,31 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	openclawPath := envOrDefault("MULTICA_OPENCLAW_PATH", "openclaw")
 	if _, err := exec.LookPath(openclawPath); err == nil {
+		openclawExtra := map[string]string{}
+		// OpenClaw is MiniMax's coding agent CLI. Inject MINIMAX_API_KEY when
+		// MULTICA_OPENCLAW_API_KEY is set, so users can configure it at the
+		// daemon level without exporting it globally.
+		if v := strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_API_KEY")); v != "" {
+			openclawExtra["MINIMAX_API_KEY"] = v
+		}
 		agents["openclaw"] = AgentEntry{
-			Path:  openclawPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+			Path:     openclawPath,
+			Model:    strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+			ExtraEnv: openclawExtra,
 		}
 	}
 	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
 	if _, err := exec.LookPath(hermesPath); err == nil {
+		hermesExtra := map[string]string{}
+		// Hermes Agent is MiniMax's Anthropic-compatible coding agent CLI.
+		// Inject MINIMAX_API_KEY when MULTICA_HERMES_API_KEY is set.
+		if v := strings.TrimSpace(os.Getenv("MULTICA_HERMES_API_KEY")); v != "" {
+			hermesExtra["MINIMAX_API_KEY"] = v
+		}
 		agents["hermes"] = AgentEntry{
-			Path:  hermesPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+			Path:     hermesPath,
+			Model:    strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+			ExtraEnv: hermesExtra,
 		}
 	}
 	if len(agents) == 0 {
