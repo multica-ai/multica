@@ -1,4 +1,4 @@
-.PHONY: dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down selfhost selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -35,6 +35,53 @@ define REQUIRE_ENV
 		exit 1; \
 	fi
 endef
+
+# ---------- Self-hosting (Docker Compose) ----------
+
+# One-command self-host: create env, start Docker Compose, wait for health
+selfhost:
+	@if [ ! -f .env ]; then \
+		echo "==> Creating .env from .env.example..."; \
+		cp .env.example .env; \
+		JWT=$$(openssl rand -hex 32); \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
+		else \
+			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
+		fi; \
+		echo "==> Generated random JWT_SECRET"; \
+	fi
+	@echo "==> Starting Multica via Docker Compose..."
+	docker compose -f docker-compose.selfhost.yml up -d --build
+	@echo "==> Waiting for backend to be ready..."
+	@for i in $$(seq 1 30); do \
+		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+			break; \
+		fi; \
+		sleep 2; \
+	done
+	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+		echo ""; \
+		echo "✓ Multica is running!"; \
+		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
+		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
+		echo ""; \
+		echo "Log in with any email + verification code: 888888"; \
+		echo ""; \
+		echo "Next — install the CLI and connect your machine:"; \
+		echo "  brew install multica-ai/tap/multica"; \
+		echo "  multica setup --local"; \
+	else \
+		echo ""; \
+		echo "Services are still starting. Check logs:"; \
+		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
+	fi
+
+# Stop all Docker Compose self-host services
+selfhost-stop:
+	@echo "==> Stopping Multica services..."
+	docker compose -f docker-compose.selfhost.yml down
+	@echo "✓ All services stopped."
 
 # ---------- One-click commands ----------
 

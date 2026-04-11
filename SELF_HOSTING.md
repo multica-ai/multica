@@ -1,10 +1,8 @@
 # Self-Hosting Guide
 
-This guide walks you through deploying Multica on your own infrastructure.
+Deploy Multica on your own infrastructure in minutes.
 
-## Architecture Overview
-
-Multica has three components:
+## Architecture
 
 | Component | Description | Technology |
 |-----------|-------------|------------|
@@ -12,11 +10,133 @@ Multica has three components:
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
-Additionally, each user who wants to run AI agents locally installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
+Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
-## Quick Start (Docker Compose)
+## Quick Install (Recommended)
+
+One command to set up everything — server, CLI, and configuration:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --local
+```
+
+This automatically clones the repository, starts all services via Docker Compose, and installs the `multica` CLI.
+
+Once complete, open http://localhost:3000, log in with any email + verification code **`888888`**, then:
+
+```bash
+multica login          # Authenticate (opens browser)
+multica daemon start   # Start the agent daemon
+```
+
+> **Prerequisites:** Docker and Docker Compose must be installed. The script checks for this and provides install links if missing.
+
+---
+
+## Step-by-Step Setup (Alternative)
+
+If you prefer to run each step manually:
+
+### Step 1 — Start the Server
 
 **Prerequisites:** Docker and Docker Compose.
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+```
+
+`make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
+
+Once ready:
+
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8080
+
+> **Note:** If you prefer to run the Docker Compose steps manually, see [Manual Docker Compose Setup](#manual-docker-compose-setup) below.
+
+### Step 2 — Log In
+
+Open http://localhost:3000 in your browser. Enter any email address and use verification code **`888888`** to log in.
+
+> This master code works in all non-production environments (i.e. when `APP_ENV` is not set to `production`). For production, configure an email provider — see [Advanced Configuration](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
+
+### Step 3 — Install CLI & Start Daemon
+
+The daemon runs on your local machine (not inside Docker). It detects installed AI agent CLIs, registers them with the server, and executes tasks when agents are assigned work.
+
+Each team member who wants to run AI agents locally needs to:
+
+### a) Install the CLI and an AI agent
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+You also need at least one AI agent CLI installed:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
+- [Codex](https://github.com/openai/codex) (`codex` on PATH)
+
+### b) One-command setup
+
+```bash
+multica setup --local
+```
+
+This automatically:
+1. Configures the CLI to connect to `localhost` (ports 8080/3000)
+2. Opens your browser for authentication
+3. Discovers your workspaces
+4. Starts the daemon in the background
+
+To verify the daemon is running:
+
+```bash
+multica daemon status
+```
+
+> **Alternative:** If you prefer manual steps, see [Manual CLI Configuration](#manual-cli-configuration) below.
+
+### Step 4 — Verify & Start Using
+
+1. Open your workspace in the web app at http://localhost:3000
+2. Navigate to **Settings → Runtimes** — you should see your machine listed
+3. Go to **Settings → Agents** and create a new agent
+4. Create an issue and assign it to your agent — it will pick up the task automatically
+
+## Stopping Services
+
+If you installed via the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop
+```
+
+If you cloned the repo manually:
+
+```bash
+# Stop the Docker Compose services (backend, frontend, database)
+make selfhost-stop
+
+# Stop the local daemon
+multica daemon stop
+```
+
+## Rebuilding After Updates
+
+```bash
+git pull
+make selfhost
+```
+
+Migrations run automatically on backend startup.
+
+---
+
+## Manual Docker Compose Setup
+
+If you prefer running Docker Compose steps manually instead of `make selfhost`:
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -36,237 +156,9 @@ Then start everything:
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-This builds and starts PostgreSQL, the backend (with auto-migration), and the frontend:
+## Manual CLI Configuration
 
-- **Frontend:** http://localhost:3000
-- **Backend API:** http://localhost:8080
-
-The backend automatically runs database migrations on startup — no manual migration step needed.
-
-To run AI agents, you also need to set up the daemon on your local machine. See [Setting Up the Agent Daemon](#setting-up-the-agent-daemon) below.
-
-### Rebuilding After Updates
-
-```bash
-git pull
-docker compose -f docker-compose.selfhost.yml up -d --build
-```
-
-Migrations run automatically on each backend startup.
-
-## Configuration
-
-All configuration is done via environment variables. Copy `.env.example` as a starting point.
-
-### Required Variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
-| `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
-| `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
-
-### Email (Required for Authentication)
-
-Multica uses email-based magic link authentication via [Resend](https://resend.com).
-
-| Variable | Description |
-|----------|-------------|
-| `RESEND_API_KEY` | Your Resend API key |
-| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
-
-### Google OAuth (Optional)
-
-| Variable | Description |
-|----------|-------------|
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
-| `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
-
-### File Storage (Optional)
-
-For file uploads and attachments, configure S3 and CloudFront:
-
-| Variable | Description |
-|----------|-------------|
-| `S3_BUCKET` | S3 bucket name |
-| `S3_REGION` | AWS region (default: `us-west-2`) |
-| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain |
-| `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
-| `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
-| `COOKIE_DOMAIN` | Domain for CloudFront auth cookies |
-
-### Server
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8080` | Backend server port |
-| `FRONTEND_PORT` | `3000` | Frontend port |
-| `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
-| `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-
-### CLI / Daemon
-
-These are configured on each user's machine, not on the server:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | WebSocket URL for daemon → server connection |
-| `MULTICA_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
-| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
-
-## Database Setup
-
-Multica requires PostgreSQL 17 with the pgvector extension.
-
-### Using Docker Compose (Recommended)
-
-The `docker-compose.selfhost.yml` includes PostgreSQL. No separate setup needed.
-
-### Using Your Own PostgreSQL
-
-If you prefer to use an existing PostgreSQL instance, ensure the pgvector extension is available:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-Set `DATABASE_URL` in your `.env` and remove the `postgres` service from the compose file.
-
-### Running Migrations Manually
-
-The Docker Compose setup runs migrations automatically. If you need to run them manually:
-
-```bash
-# Using the built binary
-./server/bin/migrate up
-
-# Or from source
-cd server && go run ./cmd/migrate up
-```
-
-## Manual Setup (Without Docker Compose)
-
-If you prefer to build and run services manually:
-
-**Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
-
-```bash
-# Start your PostgreSQL (or use: docker compose up -d postgres)
-
-# Build the backend
-make build
-
-# Run database migrations
-DATABASE_URL="your-database-url" ./server/bin/migrate up
-
-# Start the backend server
-DATABASE_URL="your-database-url" PORT=8080 JWT_SECRET="your-secret" ./server/bin/server
-```
-
-For the frontend:
-
-```bash
-pnpm install
-pnpm build
-
-# Start the frontend (production mode)
-cd apps/web
-REMOTE_API_URL=http://localhost:8080 pnpm start
-```
-
-## Reverse Proxy
-
-In production, put a reverse proxy in front of both the backend and frontend to handle TLS and routing.
-
-### Caddy (Recommended)
-
-```
-app.example.com {
-    reverse_proxy localhost:3000
-}
-
-api.example.com {
-    reverse_proxy localhost:8080
-}
-```
-
-### Nginx
-
-```nginx
-# Frontend
-server {
-    listen 443 ssl;
-    server_name app.example.com;
-
-    ssl_certificate     /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-# Backend API
-server {
-    listen 443 ssl;
-    server_name api.example.com;
-
-    ssl_certificate     /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # WebSocket support
-    location /ws {
-        proxy_pass http://localhost:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
-    }
-}
-```
-
-When using separate domains for frontend and backend, set these environment variables accordingly:
-
-```bash
-# Backend
-FRONTEND_ORIGIN=https://app.example.com
-CORS_ALLOWED_ORIGINS=https://app.example.com
-
-# Frontend (set before building the frontend image)
-REMOTE_API_URL=https://api.example.com
-NEXT_PUBLIC_API_URL=https://api.example.com
-NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
-```
-
-## Health Check
-
-The backend exposes a health check endpoint:
-
-```
-GET /health
-→ {"status":"ok"}
-```
-
-Use this for load balancer health checks or monitoring.
-
-## Setting Up the Agent Daemon
-
-The daemon runs on your local machine (not inside Docker). It detects installed AI agent CLIs, registers them as runtimes with the server, and executes tasks when agents are assigned work.
+If you prefer configuring the CLI step by step instead of `multica setup`:
 
 Each team member who wants to run AI agents locally needs to:
 
@@ -316,19 +208,26 @@ Each team member who wants to run AI agents locally needs to:
    multica daemon start
    ```
 
-   The login flow opens your browser, authenticates you via the frontend, and stores a personal access token locally. The daemon then uses this token to register with the backend.
+# Or set URLs manually:
+# multica config set app_url http://localhost:3000
+# multica config set server_url http://localhost:8080
 
-   To verify the daemon is running:
+# Login (opens browser)
+multica login
 
-   ```bash
-   multica daemon status
-   ```
-
-## Upgrading
-
-```bash
-git pull
-docker compose -f docker-compose.selfhost.yml up -d --build
+# Start the daemon
+multica daemon start
 ```
 
-Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
+For production deployments with TLS:
+
+```bash
+multica config set app_url https://app.example.com
+multica config set server_url https://api.example.com
+multica login
+multica daemon start
+```
+
+## Advanced Configuration
+
+For environment variables, manual setup (without Docker), reverse proxy configuration, database setup, and more, see the [Advanced Configuration Guide](SELF_HOSTING_ADVANCED.md).
