@@ -267,7 +267,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			dueDate = dueDate[:10]
 		}
 		rows = append(rows, []string{
-			truncateID(strVal(issue, "id")),
+			issueDisplayID(issue),
 			strVal(issue, "title"),
 			strVal(issue, "status"),
 			strVal(issue, "priority"),
@@ -302,7 +302,7 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		}
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE", "DESCRIPTION"}
 		rows := [][]string{{
-			truncateID(strVal(issue, "id")),
+			issueDisplayID(issue),
 			strVal(issue, "title"),
 			strVal(issue, "status"),
 			strVal(issue, "priority"),
@@ -387,7 +387,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			issueDisplayID(result),
 			strVal(result, "title"),
 			strVal(result, "status"),
 			strVal(result, "priority"),
@@ -456,7 +456,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			issueDisplayID(result),
 			strVal(result, "title"),
 			strVal(result, "status"),
 			strVal(result, "priority"),
@@ -864,7 +864,7 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 			matchInfo += ": " + snippet
 		}
 		rows = append(rows, []string{
-			truncateID(strVal(issue, "id")),
+			issueDisplayID(issue),
 			strVal(issue, "identifier"),
 			strVal(issue, "title"),
 			strVal(issue, "status"),
@@ -963,4 +963,15 @@ func truncateID(id string) string {
 		return string(runes[:8])
 	}
 	return id
+}
+
+// issueDisplayID returns the human-readable identifier (e.g. "PRA-42") for an
+// issue map, falling back to a truncated UUID if the identifier is absent.
+// The identifier format is accepted by all issue commands, so it can be copied
+// directly from list output into commands like `multica issue status PRA-42 todo`.
+func issueDisplayID(issue map[string]any) string {
+	if id := strVal(issue, "identifier"); id != "" {
+		return id
+	}
+	return truncateID(strVal(issue, "id"))
 }
