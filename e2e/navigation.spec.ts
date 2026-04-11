@@ -28,6 +28,13 @@ test.describe("Navigation", () => {
     await expect(page).toHaveURL(/\/issues/);
   });
 
+  test("projects page loads from the sidebar", async ({ page }) => {
+    await page.getByRole("link", { name: "Projects" }).click();
+    await page.waitForURL("**/projects");
+
+    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  });
+
   test("settings page loads via sidebar", async ({ page }) => {
     await page.getByRole("link", { name: "Settings" }).click();
     await page.waitForURL("**/settings");

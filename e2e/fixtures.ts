@@ -19,6 +19,7 @@ export class TestApiClient {
   private token: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdProjectIds: string[] = [];
   private user: Record<string, unknown> | null = null;
 
   async login(email: string, name: string) {
@@ -108,6 +109,55 @@ export class TestApiClient {
   async getIssue(id: string) {
     const res = await this.authedFetch(`/api/issues/${id}`);
     return res.json();
+  }
+
+  async listIssues(params?: Record<string, string | null | undefined>) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params ?? {})) {
+      if (value) {
+        search.set(key, value);
+      }
+    }
+
+    const query = search.toString();
+    const res = await this.authedFetch(query ? `/api/issues?${query}` : "/api/issues");
+    return res.json();
+  }
+
+  async listProjects(params?: { status?: string }) {
+    const search = new URLSearchParams();
+    if (params?.status) {
+      search.set("status", params.status);
+    }
+
+    const query = search.toString();
+    const res = await this.authedFetch(query ? `/api/projects?${query}` : "/api/projects");
+    return res.json();
+  }
+
+  async getProject(id: string) {
+    const res = await this.authedFetch(`/api/projects/${id}`);
+    return res.json();
+  }
+
+  async createProject(data: Record<string, unknown>) {
+    const res = await this.authedFetch("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const project = await res.json();
+    this.createdProjectIds.push(project.id);
+    return project;
+  }
+
+  trackProject(id: string) {
+    if (!this.createdProjectIds.includes(id)) {
+      this.createdProjectIds.push(id);
+    }
+  }
+
+  async deleteProject(id: string) {
+    await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
   }
 
   async listRuntimes() {
@@ -200,6 +250,15 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+
+    for (const id of this.createdProjectIds) {
+      try {
+        await this.deleteProject(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdProjectIds = [];
   }
 
   getToken() {
