@@ -121,6 +121,17 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				// Extract per-model usage from the result message. The assistant
+				// messages report zeros in stream-json mode; the authoritative
+				// usage data lives in result.modelUsage.
+				for model, mu := range msg.ModelUsage {
+					usage[model] = TokenUsage{
+						InputTokens:      mu.InputTokens,
+						OutputTokens:     mu.OutputTokens,
+						CacheReadTokens:  mu.CacheReadInputTokens,
+						CacheWriteTokens: mu.CacheCreationInputTokens,
+					}
+				}
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -272,10 +283,11 @@ type claudeSDKMessage struct {
 	SessionID string          `json:"session_id,omitempty"`
 
 	// result fields
-	ResultText string  `json:"result,omitempty"`
-	IsError    bool    `json:"is_error,omitempty"`
-	DurationMs float64 `json:"duration_ms,omitempty"`
-	NumTurns   int     `json:"num_turns,omitempty"`
+	ResultText string                       `json:"result,omitempty"`
+	IsError    bool                         `json:"is_error,omitempty"`
+	DurationMs float64                      `json:"duration_ms,omitempty"`
+	NumTurns   int                          `json:"num_turns,omitempty"`
+	ModelUsage map[string]claudeModelUsage  `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
@@ -302,6 +314,15 @@ type claudeUsage struct {
 	OutputTokens             int64 `json:"output_tokens"`
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
+// claudeModelUsage represents the per-model usage from the result message's
+// modelUsage field, which uses camelCase keys.
+type claudeModelUsage struct {
+	InputTokens            int64 `json:"inputTokens"`
+	OutputTokens           int64 `json:"outputTokens"`
+	CacheReadInputTokens   int64 `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
 }
 
 type claudeContentBlock struct {
