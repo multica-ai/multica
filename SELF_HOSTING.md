@@ -280,6 +280,8 @@ Each team member who wants to run AI agents locally needs to:
 2. **Install an AI agent CLI** — at least one of:
    - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
    - [Codex](https://github.com/openai/codex) (`codex` on PATH)
+   - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
+   - [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
 
 3. **Point the CLI to your server**
 
