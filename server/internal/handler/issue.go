@@ -762,7 +762,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	status := req.Status
 	if status == "" {
-		status = "backlog"
+		status = "todo"
 	}
 	priority := req.Priority
 	if priority == "" {
