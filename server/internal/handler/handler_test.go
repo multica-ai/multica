@@ -609,6 +609,139 @@ func TestVerifyCodeCreatesWorkspace(t *testing.T) {
 	}
 }
 
+func TestSetupPasswordAndLogin(t *testing.T) {
+	const email = "password-auth-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		user, err := testHandler.Queries.GetUserByEmail(ctx, email)
+		if err == nil {
+			workspaces, listErr := testHandler.Queries.ListWorkspaces(ctx, user.ID)
+			if listErr == nil {
+				for _, workspace := range workspaces {
+					_ = testHandler.Queries.DeleteWorkspace(ctx, workspace.ID)
+				}
+			}
+		}
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email})
+	req := httptest.NewRequest("POST", "/auth/send-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.SendCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SendCode: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	dbCode, err := testHandler.Queries.GetLatestVerificationCode(ctx, email)
+	if err != nil {
+		t.Fatalf("GetLatestVerificationCode: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	buf.Reset()
+	json.NewEncoder(&buf).Encode(map[string]string{
+		"email":    email,
+		"code":     dbCode.Code,
+		"password": "Password123",
+	})
+	req = httptest.NewRequest("POST", "/auth/password/setup", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.SetupPassword(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SetupPassword: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	user, err := testHandler.Queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("GetUserByEmail: %v", err)
+	}
+	if !user.PasswordHash.Valid || user.PasswordHash.String == "" {
+		t.Fatal("expected password hash to be stored")
+	}
+	if user.PasswordHash.String == "Password123" {
+		t.Fatal("password should not be stored in plain text")
+	}
+
+	w = httptest.NewRecorder()
+	buf.Reset()
+	json.NewEncoder(&buf).Encode(map[string]string{
+		"email":    email,
+		"password": "Password123",
+	})
+	req = httptest.NewRequest("POST", "/auth/password/login", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.LoginWithPassword(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("LoginWithPassword: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLoginWithPasswordWrongPassword(t *testing.T) {
+	const email = "password-auth-wrong@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		user, err := testHandler.Queries.GetUserByEmail(ctx, email)
+		if err == nil {
+			workspaces, listErr := testHandler.Queries.ListWorkspaces(ctx, user.ID)
+			if listErr == nil {
+				for _, workspace := range workspaces {
+					_ = testHandler.Queries.DeleteWorkspace(ctx, workspace.ID)
+				}
+			}
+		}
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email})
+	req := httptest.NewRequest("POST", "/auth/send-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.SendCode(w, req)
+
+	dbCode, err := testHandler.Queries.GetLatestVerificationCode(ctx, email)
+	if err != nil {
+		t.Fatalf("GetLatestVerificationCode: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	buf.Reset()
+	json.NewEncoder(&buf).Encode(map[string]string{
+		"email":    email,
+		"code":     dbCode.Code,
+		"password": "Password123",
+	})
+	req = httptest.NewRequest("POST", "/auth/password/setup", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.SetupPassword(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SetupPassword: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	buf.Reset()
+	json.NewEncoder(&buf).Encode(map[string]string{
+		"email":    email,
+		"password": "WrongPassword",
+	})
+	req = httptest.NewRequest("POST", "/auth/password/login", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.LoginWithPassword(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("LoginWithPassword: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid password") {
+		t.Fatalf("expected invalid password error, got %s", w.Body.String())
+	}
+}
+
 func TestResolveActor(t *testing.T) {
 	ctx := context.Background()
 
@@ -656,11 +789,11 @@ func TestResolveActor(t *testing.T) {
 	})
 
 	tests := []struct {
-		name            string
-		agentIDHeader   string
-		taskIDHeader    string
-		wantActorType   string
-		wantIsAgent     bool
+		name          string
+		agentIDHeader string
+		taskIDHeader  string
+		wantActorType string
+		wantIsAgent   bool
 	}{
 		{
 			name:          "no headers returns member",

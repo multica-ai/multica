@@ -12,25 +12,27 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO "user" (name, email, avatar_url)
-VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at
+INSERT INTO "user" (name, email, avatar_url, password_hash)
+VALUES ($1, $2, $3, $4)
+RETURNING id, name, email, avatar_url, password_hash, created_at, updated_at
 `
 
 type CreateUserParams struct {
-	Name      string      `json:"name"`
-	Email     string      `json:"email"`
-	AvatarUrl pgtype.Text `json:"avatar_url"`
+	Name         string      `json:"name"`
+	Email        string      `json:"email"`
+	AvatarUrl    pgtype.Text `json:"avatar_url"`
+	PasswordHash pgtype.Text `json:"password_hash"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.AvatarUrl)
+	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.AvatarUrl, arg.PasswordHash)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Email,
 		&i.AvatarUrl,
+		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -38,7 +40,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at FROM "user"
+SELECT id, name, email, avatar_url, password_hash, created_at, updated_at FROM "user"
 WHERE id = $1
 `
 
@@ -50,6 +52,7 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.Name,
 		&i.Email,
 		&i.AvatarUrl,
+		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -57,7 +60,7 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at FROM "user"
+SELECT id, name, email, avatar_url, password_hash, created_at, updated_at FROM "user"
 WHERE email = $1
 `
 
@@ -69,6 +72,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Name,
 		&i.Email,
 		&i.AvatarUrl,
+		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -81,7 +85,7 @@ UPDATE "user" SET
     avatar_url = COALESCE($3, avatar_url),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at
+RETURNING id, name, email, avatar_url, password_hash, created_at, updated_at
 `
 
 type UpdateUserParams struct {
@@ -98,6 +102,35 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Name,
 		&i.Email,
 		&i.AvatarUrl,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setUserPasswordHash = `-- name: SetUserPasswordHash :one
+UPDATE "user" SET
+    password_hash = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, email, avatar_url, password_hash, created_at, updated_at
+`
+
+type SetUserPasswordHashParams struct {
+	ID           pgtype.UUID `json:"id"`
+	PasswordHash pgtype.Text `json:"password_hash"`
+}
+
+func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserPasswordHash, arg.ID, arg.PasswordHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
