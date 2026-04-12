@@ -450,6 +450,31 @@ export class ApiClient {
     });
   }
 
+  async getTaskFileTree(issueId: string, taskId: string): Promise<{ tree: unknown[]; git_status: Record<string, string> }> {
+    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/file-tree`);
+  }
+
+  async getTaskFileContent(issueId: string, taskId: string, filePath: string): Promise<{
+    content: string;
+    path: string;
+    size: number;
+    mtime: string;
+  }> {
+    // filePath is passed as wildcard segments (not encoded as single component)
+    const cleanPath = filePath.replace(/^\/+/, "");
+    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/files/${cleanPath}`);
+  }
+
+  async getTaskFileDiff(issueId: string, taskId: string, filePath: string): Promise<{
+    path: string;
+    status: string;
+    diff: string | null;
+    content: string | null;
+  }> {
+    const cleanPath = filePath.replace(/^\/+/, "");
+    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/diff/${cleanPath}`);
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");

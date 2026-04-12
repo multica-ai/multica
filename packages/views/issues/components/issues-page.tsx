@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
 import type { IssueStatus } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueViewStore, initFilterWorkspaceSync } from "@multica/core/issues/stores/view-store";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
@@ -112,7 +113,8 @@ export function IssuesPage() {
   if (loading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+          <SidebarTrigger className="text-muted-foreground" />
           <Skeleton className="h-5 w-5 rounded" />
           <Skeleton className="h-4 w-32" />
         </div>
@@ -136,7 +138,8 @@ export function IssuesPage() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* Header 1: Workspace breadcrumb */}
-      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-4">
+      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b pl-2 pr-4">
+        <SidebarTrigger className="text-muted-foreground mr-0.5" />
         <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
         <span className="text-sm text-muted-foreground">
           {workspace?.name ?? "Workspace"}

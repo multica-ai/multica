@@ -22,6 +22,12 @@ export interface RuntimeDevice {
 
 export type AgentRuntime = RuntimeDevice;
 
+export interface TaskAgentInfo {
+  id: string;
+  name: string;
+  avatar_url?: string;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -35,6 +41,8 @@ export interface AgentTask {
   result: unknown;
   error: string | null;
   created_at: string;
+  work_dir?: string;
+  agent?: TaskAgentInfo;
 }
 
 export interface Agent {

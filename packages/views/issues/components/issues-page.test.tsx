@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
 import { WorkspaceIdProvider } from "@multica/core/hooks";
+import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -340,7 +341,9 @@ function renderWithQuery(ui: React.ReactElement) {
   });
   return render(
     <QueryClientProvider client={qc}>
-      <WorkspaceIdProvider wsId="ws-1">{ui}</WorkspaceIdProvider>
+      <WorkspaceIdProvider wsId="ws-1">
+        <SidebarProvider>{ui}</SidebarProvider>
+      </WorkspaceIdProvider>
     </QueryClientProvider>,
   );
 }

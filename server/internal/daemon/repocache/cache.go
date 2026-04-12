@@ -74,24 +74,31 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 		if repo.URL == "" {
 			continue
 		}
-		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
+		// Normalize to SSH for github.com so clones use the user's SSH agent
+		// instead of prompting for HTTPS credentials.
+		cloneURL := normalizeRepoURL(repo.URL)
+		barePath := filepath.Join(wsDir, bareDirName(cloneURL))
 
 		repoLock := c.lockForRepo(barePath)
 		repoLock.Lock()
 		if isBareRepo(barePath) {
-			// Already cached — fetch latest.
-			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
+			// Already cached — ensure the stored remote URL is also normalized
+			// (self-heals caches cloned before this fix), then fetch latest.
+			if err := ensureRemoteURL(barePath, cloneURL); err != nil {
+				c.logger.Warn("repo cache: remote set-url failed", "url", cloneURL, "error", err)
+			}
+			c.logger.Info("repo cache: fetching", "url", cloneURL, "path", barePath)
 			if err := gitFetch(barePath); err != nil {
-				c.logger.Warn("repo cache: fetch failed", "url", repo.URL, "error", err)
+				c.logger.Warn("repo cache: fetch failed", "url", cloneURL, "error", err)
 				if firstErr == nil {
 					firstErr = err
 				}
 			}
 		} else {
 			// Not cached — bare clone.
-			c.logger.Info("repo cache: cloning", "url", repo.URL, "path", barePath)
-			if err := gitCloneBare(repo.URL, barePath); err != nil {
-				c.logger.Error("repo cache: clone failed", "url", repo.URL, "error", err)
+			c.logger.Info("repo cache: cloning", "url", cloneURL, "path", barePath)
+			if err := gitCloneBare(cloneURL, barePath); err != nil {
+				c.logger.Error("repo cache: clone failed", "url", cloneURL, "error", err)
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -105,7 +112,7 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 // Lookup returns the local bare clone path for a repo URL within a workspace.
 // Returns "" if not cached.
 func (c *Cache) Lookup(workspaceID, url string) string {
-	barePath := filepath.Join(c.root, workspaceID, bareDirName(url))
+	barePath := filepath.Join(c.root, workspaceID, bareDirName(normalizeRepoURL(url)))
 	if isBareRepo(barePath) {
 		return barePath
 	}
@@ -155,8 +162,78 @@ func isBareRepo(path string) bool {
 // refs and abort the entire fetch.
 const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 
+// gitCmd builds an exec.Cmd for a git invocation with GIT_TERMINAL_PROMPT=0
+// and GIT_ASKPASS=/usr/bin/true, so that any command hitting a remote fails
+// fast instead of hanging on a credential prompt (which would block the
+// daemon sync loop on stdin the user can never reach).
+func gitCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=/bin/true",
+	)
+	return cmd
+}
+
+// normalizeRepoURL rewrites GitHub HTTP(S) URLs to the SSH form so that `git
+// clone` uses the user's SSH agent key instead of prompting for HTTPS
+// credentials. Non-github URLs and already-SSH URLs pass through unchanged.
+//
+// Examples:
+//
+//	https://github.com/org/repo       → git@github.com:org/repo.git
+//	https://github.com/org/repo.git   → git@github.com:org/repo.git
+//	http://github.com/org/repo        → git@github.com:org/repo.git
+//	git@github.com:org/repo.git       → git@github.com:org/repo.git (unchanged)
+//	https://gitlab.com/org/repo.git   → unchanged (not github)
+func normalizeRepoURL(url string) string {
+	const host = "github.com/"
+	var rest string
+	switch {
+	case strings.HasPrefix(url, "https://"+host):
+		rest = strings.TrimPrefix(url, "https://"+host)
+	case strings.HasPrefix(url, "http://"+host):
+		rest = strings.TrimPrefix(url, "http://"+host)
+	default:
+		return url
+	}
+	rest = strings.TrimRight(rest, "/")
+	if rest == "" {
+		return url
+	}
+	if !strings.HasSuffix(rest, ".git") {
+		rest += ".git"
+	}
+	return "git@github.com:" + rest
+}
+
+// ensureRemoteURL updates an existing bare cache's origin URL if it differs
+// from wantURL. This self-heals caches that were cloned before URL
+// normalization was introduced (e.g. HTTPS github URLs prompting for
+// credentials on fetch).
+func ensureRemoteURL(barePath, wantURL string) error {
+	out, err := gitCmd("-C", barePath, "config", "--get", "remote.origin.url").Output()
+	if err != nil {
+		// Missing or unreadable — try to set it anyway.
+		cmd := gitCmd("-C", barePath, "remote", "set-url", "origin", wantURL)
+		if setOut, setErr := cmd.CombinedOutput(); setErr != nil {
+			return fmt.Errorf("remote set-url: %s: %w", strings.TrimSpace(string(setOut)), setErr)
+		}
+		return nil
+	}
+	cur := strings.TrimSpace(string(out))
+	if cur == wantURL {
+		return nil
+	}
+	cmd := gitCmd("-C", barePath, "remote", "set-url", "origin", wantURL)
+	if setOut, setErr := cmd.CombinedOutput(); setErr != nil {
+		return fmt.Errorf("remote set-url: %s: %w", strings.TrimSpace(string(setOut)), setErr)
+	}
+	return nil
+}
+
 func gitCloneBare(url, dest string) error {
-	cmd := exec.Command("git", "clone", "--bare", url, dest)
+	cmd := gitCmd("clone", "--bare", url, dest)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Clean up partial clone.
 		os.RemoveAll(dest)
@@ -195,14 +272,14 @@ func gitFetch(barePath string) error {
 	// getRemoteDefaultBranch, but the modern-cache default-branch-change
 	// path (the only path that can't be recovered any other way) relies
 	// on this call.
-	_ = exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto").Run()
+	_ = gitCmd("-C", barePath, "remote", "set-head", "origin", "--auto").Run()
 	return nil
 }
 
 // runGitFetch is the raw `git fetch origin` wrapper. Callers should go through
 // gitFetch, which migrates legacy caches first.
 func runGitFetch(barePath string) error {
-	cmd := exec.Command("git", "-C", barePath, "fetch", "origin")
+	cmd := gitCmd("-C", barePath, "fetch", "origin")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -235,7 +312,7 @@ func ensureRemoteTrackingLayout(barePath string) error {
 	}
 	// Set refs/remotes/origin/HEAD so getRemoteDefaultBranch can read it.
 	// Non-fatal: if this fails we fall back to origin/main, origin/master.
-	_ = exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto").Run()
+	_ = gitCmd("-C", barePath, "remote", "set-head", "origin", "--auto").Run()
 	return nil
 }
 

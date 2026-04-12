@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { ListIssuesParams } from "../types";
+import type { FileNode, GitFileStatus } from "../types/events";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
@@ -19,6 +20,12 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  taskFileTree: (issueId: string, taskId: string) =>
+    ["issues", "taskFileTree", issueId, taskId] as const,
+  taskFileContent: (issueId: string, taskId: string, filePath: string) =>
+    ["issues", "taskFileContent", issueId, taskId, filePath] as const,
+  taskFileDiff: (issueId: string, taskId: string, filePath: string) =>
+    ["issues", "taskFileDiff", issueId, taskId, filePath] as const,
 };
 
 export type MyIssuesFilter = Pick<ListIssuesParams, "assignee_id" | "assignee_ids" | "creator_id">;
@@ -124,5 +131,54 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export interface TaskFileTreeData {
+  tree: FileNode[];
+  git_status: Record<string, GitFileStatus>;
+}
+
+/**
+ * Task file tree query — initially fetched via REST on mount, then kept fresh
+ * by WS `task:file_tree` events injected into the cache by the event handler.
+ */
+export function taskFileTreeOptions(issueId: string, taskId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskFileTree(issueId, taskId),
+    queryFn: async () => {
+      const data = await api.getTaskFileTree(issueId, taskId);
+      return data as TaskFileTreeData;
+    },
+    enabled: !!issueId && !!taskId,
+    // Don't refetch automatically — WS events keep it current for active tasks.
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function taskFileContentOptions(
+  issueId: string,
+  taskId: string,
+  filePath: string,
+) {
+  return queryOptions({
+    queryKey: issueKeys.taskFileContent(issueId, taskId, filePath),
+    queryFn: () => api.getTaskFileContent(issueId, taskId, filePath),
+    enabled: !!filePath,
+    staleTime: 10_000,
+  });
+}
+
+export function taskFileDiffOptions(
+  issueId: string,
+  taskId: string,
+  filePath: string,
+) {
+  return queryOptions({
+    queryKey: issueKeys.taskFileDiff(issueId, taskId, filePath),
+    queryFn: () => api.getTaskFileDiff(issueId, taskId, filePath),
+    enabled: !!filePath,
+    staleTime: 10_000,
   });
 }

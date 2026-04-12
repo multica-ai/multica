@@ -36,6 +36,7 @@ import {
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -133,8 +134,9 @@ export function InboxPage() {
   // -- Shared sub-components --------------------------------------------------
 
   const listHeader = (
-    <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+    <div className="flex h-12 shrink-0 items-center justify-between border-b pl-2 pr-4">
       <div className="flex items-center gap-2">
+        <SidebarTrigger className="text-muted-foreground" />
         <h1 className="text-sm font-semibold">Inbox</h1>
         {unreadCount > 0 && (
           <span className="text-xs text-muted-foreground">
@@ -237,7 +239,8 @@ export function InboxPage() {
     if (loading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-4">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+            <SidebarTrigger className="text-muted-foreground" />
             <Skeleton className="h-5 w-16" />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
@@ -295,7 +298,8 @@ export function InboxPage() {
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
         <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
           <div className="flex flex-col border-r h-full">
-            <div className="flex h-12 shrink-0 items-center border-b px-4">
+            <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+              <SidebarTrigger className="text-muted-foreground" />
               <Skeleton className="h-5 w-16" />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">

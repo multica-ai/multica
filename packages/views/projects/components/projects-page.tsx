@@ -14,6 +14,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import {
@@ -539,8 +540,9 @@ export function ProjectsPage() {
   return (
     <div className="flex h-full flex-col">
       {/* Header bar */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-5">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b pl-2 pr-5">
         <div className="flex items-center gap-2">
+          <SidebarTrigger className="text-muted-foreground" />
           <FolderKanban className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">Projects</h1>
           {!isLoading && projects.length > 0 && (

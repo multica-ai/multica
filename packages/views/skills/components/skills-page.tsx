@@ -32,6 +32,7 @@ import { Label } from "@multica/ui/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { api } from "@multica/core/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -675,8 +676,11 @@ export default function SkillsPage() {
       <div className="flex flex-1 min-h-0">
         {/* List skeleton */}
         <div className="w-72 border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <Skeleton className="h-4 w-16" />
+          <div className="flex h-12 items-center justify-between border-b pl-2 pr-4">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger className="text-muted-foreground" />
+              <Skeleton className="h-4 w-16" />
+            </div>
             <Skeleton className="h-6 w-6 rounded" />
           </div>
           <div className="divide-y">
@@ -724,8 +728,11 @@ export default function SkillsPage() {
       <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
         {/* Left column — skill list */}
         <div className="overflow-y-auto h-full border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <h1 className="text-sm font-semibold">Skills</h1>
+          <div className="flex h-12 items-center justify-between border-b pl-2 pr-4">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger className="text-muted-foreground" />
+              <h1 className="text-sm font-semibold">Skills</h1>
+            </div>
             <Tooltip>
               <TooltipTrigger
                 render={

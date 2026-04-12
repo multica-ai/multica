@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FolderGit2,
   Link2,
   MoreHorizontal,
   PanelRight,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,6 +86,7 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
 import { ProgressRing } from "./progress-ring";
+import { WorkspaceBrowser } from "./workspace-browser";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -191,7 +194,7 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout_v3", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -214,6 +217,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   });
   const sidebarRef = usePanelRef();
   const [sidebarOpen, setSidebarOpen] = useState(defaultSidebarOpen);
+  const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
@@ -352,7 +356,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         {/* Header skeleton */}
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+          <SidebarTrigger className="text-muted-foreground" />
           <Skeleton className="h-4 w-16" />
           <Skeleton className="h-4 w-4" />
           <Skeleton className="h-4 w-24" />
@@ -415,12 +420,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="content" minSize="50%">
+      <ResizablePanel id="content" minSize="10%">
       {/* LEFT: Content area */}
       <div className="flex h-full flex-col">
         {/* Header bar */}
-        <div className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-4 text-sm">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b bg-background pl-2 pr-4 text-sm">
           <div className="flex items-center gap-1.5 min-w-0">
+            <SidebarTrigger className="text-muted-foreground mr-0.5 shrink-0" />
             {workspace && (
               <>
                 <AppLink
@@ -681,6 +687,21 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={workspaceBrowserOpen ? "secondary" : "ghost"}
+                    size="icon-xs"
+                    className={workspaceBrowserOpen ? "" : "text-muted-foreground"}
+                    onClick={() => setWorkspaceBrowserOpen((v) => !v)}
+                  >
+                    <FolderGit2 className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">Toggle agent worktree</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1161,6 +1182,24 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>
       </div>
       </ResizablePanel>
+      {workspaceBrowserOpen && (
+        <>
+          <ResizableHandle />
+          <ResizablePanel
+            id="workspace-browser"
+            defaultSize={560}
+            minSize={420}
+            groupResizeBehavior="preserve-pixel-size"
+          >
+            <div className="border-l h-full">
+              <WorkspaceBrowser
+                issueId={id}
+                onClose={() => setWorkspaceBrowserOpen(false)}
+              />
+            </div>
+          </ResizablePanel>
+        </>
+      )}
       <ResizableHandle />
       <ResizablePanel
         id="sidebar"

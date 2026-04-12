@@ -13,6 +13,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/filetree"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/daemon/usage"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -35,6 +36,8 @@ type Daemon struct {
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
 	reloading    sync.Mutex         // prevents concurrent reloadWorkspaces
+
+	taskWorkDirs sync.Map // taskID -> workDir (for health server file content)
 
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	restartBinary string             // non-empty after a successful update; path to the new binary
@@ -94,6 +97,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
 
+	// Restore worktrees from previous sessions and push file trees to the server.
+	go d.restoreWorktrees(ctx)
+
 	// Start config watcher for hot-reload.
 	go d.configWatchLoop(ctx)
 
@@ -110,6 +116,70 @@ func (d *Daemon) Run(ctx context.Context) error {
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
 	return d.restartBinary
+}
+
+// restoreWorktrees scans the workspaces root for worktrees from previous daemon
+// sessions. For each worktree that has a .multica_task_id file, it re-populates
+// taskWorkDirs and pushes a fresh file tree snapshot to the server so the
+// frontend can display files without needing a new task run.
+func (d *Daemon) restoreWorktrees(ctx context.Context) {
+	if d.cfg.WorkspacesRoot == "" {
+		return
+	}
+
+	// Walk: {workspacesRoot}/{workspaceID}/{shortTaskID}/workdir/.multica_task_id
+	workspaceDirs, err := os.ReadDir(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return
+	}
+
+	var restored int
+	for _, wsEntry := range workspaceDirs {
+		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" {
+			continue
+		}
+		wsDir := filepath.Join(d.cfg.WorkspacesRoot, wsEntry.Name())
+		taskDirs, err := os.ReadDir(wsDir)
+		if err != nil {
+			continue
+		}
+		for _, taskEntry := range taskDirs {
+			if !taskEntry.IsDir() {
+				continue
+			}
+			workDir := filepath.Join(wsDir, taskEntry.Name(), "workdir")
+			taskIDFile := filepath.Join(workDir, ".multica_task_id")
+			taskIDBytes, err := os.ReadFile(taskIDFile)
+			if err != nil {
+				continue
+			}
+			taskID := strings.TrimSpace(string(taskIDBytes))
+			if taskID == "" {
+				continue
+			}
+
+			// Populate the in-memory map so the health server can serve files.
+			d.taskWorkDirs.Store(taskID, workDir)
+
+			// Push a fresh file tree snapshot.
+			snapshot, err := filetree.ScanSnapshot(workDir)
+			if err != nil {
+				d.logger.Debug("restore: scan failed", "workdir", workDir, "error", err)
+				continue
+			}
+			pushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if err := d.client.ReportFileTree(pushCtx, taskID, snapshot); err != nil {
+				d.logger.Debug("restore: push file tree failed", "task", taskID[:8], "error", err)
+			} else {
+				d.logger.Info("restored worktree", "task", taskID[:8], "workdir", workDir)
+				restored++
+			}
+			cancel()
+		}
+	}
+	if restored > 0 {
+		d.logger.Info("worktree restore complete", "count", restored)
+	}
 }
 
 // deregisterRuntimes notifies the server that all runtimes are going offline.
@@ -259,6 +329,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"daemon_id":    d.cfg.DaemonID,
 		"device_name":  d.cfg.DeviceName,
 		"cli_version":  d.cfg.CLIVersion,
+		"health_port":  d.cfg.HealthPort,
 		"runtimes":     runtimes,
 	}
 
@@ -962,6 +1033,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
+
+	// Track task workdir so the health server can serve file content.
+	// Not deleted on completion — workdir is intentionally preserved on disk,
+	// and keeping the map entry lets the health server serve files from
+	// completed tasks during the same daemon session.
+	d.taskWorkDirs.Store(task.ID, env.WorkDir)
+
+	// Persist task ID into the workdir so it can be restored on daemon restart.
+	_ = os.WriteFile(filepath.Join(env.WorkDir, ".multica_task_id"), []byte(task.ID), 0o644)
+
+	// Start file tree watcher — reports worktree file changes to frontend via server.
+	ftWatcher := filetree.NewWatcher(env.WorkDir, 5*time.Second, func(snapshot *filetree.Snapshot) {
+		reportCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := d.client.ReportFileTree(reportCtx, task.ID, snapshot); err != nil {
+			taskLog.Debug("failed to report file tree", "error", err)
+		}
+	}, d.logger)
+	ftWatcher.Start()
+	defer ftWatcher.Stop()
 
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
