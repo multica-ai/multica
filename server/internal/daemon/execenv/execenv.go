@@ -4,6 +4,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,11 +19,11 @@ type RepoContextForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string           // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string           // workspace UUID — tasks are grouped under this
-	TaskID         string           // task UUID — used for directory name
-	AgentName      string           // for git branch naming only
-	Provider       string           // agent provider ("claude", "codex") — determines skill injection paths
+	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID    string            // workspace UUID — tasks are grouped under this
+	TaskID         string            // task UUID — used for directory name
+	AgentName      string            // for git branch naming only
+	Provider       string            // agent provider ("claude", "codex") — determines skill injection paths
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -35,6 +36,11 @@ type TaskContextForEnv struct {
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
 	ChatSessionID     string              // non-empty for chat tasks
+	// MCPServers, if non-empty, is written as {"mcpServers": <raw>} to
+	// {workdir}/.mcp.json and picked up by claude via --mcp-config. The raw
+	// value must be a JSON object whose keys are server names — the same
+	// shape as Claude Code's native mcpServers map.
+	MCPServers json.RawMessage
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -58,6 +64,10 @@ type Environment struct {
 	WorkDir string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// MCPConfigPath is the absolute path to the .mcp.json file written into
+	// the workdir, or empty if no MCP servers were configured for the agent.
+	// The caller passes this as --mcp-config to claude.
+	MCPConfigPath string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -104,6 +114,14 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
+	// Write .mcp.json for providers that consume it (claude). This is only
+	// written when the agent has mcp_servers configured in its runtime_config.
+	if mcpPath, err := writeMCPConfig(workDir, params.Provider, params.Task.MCPServers); err != nil {
+		return nil, fmt.Errorf("execenv: write mcp config: %w", err)
+	} else if mcpPath != "" {
+		env.MCPConfigPath = mcpPath
+	}
+
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
@@ -138,6 +156,14 @@ func Reuse(workDir, provider string, task TaskContextForEnv, logger *slog.Logger
 	// Refresh context files (issue_context.md, skills).
 	if err := writeContextFiles(workDir, provider, task); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
+	}
+
+	// Refresh .mcp.json so server changes to the agent's runtime_config
+	// take effect on the next task.
+	if mcpPath, err := writeMCPConfig(workDir, provider, task.MCPServers); err != nil {
+		logger.Warn("execenv: refresh mcp config failed", "error", err)
+	} else {
+		env.MCPConfigPath = mcpPath
 	}
 
 	logger.Info("execenv: reusing env", "workdir", workDir)

@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -736,5 +737,94 @@ func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	data, _ := os.ReadFile(dst)
 	if string(data) != "real" {
 		t.Errorf("content = %q, want %q", data, "real")
+	}
+}
+
+func TestWriteMCPConfigClaude(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	servers := json.RawMessage(`{"fs":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}}`)
+
+	path, err := writeMCPConfig(workDir, "claude", servers)
+	if err != nil {
+		t.Fatalf("writeMCPConfig: %v", err)
+	}
+	if path != filepath.Join(workDir, ".mcp.json") {
+		t.Errorf("path = %q, want %q", path, filepath.Join(workDir, ".mcp.json"))
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read mcp.json: %v", err)
+	}
+
+	var parsed struct {
+		MCPServers map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal mcp.json: %v", err)
+	}
+	if _, ok := parsed.MCPServers["fs"]; !ok {
+		t.Errorf("expected mcpServers.fs in %s, got %s", path, data)
+	}
+}
+
+func TestWriteMCPConfigNonClaudeProvider(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	servers := json.RawMessage(`{"fs":{"command":"npx"}}`)
+
+	path, err := writeMCPConfig(workDir, "codex", servers)
+	if err != nil {
+		t.Fatalf("writeMCPConfig: %v", err)
+	}
+	if path != "" {
+		t.Errorf("expected empty path for non-claude provider, got %q", path)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("expected .mcp.json not to exist for non-claude provider")
+	}
+}
+
+func TestWriteMCPConfigEmptyServers(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		servers json.RawMessage
+	}{
+		{"nil", nil},
+		{"empty", json.RawMessage(``)},
+		{"null", json.RawMessage(`null`)},
+		{"emptyObject", json.RawMessage(`{}`)},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			workDir := t.TempDir()
+			path, err := writeMCPConfig(workDir, "claude", tc.servers)
+			if err != nil {
+				t.Fatalf("writeMCPConfig: %v", err)
+			}
+			if path != "" {
+				t.Errorf("expected empty path for %s, got %q", tc.name, path)
+			}
+		})
+	}
+}
+
+func TestWriteMCPConfigRejectsInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	_, err := writeMCPConfig(workDir, "claude", json.RawMessage(`not json`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "mcp_servers must be a JSON object") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

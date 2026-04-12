@@ -1,6 +1,8 @@
 package execenv
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +110,56 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv) error {
 	}
 
 	return nil
+}
+
+// writeMCPConfig writes a Claude-compatible .mcp.json file into workDir when
+// the agent has mcp_servers configured in its runtime_config. It returns the
+// absolute path to the written file, or an empty string when no file was
+// written (empty servers, unsupported provider, or invalid JSON shape).
+//
+// The raw value must be a JSON object whose keys are server names, matching
+// Claude Code's native mcpServers map:
+//
+//	{
+//	  "fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]},
+//	  "fetch": {"command": "uvx", "args": ["mcp-server-fetch"]}
+//	}
+//
+// It is written to disk wrapped as {"mcpServers": <raw>}.
+//
+// Currently only claude consumes .mcp.json; other providers are no-ops.
+func writeMCPConfig(workDir, provider string, servers json.RawMessage) (string, error) {
+	if provider != "claude" {
+		return "", nil
+	}
+	trimmed := bytes.TrimSpace(servers)
+	if len(trimmed) == 0 || string(trimmed) == "null" || string(trimmed) == "{}" {
+		return "", nil
+	}
+	// Validate that the raw value is a JSON object.
+	var check map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &check); err != nil {
+		return "", fmt.Errorf("mcp_servers must be a JSON object: %w", err)
+	}
+	if len(check) == 0 {
+		return "", nil
+	}
+
+	wrapper := struct {
+		MCPServers json.RawMessage `json:"mcpServers"`
+	}{MCPServers: trimmed}
+
+	data, err := json.MarshalIndent(wrapper, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal mcp config: %w", err)
+	}
+	data = append(data, '\n')
+
+	path := filepath.Join(workDir, ".mcp.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
 }
 
 // renderIssueContext builds the markdown content for issue_context.md.

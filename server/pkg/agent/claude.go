@@ -340,6 +340,11 @@ func buildClaudeArgs(opts ExecOptions) []string {
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 	}
+	// --strict-mcp-config alone means "no MCP servers"; pair it with --mcp-config
+	// to load exactly the servers configured for this agent in runtime_config.
+	if opts.MCPConfigPath != "" {
+		args = append(args, "--mcp-config", opts.MCPConfigPath)
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}

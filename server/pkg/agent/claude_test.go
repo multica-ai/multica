@@ -217,6 +217,49 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsAppendsMCPConfigPath(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{MCPConfigPath: "/tmp/task-42/.mcp.json"})
+
+	var found bool
+	for i, a := range args {
+		if a == "--mcp-config" {
+			if i+1 >= len(args) || args[i+1] != "/tmp/task-42/.mcp.json" {
+				t.Fatalf("expected --mcp-config followed by path, got args=%v", args)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --mcp-config flag when MCPConfigPath is set, got args=%v", args)
+	}
+
+	// --strict-mcp-config must still be present.
+	var strict bool
+	for _, a := range args {
+		if a == "--strict-mcp-config" {
+			strict = true
+			break
+		}
+	}
+	if !strict {
+		t.Fatalf("expected --strict-mcp-config to remain set, got args=%v", args)
+	}
+}
+
+func TestBuildClaudeArgsOmitsMCPConfigWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{})
+	for _, a := range args {
+		if a == "--mcp-config" {
+			t.Fatalf("expected no --mcp-config flag when MCPConfigPath is empty, got args=%v", args)
+		}
+	}
+}
+
 func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	t.Parallel()
 

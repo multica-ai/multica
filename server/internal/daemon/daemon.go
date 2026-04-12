@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -881,10 +882,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	agentName := "agent"
 	var skills []SkillData
 	var instructions string
+	var mcpServers json.RawMessage
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		mcpServers = task.Agent.MCPServers
 	}
 
 	// Prepare isolated execution environment.
@@ -898,6 +901,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
+		MCPServers:        mcpServers,
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -981,6 +985,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		Model:           entry.Model,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
+		MCPConfigPath:   env.MCPConfigPath,
 	})
 	if err != nil {
 		return TaskResult{}, err

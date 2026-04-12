@@ -1,5 +1,7 @@
 package daemon
 
+import "encoding/json"
+
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
 	Path  string // path to CLI binary
@@ -23,14 +25,14 @@ type RepoData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID             string     `json:"id"`
-	AgentID        string     `json:"agent_id"`
-	RuntimeID      string     `json:"runtime_id"`
-	IssueID        string     `json:"issue_id"`
-	WorkspaceID    string     `json:"workspace_id"`
-	Agent          *AgentData `json:"agent,omitempty"`
-	Repos          []RepoData `json:"repos,omitempty"`
-	PriorSessionID   string     `json:"prior_session_id,omitempty"`    // Claude session ID from a previous task on this issue
+	ID               string     `json:"id"`
+	AgentID          string     `json:"agent_id"`
+	RuntimeID        string     `json:"runtime_id"`
+	IssueID          string     `json:"issue_id"`
+	WorkspaceID      string     `json:"workspace_id"`
+	Agent            *AgentData `json:"agent,omitempty"`
+	Repos            []RepoData `json:"repos,omitempty"`
+	PriorSessionID   string     `json:"prior_session_id,omitempty"`   // Claude session ID from a previous task on this issue
 	PriorWorkDir     string     `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on this issue
 	TriggerCommentID string     `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 	ChatSessionID    string     `json:"chat_session_id,omitempty"`    // non-empty for chat tasks
@@ -43,6 +45,11 @@ type AgentData struct {
 	Name         string      `json:"name"`
 	Instructions string      `json:"instructions"`
 	Skills       []SkillData `json:"skills"`
+	// MCPServers is the raw mcp_servers JSON object extracted from the
+	// agent's runtime_config. The daemon writes it into {workdir}/.mcp.json
+	// and passes the path to the CLI via --mcp-config (claude) so the agent
+	// gets exactly the MCP servers configured for it.
+	MCPServers json.RawMessage `json:"mcp_servers,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

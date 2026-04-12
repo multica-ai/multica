@@ -26,6 +26,7 @@ type ExecOptions struct {
 	MaxTurns        int
 	Timeout         time.Duration
 	ResumeSessionID string // if non-empty, resume a previous agent session
+	MCPConfigPath   string // if non-empty, path to an .mcp.json file passed via --mcp-config (claude only)
 }
 
 // Session represents a running agent execution.
