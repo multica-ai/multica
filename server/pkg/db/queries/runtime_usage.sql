@@ -12,8 +12,8 @@ DO UPDATE SET
 -- name: ListRuntimeUsage :many
 SELECT * FROM runtime_usage
 WHERE runtime_id = $1
-ORDER BY date DESC
-LIMIT $2;
+  AND date >= $2
+ORDER BY date DESC;
 
 -- name: GetRuntimeUsageSummary :many
 SELECT provider, model,
