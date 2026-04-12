@@ -18,11 +18,11 @@ type RepoContextForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string           // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string           // workspace UUID — tasks are grouped under this
-	TaskID         string           // task UUID — used for directory name
-	AgentName      string           // for git branch naming only
-	Provider       string           // agent provider ("claude", "codex") — determines skill injection paths
+	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID    string            // workspace UUID — tasks are grouped under this
+	TaskID         string            // task UUID — used for directory name
+	AgentName      string            // for git branch naming only
+	Provider       string            // agent provider ("claude", "codex", "opencode", "openclaw", "hermes", "cursor", …) — skill injection paths
 	Task           TaskContextForEnv // context data for writing files
 }
 

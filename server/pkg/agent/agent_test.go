@@ -27,6 +27,17 @@ func TestNewReturnsCodexBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsCursorBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("cursor", Config{ExecutablePath: "/nonexistent/agent"})
+	if err != nil {
+		t.Fatalf("New(cursor) error: %v", err)
+	}
+	if _, ok := b.(*cursorBackend); !ok {
+		t.Fatalf("expected *cursorBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})

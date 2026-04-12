@@ -138,6 +138,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | OpenCode | `opencode` | Open-source coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
+| [Cursor](https://cursor.com) | `agent` | Cursor CLI coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -178,6 +179,8 @@ Agent-specific overrides:
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
+| `MULTICA_CURSOR_PATH` | Custom path to the Cursor CLI (`agent` binary; default: `agent` on `PATH`) |
+| `MULTICA_CURSOR_MODEL` | Override the model passed to Cursor (`--model`) |
 
 ### Self-Hosted Server
 

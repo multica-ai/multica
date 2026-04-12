@@ -1,5 +1,9 @@
 import { Monitor } from "lucide-react";
 
+// Same-origin PNG: `apps/web/public/runtime-providers/cursor.png` (desktop uses the same `publicDir`).
+// Keeps the mark visible on dark UI (mostly black artwork) and avoids flaky remote/CDN loads.
+const CURSOR_PROVIDER_ICON_PATH = "/runtime-providers/cursor.png";
+
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
   return (
@@ -73,6 +77,24 @@ function HermesLogo({ className }: { className: string }) {
   );
 }
 
+// Cursor — official-style mark (local asset); padded tile so black artwork reads on dark surfaces.
+function CursorLogo({ className }: { className: string }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-md bg-background p-0.5 shadow-sm ring-1 ring-border/80 ${className}`}
+    >
+      <img
+        src={CURSOR_PROVIDER_ICON_PATH}
+        alt="Cursor"
+        className="h-full w-full rounded-[3px] object-contain"
+        draggable={false}
+        loading="lazy"
+        decoding="async"
+      />
+    </span>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -91,6 +113,8 @@ export function ProviderLogo({
       return <OpenClawLogo className={className} />;
     case "hermes":
       return <HermesLogo className={className} />;
+    case "cursor":
+      return <CursorLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

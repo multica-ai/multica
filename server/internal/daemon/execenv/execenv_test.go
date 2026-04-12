@@ -317,6 +317,34 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesCursorNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "cursor-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Rust Tips", Content: "Prefer safe Rust patterns."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "cursor", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".cursor", "skills", "rust-tips", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .cursor/skills/rust-tips/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Prefer safe Rust patterns.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Cursor provider")
+	}
+}
+
 func TestCleanupPreservesLogs(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
@@ -524,6 +552,40 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	// CLAUDE.md should NOT exist.
 	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Error("expected CLAUDE.md to NOT exist for OpenCode provider")
+	}
+}
+
+func TestInjectRuntimeConfigCursor(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Review code carefully."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "cursor", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Review") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("expected CLAUDE.md to NOT exist for Cursor provider")
 	}
 }
 
