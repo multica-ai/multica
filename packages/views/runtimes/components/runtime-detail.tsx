@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspaceStore } from "@multica/core/workspace";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
 import { Button } from "@multica/ui/components/ui/button";
@@ -45,6 +46,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
 
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const dailyCostLimit =
+    (workspace?.settings?.daily_cost_limit as number | undefined) ?? undefined;
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const deleteMutation = useDeleteRuntime(wsId);
 
@@ -163,7 +167,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           <h3 className="text-xs font-medium text-muted-foreground mb-3">
             Token Usage
           </h3>
-          <UsageSection runtimeId={runtime.id} />
+          <UsageSection runtimeId={runtime.id} dailyCostLimit={dailyCostLimit} />
         </div>
 
         {/* Metadata */}

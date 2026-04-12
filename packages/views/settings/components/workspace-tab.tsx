@@ -37,6 +37,9 @@ export function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
+  const [dailyCostLimit, setDailyCostLimit] = useState(
+    () => (workspace?.settings?.daily_cost_limit as number | undefined) ?? "",
+  );
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -54,16 +57,27 @@ export function WorkspaceTab() {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
+    setDailyCostLimit(
+      (workspace?.settings?.daily_cost_limit as number | undefined) ?? "",
+    );
   }, [workspace]);
 
   const handleSave = async () => {
     if (!workspace) return;
     setSaving(true);
     try {
+      const parsedLimit =
+        dailyCostLimit !== "" ? Number(dailyCostLimit) : null;
       const updated = await api.updateWorkspace(workspace.id, {
         name,
         description,
         context,
+        settings: {
+          ...workspace.settings,
+          ...(parsedLimit !== null && parsedLimit > 0
+            ? { daily_cost_limit: parsedLimit }
+            : { daily_cost_limit: null }),
+        },
       });
       updateWorkspace(updated);
       toast.success("Workspace settings saved");
@@ -159,6 +173,24 @@ export function WorkspaceTab() {
               <div className="mt-1 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 {workspace.slug}
               </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">
+                Daily cost limit (USD)
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="No limit"
+                value={dailyCostLimit}
+                onChange={(e) => setDailyCostLimit(e.target.value === "" ? "" : Number(e.target.value))}
+                disabled={!canManageWorkspace}
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Show a warning when a runtime's daily AI cost reaches this amount. Leave blank to disable.
+              </p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
