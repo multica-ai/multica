@@ -14,11 +14,27 @@ import (
 	"time"
 )
 
-// RepoInfo describes a repository to cache.
+// Repo type constants for RepoInfo.Type.
+const (
+	TypeGitHub = "github"
+	TypeLocal  = "local"
+)
+
+// RepoInfo describes a repository to cache or otherwise make available.
+// For GitHub repos the daemon bare-clones URL into its cache. For local repos,
+// nothing is cloned — the daemon creates worktrees directly off the user's
+// on-disk .git at LocalPath.
 type RepoInfo struct {
+	ID          string
+	Name        string
+	Type        string // "github" or "local" (empty is treated as "github")
 	URL         string
+	LocalPath   string
 	Description string
 }
+
+// IsLocal reports whether this repo is resolved from a filesystem path.
+func (r RepoInfo) IsLocal() bool { return r.Type == TypeLocal }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
 type CachedRepo struct {
@@ -71,6 +87,23 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 
 	var firstErr error
 	for _, repo := range repos {
+		// Local repos are never cloned — the daemon worktrees them directly
+		// off the user's on-disk .git. We only validate that the path exists
+		// and resolves to a git repo; real failures surface later in
+		// CreateWorktree with actionable errors.
+		if repo.IsLocal() {
+			if repo.LocalPath == "" {
+				c.logger.Warn("repo cache: local repo missing local_path", "name", repo.Name, "id", repo.ID)
+				continue
+			}
+			if _, err := GitCommonDir(repo.LocalPath); err != nil {
+				c.logger.Warn("repo cache: local path is not a git repo",
+					"name", repo.Name, "path", repo.LocalPath, "error", err)
+			} else {
+				c.logger.Debug("repo cache: local repo ready", "name", repo.Name, "path", repo.LocalPath)
+			}
+			continue
+		}
 		if repo.URL == "" {
 			continue
 		}

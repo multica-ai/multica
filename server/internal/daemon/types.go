@@ -15,9 +15,41 @@ type Runtime struct {
 }
 
 // RepoData holds repository information from the workspace.
+//
+// Two forms coexist:
+//   - Type == "github": URL is the remote (https or ssh), daemon bare-clones
+//     into its cache the first time and creates worktrees from there.
+//   - Type == "local": LocalPath points at a directory on the daemon host
+//     that already has its own .git (regular repo or a worktree). The daemon
+//     creates worktrees directly off that repo's git-common-dir so existing
+//     remotes, refs, and history are shared with the user's own checkout.
+//
+// ID is stable across workspace.repos updates and is how a project's
+// project_repo rows point at an entry.
 type RepoData struct {
-	URL         string `json:"url"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	URL         string `json:"url,omitempty"`
+	LocalPath   string `json:"local_path,omitempty"`
 	Description string `json:"description"`
+}
+
+// IsLocal reports whether this repo entry references a local filesystem path.
+func (r RepoData) IsLocal() bool { return r.Type == "local" }
+
+// IsGitHub reports whether this repo entry references a remote URL. The empty
+// type is treated as GitHub for backward compatibility with pre-migration-040
+// rows.
+func (r RepoData) IsGitHub() bool { return r.Type == "" || r.Type == "github" }
+
+// Source returns the origin the daemon should clone or worktree from.
+// For GitHub repos this is the URL; for local repos it's the absolute path.
+func (r RepoData) Source() string {
+	if r.IsLocal() {
+		return r.LocalPath
+	}
+	return r.URL
 }
 
 // Task represents a claimed task from the server.

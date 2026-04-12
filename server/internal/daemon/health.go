@@ -7,10 +7,37 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
+
+// isLikelyLocalPath heuristically identifies a value that points at a local
+// filesystem. Used by /repo/checkout when the caller didn't specify a type.
+// The daemon still calls `git rev-parse` inside CreateWorktreeFromLocal to
+// reject non-repo paths.
+func isLikelyLocalPath(s string) bool {
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "file://") {
+		return true
+	}
+	// Absolute POSIX path.
+	if strings.HasPrefix(s, "/") {
+		return true
+	}
+	// Tilde-prefixed path.
+	if strings.HasPrefix(s, "~") {
+		return true
+	}
+	// Windows drive letter (defensive — daemon primarily runs on macOS/Linux).
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		return true
+	}
+	return false
+}
 
 // HealthResponse is returned by the daemon's local health endpoint.
 type HealthResponse struct {
@@ -41,8 +68,14 @@ func (d *Daemon) listenHealth() (net.Listener, error) {
 }
 
 // repoCheckoutRequest is the body of a POST /repo/checkout request.
+// The URL field is used as the primary identifier — it may be a GitHub URL,
+// an absolute local path, or a repo id — and the daemon resolves which
+// workspace repo it refers to. Type can be set explicitly to skip
+// auto-detection.
 type repoCheckoutRequest struct {
 	URL         string `json:"url"`
+	Type        string `json:"type,omitempty"`       // "github" | "local" (optional)
+	LocalPath   string `json:"local_path,omitempty"` // optional override for local repos
 	WorkspaceID string `json:"workspace_id"`
 	WorkDir     string `json:"workdir"`
 	AgentName   string `json:"agent_name"`
@@ -109,15 +142,35 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
-		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
-			WorkspaceID: req.WorkspaceID,
-			RepoURL:     req.URL,
-			WorkDir:     req.WorkDir,
-			AgentName:   req.AgentName,
-			TaskID:      req.TaskID,
-		})
+		// Figure out whether this is a local or remote repo. Explicit type
+		// wins; otherwise fall back to daemon-side heuristics (absolute path
+		// or file:// → local).
+		isLocal := req.Type == "local" || req.LocalPath != "" || isLikelyLocalPath(req.URL)
+		localPath := req.LocalPath
+		if isLocal && localPath == "" {
+			localPath = req.URL
+		}
+
+		var result *repocache.WorktreeResult
+		var err error
+		if isLocal {
+			result, err = d.repoCache.CreateWorktreeFromLocal(repocache.LocalWorktreeParams{
+				LocalPath: localPath,
+				WorkDir:   req.WorkDir,
+				AgentName: req.AgentName,
+				TaskID:    req.TaskID,
+			})
+		} else {
+			result, err = d.repoCache.CreateWorktree(repocache.WorktreeParams{
+				WorkspaceID: req.WorkspaceID,
+				RepoURL:     req.URL,
+				WorkDir:     req.WorkDir,
+				AgentName:   req.AgentName,
+				TaskID:      req.TaskID,
+			})
+		}
 		if err != nil {
-			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
+			d.logger.Error("repo checkout failed", "url", req.URL, "local", isLocal, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

@@ -11,10 +11,21 @@ import (
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
+//
+// type "github" → URL is the remote; daemon bare-clones then worktrees.
+// type "local"  → LocalPath is a directory on the daemon host whose .git is
+//                 shared with the user; daemon worktrees directly off it.
 type RepoContextForEnv struct {
-	URL         string // remote URL
-	Description string // human-readable description
+	ID          string
+	Name        string
+	Type        string // "github" or "local" (empty = "github" for back-compat)
+	URL         string
+	LocalPath   string
+	Description string
 }
+
+// IsLocal reports whether this repo is backed by a local filesystem path.
+func (r RepoContextForEnv) IsLocal() bool { return r.Type == "local" }
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
