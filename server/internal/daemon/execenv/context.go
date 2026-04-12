@@ -115,7 +115,29 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
 	b.WriteString("# Task Assignment\n\n")
-	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
+	fmt.Fprintf(&b, "**Issue ID:** %s\n", ctx.IssueID)
+	if ctx.Issue != nil {
+		if ctx.Issue.Identifier != "" {
+			fmt.Fprintf(&b, "**Issue:** %s\n", ctx.Issue.Identifier)
+		}
+		fmt.Fprintf(&b, "**Title:** %s\n", ctx.Issue.Title)
+		if ctx.Issue.Status != "" {
+			fmt.Fprintf(&b, "**Status:** %s\n", ctx.Issue.Status)
+		}
+		if ctx.Issue.Priority != "" {
+			fmt.Fprintf(&b, "**Priority:** %s\n", ctx.Issue.Priority)
+		}
+		if ctx.Issue.ParentIssueID != "" {
+			fmt.Fprintf(&b, "**Parent issue ID:** %s\n", ctx.Issue.ParentIssueID)
+		}
+		if ctx.Issue.ProjectID != "" {
+			fmt.Fprintf(&b, "**Project ID:** %s\n", ctx.Issue.ProjectID)
+		}
+		if ctx.Issue.AssigneeType != "" || ctx.Issue.AssigneeID != "" {
+			fmt.Fprintf(&b, "**Assignee:** %s %s\n", strings.TrimSpace(ctx.Issue.AssigneeType), strings.TrimSpace(ctx.Issue.AssigneeID))
+		}
+	}
+	b.WriteString("\n")
 
 	if ctx.TriggerCommentID != "" {
 		b.WriteString("**Trigger:** Comment Reply\n")
@@ -124,8 +146,15 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**Trigger:** New Assignment\n\n")
 	}
 
+	if ctx.Issue != nil && strings.TrimSpace(ctx.Issue.Description) != "" {
+		b.WriteString("## Description\n\n")
+		b.WriteString(strings.TrimSpace(ctx.Issue.Description))
+		b.WriteString("\n\n")
+	}
+
 	b.WriteString("## Quick Start\n\n")
-	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	b.WriteString("Use this file as the primary task context. The daemon injected it before launching you so sandboxed runtimes can work even when the local Multica API is unavailable.\n")
+	fmt.Fprintf(&b, "If you need newer comments or platform writeback and the CLI works, you may run `multica issue get %s --output json`. Do not block on that command just to understand the assignment.\n\n", ctx.IssueID)
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

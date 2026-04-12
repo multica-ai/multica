@@ -185,6 +185,13 @@ func TestWriteContextFiles(t *testing.T) {
 
 	ctx := TaskContextForEnv{
 		IssueID: "test-issue-id-1234",
+		Issue: &IssueContextForEnv{
+			Identifier:  "FEL-8",
+			Title:       "Fix athlete-truth answer action review blockers",
+			Description: "Resolve review blockers without relying on the local Multica API from the agent sandbox.",
+			Status:      "in_progress",
+			Priority:    "high",
+		},
 		AgentSkills: []SkillContextForEnv{
 			{
 				Name:    "Go Conventions",
@@ -208,6 +215,9 @@ func TestWriteContextFiles(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"test-issue-id-1234",
+		"FEL-8",
+		"Fix athlete-truth answer action review blockers",
+		"Resolve review blockers without relying on the local Multica API",
 		"## Agent Skills",
 		"Go Conventions",
 	} {
@@ -216,11 +226,8 @@ func TestWriteContextFiles(t *testing.T) {
 		}
 	}
 
-	// Issue details should NOT be in the context file (agent fetches via CLI).
-	for _, absent := range []string{"## Description", "## Workspace Context"} {
-		if strings.Contains(s, absent) {
-			t.Errorf("content should NOT contain %q — agent fetches details via CLI", absent)
-		}
+	if strings.Contains(s, "Run `multica issue get test-issue-id-1234 --output json` to fetch the full issue details") {
+		t.Error("context file should not require CLI fetch for full issue details")
 	}
 
 	// Verify skill directory and files.
@@ -433,8 +440,8 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "multica issue get") {
-		t.Error("should reference multica CLI even without skills")
+	if !strings.Contains(s, ".agent_context/issue_context.md") {
+		t.Error("should reference injected issue context even without skills")
 	}
 	if strings.Contains(s, "## Skills") {
 		t.Error("should not have Skills section when there are no skills")

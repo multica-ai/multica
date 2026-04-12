@@ -613,3 +613,44 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 	)
 	return i, err
 }
+
+const updateIssueStatusIfCurrent = `-- name: UpdateIssueStatusIfCurrent :one
+UPDATE issue SET
+    status = $2,
+    updated_at = now()
+WHERE id = $1 AND status = $3
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id
+`
+
+type UpdateIssueStatusIfCurrentParams struct {
+	ID             pgtype.UUID `json:"id"`
+	NextStatus     string      `json:"next_status"`
+	ExpectedStatus string      `json:"expected_status"`
+}
+
+func (q *Queries) UpdateIssueStatusIfCurrent(ctx context.Context, arg UpdateIssueStatusIfCurrentParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, updateIssueStatusIfCurrent, arg.ID, arg.NextStatus, arg.ExpectedStatus)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+	)
+	return i, err
+}

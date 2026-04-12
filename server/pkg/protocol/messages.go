@@ -26,9 +26,10 @@ type TaskProgressPayload struct {
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
-	TaskID string `json:"task_id"`
-	PRURL  string `json:"pr_url,omitempty"`
-	Output string `json:"output,omitempty"`
+	TaskID     string `json:"task_id"`
+	PRURL      string `json:"pr_url,omitempty"`
+	Output     string `json:"output,omitempty"`
+	BranchName string `json:"branch_name,omitempty"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
@@ -37,10 +38,10 @@ type TaskMessagePayload struct {
 	IssueID string         `json:"issue_id,omitempty"`
 	Seq     int            `json:"seq"`
 	Type    string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
-	Tool    string         `json:"tool,omitempty"`     // tool name for tool_use/tool_result
-	Content string         `json:"content,omitempty"`  // text content
-	Input   map[string]any `json:"input,omitempty"`    // tool input (tool_use only)
-	Output  string         `json:"output,omitempty"`   // tool output (tool_result only)
+	Tool    string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	Content string         `json:"content,omitempty"` // text content
+	Input   map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
+	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

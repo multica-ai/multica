@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -20,10 +21,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+const completionCommentBodyLimit = 12000
+
 type TaskService struct {
-	Queries *db.Queries
-	Hub     *realtime.Hub
-	Bus     *events.Bus
+	Queries             *db.Queries
+	Hub                 *realtime.Hub
+	Bus                 *events.Bus
+	CompletionWriteback func(context.Context, db.AgentTaskQueue, []byte) error
 }
 
 func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskService {
@@ -228,7 +232,6 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 }
 
 // StartTask transitions a dispatched task to running.
-// Issue status is NOT changed here — the agent manages it via the CLI.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.StartAgentTask(ctx, taskID)
 	if err != nil {
@@ -239,8 +242,8 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	return &task, nil
 }
 
-// CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// CompleteTask marks a task as completed and performs best-effort issue
+// completion writeback for issue tasks.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
 		ID:        taskID,
@@ -251,41 +254,47 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if err != nil {
 		// Log the current task state to help debug why the update matched no rows.
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
-			slog.Warn("complete task failed: task not in running state",
-				"task_id", util.UUIDToString(taskID),
-				"current_status", existing.Status,
-				"issue_id", util.UUIDToString(existing.IssueID),
-				"agent_id", util.UUIDToString(existing.AgentID),
-			)
+			if existing.Status == "completed" {
+				task = existing
+				if len(task.Result) > 0 {
+					result = task.Result
+				}
+				slog.Info("complete task retry: task already completed",
+					"task_id", util.UUIDToString(taskID),
+					"issue_id", util.UUIDToString(existing.IssueID),
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+			} else {
+				slog.Warn("complete task failed: task not in running state",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"issue_id", util.UUIDToString(existing.IssueID),
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return nil, fmt.Errorf("complete task: %w", err)
+			}
 		} else {
 			slog.Warn("complete task failed: task not found",
 				"task_id", util.UUIDToString(taskID),
 				"lookup_error", lookupErr,
 			)
+			return nil, fmt.Errorf("complete task: %w", err)
 		}
-		return nil, fmt.Errorf("complete task: %w", err)
 	}
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
-	// Post agent output as a comment, but only for assignment-triggered issue tasks
-	// where the agent did NOT already post a comment during execution.
-	// Comment-triggered tasks: the agent replies via CLI with --parent, so
-	// posting here would create a duplicate.
-	// Chat tasks: no comment posting needed.
-	if task.IssueID.Valid && !task.TriggerCommentID.Valid {
-		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
-			IssueID:  task.IssueID,
-			AuthorID: task.AgentID,
-			Since:    task.StartedAt,
-		})
-		if !agentCommented {
-			var payload protocol.TaskCompletedPayload
-			if err := json.Unmarshal(result, &payload); err == nil {
-				if payload.Output != "" {
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
-				}
-			}
+	if task.IssueID.Valid {
+		writeback := s.CompletionWriteback
+		if writeback == nil {
+			writeback = s.writeCompletion
+		}
+		if err := writeback(ctx, task, result); err != nil {
+			slog.Error("completion writeback failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"error", err,
+			)
 		}
 	}
 
@@ -550,14 +559,181 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 	return ws.IssuePrefix
 }
 
-func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID pgtype.UUID) {
+func (s *TaskService) writeCompletion(ctx context.Context, task db.AgentTaskQueue, result []byte) error {
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return fmt.Errorf("load issue: %w", err)
+	}
+
+	var payload protocol.TaskCompletedPayload
+	if len(result) > 0 {
+		if err := json.Unmarshal(result, &payload); err != nil {
+			return fmt.Errorf("decode completion payload: %w", err)
+		}
+	}
+	payload.TaskID = util.UUIDToString(task.ID)
+	if payload.PRURL == "" {
+		payload.PRURL = extractPRURL(payload.Output)
+	}
+	if payload.BranchName == "" {
+		payload.BranchName = detectBranchFromOutput(payload.Output)
+	}
+
+	var errs []error
+	marker := completionMarker(task.ID)
+	hasComment, err := s.hasCompletionComment(ctx, issue, marker)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("check completion comment: %w", err))
+	} else if !hasComment {
+		content := formatCompletionComment(payload, task)
+		if _, err := s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID); err != nil {
+			errs = append(errs, fmt.Errorf("create completion comment: %w", err))
+		}
+	}
+
+	if nextStatus, ok := completionStatusTransition(issue.Title, payload.Output, issue.Status); ok {
+		updated, err := s.Queries.UpdateIssueStatusIfCurrent(ctx, db.UpdateIssueStatusIfCurrentParams{
+			ID:             issue.ID,
+			NextStatus:     nextStatus,
+			ExpectedStatus: issue.Status,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Info("completion status transition skipped: issue status changed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"expected_status", issue.Status,
+				"next_status", nextStatus,
+			)
+		} else if err != nil {
+			errs = append(errs, fmt.Errorf("update issue status: %w", err))
+		} else {
+			s.broadcastIssueUpdated(updated)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (s *TaskService) hasCompletionComment(ctx context.Context, issue db.Issue, marker string) (bool, error) {
+	comments, err := s.Queries.ListComments(ctx, db.ListCommentsParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, comment := range comments {
+		if strings.Contains(comment.Content, marker) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func formatCompletionComment(payload protocol.TaskCompletedPayload, task db.AgentTaskQueue) string {
+	body := truncateCompletionCommentBody(strings.TrimSpace(redact.Text(payload.Output)))
+	if body == "" {
+		body = "Agent run completed."
+	}
+
+	refs := []string{"- Run ID: `" + util.UUIDToString(task.ID) + "`"}
+	if task.WorkDir.Valid && strings.TrimSpace(task.WorkDir.String) != "" {
+		refs = append(refs, "- Workdir: `"+redact.Text(strings.TrimSpace(task.WorkDir.String))+"`")
+	}
+	if strings.TrimSpace(payload.BranchName) != "" {
+		refs = append(refs, "- Branch: `"+redact.Text(strings.TrimSpace(payload.BranchName))+"`")
+	}
+	if strings.TrimSpace(payload.PRURL) != "" {
+		refs = append(refs, "- PR: "+redact.Text(strings.TrimSpace(payload.PRURL)))
+	}
+
+	return body + "\n\n---\nCompletion refs:\n" + strings.Join(refs, "\n") + "\n\n" + completionMarker(task.ID)
+}
+
+func truncateCompletionCommentBody(body string) string {
+	if len(body) <= completionCommentBodyLimit {
+		return body
+	}
+	return strings.TrimSpace(body[:completionCommentBodyLimit]) + "\n\n[Completion output truncated for issue comment. Full result is stored on the agent run.]"
+}
+
+func completionMarker(taskID pgtype.UUID) string {
+	return "<!-- multica-completion-run:" + util.UUIDToString(taskID) + " -->"
+}
+
+func completionStatusTransition(title, output, currentStatus string) (string, bool) {
+	switch classifyCompletionTask(title) {
+	case "implementation":
+		if currentStatus == "backlog" || currentStatus == "todo" || currentStatus == "in_progress" {
+			return "in_review", true
+		}
+	case "review":
+		if currentStatus != "in_review" {
+			return "", false
+		}
+		if hasNoBlockingFindings(output) {
+			return "done", true
+		}
+		if hasBlockingFindings(output) {
+			return "blocked", true
+		}
+	}
+	return "", false
+}
+
+func classifyCompletionTask(title string) string {
+	lower := strings.ToLower(strings.TrimSpace(title))
+	padded := " " + lower + " "
+	switch {
+	case strings.HasPrefix(lower, "review"), strings.Contains(padded, " review "):
+		return "review"
+	case strings.HasPrefix(lower, "fix"), strings.Contains(padded, " implementation "):
+		return "implementation"
+	default:
+		return "unknown"
+	}
+}
+
+func hasNoBlockingFindings(output string) bool {
+	return strings.Contains(strings.ToLower(output), "no blocking finding")
+}
+
+func hasBlockingFindings(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "blocking finding") ||
+		strings.Contains(lower, "blocking issue") ||
+		strings.Contains(lower, "blocker") ||
+		strings.Contains(lower, "[p0]") ||
+		strings.Contains(lower, "[p1]")
+}
+
+var prURLPattern = regexp.MustCompile(`https?://[^\s)]+/pull/[0-9]+[^\s)]*`)
+
+func extractPRURL(output string) string {
+	prURL := prURLPattern.FindString(output)
+	return strings.TrimRight(prURL, ".,;:")
+}
+
+func detectBranchFromOutput(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lower, "branch:") {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(trimmed[len("branch:"):]), "`")
+	}
+	return ""
+}
+
+func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID pgtype.UUID) (db.Comment, error) {
 	if content == "" {
-		return
+		return db.Comment{}, nil
 	}
 	// Look up issue to get workspace ID for mention expansion and broadcasting.
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
-		return
+		return db.Comment{}, fmt.Errorf("load issue: %w", err)
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
@@ -571,7 +747,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		ParentID:    parentID,
 	})
 	if err != nil {
-		return
+		return db.Comment{}, err
 	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
@@ -593,6 +769,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			"issue_status": issue.Status,
 		},
 	})
+	return comment, nil
 }
 
 func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
