@@ -39,6 +39,7 @@ import type {
   IssueReactionRemovedPayload,
   SubscriberAddedPayload,
   SubscriberRemovedPayload,
+  WorkspaceUpdatedPayload,
 } from "../types";
 
 const logger = createLogger("realtime-sync");
@@ -131,6 +132,7 @@ export function useRealtimeSync(
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
       "subscriber:added", "subscriber:removed",
+      "workspace:updated",
       "daemon:heartbeat",
     ]);
 
@@ -177,6 +179,18 @@ export function useRealtimeSync(
       if (!item) return;
       const wsId = workspaceStore.getState().workspace?.id;
       if (wsId) onInboxNew(qc, wsId, item);
+    });
+
+    // workspace:updated carries the full workspace, including repos + context.
+    // Push it straight into the Zustand store so any tab (RepositoriesTab,
+    // WorkspaceTab, etc.) reflects changes live — the generic prefix refresh
+    // only touches query cache, but these panels read from the store.
+    const unsubWorkspaceUpdated = ws.on("workspace:updated", (p) => {
+      const { workspace } = p as WorkspaceUpdatedPayload;
+      if (!workspace?.id) return;
+      workspaceStore.getState().updateWorkspace(workspace);
+      // Keep query cache in sync too for any consumer that reads via react-query.
+      qc.invalidateQueries({ queryKey: workspaceKeys.list() });
     });
 
     // --- Timeline event handlers (global fallback) ---
@@ -284,6 +298,7 @@ export function useRealtimeSync(
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubInboxNew();
+      unsubWorkspaceUpdated();
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();
