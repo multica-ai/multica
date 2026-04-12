@@ -278,13 +278,14 @@ export const en: LandingDict = {
     },
     entries: [
       {
-        version: "0.1.24",
-        date: "2026-04-11",
-        title: "Security & Notifications",
+        version: "0.1.25",
+        date: "2026-04-12",
+        title: "Security, Self-Hosting & Notifications",
         changes: [],
         features: [
           "Parent issue subscribers notified on sub-issue changes",
           "CLI `--project` filter for issue list",
+          "Custom S3 endpoints for self-hosted file storage (MinIO)",
         ],
         improvements: [
           "Meta-skill workflow defers to agent Skills instead of hardcoded logic",
@@ -295,6 +296,11 @@ export const en: LandingDict = {
           "Reply mentions no longer inherit parent thread's agent mentions",
           "Agent comment creation missing workspace ID",
           "Self-hosting Docker build failures (file permissions, CRLF, missing deps)",
+          "OpenClaw backend rewritten to match actual CLI interface",
+          "Skip duplicate auto-comment when agent already posted during task",
+          "Search input not trimmed in assignee and filter pickers",
+          "Next.js upgraded to ^16.2.3 for CVE-2026-23869",
+          "CLI daemon start polling health endpoint instead of fixed sleep",
         ],
       },
       {

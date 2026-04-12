@@ -278,13 +278,14 @@ export const zh: LandingDict = {
     },
     entries: [
       {
-        version: "0.1.24",
-        date: "2026-04-11",
-        title: "安全加固与通知",
+        version: "0.1.25",
+        date: "2026-04-12",
+        title: "安全加固、自部署与通知",
         changes: [],
         features: [
           "子 Issue 变更时通知父 Issue 的订阅者",
           "CLI `--project` 筛选 Issue 列表",
+          "自部署文件存储支持自定义 S3 端点（MinIO）",
         ],
         improvements: [
           "Meta-skill 工作流改为委托 Agent Skills 而非硬编码逻辑",
@@ -295,6 +296,11 @@ export const zh: LandingDict = {
           "回复评论不再继承父级线程的 Agent 提及",
           "Agent 创建评论缺少 workspace ID",
           "自部署 Docker 构建问题修复（文件权限、CRLF 换行、缺失依赖）",
+          "OpenClaw 后端重写以匹配实际 CLI 接口",
+          "Agent 已发布评论时跳过重复的自动评论",
+          "指派人和筛选选择器搜索输入未去空格",
+          "Next.js 升级至 ^16.2.3 修复 CVE-2026-23869",
+          "CLI daemon start 改为轮询健康检查端点",
         ],
       },
       {
