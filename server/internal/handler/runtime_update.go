@@ -27,6 +27,7 @@ const (
 type UpdateRequest struct {
 	ID            string       `json:"id"`
 	RuntimeID     string       `json:"runtime_id"`
+	DaemonScope   string       `json:"-"`
 	Status        UpdateStatus `json:"status"`
 	TargetVersion string       `json:"target_version"`
 	Output        string       `json:"output,omitempty"`
@@ -47,7 +48,14 @@ func NewUpdateStore() *UpdateStore {
 	}
 }
 
-func (s *UpdateStore) Create(runtimeID, targetVersion string) (*UpdateRequest, error) {
+func updateScopeID(runtimeID string, daemonID *string) string {
+	if daemonID != nil && *daemonID != "" {
+		return *daemonID
+	}
+	return runtimeID
+}
+
+func (s *UpdateStore) Create(runtimeID string, daemonID *string, targetVersion string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,9 +66,11 @@ func (s *UpdateStore) Create(runtimeID, targetVersion string) (*UpdateRequest, e
 		}
 	}
 
-	// Reject if there is already a pending or running update for this runtime.
+	scopeID := updateScopeID(runtimeID, daemonID)
+
+	// Reject if there is already a pending or running update for this daemon scope.
 	for _, req := range s.requests {
-		if req.RuntimeID == runtimeID && (req.Status == UpdatePending || req.Status == UpdateRunning) {
+		if req.DaemonScope == scopeID && (req.Status == UpdatePending || req.Status == UpdateRunning) {
 			return nil, errUpdateInProgress
 		}
 	}
@@ -68,6 +78,7 @@ func (s *UpdateStore) Create(runtimeID, targetVersion string) (*UpdateRequest, e
 	req := &UpdateRequest{
 		ID:            randomID(),
 		RuntimeID:     runtimeID,
+		DaemonScope:   scopeID,
 		Status:        UpdatePending,
 		TargetVersion: targetVersion,
 		CreatedAt:     time.Now(),
@@ -77,7 +88,7 @@ func (s *UpdateStore) Create(runtimeID, targetVersion string) (*UpdateRequest, e
 	return req, nil
 }
 
-var errUpdateInProgress = &updateError{msg: "an update is already in progress for this runtime"}
+var errUpdateInProgress = &updateError{msg: "an update is already in progress for this daemon"}
 
 type updateError struct{ msg string }
 
@@ -100,13 +111,13 @@ func (s *UpdateStore) Get(id string) *UpdateRequest {
 	return req
 }
 
-// PopPending returns and marks as running the pending update for a runtime.
-func (s *UpdateStore) PopPending(runtimeID string) *UpdateRequest {
+// PopPending returns and marks as running the pending update for a daemon scope.
+func (s *UpdateStore) PopPending(scopeID string) *UpdateRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, req := range s.requests {
-		if req.RuntimeID == runtimeID && req.Status == UpdatePending {
+		if req.DaemonScope == scopeID && req.Status == UpdatePending {
 			req.Status = UpdateRunning
 			req.UpdatedAt = time.Now()
 			return req
@@ -167,7 +178,8 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	update, err := h.UpdateStore.Create(runtimeID, req.TargetVersion)
+	daemonID := textToPtr(rt.DaemonID)
+	update, err := h.UpdateStore.Create(runtimeID, daemonID, req.TargetVersion)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return

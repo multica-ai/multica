@@ -1,4 +1,4 @@
-export { ApiClient } from "./client";
+export { ApiClient, ApiError } from "./client";
 export type { ApiClientOptions } from "./client";
 export { WSClient } from "./ws-client";
 

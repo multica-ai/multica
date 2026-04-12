@@ -7,8 +7,13 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
+import { ApiError, api } from "@multica/core/api";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
+import {
+  UPDATE_RECOVERY_WINDOW_MS,
+  resolveUpdateScopeId,
+  useDaemonUpdateStore,
+} from "@multica/core/runtimes";
 
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/multica-ai/multica/releases/latest";
@@ -72,43 +77,196 @@ const statusConfig: Record<
   },
   failed: { label: "Update failed", icon: XCircle, color: "text-destructive" },
   timeout: { label: "Timeout", icon: XCircle, color: "text-warning" },
+  interrupted: { label: "Update interrupted", icon: XCircle, color: "text-warning" },
 };
 
 interface UpdateSectionProps {
   runtimeId: string;
+  daemonId: string | null;
   currentVersion: string | null;
   isOnline: boolean;
 }
 
 export function UpdateSection({
   runtimeId,
+  daemonId,
   currentVersion,
   isOnline,
 }: UpdateSectionProps) {
+  const scopeId = resolveUpdateScopeId(daemonId, runtimeId);
+  const entry = useDaemonUpdateStore((s) => s.entries[scopeId]);
+  const setEntry = useDaemonUpdateStore((s) => s.setEntry);
+  const updateEntry = useDaemonUpdateStore((s) => s.updateEntry);
+  const clearEntry = useDaemonUpdateStore((s) => s.clearEntry);
+  const cleanupExpired = useDaemonUpdateStore((s) => s.cleanupExpired);
+
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
-  const [error, setError] = useState("");
-  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState<RuntimeUpdateStatus | null>(entry?.status ?? null);
+  const [error, setError] = useState(entry?.error ?? "");
+  const [output, setOutput] = useState(entry?.output ?? "");
   const [updating, setUpdating] = useState(false);
+  const [notice, setNotice] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const pollFailuresRef = useRef(0);
 
   const cleanup = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    activeRequestIdRef.current = null;
   }, []);
 
   useEffect(() => cleanup, [cleanup]);
+  useEffect(() => {
+    cleanupExpired();
+  }, [cleanupExpired]);
+
+  useEffect(() => {
+    setStatus(entry?.status ?? null);
+    setError(entry?.error ?? "");
+    setOutput(entry?.output ?? "");
+    setUpdating(entry?.status === "pending" || entry?.status === "running");
+  }, [entry]);
 
   // Fetch latest version on mount.
   useEffect(() => {
     fetchLatestVersion().then(setLatestVersion);
   }, []);
 
+  const finishWithEntry = useCallback(
+    (
+      nextStatus: Extract<
+        RuntimeUpdateStatus,
+        "completed" | "failed" | "timeout" | "interrupted"
+      >,
+      patch: { output?: string; error?: string } = {},
+    ) => {
+      updateEntry(scopeId, {
+        status: nextStatus,
+        finishedAt: Date.now(),
+        output: patch.output,
+        error: patch.error,
+      });
+      setUpdating(false);
+      cleanup();
+    },
+    [cleanup, scopeId, updateEntry],
+  );
+
+  const handleDismiss = useCallback(() => {
+    cleanup();
+    setNotice("");
+    clearEntry(scopeId);
+  }, [cleanup, clearEntry, scopeId]);
+
+  const startPolling = useCallback(
+    (requestRuntimeId: string, requestId: string) => {
+      if (activeRequestIdRef.current === requestId) {
+        return;
+      }
+
+      cleanup();
+      activeRequestIdRef.current = requestId;
+      pollFailuresRef.current = 0;
+      setUpdating(true);
+
+      const pollOnce = async () => {
+        try {
+          const result = await api.getUpdateResult(requestRuntimeId, requestId);
+          pollFailuresRef.current = 0;
+          updateEntry(scopeId, {
+            status: result.status as RuntimeUpdateStatus,
+          });
+
+          if (result.status === "completed") {
+            finishWithEntry("completed", {
+              output: result.output ?? "",
+            });
+            return;
+          }
+
+          if (result.status === "failed" || result.status === "timeout") {
+            finishWithEntry(result.status as "failed" | "timeout", {
+              error: result.error ?? "Unknown error",
+            });
+          }
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 404) {
+            clearEntry(scopeId);
+            setNotice("Previous update status expired");
+            setUpdating(false);
+            cleanup();
+            return;
+          }
+
+          pollFailuresRef.current += 1;
+          if (pollFailuresRef.current >= 5) {
+            finishWithEntry("interrupted", {
+              error: "Update polling was interrupted. Please check again.",
+            });
+          }
+        }
+      };
+
+      void pollOnce();
+      pollRef.current = setInterval(() => {
+        void pollOnce();
+      }, 2000);
+    },
+    [cleanup, clearEntry, finishWithEntry, scopeId, updateEntry],
+  );
+
+  useEffect(() => {
+    if (!entry) return;
+    if (!entry.requestId) return;
+
+    const shouldClearCompleted =
+      entry.status === "completed" &&
+      currentVersion != null &&
+      !isNewer(entry.targetVersion, currentVersion);
+
+    if (shouldClearCompleted) {
+      clearEntry(scopeId);
+      return;
+    }
+
+    if (
+      entry.status === "completed" ||
+      entry.status === "failed" ||
+      entry.status === "timeout"
+    ) {
+      return;
+    }
+
+    const recoverable =
+      (entry.status === "pending" ||
+        entry.status === "running" ||
+        entry.status === "interrupted") &&
+      Date.now() - entry.startedAt <= UPDATE_RECOVERY_WINDOW_MS;
+
+    if (recoverable) {
+      startPolling(entry.runtimeId, entry.requestId);
+      return;
+    }
+
+    if (
+      (entry.status === "pending" ||
+        entry.status === "running" ||
+        entry.status === "interrupted") &&
+      Date.now() - entry.startedAt > UPDATE_RECOVERY_WINDOW_MS
+    ) {
+      finishWithEntry("timeout", {
+        error: "Update status expired before it could be restored.",
+      });
+    }
+  }, [clearEntry, currentVersion, entry, finishWithEntry, scopeId, startPolling]);
+
   const handleUpdate = async () => {
     if (!latestVersion) return;
     cleanup();
+    setNotice("");
     setUpdating(true);
     setStatus("pending");
     setError("");
@@ -116,32 +274,22 @@ export function UpdateSection({
 
     try {
       const update = await api.initiateUpdate(runtimeId, latestVersion);
+      setEntry({
+        daemonId: scopeId,
+        runtimeId,
+        requestId: update.id,
+        targetVersion: latestVersion,
+        status: "pending",
+        startedAt: Date.now(),
+      });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setStatus(null);
+        setUpdating(false);
+        setNotice("An update is already in progress, please wait");
+        return;
+      }
 
-      pollRef.current = setInterval(async () => {
-        try {
-          const result = await api.getUpdateResult(runtimeId, update.id);
-          setStatus(result.status as RuntimeUpdateStatus);
-
-          if (result.status === "completed") {
-            setOutput(result.output ?? "");
-            setUpdating(false);
-            cleanup();
-            // Auto-clear status after a few seconds so the UI
-            // refreshes to show the new version from the re-fetched runtime data.
-            setTimeout(() => setStatus(null), 5000);
-          } else if (
-            result.status === "failed" ||
-            result.status === "timeout"
-          ) {
-            setError(result.error ?? "Unknown error");
-            setUpdating(false);
-            cleanup();
-          }
-        } catch {
-          // ignore poll errors
-        }
-      }, 2000);
-    } catch {
       setStatus("failed");
       setError("Failed to initiate update");
       setUpdating(false);
@@ -204,25 +352,33 @@ export function UpdateSection({
         )}
       </div>
 
+      {notice && <p className="text-xs text-muted-foreground">{notice}</p>}
+
       {status === "completed" && output && (
         <div className="rounded-lg border bg-success/5 px-3 py-2">
           <p className="text-xs text-success">{output}</p>
         </div>
       )}
 
-      {(status === "failed" || status === "timeout") && error && (
+      {(status === "failed" || status === "timeout" || status === "interrupted") && error && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
           <p className="text-xs text-destructive">{error}</p>
-          {status === "failed" && (
+          <div className="mt-1 flex items-center gap-2">
             <Button
               variant="ghost"
               size="xs"
-              className="mt-1"
               onClick={handleUpdate}
             >
               Retry
             </Button>
-          )}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={handleDismiss}
+            >
+              Dismiss
+            </Button>
+          </div>
         </div>
       )}
     </div>

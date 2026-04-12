@@ -12,6 +12,7 @@ const WORKSPACE_SCOPED_KEYS = [
   "multica_issues_view",
   "multica_issues_scope",
   "multica_my_issues_view",
+  "multica_runtime_ping",
   "multica:chat:selectedAgentId",
   "multica:chat:activeSessionId",
 ];

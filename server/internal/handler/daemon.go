@@ -306,7 +306,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the caller owns this runtime's workspace.
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID); !ok {
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID)
+	if !ok {
 		return
 	}
 
@@ -325,8 +326,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		resp["pending_ping"] = map[string]string{"id": pending.ID}
 	}
 
-	// Check for pending update requests for this runtime.
-	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
+	// Check for pending update requests for this daemon scope.
+	scopeID := updateScopeID(req.RuntimeID, textToPtr(rt.DaemonID))
+	if pending := h.UpdateStore.PopPending(scopeID); pending != nil {
 		resp["pending_update"] = map[string]string{
 			"id":             pending.ID,
 			"target_version": pending.TargetVersion,

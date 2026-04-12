@@ -144,6 +144,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             </h3>
             <UpdateSection
               runtimeId={runtime.id}
+              daemonId={runtime.daemon_id}
               currentVersion={cliVersion}
               isOnline={runtime.status === "online"}
             />

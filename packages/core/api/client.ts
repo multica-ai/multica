@@ -63,6 +63,16 @@ export interface LoginResponse {
   user: User;
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -107,8 +117,17 @@ export class ApiClient {
     return fallback;
   }
 
+  private createRequestId(): string {
+    const randomUUID = globalThis.crypto?.randomUUID;
+    if (typeof randomUUID === "function") {
+      return randomUUID.call(globalThis.crypto).slice(0, 8);
+    }
+
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, 8);
+  }
+
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = this.createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
@@ -132,7 +151,7 @@ export class ApiClient {
       const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
@@ -610,7 +629,7 @@ export class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = this.createRequestId();
     const start = Date.now();
     this.logger.info("→ POST /api/upload-file", { rid });
 
@@ -625,7 +644,7 @@ export class ApiClient {
       if (res.status === 401) this.handleUnauthorized();
       const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
