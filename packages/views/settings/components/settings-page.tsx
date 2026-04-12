@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Clock } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { AccountTab } from "./account-tab";
@@ -9,6 +9,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { SchedulesTab } from "./schedules-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -20,6 +21,7 @@ const workspaceTabs = [
   { value: "workspace", label: "General", icon: Settings },
   { value: "repositories", label: "Repositories", icon: FolderGit2 },
   { value: "members", label: "Members", icon: Users },
+  { value: "schedules", label: "Schedules", icon: Clock },
 ];
 
 export function SettingsPage() {
@@ -64,6 +66,7 @@ export function SettingsPage() {
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          <TabsContent value="schedules"><SchedulesTab /></TabsContent>
         </div>
       </div>
     </Tabs>

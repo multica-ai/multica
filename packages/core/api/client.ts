@@ -50,6 +50,9 @@ import type {
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
+  Schedule,
+  CreateScheduleRequest,
+  UpdateScheduleRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 
@@ -728,5 +731,37 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // ── Schedules ──
+
+  async listSchedules(): Promise<Schedule[]> {
+    return this.fetch("/api/schedules");
+  }
+
+  async getSchedule(id: string): Promise<Schedule> {
+    return this.fetch(`/api/schedules/${id}`);
+  }
+
+  async createSchedule(data: CreateScheduleRequest): Promise<Schedule> {
+    return this.fetch("/api/schedules", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateSchedule(id: string, data: UpdateScheduleRequest): Promise<Schedule> {
+    return this.fetch(`/api/schedules/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    await this.fetch(`/api/schedules/${id}`, { method: "DELETE" });
+  }
+
+  async runScheduleNow(id: string): Promise<{ status: string; issue_id: string }> {
+    return this.fetch(`/api/schedules/${id}/run`, { method: "POST" });
   }
 }

@@ -28,6 +28,7 @@ export type { Comment, CommentType, CommentAuthorType, Reaction } from "./commen
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
+export type { Schedule, CreateScheduleRequest, UpdateScheduleRequest } from "./schedule";
 export type * from "./api";
 export type { Attachment } from "./attachment";
 export type { ChatSession, ChatMessage, SendChatMessageResponse } from "./chat";
