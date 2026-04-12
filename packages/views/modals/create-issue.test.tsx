@@ -60,7 +60,10 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 vi.mock("../editor", () => ({
-  ContentEditor: forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+  ContentEditor: forwardRef(function MockContentEditor(
+    { defaultValue, onUpdate, placeholder }: any,
+    ref: any,
+  ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -95,6 +98,8 @@ vi.mock("../editor", () => ({
       />
     );
   },
+  FileDropOverlay: () => null,
+  useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
 }));
 
 vi.mock("../issues/components", () => ({
