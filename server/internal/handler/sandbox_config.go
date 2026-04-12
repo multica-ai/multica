@@ -16,17 +16,34 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-type SandboxConfigRequest struct {
-	Provider         string  `json:"provider"`
-	ProviderAPIKey   string  `json:"provider_api_key"`
-	AIGatewayAPIKey  *string `json:"ai_gateway_api_key"`
-	GitPAT           *string `json:"git_pat"`
-	TemplateID       *string `json:"template_id"`
-	Metadata         any     `json:"metadata"`
+// ---------------------------------------------------------------------------
+// Request / Response types
+// ---------------------------------------------------------------------------
+
+type CreateSandboxConfigRequest struct {
+	Name            string  `json:"name"`
+	Provider        string  `json:"provider"`
+	ProviderAPIKey  string  `json:"provider_api_key"`
+	AIGatewayAPIKey *string `json:"ai_gateway_api_key"`
+	GitPAT          *string `json:"git_pat"`
+	TemplateID      *string `json:"template_id"`
+	Metadata        any     `json:"metadata"`
+}
+
+type UpdateSandboxConfigRequest struct {
+	Name            string  `json:"name"`
+	Provider        string  `json:"provider"`
+	ProviderAPIKey  string  `json:"provider_api_key"`
+	AIGatewayAPIKey *string `json:"ai_gateway_api_key"`
+	GitPAT          *string `json:"git_pat"`
+	TemplateID      *string `json:"template_id"`
+	Metadata        any     `json:"metadata"`
 }
 
 type SandboxConfigResponse struct {
+	ID              string  `json:"id"`
 	WorkspaceID     string  `json:"workspace_id"`
+	Name            string  `json:"name"`
 	Provider        string  `json:"provider"`
 	ProviderAPIKey  string  `json:"provider_api_key"`
 	AIGatewayAPIKey *string `json:"ai_gateway_api_key"`
@@ -37,8 +54,10 @@ type SandboxConfigResponse struct {
 	UpdatedAt       string  `json:"updated_at"`
 }
 
-// redactKey returns the last 4 characters of a key prefixed with "****",
-// or last 2 if key is shorter than 12 characters.
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 func redactKey(key string) string {
 	if key == "" {
 		return ""
@@ -52,10 +71,257 @@ func redactKey(key string) string {
 	return "****" + key[len(key)-4:]
 }
 
-func (h *Handler) GetSandboxConfig(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) sandboxConfigToResponse(cfg db.WorkspaceSandboxConfig) SandboxConfigResponse {
+	encKey := h.EncryptionKey
+	providerKey, _ := decryptField(cfg.ProviderApiKey, encKey, "provider-api-key")
+	gatewayKey := decryptOptionalField(cfg.AiGatewayApiKey, encKey, "ai-gateway-api-key")
+	gitPat := decryptOptionalField(cfg.GitPat, encKey, "git-pat")
+
+	var metadata any
+	if cfg.Metadata != nil {
+		json.Unmarshal(cfg.Metadata, &metadata)
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
+	return SandboxConfigResponse{
+		ID:              uuidToString(cfg.ID),
+		WorkspaceID:     uuidToString(cfg.WorkspaceID),
+		Name:            cfg.Name,
+		Provider:        cfg.Provider,
+		ProviderAPIKey:  redactKey(providerKey),
+		AIGatewayAPIKey: redactPtr(gatewayKey),
+		GitPAT:          redactPtr(gitPat),
+		TemplateID:      textToPtr(cfg.TemplateID),
+		Metadata:        metadata,
+		CreatedAt:       timestampToString(cfg.CreatedAt),
+		UpdatedAt:       timestampToString(cfg.UpdatedAt),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Handlers — multi-config CRUD
+// ---------------------------------------------------------------------------
+
+// CreateSandboxConfig creates a new sandbox config and auto-creates a linked cloud runtime.
+// POST /api/workspaces/{id}/sandbox-configs
+func (h *Handler) CreateSandboxConfig(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "id")
 	encKey := h.EncryptionKey
 	if encKey == nil {
+		writeError(w, http.StatusServiceUnavailable, "encryption not configured")
+		return
+	}
+
+	var req CreateSandboxConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+	if req.ProviderAPIKey == "" {
+		writeError(w, http.StatusBadRequest, "provider_api_key is required")
+		return
+	}
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("Cloud Runtime (%s)", req.Provider)
+	}
+
+	encProviderKey, err := encryptField(req.ProviderAPIKey, encKey, "provider-api-key")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "encryption failed")
+		return
+	}
+
+	metadataBytes, _ := json.Marshal(req.Metadata)
+	if req.Metadata == nil {
+		metadataBytes = []byte("{}")
+	}
+
+	cfg, err := h.Queries.CreateSandboxConfig(r.Context(), db.CreateSandboxConfigParams{
+		WorkspaceID:     parseUUID(wsID),
+		Name:            req.Name,
+		Provider:        req.Provider,
+		ProviderApiKey:  encProviderKey,
+		AiGatewayApiKey: encryptOptionalField(req.AIGatewayAPIKey, encKey, "ai-gateway-api-key"),
+		GitPat:          encryptOptionalField(req.GitPAT, encKey, "git-pat"),
+		TemplateID:      ptrToText(req.TemplateID),
+		Metadata:        metadataBytes,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create sandbox config")
+		return
+	}
+
+	// Auto-create linked cloud runtime.
+	configID := uuidToString(cfg.ID)
+	var runtimeOwnerID pgtype.UUID
+	if uid := requestUserID(r); uid != "" {
+		runtimeOwnerID = parseUUID(uid)
+	}
+	daemonID := fmt.Sprintf("cloud-sandbox:%s", configID)
+	runtimeMeta, _ := json.Marshal(map[string]string{
+		"sandbox_provider":   req.Provider,
+		"sandbox_config_id":  configID,
+	})
+	rt, rtErr := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+		WorkspaceID:     parseUUID(wsID),
+		DaemonID:        pgtype.Text{String: daemonID, Valid: true},
+		Name:            req.Name,
+		RuntimeMode:     "cloud",
+		Provider:        "opencode",
+		Status:          "online",
+		DeviceInfo:      "sandbox",
+		Metadata:        runtimeMeta,
+		OwnerID:         runtimeOwnerID,
+		SandboxConfigID: cfg.ID,
+	})
+	if rtErr != nil {
+		slog.Warn("sandbox config: create cloud runtime failed", "error", rtErr)
+	} else {
+		h.publish(protocol.EventDaemonRegister, wsID, "system", "", map[string]any{
+			"runtimes": []map[string]string{{"id": util.UUIDToString(rt.ID)}},
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, h.sandboxConfigToResponse(cfg))
+}
+
+// ListSandboxConfigs returns all sandbox configs for a workspace.
+// GET /api/workspaces/{id}/sandbox-configs
+func (h *Handler) ListSandboxConfigs(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "id")
+	if h.EncryptionKey == nil {
+		writeError(w, http.StatusServiceUnavailable, "encryption not configured")
+		return
+	}
+
+	configs, err := h.Queries.ListSandboxConfigsByWorkspace(r.Context(), parseUUID(wsID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list sandbox configs")
+		return
+	}
+
+	resp := make([]SandboxConfigResponse, 0, len(configs))
+	for _, cfg := range configs {
+		resp = append(resp, h.sandboxConfigToResponse(cfg))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// UpdateSandboxConfigByID updates a specific sandbox config.
+// PUT /api/workspaces/{id}/sandbox-configs/{configId}
+func (h *Handler) UpdateSandboxConfigByID(w http.ResponseWriter, r *http.Request) {
+	configID := chi.URLParam(r, "configId")
+	encKey := h.EncryptionKey
+	if encKey == nil {
+		writeError(w, http.StatusServiceUnavailable, "encryption not configured")
+		return
+	}
+
+	existing, err := h.Queries.GetSandboxConfigByID(r.Context(), parseUUID(configID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "sandbox config not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get sandbox config")
+		return
+	}
+
+	var req UpdateSandboxConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	// Keep existing key if not provided (frontend only has the redacted version).
+	var encProviderKey string
+	if req.ProviderAPIKey != "" {
+		encProviderKey, err = encryptField(req.ProviderAPIKey, encKey, "provider-api-key")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "encryption failed")
+			return
+		}
+	} else {
+		encProviderKey = existing.ProviderApiKey
+	}
+
+	name := req.Name
+	if name == "" {
+		name = existing.Name
+	}
+
+	metadataBytes, _ := json.Marshal(req.Metadata)
+	if req.Metadata == nil {
+		metadataBytes = []byte("{}")
+	}
+
+	cfg, err := h.Queries.UpdateSandboxConfig(r.Context(), db.UpdateSandboxConfigParams{
+		ID:              parseUUID(configID),
+		Name:            name,
+		Provider:        req.Provider,
+		ProviderApiKey:  encProviderKey,
+		AiGatewayApiKey: encryptOptionalField(req.AIGatewayAPIKey, encKey, "ai-gateway-api-key"),
+		GitPat:          encryptOptionalField(req.GitPAT, encKey, "git-pat"),
+		TemplateID:      ptrToText(req.TemplateID),
+		Metadata:        metadataBytes,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update sandbox config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, h.sandboxConfigToResponse(cfg))
+}
+
+// DeleteSandboxConfigByID deletes a specific sandbox config and cleans up linked runtimes.
+// DELETE /api/workspaces/{id}/sandbox-configs/{configId}
+func (h *Handler) DeleteSandboxConfigByID(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "id")
+	configID := chi.URLParam(r, "configId")
+	configUUID := parseUUID(configID)
+
+	// Cancel active tasks on linked runtimes and mark them offline.
+	runtimes, _ := h.Queries.ListRuntimesBySandboxConfig(r.Context(), pgtype.UUID{Bytes: configUUID.Bytes, Valid: true})
+	for _, rt := range runtimes {
+		activeTasks, _ := h.Queries.ListActiveTasksByRuntime(r.Context(), rt.ID)
+		for _, task := range activeTasks {
+			if _, err := h.TaskService.CancelTask(r.Context(), task.ID); err != nil {
+				slog.Warn("sandbox config delete: cancel task failed",
+					"task_id", util.UUIDToString(task.ID), "error", err)
+			}
+		}
+		h.Queries.SetAgentRuntimeOffline(r.Context(), rt.ID)
+		h.publish(protocol.EventRuntimeUpdated, wsID, "system", "", map[string]string{
+			"runtime_id": util.UUIDToString(rt.ID),
+		})
+	}
+
+	if err := h.Queries.DeleteSandboxConfigByID(r.Context(), configUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete sandbox config")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ---------------------------------------------------------------------------
+// Legacy compat handlers (used by settings tab)
+// ---------------------------------------------------------------------------
+
+// GetSandboxConfig returns the first sandbox config for a workspace.
+// GET /api/workspaces/{id}/sandbox-config
+func (h *Handler) GetSandboxConfig(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "id")
+	if h.EncryptionKey == nil {
 		writeError(w, http.StatusServiceUnavailable, "encryption not configured")
 		return
 	}
@@ -70,144 +336,20 @@ func (h *Handler) GetSandboxConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decrypt keys for redaction display
-	providerKey, _ := decryptField(cfg.ProviderApiKey, encKey, "provider-api-key")
-	gatewayKey := decryptOptionalField(cfg.AiGatewayApiKey, encKey, "ai-gateway-api-key")
-	gitPat := decryptOptionalField(cfg.GitPat, encKey, "git-pat")
-
-	var metadata any
-	if cfg.Metadata != nil {
-		json.Unmarshal(cfg.Metadata, &metadata)
-	}
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-
-	resp := SandboxConfigResponse{
-		WorkspaceID:     uuidToString(cfg.WorkspaceID),
-		Provider:        cfg.Provider,
-		ProviderAPIKey:  redactKey(providerKey),
-		AIGatewayAPIKey: redactPtr(gatewayKey),
-		GitPAT:          redactPtr(gitPat),
-		TemplateID:      textToPtr(cfg.TemplateID),
-		Metadata:        metadata,
-		CreatedAt:       timestampToString(cfg.CreatedAt),
-		UpdatedAt:       timestampToString(cfg.UpdatedAt),
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, h.sandboxConfigToResponse(cfg))
 }
 
-func (h *Handler) UpsertSandboxConfig(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "id")
-	encKey := h.EncryptionKey
-	if encKey == nil {
-		writeError(w, http.StatusServiceUnavailable, "encryption not configured")
-		return
-	}
-
-	var req SandboxConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Provider == "" {
-		writeError(w, http.StatusBadRequest, "provider is required")
-		return
-	}
-
-	// If provider_api_key is empty on update, keep the existing encrypted value.
-	// This allows the frontend to omit the key when it hasn't changed (it only has the redacted version).
-	var encProviderKey string
-	if req.ProviderAPIKey != "" {
-		var err error
-		encProviderKey, err = encryptField(req.ProviderAPIKey, encKey, "provider-api-key")
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "encryption failed")
-			return
-		}
-	} else {
-		// Try to load existing encrypted key
-		existing, err := h.Queries.GetSandboxConfig(r.Context(), parseUUID(wsID))
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "provider_api_key is required for new configuration")
-			return
-		}
-		encProviderKey = existing.ProviderApiKey
-	}
-	encGatewayKey := encryptOptionalField(req.AIGatewayAPIKey, encKey, "ai-gateway-api-key")
-	encGitPat := encryptOptionalField(req.GitPAT, encKey, "git-pat")
-
-	metadataBytes, _ := json.Marshal(req.Metadata)
-	if req.Metadata == nil {
-		metadataBytes = []byte("{}")
-	}
-
-	cfg, err := h.Queries.UpsertSandboxConfig(r.Context(), db.UpsertSandboxConfigParams{
-		WorkspaceID:     parseUUID(wsID),
-		Provider:        req.Provider,
-		ProviderApiKey:  encProviderKey,
-		AiGatewayApiKey: encGatewayKey,
-		GitPat:          encGitPat,
-		TemplateID:      ptrToText(req.TemplateID),
-		Metadata:        metadataBytes,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save sandbox config")
-		return
-	}
-
-	// Auto-upsert cloud runtime so it appears in runtime selector
-	daemonID := fmt.Sprintf("cloud-daemon:%s", req.Provider)
-	runtimeMeta, _ := json.Marshal(map[string]string{
-		"sandbox_provider": req.Provider,
-	})
-	rt, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-		WorkspaceID: parseUUID(wsID),
-		DaemonID:    pgtype.Text{String: daemonID, Valid: true},
-		Name:        fmt.Sprintf("Cloud Runtime (%s)", req.Provider),
-		RuntimeMode: "cloud",
-		Provider:    "opencode",
-		Status:      "online",
-		DeviceInfo:  "sandbox",
-		Metadata:    runtimeMeta,
-		OwnerID:     pgtype.UUID{}, // no specific owner
-	})
-	if err != nil {
-		slog.Warn("sandbox config: upsert cloud runtime failed", "error", err)
-	} else {
-		h.publish(protocol.EventRuntimeUpdated, wsID, "system", "", map[string]string{
-			"runtime_id": util.UUIDToString(rt.ID),
-		})
-	}
-
-	var metadata any
-	json.Unmarshal(cfg.Metadata, &metadata)
-
-	resp := SandboxConfigResponse{
-		WorkspaceID:     uuidToString(cfg.WorkspaceID),
-		Provider:        cfg.Provider,
-		ProviderAPIKey:  redactKey(req.ProviderAPIKey),
-		AIGatewayAPIKey: redactInputPtr(req.AIGatewayAPIKey),
-		GitPAT:          redactInputPtr(req.GitPAT),
-		TemplateID:      textToPtr(cfg.TemplateID),
-		Metadata:        metadata,
-		CreatedAt:       timestampToString(cfg.CreatedAt),
-		UpdatedAt:       timestampToString(cfg.UpdatedAt),
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
+// DeleteSandboxConfig deletes all sandbox configs for a workspace.
+// DELETE /api/workspaces/{id}/sandbox-config
 func (h *Handler) DeleteSandboxConfig(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "id")
 	wsUUID := parseUUID(wsID)
 
-	// Find cloud runtimes for this workspace and cancel their active tasks
 	runtimes, _ := h.Queries.ListAgentRuntimes(r.Context(), wsUUID)
 	for _, rt := range runtimes {
 		if rt.RuntimeMode != "cloud" {
 			continue
 		}
-		// Cancel all active tasks on this cloud runtime
 		activeTasks, _ := h.Queries.ListActiveTasksByRuntime(r.Context(), rt.ID)
 		for _, task := range activeTasks {
 			if _, err := h.TaskService.CancelTask(r.Context(), task.ID); err != nil {
@@ -215,14 +357,12 @@ func (h *Handler) DeleteSandboxConfig(w http.ResponseWriter, r *http.Request) {
 					"task_id", util.UUIDToString(task.ID), "error", err)
 			}
 		}
-		// Mark runtime offline
 		h.Queries.SetAgentRuntimeOffline(r.Context(), rt.ID)
 		h.publish(protocol.EventRuntimeUpdated, wsID, "system", "", map[string]string{
 			"runtime_id": util.UUIDToString(rt.ID),
 		})
 	}
 
-	// Delete config
 	if err := h.Queries.DeleteSandboxConfig(r.Context(), wsUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete sandbox config")
 		return
@@ -230,7 +370,9 @@ func (h *Handler) DeleteSandboxConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// --- encryption helpers ---
+// ---------------------------------------------------------------------------
+// Encryption helpers
+// ---------------------------------------------------------------------------
 
 func encryptField(value string, key []byte, purpose string) (string, error) {
 	derived, err := crypto.DeriveKey(key, purpose)
@@ -272,14 +414,6 @@ func decryptOptionalField(t pgtype.Text, key []byte, purpose string) *string {
 
 func redactPtr(s *string) *string {
 	if s == nil {
-		return nil
-	}
-	r := redactKey(*s)
-	return &r
-}
-
-func redactInputPtr(s *string) *string {
-	if s == nil || *s == "" {
 		return nil
 	}
 	r := redactKey(*s)

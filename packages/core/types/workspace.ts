@@ -21,7 +21,9 @@ export interface Workspace {
 export type SandboxProvider = "e2b" | "daytona";
 
 export interface SandboxConfig {
+  id: string;
   workspace_id: string;
+  name: string;
   provider: SandboxProvider;
   provider_api_key: string; // redacted on GET (e.g. "****abcd")
   ai_gateway_api_key: string | null;
@@ -32,9 +34,20 @@ export interface SandboxConfig {
   updated_at: string;
 }
 
-export interface UpsertSandboxConfigRequest {
+export interface CreateSandboxConfigRequest {
+  name: string;
   provider: SandboxProvider;
   provider_api_key: string;
+  ai_gateway_api_key?: string;
+  git_pat?: string;
+  template_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateSandboxConfigRequest {
+  name?: string;
+  provider: SandboxProvider;
+  provider_api_key?: string;
   ai_gateway_api_key?: string;
   git_pat?: string;
   template_id?: string;

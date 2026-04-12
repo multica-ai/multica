@@ -17,6 +17,7 @@ import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { RuntimeList } from "./runtime-list";
 import { RuntimeDetail } from "./runtime-detail";
+import { CreateRuntimeDialog } from "./create-runtime-dialog";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -27,6 +28,7 @@ export default function RuntimesPage() {
   const [filter, setFilter] = useState<RuntimeFilter>("mine");
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const ownerParam = filter === "mine" ? "me" as const : undefined;
   const { data: runtimes = [], isLoading: fetching } = useQuery(runtimeListOptions(wsId, ownerParam));
@@ -108,6 +110,7 @@ export default function RuntimesPage() {
           ownerFilter={ownerFilter}
           onOwnerFilterChange={setOwnerFilter}
           updatableIds={updatableIds}
+          onAdd={() => setShowCreateDialog(true)}
         />
       </ResizablePanel>
 
@@ -123,6 +126,10 @@ export default function RuntimesPage() {
           </div>
         )}
       </ResizablePanel>
+
+      {showCreateDialog && (
+        <CreateRuntimeDialog onClose={() => setShowCreateDialog(false)} />
+      )}
     </ResizablePanelGroup>
   );
 }

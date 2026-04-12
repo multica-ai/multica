@@ -9,6 +9,7 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   sandboxConfig: (wsId: string) => ["workspaces", wsId, "sandbox-config"] as const,
+  sandboxConfigs: (wsId: string) => ["workspaces", wsId, "sandbox-configs"] as const,
 };
 
 export function workspaceListOptions() {
@@ -52,5 +53,12 @@ export function sandboxConfigOptions(wsId: string) {
     queryKey: workspaceKeys.sandboxConfig(wsId),
     queryFn: () => api.getSandboxConfig(wsId),
     retry: false, // 404 is expected when not configured
+  });
+}
+
+export function sandboxConfigListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.sandboxConfigs(wsId),
+    queryFn: () => api.listSandboxConfigs(wsId),
   });
 }

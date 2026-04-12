@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,14 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// PingChecker allows CloudDaemon to check for and respond to pending ping
+// requests without importing the handler package.
+type PingChecker interface {
+	PopPending(runtimeID string) (pingID string, found bool)
+	Complete(pingID string, output string, durationMs int64)
+	Fail(pingID string, errMsg string, durationMs int64)
+}
+
 // CloudDaemon is the embedded sandbox executor that claims and executes tasks
 // for cloud-mode runtimes. It mirrors the local daemon's behavior (poll → claim → execute)
 // but runs inside the server process and uses SandboxProvider instead of local CLI.
@@ -25,6 +34,7 @@ type CloudDaemon struct {
 	taskService   *service.TaskService
 	bus           *events.Bus
 	encryptionKey []byte
+	pingChecker   PingChecker
 
 	pollInterval      time.Duration
 	heartbeatInterval time.Duration
@@ -40,6 +50,7 @@ type CloudDaemonConfig struct {
 	TaskService   *service.TaskService
 	Bus           *events.Bus
 	EncryptionKey []byte
+	PingChecker   PingChecker
 
 	PollInterval      time.Duration // Default: 5s
 	HeartbeatInterval time.Duration // Default: 15s
@@ -71,6 +82,7 @@ func NewCloudDaemon(cfg CloudDaemonConfig) *CloudDaemon {
 		taskService:       cfg.TaskService,
 		bus:               cfg.Bus,
 		encryptionKey:     cfg.EncryptionKey,
+		pingChecker:       cfg.PingChecker,
 		pollInterval:      pollInterval,
 		heartbeatInterval: heartbeatInterval,
 		maxConcurrent:     maxConcurrent,
@@ -130,6 +142,21 @@ func (d *CloudDaemon) heartbeatLoop(ctx context.Context) {
 func (d *CloudDaemon) heartbeat(ctx context.Context) {
 	if err := d.queries.UpdateCloudRuntimesHeartbeat(ctx); err != nil {
 		slog.Warn("cloud daemon heartbeat failed", "error", err)
+	}
+
+	// Check for pending ping requests on cloud runtimes.
+	if d.pingChecker == nil {
+		return
+	}
+	runtimes, err := d.queries.ListCloudRuntimes(ctx)
+	if err != nil {
+		return
+	}
+	for _, rt := range runtimes {
+		rtID := util.UUIDToString(rt.ID)
+		if pingID, ok := d.pingChecker.PopPending(rtID); ok {
+			go d.handlePing(ctx, rt, pingID)
+		}
 	}
 }
 
@@ -202,7 +229,12 @@ func (d *CloudDaemon) handleTask(ctx context.Context, task db.AgentTaskQueue, ru
 	d.updateIssueStatus(ctx, task.IssueID, "in_progress", wsID, log)
 
 	// 3. Load sandbox config + decrypt
-	sandboxCfg, gitPat, aiGatewayKey, err := d.loadSandboxConfig(ctx, runtime.WorkspaceID)
+	if !runtime.SandboxConfigID.Valid {
+		log.Error("cloud daemon: runtime has no sandbox_config_id")
+		d.failTask(ctx, task.ID, "runtime has no linked sandbox config", log)
+		return
+	}
+	sandboxCfg, gitPat, aiGatewayKey, err := d.loadSandboxConfig(ctx, runtime.SandboxConfigID)
 	if err != nil {
 		log.Error("cloud daemon: load sandbox config", "error", err)
 		d.failTask(ctx, task.ID, fmt.Sprintf("sandbox config error: %v", err), log)
@@ -238,39 +270,20 @@ func (d *CloudDaemon) handleTask(ctx context.Context, task db.AgentTaskQueue, ru
 		return
 	}
 
-	log.Info("cloud daemon: sandbox connected", "sandbox_id", sb.ID)
+	log.Info("cloud daemon: sandbox connected", "sandbox_id", sb.ID, "provider", runtime.Provider)
 
-	// 6. Ensure opencode serve is running
-	if err := d.ensureServing(ctx, provider, sb, log); err != nil {
-		d.failTask(ctx, task.ID, fmt.Sprintf("opencode serve failed: %v", err), log)
-		return
-	}
-
-	// 7. Write prompt to file (never as shell argument)
-	if err := provider.WriteFile(ctx, sb, "/tmp/prompt.txt", []byte(promptResult.Prompt)); err != nil {
-		log.Error("cloud daemon: write prompt file", "error", err)
-		d.failTask(ctx, task.ID, fmt.Sprintf("write prompt error: %v", err), log)
-		return
-	}
-
-	// 8. Launch agent
+	// 6-9. Launch agent (provider-specific).
 	workDir := fmt.Sprintf("/workspace/%s", taskID[:8])
-	_, err = provider.Exec(ctx, sb, []string{
-		"sh", "-c", fmt.Sprintf(
-			"mkdir -p %s && nohup opencode run --attach http://localhost:4096 --dir %s --format json < /tmp/prompt.txt > /tmp/opencode.log 2>&1 &",
-			workDir, workDir,
-		),
-	})
-	if err != nil {
-		log.Error("cloud daemon: launch agent", "error", err)
-		d.failTask(ctx, task.ID, fmt.Sprintf("agent launch error: %v", err), log)
-		return
-	}
+	var sessionID string
 
-	// 9. Discover session ID
-	sessionID, err := d.discoverSessionID(ctx, provider, sb, workDir, log)
+	switch runtime.Provider {
+	case "opencode":
+		sessionID, err = d.launchOpencode(ctx, provider, sb, promptResult.Prompt, workDir, log)
+	default:
+		err = fmt.Errorf("cloud provider %q is not yet supported", runtime.Provider)
+	}
 	if err != nil {
-		d.failTask(ctx, task.ID, fmt.Sprintf("session discovery error: %v", err), log)
+		d.failTask(ctx, task.ID, fmt.Sprintf("agent launch error: %v", err), log)
 		return
 	}
 
@@ -310,6 +323,38 @@ func (d *CloudDaemon) handleTask(ctx context.Context, task db.AgentTaskQueue, ru
 	default:
 		d.failTask(ctx, task.ID, fmt.Sprintf("unexpected session state: %s", status.State), log)
 	}
+}
+
+// launchOpencode starts the opencode serve + run flow and returns the session ID.
+func (d *CloudDaemon) launchOpencode(ctx context.Context, provider SandboxProvider, sb *Sandbox, prompt, workDir string, log *slog.Logger) (string, error) {
+	// Ensure opencode serve is running
+	if err := d.ensureServing(ctx, provider, sb, log); err != nil {
+		return "", fmt.Errorf("opencode serve failed: %w", err)
+	}
+
+	// Write prompt to file
+	if err := provider.WriteFile(ctx, sb, "/tmp/prompt.txt", []byte(prompt)); err != nil {
+		return "", fmt.Errorf("write prompt error: %w", err)
+	}
+
+	// Launch opencode run
+	_, err := provider.Exec(ctx, sb, []string{
+		"sh", "-c", fmt.Sprintf(
+			"mkdir -p %s && nohup opencode run --attach http://localhost:4096 --dir %s --format json < /tmp/prompt.txt > /tmp/opencode.log 2>&1 &",
+			workDir, workDir,
+		),
+	})
+	if err != nil {
+		return "", fmt.Errorf("launch opencode: %w", err)
+	}
+
+	// Discover session ID
+	sessionID, err := d.discoverSessionID(ctx, provider, sb, workDir, log)
+	if err != nil {
+		return "", fmt.Errorf("session discovery: %w", err)
+	}
+
+	return sessionID, nil
 }
 
 func (d *CloudDaemon) completeTask(ctx context.Context, task db.AgentTaskQueue, provider SandboxProvider, sb *Sandbox, workDir, sessionID string, usage TokenUsage, wsID string, log *slog.Logger) {
@@ -490,8 +535,8 @@ func (d *CloudDaemon) discoverSessionID(ctx context.Context, provider SandboxPro
 	return "", fmt.Errorf("no session with directory %s found after 30s", workDir)
 }
 
-func (d *CloudDaemon) loadSandboxConfig(ctx context.Context, workspaceID pgtype.UUID) (*db.WorkspaceSandboxConfig, string, string, error) {
-	cfg, err := d.queries.GetSandboxConfig(ctx, workspaceID)
+func (d *CloudDaemon) loadSandboxConfig(ctx context.Context, configID pgtype.UUID) (*db.WorkspaceSandboxConfig, string, string, error) {
+	cfg, err := d.queries.GetSandboxConfigByID(ctx, configID)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("get sandbox config: %w", err)
 	}
@@ -553,6 +598,57 @@ func extractLastAssistantText(raw string) string {
 		}
 	}
 	return lastText
+}
+
+// handlePing tests sandbox connectivity by creating a short-lived sandbox,
+// running `echo pong`, and reporting the result.
+func (d *CloudDaemon) handlePing(ctx context.Context, runtime db.AgentRuntime, pingID string) {
+	log := slog.With("runtime_id", util.UUIDToString(runtime.ID), "ping_id", pingID)
+	log.Info("cloud daemon: ping requested")
+
+	start := time.Now()
+
+	if !runtime.SandboxConfigID.Valid {
+		d.pingChecker.Fail(pingID, "runtime has no linked sandbox config", time.Since(start).Milliseconds())
+		return
+	}
+	sandboxCfg, _, _, err := d.loadSandboxConfig(ctx, runtime.SandboxConfigID)
+	if err != nil {
+		d.pingChecker.Fail(pingID, fmt.Sprintf("sandbox config error: %v", err), time.Since(start).Milliseconds())
+		return
+	}
+
+	providerKey, err := d.decryptField(sandboxCfg.ProviderApiKey, "provider-api-key")
+	if err != nil {
+		d.pingChecker.Fail(pingID, fmt.Sprintf("provider key error: %v", err), time.Since(start).Milliseconds())
+		return
+	}
+
+	provider := NewE2BProvider(providerKey)
+
+	sb, err := provider.CreateOrConnect(ctx, "", CreateOpts{
+		TemplateID: textToString(sandboxCfg.TemplateID),
+		Timeout:    2 * time.Minute,
+	})
+	if err != nil {
+		d.pingChecker.Fail(pingID, fmt.Sprintf("sandbox creation failed: %v", err), time.Since(start).Milliseconds())
+		return
+	}
+
+	defer func() {
+		if destroyErr := provider.Destroy(ctx, sb.ID); destroyErr != nil {
+			log.Warn("cloud daemon: ping sandbox cleanup failed", "error", destroyErr)
+		}
+	}()
+
+	stdout, err := provider.Exec(ctx, sb, []string{"echo", "pong"})
+	if err != nil {
+		d.pingChecker.Fail(pingID, fmt.Sprintf("exec failed: %v", err), time.Since(start).Milliseconds())
+		return
+	}
+
+	d.pingChecker.Complete(pingID, strings.TrimSpace(stdout), time.Since(start).Milliseconds())
+	log.Info("cloud daemon: ping completed", "duration_ms", time.Since(start).Milliseconds())
 }
 
 func textToString(t pgtype.Text) string {

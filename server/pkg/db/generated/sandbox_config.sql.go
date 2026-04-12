@@ -11,6 +11,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createSandboxConfig = `-- name: CreateSandboxConfig :one
+INSERT INTO workspace_sandbox_config (
+    workspace_id, name, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at, id, name
+`
+
+type CreateSandboxConfigParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Name            string      `json:"name"`
+	Provider        string      `json:"provider"`
+	ProviderApiKey  string      `json:"provider_api_key"`
+	AiGatewayApiKey pgtype.Text `json:"ai_gateway_api_key"`
+	GitPat          pgtype.Text `json:"git_pat"`
+	TemplateID      pgtype.Text `json:"template_id"`
+	Metadata        []byte      `json:"metadata"`
+}
+
+func (q *Queries) CreateSandboxConfig(ctx context.Context, arg CreateSandboxConfigParams) (WorkspaceSandboxConfig, error) {
+	row := q.db.QueryRow(ctx, createSandboxConfig,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Provider,
+		arg.ProviderApiKey,
+		arg.AiGatewayApiKey,
+		arg.GitPat,
+		arg.TemplateID,
+		arg.Metadata,
+	)
+	var i WorkspaceSandboxConfig
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.ProviderApiKey,
+		&i.AiGatewayApiKey,
+		&i.GitPat,
+		&i.TemplateID,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ID,
+		&i.Name,
+	)
+	return i, err
+}
+
 const deleteSandboxConfig = `-- name: DeleteSandboxConfig :exec
 DELETE FROM workspace_sandbox_config WHERE workspace_id = $1
 `
@@ -20,8 +66,17 @@ func (q *Queries) DeleteSandboxConfig(ctx context.Context, workspaceID pgtype.UU
 	return err
 }
 
+const deleteSandboxConfigByID = `-- name: DeleteSandboxConfigByID :exec
+DELETE FROM workspace_sandbox_config WHERE id = $1
+`
+
+func (q *Queries) DeleteSandboxConfigByID(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSandboxConfigByID, id)
+	return err
+}
+
 const getSandboxConfig = `-- name: GetSandboxConfig :one
-SELECT workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at FROM workspace_sandbox_config WHERE workspace_id = $1
+SELECT workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at, id, name FROM workspace_sandbox_config WHERE workspace_id = $1 LIMIT 1
 `
 
 func (q *Queries) GetSandboxConfig(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceSandboxConfig, error) {
@@ -37,6 +92,31 @@ func (q *Queries) GetSandboxConfig(ctx context.Context, workspaceID pgtype.UUID)
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ID,
+		&i.Name,
+	)
+	return i, err
+}
+
+const getSandboxConfigByID = `-- name: GetSandboxConfigByID :one
+SELECT workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at, id, name FROM workspace_sandbox_config WHERE id = $1
+`
+
+func (q *Queries) GetSandboxConfigByID(ctx context.Context, id pgtype.UUID) (WorkspaceSandboxConfig, error) {
+	row := q.db.QueryRow(ctx, getSandboxConfigByID, id)
+	var i WorkspaceSandboxConfig
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.ProviderApiKey,
+		&i.AiGatewayApiKey,
+		&i.GitPat,
+		&i.TemplateID,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ID,
+		&i.Name,
 	)
 	return i, err
 }
@@ -80,23 +160,59 @@ func (q *Queries) ListSandboxConfigs(ctx context.Context) ([]ListSandboxConfigsR
 	return items, nil
 }
 
-const upsertSandboxConfig = `-- name: UpsertSandboxConfig :one
-INSERT INTO workspace_sandbox_config (
-    workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (workspace_id) DO UPDATE SET
-    provider = EXCLUDED.provider,
-    provider_api_key = EXCLUDED.provider_api_key,
-    ai_gateway_api_key = EXCLUDED.ai_gateway_api_key,
-    git_pat = EXCLUDED.git_pat,
-    template_id = EXCLUDED.template_id,
-    metadata = EXCLUDED.metadata,
-    updated_at = now()
-RETURNING workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at
+const listSandboxConfigsByWorkspace = `-- name: ListSandboxConfigsByWorkspace :many
+SELECT workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at, id, name FROM workspace_sandbox_config WHERE workspace_id = $1 ORDER BY created_at
 `
 
-type UpsertSandboxConfigParams struct {
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+func (q *Queries) ListSandboxConfigsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]WorkspaceSandboxConfig, error) {
+	rows, err := q.db.Query(ctx, listSandboxConfigsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkspaceSandboxConfig{}
+	for rows.Next() {
+		var i WorkspaceSandboxConfig
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.Provider,
+			&i.ProviderApiKey,
+			&i.AiGatewayApiKey,
+			&i.GitPat,
+			&i.TemplateID,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ID,
+			&i.Name,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateSandboxConfig = `-- name: UpdateSandboxConfig :one
+UPDATE workspace_sandbox_config SET
+    name = $2,
+    provider = $3,
+    provider_api_key = $4,
+    ai_gateway_api_key = $5,
+    git_pat = $6,
+    template_id = $7,
+    metadata = $8,
+    updated_at = now()
+WHERE id = $1
+RETURNING workspace_id, provider, provider_api_key, ai_gateway_api_key, git_pat, template_id, metadata, created_at, updated_at, id, name
+`
+
+type UpdateSandboxConfigParams struct {
+	ID              pgtype.UUID `json:"id"`
+	Name            string      `json:"name"`
 	Provider        string      `json:"provider"`
 	ProviderApiKey  string      `json:"provider_api_key"`
 	AiGatewayApiKey pgtype.Text `json:"ai_gateway_api_key"`
@@ -105,9 +221,10 @@ type UpsertSandboxConfigParams struct {
 	Metadata        []byte      `json:"metadata"`
 }
 
-func (q *Queries) UpsertSandboxConfig(ctx context.Context, arg UpsertSandboxConfigParams) (WorkspaceSandboxConfig, error) {
-	row := q.db.QueryRow(ctx, upsertSandboxConfig,
-		arg.WorkspaceID,
+func (q *Queries) UpdateSandboxConfig(ctx context.Context, arg UpdateSandboxConfigParams) (WorkspaceSandboxConfig, error) {
+	row := q.db.QueryRow(ctx, updateSandboxConfig,
+		arg.ID,
+		arg.Name,
 		arg.Provider,
 		arg.ProviderApiKey,
 		arg.AiGatewayApiKey,
@@ -126,6 +243,8 @@ func (q *Queries) UpsertSandboxConfig(ctx context.Context, arg UpsertSandboxConf
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ID,
+		&i.Name,
 	)
 	return i, err
 }

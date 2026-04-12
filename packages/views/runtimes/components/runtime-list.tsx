@@ -1,4 +1,4 @@
-import { Server, ArrowUpCircle, ChevronDown, Check } from "lucide-react";
+import { Server, ArrowUpCircle, ChevronDown, Check, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -80,6 +80,7 @@ export function RuntimeList({
   ownerFilter,
   onOwnerFilterChange,
   updatableIds,
+  onAdd,
 }: {
   runtimes: AgentRuntime[];
   selectedId: string;
@@ -89,6 +90,7 @@ export function RuntimeList({
   ownerFilter: string | null;
   onOwnerFilterChange: (ownerId: string | null) => void;
   updatableIds?: Set<string>;
+  onAdd?: () => void;
 }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -122,10 +124,20 @@ export function RuntimeList({
     <div className="overflow-y-auto h-full border-r">
       <div className="flex h-12 items-center justify-between border-b px-4">
         <h1 className="text-sm font-semibold">Runtimes</h1>
-        <span className="text-xs text-muted-foreground">
-          {filteredRuntimes.filter((r) => r.status === "online").length}/
-          {filteredRuntimes.length} online
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {filteredRuntimes.filter((r) => r.status === "online").length}/
+            {filteredRuntimes.length} online
+          </span>
+          {onAdd && (
+            <button
+              onClick={onAdd}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter bar */}

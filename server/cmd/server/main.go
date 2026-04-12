@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/sandbox"
@@ -80,7 +81,10 @@ func main() {
 		}
 	}
 
-	r := NewRouter(pool, hub, bus, encKey)
+	// Shared PingStore — used by both HTTP handler and CloudDaemon.
+	pingStore := handler.NewPingStore()
+
+	r := NewRouter(pool, hub, bus, encKey, pingStore)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -96,6 +100,7 @@ func main() {
 		TaskService:   taskService,
 		Bus:           bus,
 		EncryptionKey: encKey,
+		PingChecker:   &pingStoreAdapter{store: pingStore},
 	})
 	cloudDaemonCtx, cloudDaemonCancel := context.WithCancel(context.Background())
 	if cloudDaemon != nil {
@@ -136,4 +141,25 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+// pingStoreAdapter adapts handler.PingStore to the sandbox.PingChecker interface.
+type pingStoreAdapter struct {
+	store *handler.PingStore
+}
+
+func (a *pingStoreAdapter) PopPending(runtimeID string) (string, bool) {
+	p := a.store.PopPending(runtimeID)
+	if p == nil {
+		return "", false
+	}
+	return p.ID, true
+}
+
+func (a *pingStoreAdapter) Complete(pingID, output string, durationMs int64) {
+	a.store.Complete(pingID, output, durationMs)
+}
+
+func (a *pingStoreAdapter) Fail(pingID, errMsg string, durationMs int64) {
+	a.store.Fail(pingID, errMsg, durationMs)
 }
