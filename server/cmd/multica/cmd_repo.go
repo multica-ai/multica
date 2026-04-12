@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -25,8 +26,25 @@ var repoCheckoutCmd = &cobra.Command{
 	RunE:  runRepoCheckout,
 }
 
+var repoPublishCmd = &cobra.Command{
+	Use:   "publish",
+	Short: "Commit and push the current worktree changes",
+	Long:  "Discovers git repositories under the current working directory, commits pending changes if needed, and pushes them to the selected remote.",
+	Args:  cobra.NoArgs,
+	RunE:  runRepoPublish,
+}
+
+var (
+	repoPublishRemote  string
+	repoPublishMessage string
+)
+
 func init() {
 	repoCmd.AddCommand(repoCheckoutCmd)
+	repoCmd.AddCommand(repoPublishCmd)
+
+	repoPublishCmd.Flags().StringVar(&repoPublishRemote, "remote", "origin", "Git remote to push to")
+	repoPublishCmd.Flags().StringVarP(&repoPublishMessage, "message", "m", "", "Commit message to use when auto-committing dirty worktrees")
 }
 
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
@@ -87,6 +105,28 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
 	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
+
+	return nil
+}
+
+func runRepoPublish(cmd *cobra.Command, _ []string) error {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	results, err := gitops.PublishWorkspace(workDir, gitops.PublishOptions{
+		Remote:        repoPublishRemote,
+		CommitMessage: repoPublishMessage,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, result := range results {
+		fmt.Fprintf(os.Stderr, "Published %s (branch: %s, remote: %s, commit: %s, committed: %t)\n",
+			result.Root, result.Branch, result.Remote, result.CommitHash, result.Committed)
+	}
 
 	return nil
 }

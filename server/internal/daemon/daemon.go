@@ -898,6 +898,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	}
 
+	// Optionally publish completed worktrees back to GitHub before reporting the
+	// task as complete. Publishing failures are non-fatal so task completion still
+	// reaches the server and the agent can see the failure in logs.
+	d.autoPublishCompletedTask(ctx, task, result)
+
 	switch result.Status {
 	case "blocked":
 		if err := d.client.FailTask(ctx, task.ID, result.Comment); err != nil {
