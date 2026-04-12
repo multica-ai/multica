@@ -145,7 +145,7 @@ export function RepositoriesTab() {
                     <div className="flex items-start gap-2">
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2">
-                          <div className="flex h-8 overflow-hidden rounded-md border">
+                          <div className="flex h-8 shrink-0 overflow-hidden rounded-md border">
                             {(["github", "local"] as WorkspaceRepoType[]).map(
                               (t) => (
                                 <button
@@ -156,7 +156,7 @@ export function RepositoriesTab() {
                                   }
                                   disabled={!canManageWorkspace}
                                   className={cn(
-                                    "flex items-center gap-1 px-2 text-xs transition-colors",
+                                    "flex shrink-0 items-center gap-1 whitespace-nowrap px-2.5 text-xs transition-colors",
                                     repo.type === t
                                       ? "bg-accent text-accent-foreground"
                                       : "bg-background hover:bg-accent/50",
@@ -182,7 +182,7 @@ export function RepositoriesTab() {
                             }
                             disabled={!canManageWorkspace}
                             placeholder="Name (e.g. multica)"
-                            className="text-sm h-8"
+                            className="min-w-0 flex-1 text-sm h-8"
                           />
                         </div>
 
