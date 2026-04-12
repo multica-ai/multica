@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -515,6 +517,98 @@ func TestNilIfEmpty(t *testing.T) {
 	}
 	if nilIfEmpty("hello") != "hello" {
 		t.Fatal("expected 'hello'")
+	}
+}
+
+func TestParseMCPServersFromTOML(t *testing.T) {
+	t.Parallel()
+
+	config := `
+model = "gpt-5.4"
+
+[mcp_servers.vercel]
+command = "/usr/local/bin/vercel-mcp"
+args = ["--stdio"]
+
+[mcp_servers.vercel.env]
+VERCEL_TOKEN = "tok_123"
+
+[mcp_servers.github]
+command = "gh-mcp"
+args = ["serve", "--port", "0"]
+
+[projects."/tmp/test"]
+trust_level = "trusted"
+`
+
+	servers := parseMCPServersFromTOML(config)
+	if servers == nil {
+		t.Fatal("expected non-nil servers")
+	}
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(servers))
+	}
+
+	vercel, ok := servers["vercel"].(map[string]any)
+	if !ok {
+		t.Fatal("expected vercel server")
+	}
+	if vercel["command"] != "/usr/local/bin/vercel-mcp" {
+		t.Fatalf("unexpected vercel command: %v", vercel["command"])
+	}
+	args, ok := vercel["args"].([]any)
+	if !ok || len(args) != 1 || args[0] != "--stdio" {
+		t.Fatalf("unexpected vercel args: %v", vercel["args"])
+	}
+	env, ok := vercel["env"].(map[string]any)
+	if !ok || env["VERCEL_TOKEN"] != "tok_123" {
+		t.Fatalf("unexpected vercel env: %v", vercel["env"])
+	}
+
+	github, ok := servers["github"].(map[string]any)
+	if !ok {
+		t.Fatal("expected github server")
+	}
+	if github["command"] != "gh-mcp" {
+		t.Fatalf("unexpected github command: %v", github["command"])
+	}
+	ghArgs, ok := github["args"].([]any)
+	if !ok || len(ghArgs) != 3 {
+		t.Fatalf("unexpected github args: %v", github["args"])
+	}
+}
+
+func TestParseMCPServersFromTOMLEmpty(t *testing.T) {
+	t.Parallel()
+
+	servers := parseMCPServersFromTOML(`model = "gpt-5.4"`)
+	if servers != nil {
+		t.Fatalf("expected nil for config without MCP servers, got %v", servers)
+	}
+}
+
+func TestLoadCodexMCPServersFromEnv(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	config := `[mcp_servers.test-server]
+command = "/bin/echo"
+args = ["hello"]
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	servers := loadCodexMCPServers(map[string]string{"CODEX_HOME": dir})
+	if servers == nil {
+		t.Fatal("expected non-nil servers")
+	}
+	srv, ok := servers["test-server"].(map[string]any)
+	if !ok {
+		t.Fatal("expected test-server")
+	}
+	if srv["command"] != "/bin/echo" {
+		t.Fatalf("unexpected command: %v", srv["command"])
 	}
 }
 

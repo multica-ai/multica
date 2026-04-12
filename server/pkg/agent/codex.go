@@ -143,6 +143,17 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.notify("initialized")
 
 		// 2. Start thread
+		// Load MCP server configuration from the Codex config so that
+		// MCP tools are available in app-server mode. In interactive
+		// mode Codex reads config.toml itself, but app-server expects
+		// the client to pass it via the config parameter.
+		var threadConfig map[string]any
+		if mcpServers := loadCodexMCPServers(b.cfg.Env); len(mcpServers) > 0 {
+			threadConfig = map[string]any{
+				"mcp_servers": mcpServers,
+			}
+		}
+
 		threadResult, err := c.request(runCtx, "thread/start", map[string]any{
 			"model":                    nilIfEmpty(opts.Model),
 			"modelProvider":            nil,
@@ -150,7 +161,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			"cwd":                      opts.Cwd,
 			"approvalPolicy":           nil,
 			"sandbox":                  "workspace-write",
-			"config":                   nil,
+			"config":                   threadConfig,
 			"baseInstructions":         nil,
 			"developerInstructions":    nilIfEmpty(opts.SystemPrompt),
 			"compactPrompt":            nil,
@@ -860,6 +871,162 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 // bytesContainsStr checks if b contains the string s (without allocating).
 func bytesContainsStr(b []byte, s string) bool {
 	return strings.Contains(string(b), s)
+}
+
+// ── MCP config loader ──
+
+// loadCodexMCPServers reads MCP server definitions from the Codex config.toml.
+// It checks CODEX_HOME from the provided env map first, then falls back to
+// ~/.codex/config.toml. Returns nil if no MCP servers are configured.
+func loadCodexMCPServers(env map[string]string) map[string]any {
+	configPath := ""
+	if codexHome := env["CODEX_HOME"]; codexHome != "" {
+		configPath = filepath.Join(codexHome, "config.toml")
+	}
+	if configPath == "" || !fileExists(configPath) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		configPath = filepath.Join(home, ".codex", "config.toml")
+	}
+	if !fileExists(configPath) {
+		return nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil
+	}
+
+	return parseMCPServersFromTOML(string(data))
+}
+
+// parseMCPServersFromTOML extracts [mcp_servers.*] sections from a TOML config.
+// It handles the subset of TOML used by Codex MCP configuration:
+//
+//	[mcp_servers.name]
+//	command = "..."
+//	args = ["arg1", "arg2"]
+//	[mcp_servers.name.env]
+//	KEY = "value"
+func parseMCPServersFromTOML(content string) map[string]any {
+	servers := make(map[string]any)
+	lines := strings.Split(content, "\n")
+
+	var currentServer string // e.g. "vercel"
+	var currentSub string    // e.g. "env" for [mcp_servers.vercel.env]
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines and comments.
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		// Section header.
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			header := trimmed[1 : len(trimmed)-1]
+			header = strings.TrimSpace(header)
+
+			if strings.HasPrefix(header, "mcp_servers.") {
+				parts := strings.SplitN(header[len("mcp_servers."):], ".", 2)
+				currentServer = parts[0]
+				if len(parts) > 1 {
+					currentSub = parts[1]
+				} else {
+					currentSub = ""
+				}
+				// Initialize server map if needed.
+				if _, ok := servers[currentServer]; !ok {
+					servers[currentServer] = map[string]any{}
+				}
+			} else {
+				// Different section — stop processing MCP.
+				currentServer = ""
+				currentSub = ""
+			}
+			continue
+		}
+
+		// Key-value pair inside an MCP server section.
+		if currentServer == "" {
+			continue
+		}
+
+		key, value, ok := parseTOMLKeyValue(trimmed)
+		if !ok {
+			continue
+		}
+
+		serverMap := servers[currentServer].(map[string]any)
+		if currentSub != "" {
+			// Nested section (e.g. [mcp_servers.name.env]).
+			sub, ok := serverMap[currentSub].(map[string]any)
+			if !ok {
+				sub = make(map[string]any)
+				serverMap[currentSub] = sub
+			}
+			sub[key] = value
+		} else {
+			serverMap[key] = value
+		}
+	}
+
+	if len(servers) == 0 {
+		return nil
+	}
+	return servers
+}
+
+// parseTOMLKeyValue parses a simple TOML key = value line.
+// Supports strings, arrays of strings, booleans, and integers.
+func parseTOMLKeyValue(line string) (string, any, bool) {
+	idx := strings.Index(line, "=")
+	if idx < 0 {
+		return "", nil, false
+	}
+	key := strings.TrimSpace(line[:idx])
+	val := strings.TrimSpace(line[idx+1:])
+
+	// String value.
+	if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") && len(val) >= 2 {
+		return key, val[1 : len(val)-1], true
+	}
+
+	// Array of strings.
+	if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+		inner := strings.TrimSpace(val[1 : len(val)-1])
+		if inner == "" {
+			return key, []any{}, true
+		}
+		var items []any
+		for _, item := range strings.Split(inner, ",") {
+			item = strings.TrimSpace(item)
+			if strings.HasPrefix(item, "\"") && strings.HasSuffix(item, "\"") && len(item) >= 2 {
+				items = append(items, item[1:len(item)-1])
+			}
+		}
+		return key, items, true
+	}
+
+	// Boolean.
+	if val == "true" {
+		return key, true, true
+	}
+	if val == "false" {
+		return key, false, true
+	}
+
+	// Pass through as string for other values.
+	return key, val, true
+}
+
+// fileExists returns true if the path exists and is a regular file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // ── Helpers ──
