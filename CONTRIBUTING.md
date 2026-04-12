@@ -297,6 +297,17 @@ Notes:
 - E2E tests create their own workspace and issue fixtures
 - the check flow starts backend/frontend only if they are not already running
 
+## Local-Repo Worktree Strategy
+
+When a workspace has a `type: "local"` repo, the daemon operates on the user's on-disk `.git` **only through git worktrees** — it never `cd`s into the user's working tree, and the worktree directories always live under the daemon's workspaces root (typically `~/multica_workspaces/`), never inside the user's repo.
+
+Two invariants matter for contributors touching the daemon:
+
+1. **Per-repo serialization.** `repocache.Cache.lockForRepo(commonDir)` keyed on `git rev-parse --git-common-dir` serializes worktree admin (`worktree add`, `worktree remove`, config/HEAD reads) so concurrent tasks on the same repo never race on git's lockfiles. Every new helper that mutates git state on a local repo must take this lock.
+2. **No path escapes.** `CreateWorktreeFromLocal` refuses to place the new worktree path inside the user's repo. Any new callers must preserve this check or route through that helper.
+
+Branches follow `agent/<sanitizedAgentName>/<shortTaskId>` with a timestamp suffix on collision. They are preserved across task completion so users can inspect, diff, or merge them; only the worktree directory is cleaned up.
+
 ## Local Codex Daemon
 
 Run the local daemon:

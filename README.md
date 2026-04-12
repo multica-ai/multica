@@ -44,6 +44,7 @@ Multica manages the full agent lifecycle: from task assignment to execution moni
 - **Autonomous Execution** — set it and forget it. Full task lifecycle management (enqueue, claim, start, complete/fail) with real-time progress streaming via WebSocket.
 - **Reusable Skills** — every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.
 - **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
+- **Local & GitHub Repos** — point agents at GitHub URLs *or* your own local checkouts. Each task gets an isolated git worktree on its own branch, so many agents can work on the same project concurrently without ever touching your working tree.
 - **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
 
 ---
@@ -113,6 +114,7 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica setup` | One-command setup (configure + login + start daemon) |
 | `multica setup --local` | Same, but for self-hosted deployments |
 | `multica config local` | Configure CLI for a local self-hosted server |
+| `multica run` | Start an agent on a local repo; auto-create or pick an issue |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
 | `multica update` | Update to the latest version |
