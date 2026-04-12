@@ -11,6 +11,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
+    // Share static assets with the web app so shared `@multica/views` can use `/…` paths.
+    publicDir: resolve(__dirname, "../web/public"),
     server: {
       port: 5173,
       strictPort: true,
