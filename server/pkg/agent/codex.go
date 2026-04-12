@@ -34,7 +34,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	cmd := exec.CommandContext(runCtx, execPath, "app-server", "--listen", "stdio://")
+	cmd := exec.CommandContext(runCtx, execPath, buildCodexArgs()...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -50,7 +50,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("codex stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[codex:stderr] ")
+	stderrWriter := newLogWriter(b.cfg.Logger, "[codex:stderr] ")
+	cmd.Stderr = stderrWriter
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -144,19 +145,19 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 		// 2. Start thread
 		threadResult, err := c.request(runCtx, "thread/start", map[string]any{
-			"model":                    nilIfEmpty(opts.Model),
-			"modelProvider":            nil,
-			"profile":                  nil,
-			"cwd":                      opts.Cwd,
-			"approvalPolicy":           nil,
-			"sandbox":                  "workspace-write",
-			"config":                   nil,
-			"baseInstructions":         nil,
-			"developerInstructions":    nilIfEmpty(opts.SystemPrompt),
-			"compactPrompt":            nil,
-			"includeApplyPatchTool":    nil,
-			"experimentalRawEvents":    false,
-			"persistExtendedHistory":   true,
+			"model":                  nilIfEmpty(opts.Model),
+			"modelProvider":          nil,
+			"profile":                nil,
+			"cwd":                    opts.Cwd,
+			"approvalPolicy":         nil,
+			"sandbox":                "workspace-write",
+			"config":                 nil,
+			"baseInstructions":       nil,
+			"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
+			"compactPrompt":          nil,
+			"includeApplyPatchTool":  nil,
+			"experimentalRawEvents":  false,
+			"persistExtendedHistory": true,
 		})
 		if err != nil {
 			finalStatus = "failed"
@@ -221,6 +222,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		outputMu.Lock()
 		finalOutput := output.String()
 		outputMu.Unlock()
+		stderrTail := stderrWriter.Tail()
+
+		if finalStatus == "completed" && strings.TrimSpace(finalOutput) == "" && finalError == "" {
+			finalError = inferCodexEmptyOutputError(stderrTail)
+		}
 
 		// Build usage map from accumulated codex usage.
 		// First check JSON-RPC notifications (often empty for Codex).
@@ -260,17 +266,64 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+func buildCodexArgs() []string {
+	// Multica uses Codex as a task runner, not an interactive plugin host.
+	// Disable plugins so app-server startup does not spend time on featured
+	// plugin sync, remote plugin auth, or curated plugin clone noise.
+	return []string{
+		"app-server",
+		"--disable", "plugins",
+		"--listen", "stdio://",
+	}
+}
+
+func inferCodexEmptyOutputError(stderrTail string) string {
+	stderrTail = strings.TrimSpace(stderrTail)
+	if stderrTail == "" {
+		return ""
+	}
+
+	if strings.Contains(stderrTail, "responses_websocket") &&
+		strings.Contains(stderrTail, "500 Internal Server Error") &&
+		strings.Contains(stderrTail, "wss://api.openai.com/v1/responses") {
+		return "codex upstream connection failed: OpenAI responses websocket returned 500 Internal Server Error"
+	}
+
+	if strings.Contains(stderrTail, "falling back to HTTP") &&
+		strings.Contains(stderrTail, "stream disconnected") {
+		return "codex upstream connection failed after websocket fallback; no final output was produced"
+	}
+
+	lastLine := lastMeaningfulLine(stderrTail)
+	if lastLine == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("codex produced no final output; recent stderr: %s", lastLine)
+}
+
+func lastMeaningfulLine(stderrTail string) string {
+	for i := len(strings.Split(stderrTail, "\n")) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(strings.Split(stderrTail, "\n")[i])
+		if line == "" {
+			continue
+		}
+		return line
+	}
+	return ""
+}
+
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg       Config
-	stdin     interface{ Write([]byte) (int, error) }
-	mu        sync.Mutex
-	nextID    int
-	pending   map[int]*pendingRPC
-	threadID  string
-	turnID    string
-	onMessage func(Message)
+	cfg        Config
+	stdin      interface{ Write([]byte) (int, error) }
+	mu         sync.Mutex
+	nextID     int
+	pending    map[int]*pendingRPC
+	threadID   string
+	turnID     string
+	onMessage  func(Message)
 	onTurnDone func(aborted bool)
 
 	notificationProtocol string // "unknown", "legacy", "raw"

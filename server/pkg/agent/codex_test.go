@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -518,6 +519,26 @@ func TestNilIfEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgsDisablesPlugins(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs()
+	expected := []string{
+		"app-server",
+		"--disable", "plugins",
+		"--listen", "stdio://",
+	}
+
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
+		}
+	}
+}
+
 func TestCodexProtocolDetectionLegacyBlocksRaw(t *testing.T) {
 	t.Parallel()
 
@@ -541,5 +562,44 @@ func TestCodexProtocolDetectionLegacyBlocksRaw(t *testing.T) {
 
 	if len(messages) != messagesBefore {
 		t.Fatal("raw notification should be ignored in legacy mode")
+	}
+}
+
+func TestInferCodexEmptyOutputErrorResponsesWebsocket500(t *testing.T) {
+	t.Parallel()
+
+	stderr := strings.Join([]string{
+		"2026-04-12T11:09:40Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses",
+		"2026-04-12T11:09:51Z WARN codex_core::client: falling back to HTTP",
+	}, "\n")
+
+	got := inferCodexEmptyOutputError(stderr)
+	want := "codex upstream connection failed: OpenAI responses websocket returned 500 Internal Server Error"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestInferCodexEmptyOutputErrorFallsBackToRecentStderr(t *testing.T) {
+	t.Parallel()
+
+	got := inferCodexEmptyOutputError("first line\nfinal useful error")
+	if got != "codex produced no final output; recent stderr: final useful error" {
+		t.Fatalf("unexpected error message: %q", got)
+	}
+}
+
+func TestLogWriterCapturesTail(t *testing.T) {
+	t.Parallel()
+
+	w := newLogWriter(slog.Default(), "[test] ")
+	w.maxLines = 3
+	_, _ = w.Write([]byte("line-1\nline-2\n"))
+	_, _ = w.Write([]byte("line-3\nline-4\n"))
+
+	got := w.Tail()
+	want := "line-2\nline-3\nline-4"
+	if got != want {
+		t.Fatalf("got tail %q, want %q", got, want)
 	}
 }
