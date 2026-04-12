@@ -295,6 +295,28 @@ type RuntimeUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ScheduledTask struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	Name           string             `json:"name"`
+	TitleTemplate  string             `json:"title_template"`
+	Description    string             `json:"description"`
+	AssigneeType   string             `json:"assignee_type"`
+	AssigneeID     pgtype.UUID        `json:"assignee_id"`
+	Priority       string             `json:"priority"`
+	CronExpression string             `json:"cron_expression"`
+	Timezone       string             `json:"timezone"`
+	Enabled        bool               `json:"enabled"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	LastRunAt      pgtype.Timestamptz `json:"last_run_at"`
+	LastRunIssueID pgtype.UUID        `json:"last_run_issue_id"`
+	LastRunError   pgtype.Text        `json:"last_run_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt     pgtype.Timestamptz `json:"archived_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -77,6 +78,13 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 
+	// Start the scheduled-task loop. It polls every minute for due scheduled
+	// tasks, creates the corresponding issues, and enqueues them for agents.
+	taskService := service.NewTaskService(queries, hub, bus)
+	scheduler := service.NewScheduleService(queries, pool, taskService, slog.Default())
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	go scheduler.Run(schedCtx)
+
 	// Graceful shutdown
 	go func() {
 		slog.Info("server starting", "port", port)
@@ -92,6 +100,7 @@ func main() {
 
 	slog.Info("shutting down server")
 	sweepCancel()
+	schedCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
