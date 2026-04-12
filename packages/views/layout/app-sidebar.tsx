@@ -17,6 +17,7 @@ import {
   Inbox,
   ListTodo,
   Bot,
+  Clock,
   Monitor,
   ChevronDown,
   Settings,
@@ -76,6 +77,7 @@ const workspaceNav = [
   { href: "/issues", label: "Issues", icon: ListTodo },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/schedules", label: "Schedules", icon: Clock },
 ];
 
 const configureNav = [
