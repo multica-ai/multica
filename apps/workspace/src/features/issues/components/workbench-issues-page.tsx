@@ -1,23 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
+import type { StoreApi } from "zustand";
 import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
-import type { IssueStatus } from "@/shared/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues/store";
-import { useIssueViewStore, initFilterWorkspaceSync } from "@/features/issues/stores/view-store";
-import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
+import {
+  registerViewStoreForWorkspaceSync,
+  type IssueViewState,
+} from "@/features/issues/stores/view-store";
 import {
   ViewStoreProvider,
   useViewStore,
   useViewStoreApi,
 } from "@/features/issues/stores/view-store-context";
+import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
 import { filterIssues } from "@/features/issues/utils/filter";
 import { BOARD_STATUSES } from "@/features/issues/config";
-import { useWorkspaceStore } from "@/features/workspace";
-import { WorkspaceAvatar } from "@/features/workspace";
+import { useWorkspaceStore, WorkspaceAvatar } from "@/features/workspace";
+import type { Issue, IssueStatus } from "@/shared/types";
 import { useIssueSelectionStore } from "@/features/issues/stores/selection-store";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
@@ -25,35 +28,43 @@ import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { IssueTaskStatusSync } from "./issue-task-status-sync";
 
-interface IssuesPageProps {
-  breadcrumbLabel?: string;
+interface WorkbenchIssuesPageProps {
+  breadcrumbLabel: string;
+  emptyTitle: string;
+  emptyDescription: string;
+  store: StoreApi<IssueViewState>;
+  deriveIssues: (issues: Issue[]) => Issue[];
   forcedViewMode?: "board" | "list";
   hideViewToggle?: boolean;
+  createIssueData?: Record<string, unknown> | null;
 }
 
-function IssuesPageContent({
+interface WorkbenchIssuesPageContentProps extends WorkbenchIssuesPageProps {}
+
+function WorkbenchIssuesPageContent({
   breadcrumbLabel,
+  emptyTitle,
+  emptyDescription,
+  deriveIssues,
   forcedViewMode,
   hideViewToggle,
-}: {
-  breadcrumbLabel: string;
-  forcedViewMode?: "board" | "list";
-  hideViewToggle: boolean;
-}) {
-  const allIssues = useIssueStore((s) => s.issues);
-  const loading = useIssueStore((s) => s.loading);
-  const workspace = useWorkspaceStore((s) => s.workspace);
-  const scope = useIssuesScopeStore((s) => s.scope);
+  createIssueData,
+}: WorkbenchIssuesPageContentProps) {
+  const allIssues = useIssueStore((state) => state.issues);
+  const loading = useIssueStore((state) => state.loading);
+  const workspace = useWorkspaceStore((state) => state.workspace);
+  const scope = useIssuesScopeStore((state) => state.scope);
   const viewStoreApi = useViewStoreApi();
   const { updateIssue } = useIssueMutations();
-  const storeViewMode = useViewStore((s) => s.viewMode);
-  const setViewMode = useViewStore((s) => s.setViewMode);
-  const statusFilters = useViewStore((s) => s.statusFilters);
-  const priorityFilters = useViewStore((s) => s.priorityFilters);
-  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
-  const creatorFilters = useViewStore((s) => s.creatorFilters);
-  const viewMode = forcedViewMode || storeViewMode;
+
+  const storeViewMode = useViewStore((state) => state.viewMode);
+  const setViewMode = useViewStore((state) => state.setViewMode);
+  const statusFilters = useViewStore((state) => state.statusFilters);
+  const priorityFilters = useViewStore((state) => state.priorityFilters);
+  const assigneeFilters = useViewStore((state) => state.assigneeFilters);
+  const includeNoAssignee = useViewStore((state) => state.includeNoAssignee);
+  const creatorFilters = useViewStore((state) => state.creatorFilters);
+  const viewMode = forcedViewMode ?? storeViewMode;
 
   useEffect(() => {
     if (forcedViewMode && storeViewMode !== forcedViewMode) {
@@ -65,11 +76,19 @@ function IssuesPageContent({
     useIssueSelectionStore.getState().clear();
   }, [viewMode, scope]);
 
+  const derivedIssues = useMemo(() => deriveIssues(allIssues), [allIssues, deriveIssues]);
+
   const scopedIssues = useMemo(() => {
-    if (scope === "members") return allIssues.filter((i) => i.assignee_type === "member");
-    if (scope === "agents") return allIssues.filter((i) => i.assignee_type === "agent");
-    return allIssues;
-  }, [allIssues, scope]);
+    if (scope === "members") {
+      return derivedIssues.filter((issue) => issue.assignee_type === "member");
+    }
+
+    if (scope === "agents") {
+      return derivedIssues.filter((issue) => issue.assignee_type === "agent");
+    }
+
+    return derivedIssues;
+  }, [derivedIssues, scope]);
 
   const issues = useMemo(
     () =>
@@ -80,19 +99,37 @@ function IssuesPageContent({
         includeNoAssignee,
         creatorFilters,
       }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
+    [
+      scopedIssues,
+      statusFilters,
+      priorityFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+    ],
   );
 
-  const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0) {
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
-    }
-    return BOARD_STATUSES;
-  }, [statusFilters]);
+  const statusesWithIssues = useMemo(
+    () => BOARD_STATUSES.filter((status) => scopedIssues.some((issue) => issue.status === status)),
+    [scopedIssues],
+  );
 
-  const hiddenStatuses = useMemo(() => {
-    return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));
-  }, [visibleStatuses]);
+  const visibleStatuses = useMemo<IssueStatus[]>(() => {
+    const fallbackStatuses: IssueStatus[] =
+      statusesWithIssues.length > 0 ? statusesWithIssues : ["backlog"];
+
+    if (statusFilters.length > 0) {
+      const filteredStatuses = BOARD_STATUSES.filter((status) => statusFilters.includes(status));
+      return filteredStatuses.length > 0 ? filteredStatuses : fallbackStatuses;
+    }
+
+    return fallbackStatuses;
+  }, [statusFilters, statusesWithIssues]);
+
+  const hiddenStatuses = useMemo(
+    () => statusesWithIssues.filter((status) => !visibleStatuses.includes(status)),
+    [statusesWithIssues, visibleStatuses],
+  );
 
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
@@ -126,8 +163,8 @@ function IssuesPageContent({
           <Skeleton className="h-8 w-24" />
         </div>
         <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="flex min-w-52 flex-1 flex-col gap-2">
               <Skeleton className="h-4 w-20" />
               <Skeleton className="h-24 w-full rounded-lg" />
               <Skeleton className="h-24 w-full rounded-lg" />
@@ -166,8 +203,8 @@ function IssuesPageContent({
       {scopedIssues.length === 0 ? (
         <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
           <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-          <p className="text-sm">No issues yet</p>
-          <p className="text-xs">Create an issue to get started.</p>
+          <p className="text-sm">{emptyTitle}</p>
+          <p className="text-xs">{emptyDescription}</p>
         </div>
       ) : (
         <div className="flex flex-col flex-1 min-h-0">
@@ -178,6 +215,7 @@ function IssuesPageContent({
               visibleStatuses={visibleStatuses}
               hiddenStatuses={hiddenStatuses}
               onMoveIssue={handleMoveIssue}
+              createIssueData={createIssueData}
             />
           ) : (
             <ListView issues={issues} visibleStatuses={visibleStatuses} />
@@ -190,22 +228,14 @@ function IssuesPageContent({
   );
 }
 
-export function IssuesPage({
-  breadcrumbLabel = "Issues",
-  forcedViewMode,
-  hideViewToggle = false,
-}: IssuesPageProps = {}) {
+export function WorkbenchIssuesPage({ store, ...props }: WorkbenchIssuesPageProps) {
   useEffect(() => {
-    initFilterWorkspaceSync();
-  }, []);
+    registerViewStoreForWorkspaceSync(store);
+  }, [store]);
 
   return (
-    <ViewStoreProvider store={useIssueViewStore}>
-      <IssuesPageContent
-        breadcrumbLabel={breadcrumbLabel}
-        forcedViewMode={forcedViewMode}
-        hideViewToggle={hideViewToggle}
-      />
+    <ViewStoreProvider store={store}>
+      <WorkbenchIssuesPageContent store={store} {...props} />
     </ViewStoreProvider>
   );
 }

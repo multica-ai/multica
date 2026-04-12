@@ -2,6 +2,8 @@
 
 import {
   Inbox,
+  CalendarDays,
+  CalendarRange,
   ListTodo,
   FolderKanban,
   Bot,
@@ -9,13 +11,17 @@ import {
   Settings,
   BookOpenText,
   CircleUser,
+  Columns3,
 } from "lucide-react";
 
 export const primaryNav = [
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/my-issues", label: "My Issues", icon: CircleUser },
-  { href: "/issues", label: "Issues", icon: ListTodo },
+  { href: "/board", label: "Board", icon: Columns3 },
   { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/backlog", label: "Backlog", icon: ListTodo },
+  { href: "/today", label: "Today", icon: CalendarDays },
+  { href: "/upcoming", label: "Upcoming", icon: CalendarRange },
+  { href: "/my-work", label: "My Work", icon: CircleUser },
+  { href: "/notifications", label: "Notifications", icon: Inbox },
 ];
 
 export const workspaceNav = [
@@ -27,14 +33,16 @@ export const workspaceNav = [
 
 export function isWorkspaceNavActive(pathname: string, href: string): boolean {
   switch (href) {
-    case "/inbox":
-      return pathname === "/" || pathname === "/inbox";
-    case "/issues":
-      return pathname === "/issues" || pathname === "/board" || pathname.startsWith("/issues/");
-    case "/projects":
-      return pathname === "/projects" || pathname.startsWith("/projects/");
+    case "/board":
+      return pathname === "/board" || pathname === "/issues" || pathname.startsWith("/issues/");
+    case "/notifications":
+      return pathname === "/" || pathname === "/inbox" || pathname === "/notifications";
+    case "/my-work":
+      return pathname === "/my-work" || pathname === "/my-issues";
     case "/agents":
       return pathname === "/agents" || pathname.startsWith("/agents/");
+    case "/projects":
+      return pathname === "/projects" || pathname.startsWith("/projects/");
     default:
       return pathname === href;
   }

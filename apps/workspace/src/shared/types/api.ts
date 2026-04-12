@@ -37,7 +37,11 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_id?: string;
+  assignee_type?: IssueAssigneeType;
+  creator_id?: string;
+  creator_type?: "member" | "agent";
   project_id?: string;
+  view?: "backlog" | "today" | "upcoming";
 }
 
 export interface ListIssuesResponse {

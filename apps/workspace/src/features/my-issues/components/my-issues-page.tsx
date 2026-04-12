@@ -8,6 +8,7 @@ import type { IssueStatus } from "@/shared/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, WorkspaceAvatar } from "@/features/workspace";
+import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues/store";
 import { filterIssues } from "@/features/issues/utils/filter";
 import { BOARD_STATUSES } from "@/features/issues/config";
@@ -17,7 +18,7 @@ import { BoardView } from "@/features/issues/components/board-view";
 import { ListView } from "@/features/issues/components/list-view";
 import { BatchActionToolbar } from "@/features/issues/components/batch-action-toolbar";
 import { registerViewStoreForWorkspaceSync } from "@/features/issues/stores/view-store";
-import { api } from "@/shared/api";
+import { IssueTaskStatusSync } from "@/features/issues/components/issue-task-status-sync";
 import { myIssuesViewStore } from "../stores/my-issues-view-store";
 import { MyIssuesHeader } from "./my-issues-header";
 
@@ -27,6 +28,7 @@ export function MyIssuesPage() {
   const agents = useWorkspaceStore((s) => s.agents);
   const allIssues = useIssueStore((s) => s.issues);
   const loading = useIssueStore((s) => s.loading);
+  const { updateIssue } = useIssueMutations();
 
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
@@ -118,16 +120,11 @@ export function MyIssuesPage() {
       };
       if (newPosition !== undefined) updates.position = newPosition;
 
-      useIssueStore.getState().updateIssue(issueId, updates);
-
-      api.updateIssue(issueId, updates).catch(() => {
+      void updateIssue(issueId, updates).catch(() => {
         toast.error("Failed to move issue");
-        api.listIssues({ limit: 200 }).then((res) => {
-          useIssueStore.getState().setIssues(res.issues);
-        }).catch(console.error);
       });
     },
-    [],
+    [updateIssue],
   );
 
   if (loading) {
@@ -156,8 +153,10 @@ export function MyIssuesPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
+      <IssueTaskStatusSync />
+
       <div className="border-b px-4 py-4 md:hidden">
-        <h1 className="text-base font-semibold">My Issues</h1>
+        <h1 className="text-base font-semibold">My Work</h1>
         <p className="mt-1 text-xs text-muted-foreground">
           {workspace?.name ?? "Workspace"}
         </p>
@@ -169,7 +168,7 @@ export function MyIssuesPage() {
           {workspace?.name ?? "Workspace"}
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">My Issues</span>
+        <span className="text-sm font-medium">My Work</span>
       </div>
 
       <MyIssuesHeader allIssues={myIssues} />
@@ -178,7 +177,7 @@ export function MyIssuesPage() {
         {myIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">No issues assigned to you</p>
+            <p className="text-sm">No work assigned to you</p>
             <p className="text-xs">Issues you create or are assigned to will appear here.</p>
           </div>
         ) : (

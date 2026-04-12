@@ -172,7 +172,11 @@ export class ApiClient {
     if (params?.status) search.set("status", params.status);
     if (params?.priority) search.set("priority", params.priority);
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
+    if (params?.assignee_type) search.set("assignee_type", params.assignee_type);
+    if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.creator_type) search.set("creator_type", params.creator_type);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.view) search.set("view", params.view);
     return this.fetch(`/api/issues?${search}`);
   }
 

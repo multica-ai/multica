@@ -60,7 +60,7 @@ const FILTER_ITEM_CLASS =
 function HoverCheck({ checked }: { checked: boolean }) {
   return (
     <div
-      className="border-input data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground pointer-events-none size-4 shrink-0 rounded-[4px] border transition-all select-none *:[svg]:opacity-0 data-[selected=true]:*:[svg]:opacity-100 opacity-0 group-hover/fitem:opacity-100 group-focus/fitem:opacity-100 data-[selected=true]:opacity-100"
+      className="border-input data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground pointer-events-none size-4 shrink-0 rounded-lg border transition-all select-none *:[svg]:opacity-0 data-[selected=true]:*:[svg]:opacity-100 opacity-0 group-hover/fitem:opacity-100 group-focus/fitem:opacity-100 data-[selected=true]:opacity-100"
       data-selected={checked}
     >
       <Check className="size-3.5 text-current" />
@@ -101,9 +101,9 @@ function useIssueCounts(allIssues: Issue[]) {
 // ---------------------------------------------------------------------------
 
 const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
-  { value: "assigned", label: "Assigned", description: "Issues assigned to me" },
-  { value: "created", label: "Created", description: "Issues I created" },
-  { value: "agents", label: "My Agents", description: "Issues assigned to my agents" },
+  { value: "assigned", label: "Assigned", description: "Work assigned to me" },
+  { value: "created", label: "Created", description: "Work I created" },
+  { value: "agents", label: "My Agents", description: "Work assigned to my agents" },
 ];
 
 // ---------------------------------------------------------------------------

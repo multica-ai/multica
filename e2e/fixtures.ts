@@ -124,6 +124,14 @@ export class TestApiClient {
     return res.json();
   }
 
+  async updateIssue(id: string, updates: Record<string, unknown>) {
+    const res = await this.authedFetch(`/api/issues/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+    return res.json();
+  }
+
   async listProjects(params?: { status?: string }) {
     const search = new URLSearchParams();
     if (params?.status) {

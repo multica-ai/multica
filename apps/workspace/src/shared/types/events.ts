@@ -186,6 +186,19 @@ export interface TaskMessagePayload {
   output?: string;
 }
 
+export interface TaskDispatchPayload {
+  task_id: string;
+  issue_id?: string;
+  runtime_id?: string;
+}
+
+export interface TaskProgressPayload {
+  task_id: string;
+  summary: string;
+  step?: number;
+  total?: number;
+}
+
 export interface TaskCompletedPayload {
   task_id: string;
   agent_id: string;

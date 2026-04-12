@@ -17,7 +17,7 @@ interface IssueDraft {
 const EMPTY_DRAFT: IssueDraft = {
   title: "",
   description: "",
-  status: "todo",
+  status: "backlog",
   priority: "none",
   assigneeType: undefined,
   assigneeId: undefined,

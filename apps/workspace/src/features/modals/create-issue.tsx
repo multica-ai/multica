@@ -90,6 +90,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [title, setTitle] = useState(draft.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
+  const projectId = typeof data?.project_id === "string" ? data.project_id : undefined;
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
@@ -150,6 +151,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
         priority,
+        project_id: projectId,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
         start_date: startDate || undefined,

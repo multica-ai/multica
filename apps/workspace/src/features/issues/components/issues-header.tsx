@@ -46,11 +46,14 @@ import { StatusIcon, PriorityIcon } from "@/features/issues/components";
 import { useWorkspaceStore } from "@/features/workspace";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import {
-  useIssueViewStore,
   SORT_OPTIONS,
   CARD_PROPERTY_OPTIONS,
   type ActorFilterValue,
 } from "@/features/issues/stores/view-store";
+import {
+  useViewStore,
+  useViewStoreApi,
+} from "@/features/issues/stores/view-store-context";
 import {
   useIssuesScopeStore,
   type IssuesScope,
@@ -69,7 +72,7 @@ const FILTER_ITEM_CLASS =
 function HoverCheck({ checked }: { checked: boolean }) {
   return (
     <div
-      className="border-input data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground pointer-events-none size-4 shrink-0 rounded-[4px] border transition-all select-none *:[svg]:opacity-0 data-[selected=true]:*:[svg]:opacity-100 opacity-0 group-hover/fitem:opacity-100 group-focus/fitem:opacity-100 data-[selected=true]:opacity-100"
+      className="border-input data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground pointer-events-none size-4 shrink-0 rounded-lg border transition-all select-none *:[svg]:opacity-0 data-[selected=true]:*:[svg]:opacity-100 opacity-0 group-hover/fitem:opacity-100 group-focus/fitem:opacity-100 data-[selected=true]:opacity-100"
       data-selected={checked}
     >
       <Check className="size-3.5 text-current" />
@@ -281,17 +284,18 @@ export function IssuesHeader({
 }) {
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
+  const viewStore = useViewStoreApi();
 
-  const viewMode = useIssueViewStore((s) => s.viewMode);
-  const statusFilters = useIssueViewStore((s) => s.statusFilters);
-  const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
-  const assigneeFilters = useIssueViewStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useIssueViewStore((s) => s.includeNoAssignee);
-  const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
-  const sortBy = useIssueViewStore((s) => s.sortBy);
-  const sortDirection = useIssueViewStore((s) => s.sortDirection);
-  const cardProperties = useIssueViewStore((s) => s.cardProperties);
-  const act = useIssueViewStore.getState();
+  const viewMode = useViewStore((s) => s.viewMode);
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const priorityFilters = useViewStore((s) => s.priorityFilters);
+  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
+  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
+  const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
+  const cardProperties = useViewStore((s) => s.cardProperties);
+  const act = viewStore.getState();
 
   const counts = useIssueCounts(scopedIssues);
 

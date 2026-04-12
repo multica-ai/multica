@@ -15,24 +15,37 @@ test.describe("Navigation", () => {
   });
 
   test("sidebar navigation works", async ({ page }) => {
-    await page.getByRole("link", { name: "Inbox" }).click();
-    await page.waitForURL("**/inbox");
-    await expect(page).toHaveURL(/\/inbox/);
+    await page.getByRole("link", { name: "Board" }).click();
+    await page.waitForURL("**/board");
+    await expect(page).toHaveURL(/\/board/);
+
+    await page.getByRole("link", { name: "Backlog" }).click();
+    await page.waitForURL("**/backlog");
+    await expect(page).toHaveURL(/\/backlog/);
+
+    await page.getByRole("link", { name: "Today" }).click();
+    await page.waitForURL("**/today");
+    await expect(page).toHaveURL(/\/today/);
+
+    await page.getByRole("link", { name: "Upcoming" }).click();
+    await page.waitForURL("**/upcoming");
+    await expect(page).toHaveURL(/\/upcoming/);
+
+    await page.getByRole("link", { name: "My Work" }).click();
+    await page.waitForURL("**/my-work");
+    await expect(page).toHaveURL(/\/my-work/);
+
+    await page.getByRole("link", { name: "Projects" }).click();
+    await page.waitForURL("**/projects");
+    await expect(page).toHaveURL(/\/projects/);
+
+    await page.getByRole("link", { name: "Notifications" }).click();
+    await page.waitForURL("**/notifications");
+    await expect(page).toHaveURL(/\/notifications/);
 
     await page.getByRole("link", { name: "Agents" }).click();
     await page.waitForURL("**/agents");
     await expect(page).toHaveURL(/\/agents/);
-
-    await page.getByRole("link", { name: "Issues", exact: true }).click();
-    await page.waitForURL("**/issues");
-    await expect(page).toHaveURL(/\/issues/);
-  });
-
-  test("projects page loads from the sidebar", async ({ page }) => {
-    await page.getByRole("link", { name: "Projects" }).click();
-    await page.waitForURL("**/projects");
-
-    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   });
 
   test("settings page loads via sidebar", async ({ page }) => {
@@ -84,7 +97,7 @@ test.describe("Navigation", () => {
     await expect(page.getByRole("tab", { name: "Profile" })).toBeVisible();
   });
 
-  test("mobile inbox drills into detail and returns to list", async ({ page }) => {
+  test("mobile notifications drills into detail and returns to list", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
 
@@ -94,9 +107,9 @@ test.describe("Navigation", () => {
 
     await page.goto(`/inbox?issue=${issue.id}`);
     await expect(page).toHaveURL(new RegExp(`/inbox\\?issue=${issue.id}$`));
-    await expect(page.getByRole("button", { name: "Back to Inbox" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Back to Notifications" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Back to Inbox" }).click();
+    await page.getByRole("button", { name: "Back to Notifications" }).click();
     await expect(page).toHaveURL(/\/inbox$/);
   });
 });

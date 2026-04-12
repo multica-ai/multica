@@ -8,6 +8,7 @@ import {
   Save,
   Trash2,
   Check,
+  KanbanSquare,
 } from "lucide-react";
 import {
   ResizablePanelGroup,
@@ -200,10 +201,12 @@ function ProjectDetailPanel({
   project,
   onUpdate,
   onDelete,
+  boardHref,
 }: {
   project: Project;
   onUpdate: (id: string, updates: UpdateProjectRequest) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  boardHref: string;
 }) {
   const issues = useIssueStore((state) => state.issues);
   const [title, setTitle] = useState(project.title);
@@ -283,6 +286,14 @@ function ProjectDetailPanel({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Link
+          href={boardHref}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        >
+          <KanbanSquare className="h-3.5 w-3.5" />
+          Board
+        </Link>
 
         <Button
           variant="ghost"
@@ -529,6 +540,7 @@ export function ProjectsPage({
               project={selectedProject}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
+              boardHref={`/projects/${selectedProject.id}/board`}
             />
           </div>
           <CreateProjectDialog
@@ -658,6 +670,7 @@ export function ProjectsPage({
             project={selectedProject}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
+              boardHref={`/projects/${selectedProject.id}/board`}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">

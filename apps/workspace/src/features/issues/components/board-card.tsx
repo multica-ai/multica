@@ -7,21 +7,17 @@ import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@/shared/types";
 import { CalendarDays } from "lucide-react";
 import { ActorAvatar } from "@/components/common/actor-avatar";
-import { api } from "@/shared/api";
-import { useIssueStore } from "@/features/issues/store";
+import { useIssueMutations } from "@/features/issues/mutations";
+import {
+  formatIssueSchedule,
+  isIssueScheduleOverdue,
+} from "@/features/issues/utils/workbench-view";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@/features/issues/config";
-import type { CardProperties } from "@/features/issues/stores/view-store";
 import { useViewStore } from "@/features/issues/stores/view-store-context";
 import { Link } from "@/shared/router";
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-}
+import { IssueTaskStatusBadge } from "./issue-task-status-badge";
 
 /** Stops event from bubbling to Link/drag handlers */
 function PickerWrapper({ children }: { children: React.ReactNode }) {
@@ -45,24 +41,23 @@ export const BoardCardContent = memo(function BoardCardContent({
 }) {
   const storeProperties = useViewStore((s) => s.cardProperties);
   const priorityCfg = PRIORITY_CONFIG[issue.priority];
+  const { updateIssue } = useIssueMutations();
 
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
-      const prev = { ...issue };
-      useIssueStore.getState().updateIssue(issue.id, updates);
-      api.updateIssue(issue.id, updates).catch(() => {
-        useIssueStore.getState().updateIssue(issue.id, prev);
+      void updateIssue(issue.id, updates).catch(() => {
         toast.error("Failed to update issue");
       });
     },
-    [issue],
+    [issue.id, updateIssue],
   );
 
   const showPriority = storeProperties.priority;
   const showDescription = storeProperties.description && issue.description;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
-  const showDueDate = storeProperties.dueDate && issue.due_date;
-  const showBottom = showAssignee || showDueDate;
+  const scheduleLabel = storeProperties.dueDate ? formatIssueSchedule(issue) : null;
+  const showSchedule = !!scheduleLabel;
+  const canEditDueDate = editable && !!issue.due_date;
 
   return (
     <div className="rounded-lg border bg-card p-3.5 shadow-[0_1px_2px_0_rgba(0,0,0,0.03)] transition-shadow group-hover:shadow-sm">
@@ -81,8 +76,10 @@ export const BoardCardContent = memo(function BoardCardContent({
         </p>
       )}
 
-      {/* Row 3: Assignee, priority badge, due date */}
-      {(showAssignee || showPriority || showDueDate) && (
+      <IssueTaskStatusBadge issue={issue} variant="board" />
+
+      {/* Row 3: Assignee, priority badge, schedule */}
+      {(showAssignee || showPriority || showSchedule) && (
         <div className="mt-3 flex items-center gap-2">
           {showAssignee &&
             (editable ? (
@@ -127,9 +124,9 @@ export const BoardCardContent = memo(function BoardCardContent({
                 {priorityCfg.label}
               </span>
             ))}
-          {showDueDate && (
+          {showSchedule && (
             <div className="ml-auto">
-              {editable ? (
+              {canEditDueDate ? (
                 <PickerWrapper>
                   <DueDatePicker
                     dueDate={issue.due_date}
@@ -137,13 +134,13 @@ export const BoardCardContent = memo(function BoardCardContent({
                     trigger={
                       <span
                         className={`flex items-center gap-1 text-xs ${
-                          new Date(issue.due_date!) < new Date()
+                          isIssueScheduleOverdue(issue)
                             ? "text-destructive"
                             : "text-muted-foreground"
                         }`}
                       >
                         <CalendarDays className="size-3" />
-                        {formatDate(issue.due_date!)}
+                        {scheduleLabel}
                       </span>
                     }
                   />
@@ -151,13 +148,13 @@ export const BoardCardContent = memo(function BoardCardContent({
               ) : (
                 <span
                   className={`flex items-center gap-1 text-xs ${
-                    new Date(issue.due_date!) < new Date()
+                    isIssueScheduleOverdue(issue)
                       ? "text-destructive"
                       : "text-muted-foreground"
                   }`}
                 >
                   <CalendarDays className="size-3" />
-                  {formatDate(issue.due_date!)}
+                  {scheduleLabel}
                 </span>
               )}
             </div>

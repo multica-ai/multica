@@ -4,23 +4,23 @@ import { memo } from "react";
 import type { Issue } from "@/shared/types";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { useIssueSelectionStore } from "@/features/issues/stores/selection-store";
+import {
+  formatIssueSchedule,
+  isIssueScheduleOverdue,
+} from "@/features/issues/utils/workbench-view";
 import { Link } from "@/shared/router";
 import { PriorityIcon } from "./priority-icon";
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-}
+import { IssueTaskStatusBadge } from "./issue-task-status-badge";
 
 export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
+  const scheduleLabel = formatIssueSchedule(issue);
+  const isOverdue = isIssueScheduleOverdue(issue);
 
   return (
     <div
-      className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:bg-accent/50 ${
+      className={`group/row flex min-h-9 items-center gap-2 px-4 py-1 text-sm transition-colors hover:bg-accent/50 ${
         selected ? "bg-accent/30" : ""
       }`}
     >
@@ -45,10 +45,15 @@ export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
         <span className="w-16 shrink-0 text-xs text-muted-foreground">
           {issue.identifier}
         </span>
-        <span className="min-w-0 flex-1 truncate">{issue.title}</span>
-        {issue.due_date && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatDate(issue.due_date)}
+        <div className="min-w-0 flex-1">
+          <div className="truncate">{issue.title}</div>
+          <div className="mt-0.5 flex items-center gap-2">
+            <IssueTaskStatusBadge issue={issue} variant="list" />
+          </div>
+        </div>
+        {scheduleLabel && (
+          <span className={`shrink-0 text-xs ${isOverdue ? "text-destructive" : "text-muted-foreground"}`}>
+            {scheduleLabel}
           </span>
         )}
         {issue.assignee_type && issue.assignee_id && (
