@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Build, type check, and test
         run: pnpm build && pnpm typecheck && pnpm test
 
