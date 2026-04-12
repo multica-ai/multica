@@ -173,7 +173,7 @@ function ActorSubContent({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const query = search.toLowerCase();
+  const query = search.trim().toLowerCase();
   const filteredMembers = members.filter((m) =>
     m.name.toLowerCase().includes(query),
   );
@@ -306,7 +306,7 @@ function ProjectSubContent({
   const [search, setSearch] = useState("");
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const query = search.toLowerCase();
+  const query = search.trim().toLowerCase();
   const filtered = projects.filter((p) =>
     p.title.toLowerCase().includes(query),
   );

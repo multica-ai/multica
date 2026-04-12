@@ -174,12 +174,20 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Wait briefly and verify daemon started via health endpoint.
-	time.Sleep(2 * time.Second)
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel2()
-	health = checkDaemonHealthOnPort(ctx2, healthPort)
-	if health["status"] != "running" {
+	// Poll health endpoint until the daemon is ready or timeout.
+	deadline := time.Now().Add(15 * time.Second)
+	started := false
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health = checkDaemonHealthOnPort(hctx, healthPort)
+		hcancel()
+		if health["status"] == "running" {
+			started = true
+			break
+		}
+	}
+	if !started {
 		fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
 		return nil
 	}

@@ -11,11 +11,14 @@ test.describe("Issues", () => {
   });
 
   test.afterEach(async () => {
-    await api.cleanup();
+    if (api) {
+      await api.cleanup();
+    }
   });
 
   test("issues page loads with board view", async ({ page }) => {
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await api.createIssue("E2E Board View " + Date.now());
+    await page.reload();
 
     // Board columns should be visible
     await expect(page.locator("text=Backlog")).toBeVisible();
@@ -23,29 +26,36 @@ test.describe("Issues", () => {
     await expect(page.locator("text=In Progress")).toBeVisible();
   });
 
-  test("can switch between board and list view", async ({ page }) => {
-    await expect(page.locator("text=All Issues")).toBeVisible();
+  test("can switch from board to list view", async ({ page }) => {
+    const title = "E2E List Switch " + Date.now();
+    await api.createIssue(title);
+    await page.reload();
+    await expect(page.locator("text=Backlog")).toBeVisible();
 
     // Switch to list view
     await page.click("text=List");
-    await expect(page.locator("text=All Issues")).toBeVisible();
-
-    // Switch back to board view
-    await page.click("text=Board");
-    await expect(page.locator("text=Backlog")).toBeVisible();
+    await expect(page.getByText(title)).toBeVisible();
   });
 
   test("can create a new issue", async ({ page }) => {
-    await page.click("text=New Issue");
+    const newIssueButton = page.getByRole("button", { name: "New Issue" });
+    await expect(newIssueButton).toBeVisible();
+    await newIssueButton.click();
 
     const title = "E2E Created " + Date.now();
-    await page.fill('input[placeholder="Issue title..."]', title);
-    await page.click("text=Create");
+    const titleInput = page.getByRole("textbox", { name: "Issue title" });
+    await expect(titleInput).toBeVisible();
+    await titleInput.fill(title);
+    await page.getByRole("button", { name: "Create Issue" }).click();
 
-    // New issue should appear on the page
-    await expect(page.locator(`text=${title}`).first()).toBeVisible({
-      timeout: 10000,
-    });
+    await expect(page.getByText("Issue created")).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("region", { name: /Notifications/ }).getByText(title),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "View issue" }).click();
+    await page.waitForURL(/\/issues\/[\w-]+/);
+    await expect(page.locator("text=Properties")).toBeVisible();
   });
 
   test("can navigate to issue detail page", async ({ page }) => {
@@ -54,7 +64,6 @@ test.describe("Issues", () => {
 
     // Reload to see the new issue
     await page.reload();
-    await expect(page.locator("text=All Issues")).toBeVisible();
 
     // Navigate to the issue detail
     const issueLink = page.locator(`a[href="/issues/${issue.id}"]`);
@@ -71,18 +80,15 @@ test.describe("Issues", () => {
     ).toBeVisible();
   });
 
-  test("can cancel issue creation", async ({ page }) => {
-    await page.click("text=New Issue");
+  test("can dismiss issue creation", async ({ page }) => {
+    await page.getByRole("button", { name: "New Issue" }).click();
 
-    await expect(
-      page.locator('input[placeholder="Issue title..."]'),
-    ).toBeVisible();
+    const titleInput = page.getByRole("textbox", { name: "Issue title" });
+    await expect(titleInput).toBeVisible();
 
-    await page.click("text=Cancel");
+    await page.keyboard.press("Escape");
 
-    await expect(
-      page.locator('input[placeholder="Issue title..."]'),
-    ).not.toBeVisible();
-    await expect(page.locator("text=New Issue")).toBeVisible();
+    await expect(titleInput).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible();
   });
 });

@@ -49,3 +49,5 @@ _features/
 *.app
 server/server
 start.sh
+data/
+.kilo

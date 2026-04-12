@@ -16,9 +16,10 @@ import (
 )
 
 type S3Storage struct {
-	client    *s3.Client
-	bucket    string
-	cdnDomain string // if set, returned URLs use this instead of bucket name
+	client      *s3.Client
+	bucket      string
+	cdnDomain   string // if set, returned URLs use this instead of bucket name
+	endpointURL string // if set, use path-style URLs (e.g. MinIO)
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -31,7 +32,7 @@ type S3Storage struct {
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
-		slog.Info("S3_BUCKET not set, file upload disabled")
+		slog.Info("S3_BUCKET not set, cloud upload disabled")
 		return nil
 	}
 
@@ -60,32 +61,43 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain)
+	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	s3Opts := []func(*s3.Options){}
+	if endpointURL != "" {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpointURL)
+			o.UsePathStyle = true
+		})
+	}
+
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL)
 	return &S3Storage{
-		client:    s3.NewFromConfig(cfg),
-		bucket:    bucket,
-		cdnDomain: cdnDomain,
+		client:      s3.NewFromConfig(cfg, s3Opts...),
+		bucket:      bucket,
+		cdnDomain:   cdnDomain,
+		endpointURL: endpointURL,
 	}
 }
 
-// sanitizeFilename removes characters that could cause header injection in Content-Disposition.
-func sanitizeFilename(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		// Strip control chars, newlines, null bytes, quotes, semicolons, backslashes
-		if r < 0x20 || r == 0x7f || r == '"' || r == ';' || r == '\\' || r == '\x00' {
-			b.WriteRune('_')
-		} else {
-			b.WriteRune(r)
-		}
+// storageClass returns the appropriate S3 storage class.
+// Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
+func (s *S3Storage) storageClass() types.StorageClass {
+	if s.endpointURL != "" {
+		return types.StorageClassStandard
 	}
-	return b.String()
+	return types.StorageClassIntelligentTiering
 }
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
 // e.g. "https://multica-static.copilothub.ai/abc123.png" → "abc123.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
+	if s.endpointURL != "" {
+		prefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
+		if strings.HasPrefix(rawURL, prefix) {
+			return strings.TrimPrefix(rawURL, prefix)
+		}
+	}
+
 	// Strip the "https://domain/" prefix.
 	for _, prefix := range []string{
 		"https://" + s.cdnDomain + "/",
@@ -123,16 +135,6 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	}
 }
 
-// isInlineContentType returns true for media types that browsers should
-// display inline (images, video, audio, PDF). Everything else triggers a
-// download via Content-Disposition: attachment.
-func isInlineContentType(ct string) bool {
-	return strings.HasPrefix(ct, "image/") ||
-		strings.HasPrefix(ct, "video/") ||
-		strings.HasPrefix(ct, "audio/") ||
-		ct == "application/pdf"
-}
-
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	safe := sanitizeFilename(filename)
 	disposition := "attachment"
@@ -146,12 +148,16 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
-		StorageClass:       types.StorageClassIntelligentTiering,
+		StorageClass:       s.storageClass(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 
+	if s.endpointURL != "" {
+		link := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+		return link, nil
+	}
 	domain := s.bucket
 	if s.cdnDomain != "" {
 		domain = s.cdnDomain

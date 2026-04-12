@@ -268,15 +268,23 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
-	// Post agent output as a comment, but only for issue tasks with assignment triggers.
+	// Post agent output as a comment, but only for assignment-triggered issue tasks
+	// where the agent did NOT already post a comment during execution.
 	// Comment-triggered tasks: the agent replies via CLI with --parent, so
 	// posting here would create a duplicate.
 	// Chat tasks: no comment posting needed.
 	if task.IssueID.Valid && !task.TriggerCommentID.Valid {
-		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil {
-			if payload.Output != "" {
-				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
+		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
+			IssueID:  task.IssueID,
+			AuthorID: task.AgentID,
+			Since:    task.StartedAt,
+		})
+		if !agentCommented {
+			var payload protocol.TaskCompletedPayload
+			if err := json.Unmarshal(result, &payload); err == nil {
+				if payload.Output != "" {
+					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
+				}
 			}
 		}
 	}

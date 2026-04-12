@@ -10,6 +10,7 @@ import (
 var (
 	version = "dev"
 	commit  = "unknown"
+	date    = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -40,6 +41,7 @@ func init() {
 	// Additional commands
 	authCmd.GroupID = groupAdditional
 	loginCmd.GroupID = groupAdditional
+	setupCmd.GroupID = groupAdditional
 	attachmentCmd.GroupID = groupAdditional
 	configCmd.GroupID = groupAdditional
 	updateCmd.GroupID = groupAdditional
@@ -55,6 +57,7 @@ func init() {
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(attachmentCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(updateCmd)

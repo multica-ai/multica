@@ -17,7 +17,7 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(_ *cobra.Command, _ []string) error {
-	fmt.Fprintf(os.Stderr, "Current version: %s (commit: %s)\n", version, commit)
+	fmt.Fprintf(os.Stderr, "Current version: %s (commit: %s, built: %s)\n", version, commit, date)
 
 	// Check latest version from GitHub.
 	latest, err := cli.FetchLatestRelease()

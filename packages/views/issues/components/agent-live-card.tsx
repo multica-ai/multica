@@ -119,20 +119,40 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     let cancelled = false;
     api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
       if (cancelled || tasks.length === 0) return;
-      const newStates = new Map<string, TaskState>();
-      const loadPromises = tasks.map(async (task) => {
-        try {
-          const msgs = await api.listTaskMessages(task.id);
+
+      // Show cards immediately with empty timeline
+      setTaskStates((prev) => {
+        const next = new Map(prev);
+        for (const task of tasks) {
+          if (!next.has(task.id)) {
+            next.set(task.id, { task, items: [] });
+          }
+        }
+        return next;
+      });
+
+      // Load messages per task in the background
+      for (const task of tasks) {
+        api.listTaskMessages(task.id).then((msgs) => {
+          if (cancelled) return;
           const timeline = buildTimeline(msgs);
           for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
-          newStates.set(task.id, { task, items: timeline });
-        } catch {
-          newStates.set(task.id, { task, items: [] });
-        }
-      });
-      Promise.all(loadPromises).then(() => {
-        if (!cancelled) setTaskStates(newStates);
-      });
+          setTaskStates((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(task.id);
+            if (existing) {
+              // Merge: keep any WS-delivered items not in the loaded batch
+              const loadedSeqs = new Set(timeline.map((i) => i.seq));
+              const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
+              const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
+              next.set(task.id, { task: existing.task, items: merged });
+            } else {
+              next.set(task.id, { task, items: timeline });
+            }
+            return next;
+          });
+        }).catch(console.error);
+      }
     }).catch(console.error);
 
     return () => { cancelled = true; };
@@ -354,7 +374,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
       >
         <div className="overflow-hidden">
-          {items.length > 0 && (
+          {items.length > 0 ? (
             <div
               ref={scrollRef}
               onScroll={handleScroll}
@@ -379,6 +399,12 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
                   Latest
                 </button>
               )}
+            </div>
+          ) : (
+            <div className="border-t border-info/10 px-3 py-3">
+              <p className="text-xs text-muted-foreground">
+                Live log is not available for this agent provider. Results will appear when the task completes.
+              </p>
             </div>
           )}
         </div>

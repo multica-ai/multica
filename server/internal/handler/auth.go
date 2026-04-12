@@ -241,6 +241,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
+		slog.Error("failed to send verification code", "email", email, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send verification code")
 		return
 	}

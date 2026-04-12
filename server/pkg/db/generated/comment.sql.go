@@ -130,6 +130,29 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const hasAgentCommentedSince = `-- name: HasAgentCommentedSince :one
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = $1
+      AND author_type = 'agent'
+      AND author_id = $2
+      AND created_at >= $3
+) AS commented
+`
+
+type HasAgentCommentedSinceParams struct {
+	IssueID  pgtype.UUID        `json:"issue_id"`
+	AuthorID pgtype.UUID        `json:"author_id"`
+	Since    pgtype.Timestamptz `json:"since"`
+}
+
+func (q *Queries) HasAgentCommentedSince(ctx context.Context, arg HasAgentCommentedSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAgentCommentedSince, arg.IssueID, arg.AuthorID, arg.Since)
+	var commented bool
+	err := row.Scan(&commented)
+	return commented, err
+}
+
 const listComments = `-- name: ListComments :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
 WHERE issue_id = $1 AND workspace_id = $2

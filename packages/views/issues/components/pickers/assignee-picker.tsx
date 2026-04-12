@@ -67,7 +67,7 @@ export function AssigneePicker({
 
   const getFreq = (type: string, id: string) => freqMap.get(`${type}:${id}`) ?? 0;
 
-  const query = filter.toLowerCase();
+  const query = filter.trim().toLowerCase();
   const filteredMembers = members
     .filter((m) => m.name.toLowerCase().includes(query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));

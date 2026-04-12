@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Plus, FolderKanban, ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Plus, FolderKanban, ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus, Check } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useCreateProject } from "@multica/core/projects/mutations";
+import { useCreateProject, useUpdateProject } from "@multica/core/projects/mutations";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER, PROJECT_PRIORITY_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspaceStore } from "@multica/core/workspace";
@@ -36,7 +36,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { TitleEditor } from "../../editor";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Project, ProjectStatus, ProjectPriority, UpdateProjectRequest } from "@multica/core/types";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 
 function formatRelativeDate(date: string): string {
@@ -50,32 +50,83 @@ function formatRelativeDate(date: string): string {
 }
 
 function ProjectRow({ project }: { project: Project }) {
+  const wsId = useWorkspaceId();
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
+  const updateProject = useUpdateProject();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { getActorName } = useActorName();
+
+  const [leadOpen, setLeadOpen] = useState(false);
+  const [leadFilter, setLeadFilter] = useState("");
+  const leadQuery = leadFilter.toLowerCase();
+  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
+  const filteredAgents = agents.filter((a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery));
+
+  const handleUpdate = useCallback(
+    (data: UpdateProjectRequest) => {
+      updateProject.mutate({ id: project.id, ...data });
+    },
+    [project.id, updateProject],
+  );
+
   return (
-    <AppLink
-      href={`/projects/${project.id}`}
-      className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40"
-    >
-      {/* Icon + Name */}
-      <span className="shrink-0 w-[24px] text-center text-base">{project.icon || "📁"}</span>
-      <span className="min-w-0 flex-1 truncate font-medium">{project.title}</span>
+    <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
+      {/* Icon + Name (navigates to detail) */}
+      <AppLink
+        href={`/projects/${project.id}`}
+        className="flex min-w-0 flex-1 items-center gap-2"
+      >
+        <span className="shrink-0 w-[24px] text-center text-base">{project.icon || "📁"}</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{project.title}</span>
+      </AppLink>
 
-      {/* Priority */}
-      <span className="flex w-24 items-center justify-center gap-1 shrink-0">
-        <PriorityIcon priority={project.priority} />
-        <span className={cn("text-xs", priorityCfg.color)}>{priorityCfg.label}</span>
-      </span>
+      {/* Priority — dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button type="button" className="flex w-24 items-center justify-center gap-1 shrink-0 rounded px-1 py-0.5 hover:bg-accent/60 transition-colors cursor-pointer">
+              <PriorityIcon priority={project.priority} />
+              <span className={cn("text-xs", priorityCfg.color)}>{priorityCfg.label}</span>
+            </button>
+          }
+        />
+        <DropdownMenuContent align="start" className="w-44">
+          {PROJECT_PRIORITY_ORDER.map((p) => (
+            <DropdownMenuItem key={p} onClick={() => handleUpdate({ priority: p as ProjectPriority })}>
+              <PriorityIcon priority={p} />
+              <span>{PROJECT_PRIORITY_CONFIG[p].label}</span>
+              {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      {/* Status */}
-      <span className={cn(
-        "inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium shrink-0 w-28 justify-center",
-        statusCfg.badgeBg, statusCfg.badgeText,
-      )}>
-        {statusCfg.label}
-      </span>
+      {/* Status — dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button type="button" className={cn(
+              "inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium shrink-0 w-28 justify-center cursor-pointer hover:opacity-80 transition-opacity",
+              statusCfg.badgeBg, statusCfg.badgeText,
+            )}>
+              {statusCfg.label}
+            </button>
+          }
+        />
+        <DropdownMenuContent align="start" className="w-44">
+          {PROJECT_STATUS_ORDER.map((s) => (
+            <DropdownMenuItem key={s} onClick={() => handleUpdate({ status: s as ProjectStatus })}>
+              <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
+              <span>{PROJECT_STATUS_CONFIG[s].label}</span>
+              {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      {/* Progress */}
+      {/* Progress (read-only) */}
       <span className="flex w-24 items-center justify-center gap-1.5 shrink-0">
         {project.issue_count > 0 ? (
           <>
@@ -94,20 +145,85 @@ function ProjectRow({ project }: { project: Project }) {
         )}
       </span>
 
-      {/* Lead */}
-      <span className="flex w-10 items-center justify-center shrink-0">
-        {project.lead_type && project.lead_id ? (
-          <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={22} />
-        ) : (
-          <span className="h-[22px] w-[22px] rounded-full border border-dashed border-muted-foreground/30" />
-        )}
-      </span>
+      {/* Lead — popover */}
+      <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+        <PopoverTrigger
+          render={
+            <button type="button" className="flex w-10 items-center justify-center shrink-0 rounded-full hover:ring-2 hover:ring-accent transition-all cursor-pointer">
+              {project.lead_type && project.lead_id ? (
+                <Tooltip>
+                  <TooltipTrigger render={<span><ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={22} /></span>} />
+                  <TooltipContent side="bottom">{getActorName(project.lead_type, project.lead_id)}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <span className="h-[22px] w-[22px] rounded-full border border-dashed border-muted-foreground/30" />
+              )}
+            </button>
+          }
+        />
+        <PopoverContent align="start" className="w-52 p-0">
+          <div className="px-2 py-1.5 border-b">
+            <input
+              type="text"
+              value={leadFilter}
+              onChange={(e) => setLeadFilter(e.target.value)}
+              placeholder="Assign lead..."
+              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+            />
+          </div>
+          <div className="p-1 max-h-60 overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => { handleUpdate({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+            >
+              <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">No lead</span>
+            </button>
+            {filteredMembers.length > 0 && (
+              <>
+                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
+                {filteredMembers.map((m) => (
+                  <button
+                    type="button"
+                    key={m.user_id}
+                    onClick={() => { handleUpdate({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                  >
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                    <span>{m.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+            {filteredAgents.length > 0 && (
+              <>
+                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
+                {filteredAgents.map((a) => (
+                  <button
+                    type="button"
+                    key={a.id}
+                    onClick={() => { handleUpdate({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                  >
+                    <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                    <span>{a.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+            {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
+              <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       {/* Created */}
       <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {formatRelativeDate(project.created_at)}
       </span>
-    </AppLink>
+    </div>
   );
 }
 
