@@ -954,6 +954,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Inject agent-specific extra env vars (e.g. API keys, base URLs configured
+	// via MULTICA_CLAUDE_API_KEY / MULTICA_OPENCLAW_API_KEY / etc.). These take
+	// priority over inherited env vars so daemon-level config wins.
+	for k, v := range entry.ExtraEnv {
+		agentEnv[k] = v
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,

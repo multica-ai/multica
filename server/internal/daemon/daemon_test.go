@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -81,5 +82,106 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 
 	if isWorkspaceNotFoundError(&requestError{StatusCode: http.StatusInternalServerError, Body: `{"error":"workspace not found"}`}) {
 		t.Fatal("did not expect 500 to be treated as workspace not found")
+	}
+}
+
+// TestLoadConfigClaudeExtraEnv verifies that MULTICA_CLAUDE_API_KEY and
+// MULTICA_CLAUDE_BASE_URL are populated into AgentEntry.ExtraEnv as the
+// correct Anthropic env var names.
+func TestLoadConfigClaudeExtraEnv(t *testing.T) {
+	// Create a temporary fake claude binary so exec.LookPath succeeds.
+	tmp := t.TempDir()
+	fakeClaude := tmp + "/claude"
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("create fake claude: %v", err)
+	}
+
+	t.Setenv("MULTICA_CLAUDE_PATH", fakeClaude)
+	t.Setenv("MULTICA_CLAUDE_API_KEY", "minimax-test-key")
+	t.Setenv("MULTICA_CLAUDE_BASE_URL", "https://api.minimax.io/anthropic")
+	// Ensure other agents are not found so we don't need more fake binaries.
+	for _, v := range []string{
+		"MULTICA_CODEX_PATH", "MULTICA_OPENCODE_PATH",
+		"MULTICA_OPENCLAW_PATH", "MULTICA_HERMES_PATH",
+	} {
+		t.Setenv(v, "/nonexistent/binary-"+v)
+	}
+
+	cfg, err := LoadConfig(Overrides{})
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+
+	claudeEntry, ok := cfg.Agents["claude"]
+	if !ok {
+		t.Fatal("expected claude entry in config")
+	}
+	if claudeEntry.ExtraEnv["ANTHROPIC_AUTH_TOKEN"] != "minimax-test-key" {
+		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want %q", claudeEntry.ExtraEnv["ANTHROPIC_AUTH_TOKEN"], "minimax-test-key")
+	}
+	if claudeEntry.ExtraEnv["ANTHROPIC_BASE_URL"] != "https://api.minimax.io/anthropic" {
+		t.Errorf("ANTHROPIC_BASE_URL = %q, want %q", claudeEntry.ExtraEnv["ANTHROPIC_BASE_URL"], "https://api.minimax.io/anthropic")
+	}
+}
+
+// TestLoadConfigOpenclawExtraEnv verifies that MULTICA_OPENCLAW_API_KEY is
+// mapped to MINIMAX_API_KEY in AgentEntry.ExtraEnv.
+func TestLoadConfigOpenclawExtraEnv(t *testing.T) {
+	tmp := t.TempDir()
+	fakeOpenclaw := tmp + "/openclaw"
+	if err := os.WriteFile(fakeOpenclaw, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("create fake openclaw: %v", err)
+	}
+
+	t.Setenv("MULTICA_OPENCLAW_PATH", fakeOpenclaw)
+	t.Setenv("MULTICA_OPENCLAW_API_KEY", "minimax-openclaw-key")
+	for _, v := range []string{
+		"MULTICA_CLAUDE_PATH", "MULTICA_CODEX_PATH",
+		"MULTICA_OPENCODE_PATH", "MULTICA_HERMES_PATH",
+	} {
+		t.Setenv(v, "/nonexistent/binary-"+v)
+	}
+
+	cfg, err := LoadConfig(Overrides{})
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+
+	entry, ok := cfg.Agents["openclaw"]
+	if !ok {
+		t.Fatal("expected openclaw entry in config")
+	}
+	if entry.ExtraEnv["MINIMAX_API_KEY"] != "minimax-openclaw-key" {
+		t.Errorf("MINIMAX_API_KEY = %q, want %q", entry.ExtraEnv["MINIMAX_API_KEY"], "minimax-openclaw-key")
+	}
+}
+
+// TestAgentEntryExtraEnvEmpty verifies that an agent entry without API key
+// env vars set has a nil or empty ExtraEnv — no spurious keys injected.
+func TestAgentEntryExtraEnvEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	fakeClaude := tmp + "/claude"
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("create fake claude: %v", err)
+	}
+
+	t.Setenv("MULTICA_CLAUDE_PATH", fakeClaude)
+	t.Setenv("MULTICA_CLAUDE_API_KEY", "")
+	t.Setenv("MULTICA_CLAUDE_BASE_URL", "")
+	for _, v := range []string{
+		"MULTICA_CODEX_PATH", "MULTICA_OPENCODE_PATH",
+		"MULTICA_OPENCLAW_PATH", "MULTICA_HERMES_PATH",
+	} {
+		t.Setenv(v, "/nonexistent/binary-"+v)
+	}
+
+	cfg, err := LoadConfig(Overrides{})
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+
+	entry := cfg.Agents["claude"]
+	if len(entry.ExtraEnv) != 0 {
+		t.Errorf("expected empty ExtraEnv, got %v", entry.ExtraEnv)
 	}
 }

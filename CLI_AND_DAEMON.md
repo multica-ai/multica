@@ -135,6 +135,9 @@ The daemon auto-detects these AI CLIs on your PATH:
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
+| [OpenCode](https://opencode.ai) | `opencode` | Open-source coding agent (multi-provider) |
+| [OpenClaw](https://openclaw.ai) | `openclaw` | MiniMax's coding agent |
+| [Hermes](https://hermes.ai) | `hermes` | MiniMax's Anthropic-compatible coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -166,9 +169,42 @@ Agent-specific overrides:
 | Variable | Description |
 |----------|-------------|
 | `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
-| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
+| `MULTICA_CLAUDE_MODEL` | Override the model used by Claude Code |
+| `MULTICA_CLAUDE_API_KEY` | API key injected as `ANTHROPIC_AUTH_TOKEN` (enables alternative providers, e.g. MiniMax) |
+| `MULTICA_CLAUDE_BASE_URL` | Base URL injected as `ANTHROPIC_BASE_URL` (e.g. `https://api.minimax.io/anthropic` for MiniMax) |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
-| `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_CODEX_MODEL` | Override the model used by Codex |
+| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `MULTICA_OPENCODE_MODEL` | Override the model used by OpenCode |
+| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `MULTICA_OPENCLAW_MODEL` | Override the model used by OpenClaw |
+| `MULTICA_OPENCLAW_API_KEY` | MiniMax API key injected as `MINIMAX_API_KEY` for OpenClaw |
+| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
+| `MULTICA_HERMES_MODEL` | Override the model used by Hermes |
+| `MULTICA_HERMES_API_KEY` | MiniMax API key injected as `MINIMAX_API_KEY` for Hermes |
+
+#### Using MiniMax Models
+
+MiniMax's [MiniMax-M2.7](https://platform.minimax.io/docs/guides/text-ai-coding-tools) model can be used through any of the supported agents:
+
+**Via Claude Code** (Anthropic-compatible API):
+```bash
+export MULTICA_CLAUDE_API_KEY=your_minimax_api_key
+export MULTICA_CLAUDE_BASE_URL=https://api.minimax.io/anthropic
+multica daemon start
+```
+
+**Via OpenClaw** (MiniMax's native coding agent):
+```bash
+export MULTICA_OPENCLAW_API_KEY=your_minimax_api_key
+multica daemon start
+```
+
+**Via Hermes Agent** (MiniMax's Anthropic-compatible coding agent):
+```bash
+export MULTICA_HERMES_API_KEY=your_minimax_api_key
+multica daemon start
+```
 
 ### Self-Hosted Server
 
