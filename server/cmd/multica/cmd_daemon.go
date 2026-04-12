@@ -255,6 +255,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			serverURL = c.ServerURL
 		}
 	}
+
+	profileCfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+
 	overrides := daemon.Overrides{
 		ServerURL:   serverURL,
 		DaemonID:    flagString(cmd, "daemon-id"),
@@ -277,9 +283,13 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if v, _ := cmd.Flags().GetBool("auto-publish"); v {
 		overrides.AutoPublish = true
+	} else if os.Getenv("MULTICA_AUTO_PUBLISH") == "" && profileCfg.AutoPublish {
+		overrides.AutoPublish = true
 	}
 	if v, _ := cmd.Flags().GetString("publish-remote"); v != "" {
 		overrides.PublishRemote = v
+	} else if os.Getenv("MULTICA_PUBLISH_REMOTE") == "" && profileCfg.PublishRemote != "" {
+		overrides.PublishRemote = profileCfg.PublishRemote
 	}
 
 	cfg, err := daemon.LoadConfig(overrides)

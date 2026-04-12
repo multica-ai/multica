@@ -423,6 +423,13 @@ func (d *Daemon) reloadWorkspaces(ctx context.Context) {
 		return
 	}
 
+	d.cfg.AutoPublish = cfg.AutoPublish
+	if remote := strings.TrimSpace(cfg.PublishRemote); remote != "" {
+		d.cfg.PublishRemote = remote
+	} else if strings.TrimSpace(d.cfg.PublishRemote) == "" {
+		d.cfg.PublishRemote = "origin"
+	}
+
 	newIDs := make(map[string]string) // id -> name
 	for _, ws := range cfg.WatchedWorkspaces {
 		newIDs[ws.ID] = ws.Name

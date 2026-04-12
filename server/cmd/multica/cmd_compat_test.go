@@ -57,3 +57,26 @@ func TestRunConfigSetPersistsValues(t *testing.T) {
 		t.Fatalf("WorkspaceID = %q, want %q", cfg.WorkspaceID, "ws-123")
 	}
 }
+
+func TestRunConfigSetPersistsAutoPublishSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cmd := testCmd()
+
+	if err := runConfigSet(cmd, []string{"auto_publish", "true"}); err != nil {
+		t.Fatalf("runConfigSet(auto_publish) error = %v", err)
+	}
+	if err := runConfigSet(cmd, []string{"publish_remote", "fork"}); err != nil {
+		t.Fatalf("runConfigSet(publish_remote) error = %v", err)
+	}
+
+	cfg, err := cli.LoadCLIConfig()
+	if err != nil {
+		t.Fatalf("LoadCLIConfig() error = %v", err)
+	}
+	if !cfg.AutoPublish {
+		t.Fatalf("AutoPublish = false, want true")
+	}
+	if cfg.PublishRemote != "fork" {
+		t.Fatalf("PublishRemote = %q, want %q", cfg.PublishRemote, "fork")
+	}
+}
