@@ -32,7 +32,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
+	opts.Timeout = timeout
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runDeadline, _ := runCtx.Deadline()
 
 	cmd := exec.CommandContext(runCtx, execPath, buildCodexArgs()...)
 	if opts.Cwd != "" {
@@ -254,13 +256,44 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			usageMap = map[string]TokenUsage{model: u}
 		}
 
-		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			Usage:      usageMap,
+		result := Result{
+			Status: finalStatus,
+			Output: finalOutput,
+			Error:  finalError,
+			Usage:  usageMap,
 		}
+
+		if shouldFallbackToCodexExec(result) && ctx.Err() == nil {
+			b.cfg.Logger.Warn("codex app-server failed with transient upstream error; retrying via exec fallback",
+				"cwd", opts.Cwd,
+				"error", result.Error)
+			trySend(msgCh, Message{
+				Type:    MessageLog,
+				Level:   "warn",
+				Content: "Codex app-server hit an upstream connection failure; retrying with codex exec fallback.",
+			})
+
+			fallbackCtx, fallbackCancel, remaining, ok := newCodexFallbackContext(ctx, runDeadline)
+			if !ok {
+				result = Result{
+					Status: "timeout",
+					Error:  fmt.Sprintf("codex timed out after %s before exec fallback could start", timeout),
+				}
+			} else {
+				fallbackOpts := opts
+				if remaining > 0 {
+					fallbackOpts.Timeout = remaining
+				}
+				fallback := b.executeExecFallback(fallbackCtx, execPath, prompt, fallbackOpts, func(msg Message) {
+					trySend(msgCh, msg)
+				})
+				fallbackCancel()
+				result = mergeCodexFallbackResult(result, fallback)
+			}
+		}
+
+		result.DurationMs = time.Since(startTime).Milliseconds()
+		resCh <- result
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
@@ -275,6 +308,91 @@ func buildCodexArgs() []string {
 		"--disable", "plugins",
 		"--listen", "stdio://",
 	}
+}
+
+func newCodexFallbackContext(parent context.Context, runDeadline time.Time) (context.Context, context.CancelFunc, time.Duration, bool) {
+	if !runDeadline.IsZero() {
+		remaining := time.Until(runDeadline)
+		if remaining <= 0 {
+			return nil, nil, 0, false
+		}
+		ctx, cancel := context.WithTimeout(parent, remaining)
+		return ctx, cancel, remaining, true
+	}
+
+	ctx, cancel := context.WithCancel(parent)
+	return ctx, cancel, 0, true
+}
+
+func buildCodexExecArgs(opts ExecOptions) []string {
+	args := []string{
+		"exec",
+		"--disable", "plugins",
+		"--disable", "shell_snapshot",
+		"--skip-git-repo-check",
+		"--json",
+		"-c", `approval_policy="never"`,
+	}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	if opts.Cwd != "" {
+		args = append(args, "-C", opts.Cwd)
+	}
+	args = append(args, "-")
+	return args
+}
+
+func buildCodexExecInput(prompt, systemPrompt string) []byte {
+	var input strings.Builder
+	if strings.TrimSpace(systemPrompt) != "" {
+		input.WriteString("<developer_instructions>\n")
+		input.WriteString(systemPrompt)
+		input.WriteString("\n</developer_instructions>\n\n")
+	}
+	input.WriteString(prompt)
+	if !strings.HasSuffix(input.String(), "\n") {
+		input.WriteByte('\n')
+	}
+	return []byte(input.String())
+}
+
+func shouldFallbackToCodexExec(result Result) bool {
+	if result.Status == "aborted" || result.Status == "timeout" {
+		return false
+	}
+	return isCodexTransientUpstreamMessage(result.Error)
+}
+
+func isCodexTransientUpstreamMessage(message string) bool {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "codex upstream connection failed") ||
+		(strings.Contains(msg, "responses_websocket") &&
+			strings.Contains(msg, "500 internal server error") &&
+			strings.Contains(msg, "wss://api.openai.com/v1/responses"))
+}
+
+func mergeCodexFallbackResult(primary, fallback Result) Result {
+	if fallback.Status == "" {
+		return primary
+	}
+	if fallback.Output == "" {
+		fallback.Output = primary.Output
+	}
+	if len(fallback.Usage) == 0 {
+		fallback.Usage = primary.Usage
+	}
+	if fallback.Error == "" {
+		return fallback
+	}
+	if isCodexTransientUpstreamMessage(fallback.Error) {
+		return fallback
+	}
+	fallback.Error = fmt.Sprintf("codex exec fallback failed after app-server upstream failure: %s", fallback.Error)
+	return fallback
 }
 
 func inferCodexEmptyOutputError(stderrTail string) string {
@@ -300,6 +418,203 @@ func inferCodexEmptyOutputError(stderrTail string) string {
 	}
 
 	return fmt.Sprintf("codex produced no final output; recent stderr: %s", lastLine)
+}
+
+func (b *codexBackend) executeExecFallback(ctx context.Context, execPath, prompt string, opts ExecOptions, emit func(Message)) Result {
+	procCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	cmd := exec.CommandContext(procCtx, execPath, buildCodexExecArgs(opts)...)
+	if opts.Cwd != "" {
+		cmd.Dir = opts.Cwd
+	}
+	cmd.Env = buildEnv(b.cfg.Env)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{Status: "failed", Error: fmt.Sprintf("codex exec stdout pipe: %v", err)}
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return Result{Status: "failed", Error: fmt.Sprintf("codex exec stdin pipe: %v", err)}
+	}
+	stderrWriter := newLogWriter(b.cfg.Logger, "[codex:exec:stderr] ")
+	cmd.Stderr = stderrWriter
+
+	if err := cmd.Start(); err != nil {
+		return Result{Status: "failed", Error: fmt.Sprintf("start codex exec fallback: %v", err)}
+	}
+	b.cfg.Logger.Info("codex started exec fallback", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+
+	input := buildCodexExecInput(prompt, opts.SystemPrompt)
+	if _, err := stdin.Write(input); err != nil {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		return Result{Status: "failed", Error: fmt.Sprintf("write codex exec input: %v", err)}
+	}
+	if err := stdin.Close(); err != nil {
+		_ = cmd.Wait()
+		return Result{Status: "failed", Error: fmt.Sprintf("close codex exec stdin: %v", err)}
+	}
+
+	var state codexExecState
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		handleCodexExecStreamLine(line, &state, emit)
+	}
+
+	waitErr := cmd.Wait()
+	finalStatus := "completed"
+	var finalError string
+
+	if ctx.Err() == context.DeadlineExceeded {
+		finalStatus = "timeout"
+		finalError = fmt.Sprintf("codex exec fallback timed out after %s", opts.Timeout)
+	} else if ctx.Err() == context.Canceled {
+		finalStatus = "aborted"
+		finalError = "codex exec fallback cancelled"
+	} else if waitErr != nil {
+		finalStatus = "failed"
+		finalError = inferCodexEmptyOutputError(stderrWriter.Tail())
+		if finalError == "" {
+			finalError = fmt.Sprintf("codex exec fallback exited with error: %v", waitErr)
+		}
+	}
+
+	finalOutput := state.output.String()
+	if finalStatus == "completed" && strings.TrimSpace(finalOutput) == "" && finalError == "" {
+		finalError = inferCodexEmptyOutputError(stderrWriter.Tail())
+	}
+
+	model := opts.Model
+	if model == "" {
+		model = "unknown"
+	}
+	var usage map[string]TokenUsage
+	if state.usage.InputTokens > 0 || state.usage.OutputTokens > 0 || state.usage.CacheReadTokens > 0 || state.usage.CacheWriteTokens > 0 {
+		usage = map[string]TokenUsage{model: state.usage}
+	}
+
+	b.cfg.Logger.Info("codex exec fallback finished", "pid", cmd.Process.Pid, "status", finalStatus)
+	return Result{
+		Status:    finalStatus,
+		Output:    finalOutput,
+		Error:     finalError,
+		SessionID: state.threadID,
+		Usage:     usage,
+	}
+}
+
+type codexExecState struct {
+	threadID string
+	output   strings.Builder
+	usage    TokenUsage
+}
+
+type codexExecEvent struct {
+	Type     string          `json:"type"`
+	ThreadID string          `json:"thread_id"`
+	Item     *codexExecItem  `json:"item"`
+	Usage    *codexExecUsage `json:"usage"`
+}
+
+type codexExecItem struct {
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	Text             string `json:"text"`
+	Command          string `json:"command"`
+	AggregatedOutput string `json:"aggregated_output"`
+	Status           string `json:"status"`
+}
+
+type codexExecUsage struct {
+	InputTokens       int64 `json:"input_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+}
+
+func handleCodexExecStreamLine(line string, state *codexExecState, emit func(Message)) {
+	var event codexExecEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return
+	}
+
+	switch event.Type {
+	case "thread.started":
+		state.threadID = event.ThreadID
+	case "turn.started":
+		if emit != nil {
+			emit(Message{Type: MessageStatus, Status: "running"})
+		}
+	case "turn.completed":
+		if event.Usage != nil {
+			state.usage.InputTokens += event.Usage.InputTokens
+			state.usage.CacheReadTokens += event.Usage.CachedInputTokens
+			state.usage.OutputTokens += event.Usage.OutputTokens
+		}
+	case "item.started":
+		handleCodexExecItemStarted(event.Item, emit)
+	case "item.completed":
+		handleCodexExecItemCompleted(event.Item, state, emit)
+	}
+}
+
+func handleCodexExecItemStarted(item *codexExecItem, emit func(Message)) {
+	if item == nil || emit == nil {
+		return
+	}
+	switch item.Type {
+	case "command_execution", "commandExecution":
+		emit(Message{
+			Type:   MessageToolUse,
+			Tool:   "exec_command",
+			CallID: item.ID,
+			Input:  map[string]any{"command": item.Command},
+		})
+	case "file_change", "fileChange":
+		emit(Message{
+			Type:   MessageToolUse,
+			Tool:   "patch_apply",
+			CallID: item.ID,
+		})
+	}
+}
+
+func handleCodexExecItemCompleted(item *codexExecItem, state *codexExecState, emit func(Message)) {
+	if item == nil {
+		return
+	}
+	switch item.Type {
+	case "agent_message", "agentMessage":
+		if item.Text != "" {
+			state.output.WriteString(item.Text)
+			if emit != nil {
+				emit(Message{Type: MessageText, Content: item.Text})
+			}
+		}
+	case "command_execution", "commandExecution":
+		if emit != nil {
+			emit(Message{
+				Type:   MessageToolResult,
+				Tool:   "exec_command",
+				CallID: item.ID,
+				Output: item.AggregatedOutput,
+			})
+		}
+	case "file_change", "fileChange":
+		if emit != nil {
+			emit(Message{
+				Type:   MessageToolResult,
+				Tool:   "patch_apply",
+				CallID: item.ID,
+			})
+		}
+	}
 }
 
 func lastMeaningfulLine(stderrTail string) string {

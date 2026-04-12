@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -536,6 +538,167 @@ func TestBuildCodexArgsDisablesPlugins(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildCodexExecArgsUsesJSONFallback(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexExecArgs(ExecOptions{
+		Cwd:   `E:\GitHub\multica`,
+		Model: "gpt-5.4",
+	})
+	expected := []string{
+		"exec",
+		"--disable", "plugins",
+		"--disable", "shell_snapshot",
+		"--skip-git-repo-check",
+		"--json",
+		"-c", `approval_policy="never"`,
+		"--model", "gpt-5.4",
+		"-C", `E:\GitHub\multica`,
+		"-",
+	}
+
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
+		}
+	}
+}
+
+func TestBuildCodexExecInputIncludesSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	got := string(buildCodexExecInput("user task", "be precise"))
+	want := "<developer_instructions>\nbe precise\n</developer_instructions>\n\nuser task\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestShouldFallbackToCodexExec(t *testing.T) {
+	t.Parallel()
+
+	if !shouldFallbackToCodexExec(Result{
+		Status: "failed",
+		Error:  "codex upstream connection failed: OpenAI responses websocket returned 500 Internal Server Error",
+	}) {
+		t.Fatal("expected upstream websocket failure to trigger fallback")
+	}
+	if shouldFallbackToCodexExec(Result{
+		Status: "timeout",
+		Error:  "codex upstream connection failed: OpenAI responses websocket returned 500 Internal Server Error",
+	}) {
+		t.Fatal("timeout should not trigger fallback")
+	}
+	if shouldFallbackToCodexExec(Result{
+		Status: "failed",
+		Error:  "some unrelated codex failure",
+	}) {
+		t.Fatal("unrelated failures should not trigger fallback")
+	}
+}
+
+func TestNewCodexFallbackContextIgnoresCancelledPrimaryContext(t *testing.T) {
+	t.Parallel()
+
+	parent := context.Background()
+	primaryCtx, primaryCancel := context.WithTimeout(parent, time.Minute)
+	deadline, ok := primaryCtx.Deadline()
+	if !ok {
+		t.Fatal("expected primary context deadline")
+	}
+	primaryCancel()
+
+	fallbackCtx, fallbackCancel, remaining, ok := newCodexFallbackContext(parent, deadline)
+	if !ok {
+		t.Fatal("expected fallback context to be created")
+	}
+	defer fallbackCancel()
+
+	if fallbackCtx.Err() != nil {
+		t.Fatalf("expected fresh fallback context, got %v", fallbackCtx.Err())
+	}
+	if remaining <= 0 {
+		t.Fatalf("expected positive remaining budget, got %s", remaining)
+	}
+}
+
+func TestNewCodexFallbackContextRejectsExpiredDeadline(t *testing.T) {
+	t.Parallel()
+
+	fallbackCtx, fallbackCancel, remaining, ok := newCodexFallbackContext(context.Background(), time.Now().Add(-time.Second))
+	if ok {
+		if fallbackCancel != nil {
+			fallbackCancel()
+		}
+		t.Fatal("expected expired deadline to skip fallback context")
+	}
+	if fallbackCtx != nil {
+		t.Fatalf("expected nil context, got %#v", fallbackCtx)
+	}
+	if remaining != 0 {
+		t.Fatalf("expected zero remaining budget, got %s", remaining)
+	}
+}
+
+func TestHandleCodexExecStreamLineMapsMessages(t *testing.T) {
+	t.Parallel()
+
+	var state codexExecState
+	var messages []Message
+	emit := func(msg Message) {
+		messages = append(messages, msg)
+	}
+
+	handleCodexExecStreamLine(`{"type":"thread.started","thread_id":"thread-1"}`, &state, emit)
+	handleCodexExecStreamLine(`{"type":"turn.started"}`, &state, emit)
+	handleCodexExecStreamLine(`{"type":"item.started","item":{"id":"item-1","type":"command_execution","command":"pwd"}}`, &state, emit)
+	handleCodexExecStreamLine(`{"type":"item.completed","item":{"id":"item-1","type":"command_execution","aggregated_output":"E:\\\\GitHub\\\\multica"}}`, &state, emit)
+	handleCodexExecStreamLine(`{"type":"item.completed","item":{"id":"item-2","type":"agent_message","text":"DONE"}}`, &state, emit)
+	handleCodexExecStreamLine(`{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":3}}`, &state, emit)
+
+	if state.threadID != "thread-1" {
+		t.Fatalf("expected thread-1, got %q", state.threadID)
+	}
+	if state.output.String() != "DONE" {
+		t.Fatalf("expected DONE output, got %q", state.output.String())
+	}
+	if state.usage.InputTokens != 10 || state.usage.CacheReadTokens != 4 || state.usage.OutputTokens != 3 {
+		t.Fatalf("unexpected usage: %+v", state.usage)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", len(messages), messages)
+	}
+	if messages[0].Type != MessageStatus || messages[0].Status != "running" {
+		t.Fatalf("unexpected status message: %+v", messages[0])
+	}
+	if messages[1].Type != MessageToolUse || messages[1].Tool != "exec_command" || messages[1].Input["command"] != "pwd" {
+		t.Fatalf("unexpected tool-use message: %+v", messages[1])
+	}
+	if messages[2].Type != MessageToolResult || messages[2].Output != `E:\\GitHub\\multica` {
+		t.Fatalf("unexpected tool-result message: %+v", messages[2])
+	}
+	if messages[3].Type != MessageText || messages[3].Content != "DONE" {
+		t.Fatalf("unexpected text message: %+v", messages[3])
+	}
+}
+
+func TestMergeCodexFallbackResultWrapsNonUpstreamFallbackError(t *testing.T) {
+	t.Parallel()
+
+	got := mergeCodexFallbackResult(
+		Result{Status: "failed", Error: "codex upstream connection failed: OpenAI responses websocket returned 500 Internal Server Error"},
+		Result{Status: "failed", Error: "sandbox setup failed"},
+	)
+
+	want := "codex exec fallback failed after app-server upstream failure: sandbox setup failed"
+	if got.Error != want {
+		t.Fatalf("got %q, want %q", got.Error, want)
 	}
 }
 
