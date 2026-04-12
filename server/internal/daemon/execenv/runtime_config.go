@@ -14,8 +14,11 @@ import (
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
-func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
-	content := buildMetaSkillContent(provider, ctx)
+//
+// memories is an optional pre-formatted <hindsight_memories> block (or "") that is
+// prepended to the config file content when non-empty.
+func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv, memories string) error {
+	content := buildMetaSkillContent(provider, ctx, memories)
 
 	switch provider {
 	case "claude":
@@ -30,8 +33,14 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
-func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
+// memories is a pre-formatted <hindsight_memories> block prepended when non-empty.
+func buildMetaSkillContent(provider string, ctx TaskContextForEnv, memories string) string {
 	var b strings.Builder
+
+	if memories != "" {
+		b.WriteString(memories)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")

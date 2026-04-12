@@ -144,7 +144,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Inject runtime config (done separately in daemon, replicate here).
-	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx, ""); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		},
 	}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "claude", ctx, ""); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "codex", ctx, ""); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -423,7 +423,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 
 	ctx := TaskContextForEnv{IssueID: "test-issue-id"}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "claude", ctx, ""); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -500,7 +500,7 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "opencode", ctx, ""); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -550,7 +550,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
+	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx, ""); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -588,7 +588,7 @@ func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	dir := t.TempDir()
 
 	// Unknown provider should be a no-op.
-	if err := InjectRuntimeConfig(dir, "unknown", TaskContextForEnv{}); err != nil {
+	if err := InjectRuntimeConfig(dir, "unknown", TaskContextForEnv{}, ""); err != nil {
 		t.Fatalf("expected no error for unknown provider, got: %v", err)
 	}
 

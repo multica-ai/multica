@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/daemon/usage"
+	"github.com/multica-ai/multica/server/internal/hindsight"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -26,10 +27,11 @@ type workspaceState struct {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg       Config
-	client    *Client
-	repoCache *repocache.Cache
-	logger    *slog.Logger
+	cfg          Config
+	client       *Client
+	repoCache    *repocache.Cache
+	hindsightCfg *hindsight.Config // nil when memory is disabled
+	logger       *slog.Logger
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -44,10 +46,15 @@ type Daemon struct {
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	hsCfg := hindsight.ConfigFromEnv()
+	if hsCfg != nil {
+		logger.Info("hindsight memory enabled", "url", hsCfg.APIURL, "bank", hsCfg.BankID)
+	}
 	return &Daemon{
 		cfg:          cfg,
 		client:       NewClient(cfg.ServerBaseURL),
 		repoCache:    repocache.New(cacheRoot, logger),
+		hindsightCfg: hsCfg,
 		logger:       logger,
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
@@ -920,8 +927,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 	}
 
+	// Recall relevant memories from Hindsight (no-op when memory is disabled).
+	recallQuery := task.ChatMessage
+	if recallQuery == "" {
+		recallQuery = "workspace context recent tasks"
+	}
+	memories := hindsight.Recall(ctx, d.hindsightCfg, recallQuery, d.logger)
+	memoriesBlock := hindsight.FormatMemoriesBlock(memories)
+
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
+	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx, memoriesBlock); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
@@ -1145,6 +1160,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	case "completed":
 		if result.Output == "" {
 			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
+		}
+		// Retain the task outcome to Hindsight memory (fire-and-forget).
+		if d.hindsightCfg != nil {
+			content := hindsight.BuildRetainContent(task.WorkspaceID, task.IssueID, agentName, "completed", result.Output)
+			go hindsight.Retain(context.Background(), d.hindsightCfg, content, d.logger)
 		}
 		return TaskResult{
 			Status:    "completed",
