@@ -1,38 +1,30 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { IssueSubscriber } from "@/shared/types";
 import type {
   SubscriberAddedPayload,
   SubscriberRemovedPayload,
 } from "@/shared/types";
-import { api } from "@/shared/api";
 import { toast } from "sonner";
 import { useWSEvent, useWSReconnect } from "@/features/realtime";
+import { queryKeys } from "@/shared/query";
+import { useIssueSubscribersMutations } from "../mutations";
+import { useIssueSubscribersQuery } from "../queries";
 
 export function useIssueSubscribers(issueId: string, userId?: string) {
-  const [subscribers, setSubscribers] = useState<IssueSubscriber[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Initial fetch
-  useEffect(() => {
-    setSubscribers([]);
-    setLoading(true);
-    api
-      .listIssueSubscribers(issueId)
-      .then((subs) => setSubscribers(subs))
-      .catch((e) => {
-        console.error(e);
-        toast.error("Failed to load subscribers");
-      })
-      .finally(() => setLoading(false));
-  }, [issueId]);
+  const queryClient = useQueryClient();
+  const subscribersQuery = useIssueSubscribersQuery(issueId);
+  const { toggleSubscriber } = useIssueSubscribersMutations(issueId);
+  const subscribers = subscribersQuery.data ?? [];
+  const loading = subscribersQuery.isPending;
 
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      api.listIssueSubscribers(issueId).then(setSubscribers).catch(console.error);
-    }, [issueId]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.subscribers(issueId) });
+    }, [issueId, queryClient]),
   );
 
   // --- WS event handlers ---
@@ -43,10 +35,12 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
       (payload: unknown) => {
         const p = payload as SubscriberAddedPayload;
         if (p.issue_id !== issueId) return;
-        setSubscribers((prev) => {
-          if (prev.some((s) => s.user_id === p.user_id && s.user_type === p.user_type)) return prev;
+        queryClient.setQueryData<IssueSubscriber[]>(queryKeys.issues.subscribers(issueId), (existing = []) => {
+          if (existing.some((subscriber) => subscriber.user_id === p.user_id && subscriber.user_type === p.user_type)) {
+            return existing;
+          }
           return [
-            ...prev,
+            ...existing,
             {
               issue_id: p.issue_id,
               user_type: p.user_type as "member" | "agent",
@@ -57,7 +51,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
           ];
         });
       },
-      [issueId],
+      [issueId, queryClient],
     ),
   );
 
@@ -67,65 +61,40 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
       (payload: unknown) => {
         const p = payload as SubscriberRemovedPayload;
         if (p.issue_id !== issueId) return;
-        setSubscribers((prev) =>
-          prev.filter((s) => !(s.user_id === p.user_id && s.user_type === p.user_type)),
+        queryClient.setQueryData<IssueSubscriber[]>(queryKeys.issues.subscribers(issueId), (existing = []) =>
+          existing.filter((subscriber) => !(subscriber.user_id === p.user_id && subscriber.user_type === p.user_type)),
         );
       },
-      [issueId],
+      [issueId, queryClient],
     ),
   );
-
-  // --- Mutations ---
 
   const isSubscribed = subscribers.some(
     (s) => s.user_type === "member" && s.user_id === userId,
   );
 
-  const toggleSubscriber = useCallback(
+  const toggleSubscriberSafe = useCallback(
     async (subUserId: string, userType: "member" | "agent", currentlySubscribed: boolean) => {
-      if (currentlySubscribed) {
-        // Optimistic remove + rollback on error
-        const removed = subscribers.find(
-          (s) => s.user_id === subUserId && s.user_type === userType,
-        );
-        setSubscribers((prev) =>
-          prev.filter((s) => !(s.user_id === subUserId && s.user_type === userType)),
-        );
-        try {
-          await api.unsubscribeFromIssue(issueId, subUserId, userType);
-        } catch {
-          if (removed) setSubscribers((prev) => [...prev, removed]);
-          toast.error("Failed to update subscriber");
-        }
-      } else {
-        // Optimistic add
-        const tempSub: IssueSubscriber = {
-          issue_id: issueId,
-          user_type: userType,
-          user_id: subUserId,
-          reason: "manual" as const,
-          created_at: new Date().toISOString(),
-        };
-        setSubscribers((prev) => {
-          if (prev.some((s) => s.user_id === subUserId && s.user_type === userType)) return prev;
-          return [...prev, tempSub];
-        });
-        try {
-          await api.subscribeToIssue(issueId, subUserId, userType);
-        } catch {
-          setSubscribers((prev) =>
-            prev.filter((s) => !(s.user_id === subUserId && s.user_type === userType && s.reason === "manual")),
-          );
-          toast.error("Failed to update subscriber");
-        }
+      try {
+        await toggleSubscriber(subUserId, userType, !currentlySubscribed);
+      } catch {
+        toast.error("Failed to update subscriber");
       }
     },
-    [issueId, subscribers],
+    [toggleSubscriber],
   );
 
   const toggleSubscribe = useCallback(() => {
-    if (userId) toggleSubscriber(userId, "member", isSubscribed);
-  }, [userId, isSubscribed, toggleSubscriber]);
+    if (userId) {
+      void toggleSubscriberSafe(userId, "member", isSubscribed);
+    }
+  }, [userId, isSubscribed, toggleSubscriberSafe]);
 
-  return { subscribers, loading, isSubscribed, toggleSubscribe, toggleSubscriber };
+  return {
+    subscribers,
+    loading,
+    isSubscribed,
+    toggleSubscribe,
+    toggleSubscriber: toggleSubscriberSafe,
+  };
 }

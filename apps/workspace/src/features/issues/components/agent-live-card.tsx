@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronRight, ChevronUp, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square } from "lucide-react";
-import { api } from "@/shared/api";
 import { useWSEvent } from "@/features/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@/shared/types/events";
 import type { AgentTask } from "@/shared/types/agent";
@@ -11,6 +11,16 @@ import { toast } from "sonner";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useActorName } from "@/features/workspace";
+import { queryKeys } from "@/shared/query";
+import { useIssueTaskMutations } from "../mutations";
+import {
+  issueActiveTaskQueryOptions,
+  issueTaskRunsQueryOptions,
+  taskMessagesQueryOptions,
+  useIssueActiveTaskQuery,
+  useIssueTaskRunsQuery,
+  useTaskMessagesQuery,
+} from "../queries";
 import { redactSecrets } from "../utils/redact";
 
 // ─── Shared types & helpers ─────────────────────────────────────────────────
@@ -105,37 +115,22 @@ interface AgentLiveCardProps {
 }
 
 export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentLiveCardProps) {
+  const queryClient = useQueryClient();
   const { getActorName } = useActorName();
-  const [activeTask, setActiveTask] = useState<AgentTask | null>(null);
-  const [items, setItems] = useState<TimelineItem[]>([]);
+  const activeTaskQuery = useIssueActiveTaskQuery(issueId);
+  const activeTask = activeTaskQuery.data ?? null;
+  const taskMessagesQuery = useTaskMessagesQuery(activeTask?.id ?? null);
+  const items = useMemo(
+    () => buildTimeline(taskMessagesQuery.data ?? []),
+    [taskMessagesQuery.data],
+  );
   const [elapsed, setElapsed] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [isStuck, setIsStuck] = useState(false);
+  const { cancelTask } = useIssueTaskMutations(issueId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const seenSeqs = useRef(new Set<string>());
-
-  // Check for active task on mount
-  useEffect(() => {
-    let cancelled = false;
-    api.getActiveTaskForIssue(issueId).then(({ task }) => {
-      if (!cancelled) {
-        setActiveTask(task);
-        if (task) {
-          api.listTaskMessages(task.id).then((msgs) => {
-            if (!cancelled) {
-              const timeline = buildTimeline(msgs);
-              setItems(timeline);
-              for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
-            }
-          }).catch(console.error);
-        }
-      }
-    }).catch(console.error);
-
-    return () => { cancelled = true; };
-  }, [issueId]);
 
   // Handle real-time task messages
   useWSEvent(
@@ -143,24 +138,18 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
     useCallback((payload: unknown) => {
       const msg = payload as TaskMessagePayload;
       if (msg.issue_id !== issueId) return;
-      const key = `${msg.task_id}:${msg.seq}`;
-      if (seenSeqs.current.has(key)) return;
-      seenSeqs.current.add(key);
-
-      setItems((prev) => {
-        const item: TimelineItem = {
-          seq: msg.seq,
-          type: msg.type,
-          tool: msg.tool,
-          content: msg.content,
-          input: msg.input,
-          output: msg.output,
-        };
-        const next = [...prev, item];
-        next.sort((a, b) => a.seq - b.seq);
-        return next;
+      queryClient.setQueryData<TaskMessagePayload[]>(queryKeys.tasks.messages(msg.task_id), (existing = []) => {
+        if (existing.some((item) => item.seq === msg.seq && item.task_id === msg.task_id)) {
+          return existing;
+        }
+        return [...existing, msg].sort((left, right) => left.seq - right.seq);
       });
-    }, [issueId]),
+
+      if (!activeTask || activeTask.id !== msg.task_id) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.activeByIssue(issueId) });
+        void queryClient.fetchQuery(issueActiveTaskQueryOptions(issueId)).catch(() => null);
+      }
+    }, [activeTask, issueId, queryClient]),
   );
 
   // Handle task completion/failure
@@ -169,11 +158,10 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
     useCallback((payload: unknown) => {
       const p = payload as TaskCompletedPayload;
       if (p.issue_id !== issueId) return;
-      setActiveTask(null);
-      setItems([]);
-      seenSeqs.current.clear();
+      queryClient.setQueryData<AgentTask | null>(queryKeys.tasks.activeByIssue(issueId), null);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byIssue(issueId) });
       setCancelling(false);
-    }, [issueId]),
+    }, [issueId, queryClient]),
   );
 
   useWSEvent(
@@ -181,11 +169,10 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
     useCallback((payload: unknown) => {
       const p = payload as TaskFailedPayload;
       if (p.issue_id !== issueId) return;
-      setActiveTask(null);
-      setItems([]);
-      seenSeqs.current.clear();
+      queryClient.setQueryData<AgentTask | null>(queryKeys.tasks.activeByIssue(issueId), null);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byIssue(issueId) });
       setCancelling(false);
-    }, [issueId]),
+    }, [issueId, queryClient]),
   );
 
   useWSEvent(
@@ -193,11 +180,10 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
     useCallback((payload: unknown) => {
       const p = payload as TaskCancelledPayload;
       if (p.issue_id !== issueId) return;
-      setActiveTask(null);
-      setItems([]);
-      seenSeqs.current.clear();
+      queryClient.setQueryData<AgentTask | null>(queryKeys.tasks.activeByIssue(issueId), null);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byIssue(issueId) });
       setCancelling(false);
-    }, [issueId]),
+    }, [issueId, queryClient]),
   );
 
   // Pick up new tasks — skip if we're already showing an active task to avoid
@@ -207,14 +193,9 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
     "task:dispatch",
     useCallback(() => {
       if (activeTask) return;
-      api.getActiveTaskForIssue(issueId).then(({ task }) => {
-        if (task) {
-          setActiveTask(task);
-          setItems([]);
-          seenSeqs.current.clear();
-        }
-      }).catch(console.error);
-    }, [issueId, activeTask]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.activeByIssue(issueId) });
+      void queryClient.fetchQuery(issueActiveTaskQueryOptions(issueId)).catch(() => null);
+    }, [activeTask, issueId, queryClient]),
   );
 
   // Elapsed time
@@ -267,12 +248,12 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
     if (!activeTask || cancelling) return;
     setCancelling(true);
     try {
-      await api.cancelTask(issueId, activeTask.id);
+      await cancelTask(activeTask.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to cancel task");
       setCancelling(false);
     }
-  }, [activeTask, issueId, cancelling]);
+  }, [activeTask, cancelTask, cancelling]);
 
   if (!activeTask) return null;
 
@@ -343,7 +324,7 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
         <div
           className={cn(
             "overflow-hidden transition-all duration-200",
-            isStuck ? "max-h-0 opacity-0" : "max-h-[20rem] opacity-100",
+            isStuck ? "max-h-0 opacity-0" : "max-h-80 opacity-100",
           )}
         >
           {items.length > 0 && (
@@ -385,12 +366,10 @@ interface TaskRunHistoryProps {
 }
 
 export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
-  const [tasks, setTasks] = useState<AgentTask[]>([]);
+  const queryClient = useQueryClient();
+  const tasksQuery = useIssueTaskRunsQuery(issueId);
+  const tasks = tasksQuery.data ?? [];
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
-  }, [issueId]);
 
   // Refresh when a task completes
   useWSEvent(
@@ -398,8 +377,8 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
     useCallback((payload: unknown) => {
       const p = payload as TaskCompletedPayload;
       if (p.issue_id !== issueId) return;
-      api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
-    }, [issueId]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byIssue(issueId) });
+    }, [issueId, queryClient]),
   );
 
   useWSEvent(
@@ -407,8 +386,8 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
     useCallback((payload: unknown) => {
       const p = payload as TaskFailedPayload;
       if (p.issue_id !== issueId) return;
-      api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
-    }, [issueId]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byIssue(issueId) });
+    }, [issueId, queryClient]),
   );
 
   // Refresh when a task is cancelled
@@ -417,8 +396,8 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
     useCallback((payload: unknown) => {
       const p = payload as TaskCancelledPayload;
       if (p.issue_id !== issueId) return;
-      api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
-    }, [issueId]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byIssue(issueId) });
+    }, [issueId, queryClient]),
   );
 
   const completedTasks = tasks.filter((t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled");
@@ -444,21 +423,11 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
 
 function TaskRunEntry({ task }: { task: AgentTask }) {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<TimelineItem[] | null>(null);
-
-  const loadMessages = useCallback(() => {
-    if (items !== null) return; // already loaded
-    api.listTaskMessages(task.id).then((msgs) => {
-      setItems(buildTimeline(msgs));
-    }).catch((e) => {
-      console.error(e);
-      setItems([]);
-    });
-  }, [task.id, items]);
-
-  useEffect(() => {
-    if (open) loadMessages();
-  }, [open, loadMessages]);
+  const messagesQuery = useQuery({
+    ...taskMessagesQueryOptions(task.id),
+    enabled: open,
+  });
+  const items = useMemo(() => buildTimeline(messagesQuery.data ?? []), [messagesQuery.data]);
 
   const duration = task.started_at && task.completed_at
     ? formatDuration(task.started_at, task.completed_at)
@@ -483,7 +452,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-5 mt-1 max-h-64 overflow-y-auto rounded border bg-muted/30 px-3 py-2 space-y-0.5">
-          {items === null ? (
+          {messagesQuery.isPending ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
               <Loader2 className="h-3 w-3 animate-spin" />
               Loading...
@@ -540,7 +509,7 @@ function ToolCallRow({ item }: { item: TimelineItem }) {
       </CollapsibleTrigger>
       {hasInput && (
         <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+          <pre className="ml-4.5 mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
             {redactSecrets(JSON.stringify(item.input, null, 2))}
           </pre>
         </CollapsibleContent>
@@ -567,7 +536,7 @@ function ToolResultRow({ item }: { item: TimelineItem }) {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+        <pre className="ml-4.5 mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
           {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
         </pre>
       </CollapsibleContent>
@@ -589,7 +558,7 @@ function ThinkingRow({ item }: { item: TimelineItem }) {
         <span className="text-muted-foreground italic truncate">{preview}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-info/5 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
+        <pre className="ml-4.5 mt-0.5 max-h-40 overflow-auto rounded bg-info/5 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap wrap-break-word">
           {text}
         </pre>
       </CollapsibleContent>

@@ -38,7 +38,7 @@ import {
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
-import { api } from "@/shared/api";
+import { useWorkspaceSettingsMutations } from "@/features/settings/mutations";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
   owner: { label: "Owner", icon: Crown, description: "Full access, manage all settings" },
@@ -141,7 +141,7 @@ export function MembersTab() {
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const members = useWorkspaceStore((s) => s.members);
-  const refreshMembers = useWorkspaceStore((s) => s.refreshMembers);
+  const { createMember, updateMember, deleteMember } = useWorkspaceSettingsMutations();
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
@@ -162,13 +162,12 @@ export function MembersTab() {
     if (!workspace) return;
     setInviteLoading(true);
     try {
-      await api.createMember(workspace.id, {
+      await createMember({
         email: inviteEmail,
         role: inviteRole,
       });
       setInviteEmail("");
       setInviteRole("member");
-      await refreshMembers();
       toast.success("Member added");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to add member");
@@ -181,8 +180,7 @@ export function MembersTab() {
     if (!workspace) return;
     setMemberActionId(memberId);
     try {
-      await api.updateMember(workspace.id, memberId, { role });
-      await refreshMembers();
+      await updateMember(memberId, { role });
       toast.success("Role updated");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update member");
@@ -200,8 +198,7 @@ export function MembersTab() {
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {
-          await api.deleteMember(workspace.id, member.id);
-          await refreshMembers();
+          await deleteMember(member.id);
           toast.success("Member removed");
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "Failed to remove member");

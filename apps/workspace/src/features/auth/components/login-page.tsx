@@ -3,7 +3,9 @@
 import { Suspense, useState, useEffect, useCallback } from "react";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
+import { workspacesQueryOptions } from "@/features/workspace/queries";
 import { api } from "@/shared/api";
+import { getAppQueryClient } from "@/shared/query";
 import { useRouter, useSearchParams } from "@/shared/router";
 import {
   Card,
@@ -152,7 +154,7 @@ function LoginPageContent() {
         }
 
         await verifyCode(email, value);
-        const wsList = await api.listWorkspaces();
+        const wsList = await getAppQueryClient().fetchQuery(workspacesQueryOptions());
         await hydrateWorkspace(wsList);
         router.push(searchParams.get("next") || "/issues");
       } catch (err) {

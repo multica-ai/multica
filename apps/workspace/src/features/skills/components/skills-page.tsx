@@ -32,8 +32,9 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
+import { useSkillMutations } from "@/features/skills/mutations";
+import { useSkillDetailQuery } from "@/features/skills/queries";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
@@ -115,7 +116,7 @@ function CreateSkillDialog({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="create" className="space-y-4 mt-4 min-h-[180px]">
+          <TabsContent value="create" className="mt-4 min-h-45 space-y-4">
             <div>
               <Label className="text-xs text-muted-foreground">Name</Label>
               <Input
@@ -140,7 +141,7 @@ function CreateSkillDialog({
             </div>
           </TabsContent>
 
-          <TabsContent value="import" className="space-y-4 mt-4 min-h-[180px]">
+          <TabsContent value="import" className="mt-4 min-h-45 space-y-4">
             <div>
               <Label className="text-xs text-muted-foreground">Skill URL</Label>
               <Input
@@ -350,6 +351,7 @@ function SkillDetail({
   onDelete: (id: string) => Promise<void>;
 }) {
   const isMobile = useIsMobile();
+  const skillDetailQuery = useSkillDetailQuery(skill.id);
   const [name, setName] = useState(skill.name);
   const [description, setDescription] = useState(skill.description);
   const [content, setContent] = useState(skill.content);
@@ -373,13 +375,21 @@ function SkillDetail({
   useEffect(() => {
     setSelectedPath(SKILL_MD);
     setLoadingFiles(true);
-    api.getSkill(skill.id).then((full) => {
-      useWorkspaceStore.getState().upsertSkill(full);
-      setFiles((full.files ?? []).map((f) => ({ path: f.path, content: f.content })));
-    }).catch((e) => {
-      toast.error(e instanceof Error ? e.message : "Failed to load skill files");
-    }).finally(() => setLoadingFiles(false));
   }, [skill.id]);
+
+  useEffect(() => {
+    if (skillDetailQuery.data) {
+      useWorkspaceStore.getState().upsertSkill(skillDetailQuery.data);
+      setFiles((skillDetailQuery.data.files ?? []).map((file) => ({ path: file.path, content: file.content })));
+      setLoadingFiles(false);
+      return;
+    }
+
+    if (skillDetailQuery.isError) {
+      toast.error(skillDetailQuery.error instanceof Error ? skillDetailQuery.error.message : "Failed to load skill files");
+      setLoadingFiles(false);
+    }
+  }, [skillDetailQuery.data, skillDetailQuery.error, skillDetailQuery.isError]);
 
   // Build the virtual file map
   const fileMap = useMemo(() => buildFileMap(content, files), [content, files]);
@@ -694,9 +704,7 @@ export default function SkillsPage() {
   const searchParams = useSearchParams();
   const isLoading = useAuthStore((s) => s.isLoading);
   const skills = useWorkspaceStore((s) => s.skills);
-  const refreshSkills = useWorkspaceStore((s) => s.refreshSkills);
-  const upsertSkill = useWorkspaceStore((s) => s.upsertSkill);
-  const removeSkill = useWorkspaceStore((s) => s.removeSkill);
+  const { createSkill, importSkill, updateSkill, deleteSkill } = useSkillMutations();
   const [selectedId, setSelectedId] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -711,8 +719,7 @@ export default function SkillsPage() {
   }, [isMobile, skills, selectedId]);
 
   const handleCreate = async (data: CreateSkillRequest) => {
-    const skill = await api.createSkill(data);
-    upsertSkill(skill);
+    const skill = await createSkill(data);
     if (isMobile) {
       router.push(`/skills?skill=${skill.id}`);
     } else {
@@ -722,8 +729,7 @@ export default function SkillsPage() {
   };
 
   const handleImport = async (url: string) => {
-    const skill = await api.importSkill({ url });
-    upsertSkill(skill);
+    const skill = await importSkill({ url });
     if (isMobile) {
       router.push(`/skills?skill=${skill.id}`);
     } else {
@@ -734,8 +740,7 @@ export default function SkillsPage() {
 
   const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
     try {
-      const updated = await api.updateSkill(id, data);
-      upsertSkill(updated);
+      await updateSkill(id, data);
       toast.success("Skill saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save skill");
@@ -745,14 +750,13 @@ export default function SkillsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      await api.deleteSkill(id);
+      await deleteSkill(id);
       if (isMobile && selectedSkillId === id) {
         router.replace("/skills");
       } else if (selectedId === id) {
         const remaining = skills.filter((s) => s.id !== id);
         setSelectedId(remaining[0]?.id ?? "");
       }
-      removeSkill(id);
       toast.success("Skill deleted");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to delete skill");

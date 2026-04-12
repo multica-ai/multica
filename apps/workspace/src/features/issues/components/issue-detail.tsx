@@ -61,13 +61,14 @@ import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, AssigneeP
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
-import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
 import { useIssueTimeline } from "@/features/issues/hooks/use-issue-timeline";
 import { useIssueReactions } from "@/features/issues/hooks/use-issue-reactions";
 import { useIssueSubscribers } from "@/features/issues/hooks/use-issue-subscribers";
+import { useIssueMutations } from "@/features/issues/mutations";
+import { useIssueDetailQuery } from "@/features/issues/queries";
 import { ReactionBar } from "@/components/common/reaction-bar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
@@ -219,29 +220,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
+  const issueDetailQuery = useIssueDetailQuery(id);
+  const { updateIssue, deleteIssue } = useIssueMutations();
 
   // Single source of truth: read issue directly from global store
-  const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? null;
-  const [issueLoading, setIssueLoading] = useState(!issue);
-
-  // If issue isn't in the store yet, fetch and upsert it
-  useEffect(() => {
-    if (issue) {
-      setIssueLoading(false);
-      return;
-    }
-    setIssueLoading(true);
-    api
-      .getIssue(id)
-      .then((iss) => {
-        useIssueStore.getState().addIssue(iss);
-      })
-      .catch((e) => {
-        console.error(e);
-        toast.error("Failed to load issue");
-      })
-      .finally(() => setIssueLoading(false));
-  }, [id, !!issue]);
+  const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? issueDetailQuery.data ?? null;
+  const issueLoading = !issue && issueDetailQuery.isPending;
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
@@ -297,14 +281,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleUpdateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issue) return;
-      const prev = { ...issue };
-      useIssueStore.getState().updateIssue(id, updates);
-      api.updateIssue(id, updates).catch(() => {
-        useIssueStore.getState().updateIssue(id, prev);
+      void updateIssue(id, updates).catch(() => {
         toast.error("Failed to update issue");
       });
     },
-    [issue, id],
+    [id, issue, updateIssue],
   );
 
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -316,8 +297,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await api.deleteIssue(issue!.id);
-      useIssueStore.getState().removeIssue(issue!.id);
+      await deleteIssue(issue!.id);
       toast.success("Issue deleted");
       if (onDelete) onDelete();
       else router.push("/issues");

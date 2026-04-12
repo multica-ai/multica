@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Comment, TimelineEntry } from "@/shared/types";
 import type {
   CommentCreatedPayload,
@@ -10,9 +11,11 @@ import type {
   ReactionAddedPayload,
   ReactionRemovedPayload,
 } from "@/shared/types";
-import { api } from "@/shared/api";
 import { useWSEvent, useWSReconnect } from "@/features/realtime";
 import { toast } from "sonner";
+import { queryKeys } from "@/shared/query";
+import { useIssueTimelineMutations } from "../mutations";
+import { useIssueTimelineQuery } from "../queries";
 
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
@@ -30,29 +33,24 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
 }
 
 export function useIssueTimeline(issueId: string, userId?: string) {
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  // Initial fetch + reset on id change
-  useEffect(() => {
-    setTimeline([]);
-    setLoading(true);
-    api
-      .listTimeline(issueId)
-      .then((entries) => setTimeline(entries))
-      .catch((e) => {
-        console.error(e);
-        toast.error("Failed to load activity");
-      })
-      .finally(() => setLoading(false));
-  }, [issueId]);
+  const queryClient = useQueryClient();
+  const timelineQuery = useIssueTimelineQuery(issueId);
+  const {
+    submitComment,
+    submitReply,
+    editComment,
+    deleteComment,
+    toggleCommentReaction,
+    submitting,
+  } = useIssueTimelineMutations(issueId);
+  const timeline = timelineQuery.data ?? [];
+  const loading = timelineQuery.isPending;
 
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      api.listTimeline(issueId).then(setTimeline).catch(console.error);
-    }, [issueId]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.timeline(issueId) });
+    }, [issueId, queryClient]),
   );
 
   // --- WS event handlers ---
@@ -64,12 +62,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
         if (comment.author_type === "member" && comment.author_id === userId) return;
-        setTimeline((prev) => {
-          if (prev.some((e) => e.id === comment.id)) return prev;
-          return [...prev, commentToTimelineEntry(comment)];
+        queryClient.setQueryData<TimelineEntry[]>(queryKeys.issues.timeline(issueId), (existing = []) => {
+          if (existing.some((entry) => entry.id === comment.id)) return existing;
+          return [...existing, commentToTimelineEntry(comment)];
         });
       },
-      [issueId, userId],
+      [issueId, queryClient, userId],
     ),
   );
 
@@ -79,12 +77,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id === issueId) {
-          setTimeline((prev) =>
-            prev.map((e) => (e.id === comment.id ? commentToTimelineEntry(comment) : e)),
+          queryClient.setQueryData<TimelineEntry[]>(queryKeys.issues.timeline(issueId), (existing = []) =>
+            existing.map((entry) =>
+              entry.id === comment.id ? commentToTimelineEntry(comment) : entry,
+            ),
           );
         }
       },
-      [issueId],
+      [issueId, queryClient],
     ),
   );
 
@@ -94,23 +94,23 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
         if (issue_id === issueId) {
-          setTimeline((prev) => {
+          queryClient.setQueryData<TimelineEntry[]>(queryKeys.issues.timeline(issueId), (existing = []) => {
             const idsToRemove = new Set<string>([comment_id]);
             let added = true;
             while (added) {
               added = false;
-              for (const e of prev) {
-                if (e.parent_id && idsToRemove.has(e.parent_id) && !idsToRemove.has(e.id)) {
-                  idsToRemove.add(e.id);
+              for (const entry of existing) {
+                if (entry.parent_id && idsToRemove.has(entry.parent_id) && !idsToRemove.has(entry.id)) {
+                  idsToRemove.add(entry.id);
                   added = true;
                 }
               }
             }
-            return prev.filter((e) => !idsToRemove.has(e.id));
+            return existing.filter((entry) => !idsToRemove.has(entry.id));
           });
         }
       },
-      [issueId],
+      [issueId, queryClient],
     ),
   );
 
@@ -122,12 +122,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         if (p.issue_id !== issueId) return;
         const entry = p.entry;
         if (!entry || !entry.id) return;
-        setTimeline((prev) => {
-          if (prev.some((e) => e.id === entry.id)) return prev;
-          return [...prev, entry];
+        queryClient.setQueryData<TimelineEntry[]>(queryKeys.issues.timeline(issueId), (existing = []) => {
+          if (existing.some((item) => item.id === entry.id)) return existing;
+          return [...existing, entry];
         });
       },
-      [issueId],
+      [issueId, queryClient],
     ),
   );
 
@@ -138,16 +138,16 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
         if (reaction.actor_type === "member" && reaction.actor_id === userId) return;
-        setTimeline((prev) =>
-          prev.map((e) => {
-            if (e.id !== reaction.comment_id) return e;
-            const existing = e.reactions ?? [];
-            if (existing.some((r) => r.id === reaction.id)) return e;
-            return { ...e, reactions: [...existing, reaction] };
+        queryClient.setQueryData<TimelineEntry[]>(queryKeys.issues.timeline(issueId), (existing = []) =>
+          existing.map((entry) => {
+            if (entry.id !== reaction.comment_id) return entry;
+            const reactions = entry.reactions ?? [];
+            if (reactions.some((item) => item.id === reaction.id)) return entry;
+            return { ...entry, reactions: [...reactions, reaction] };
           }),
         );
       },
-      [issueId, userId],
+      [issueId, queryClient, userId],
     ),
   );
 
@@ -158,191 +158,94 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
         if (p.actor_type === "member" && p.actor_id === userId) return;
-        setTimeline((prev) =>
-          prev.map((e) => {
-            if (e.id !== p.comment_id) return e;
+        queryClient.setQueryData<TimelineEntry[]>(queryKeys.issues.timeline(issueId), (existing = []) =>
+          existing.map((entry) => {
+            if (entry.id !== p.comment_id) return entry;
             return {
-              ...e,
-              reactions: (e.reactions ?? []).filter(
-                (r) => !(r.emoji === p.emoji && r.actor_type === p.actor_type && r.actor_id === p.actor_id),
+              ...entry,
+              reactions: (entry.reactions ?? []).filter(
+                (reaction) =>
+                  !(reaction.emoji === p.emoji && reaction.actor_type === p.actor_type && reaction.actor_id === p.actor_id),
               ),
             };
           }),
         );
       },
-      [issueId, userId],
+      [issueId, queryClient, userId],
     ),
   );
 
-  // --- Mutation functions ---
-
-  const submitComment = useCallback(
+  const submitCommentSafe = useCallback(
     async (content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || submitting || !userId) return;
-      setSubmitting(true);
+      if (!content.trim() || !userId) return;
       try {
-        const comment = await api.createComment(issueId, content, undefined, undefined, attachmentIds);
-        setTimeline((prev) => {
-          if (prev.some((e) => e.id === comment.id)) return prev;
-          return [...prev, commentToTimelineEntry(comment)];
-        });
+        await submitComment(content, attachmentIds);
       } catch {
         toast.error("Failed to send comment");
-      } finally {
-        setSubmitting(false);
       }
     },
-    [issueId, userId],
+    [submitComment, userId],
   );
 
-  const submitReply = useCallback(
+  const submitReplySafe = useCallback(
     async (parentId: string, content: string, attachmentIds?: string[]) => {
       if (!content.trim() || !userId) return;
       try {
-        const comment = await api.createComment(issueId, content, "comment", parentId, attachmentIds);
-        setTimeline((prev) => {
-          if (prev.some((e) => e.id === comment.id)) return prev;
-          return [...prev, commentToTimelineEntry(comment)];
-        });
+        await submitReply(parentId, content, attachmentIds);
       } catch {
         toast.error("Failed to send reply");
       }
     },
-    [issueId, userId],
+    [submitReply, userId],
   );
 
-  const editComment = useCallback(
+  const editCommentSafe = useCallback(
     async (commentId: string, content: string) => {
-      // Optimistic: update content immediately
-      let prevContent: string | undefined;
-      setTimeline((prev) =>
-        prev.map((e) => {
-          if (e.id !== commentId) return e;
-          prevContent = e.content;
-          return { ...e, content, updated_at: new Date().toISOString() };
-        }),
-      );
       try {
-        const updated = await api.updateComment(commentId, content);
-        setTimeline((prev) =>
-          prev.map((e) => (e.id === updated.id ? commentToTimelineEntry(updated) : e)),
-        );
+        await editComment(commentId, content);
       } catch {
-        // Rollback
-        if (prevContent !== undefined) {
-          setTimeline((prev) =>
-            prev.map((e) => (e.id === commentId ? { ...e, content: prevContent! } : e)),
-          );
-        }
         toast.error("Failed to update comment");
       }
     },
-    [],
+    [editComment],
   );
 
-  const deleteComment = useCallback(
+  const deleteCommentSafe = useCallback(
     async (commentId: string) => {
-      // Capture entries for rollback
-      let removedEntries: TimelineEntry[] = [];
-      setTimeline((prev) => {
-        const idsToRemove = new Set<string>([commentId]);
-        let added = true;
-        while (added) {
-          added = false;
-          for (const e of prev) {
-            if (e.parent_id && idsToRemove.has(e.parent_id) && !idsToRemove.has(e.id)) {
-              idsToRemove.add(e.id);
-              added = true;
-            }
-          }
-        }
-        removedEntries = prev.filter((e) => idsToRemove.has(e.id));
-        return prev.filter((e) => !idsToRemove.has(e.id));
-      });
       try {
-        await api.deleteComment(commentId);
+        await deleteComment(commentId);
       } catch {
-        // Rollback: re-add removed entries
-        setTimeline((prev) => [...prev, ...removedEntries]);
         toast.error("Failed to delete comment");
       }
     },
-    [],
+    [deleteComment],
   );
 
   const toggleReaction = useCallback(
     async (commentId: string, emoji: string) => {
       if (!userId) return;
-      const entry = timeline.find((e) => e.id === commentId);
-      const existing = (entry?.reactions ?? []).find(
-        (r) => r.emoji === emoji && r.actor_type === "member" && r.actor_id === userId,
-      );
-      if (existing) {
-        setTimeline((prev) =>
-          prev.map((e) => {
-            if (e.id !== commentId) return e;
-            return { ...e, reactions: (e.reactions ?? []).filter((r) => r.id !== existing.id) };
-          }),
-        );
-        try {
-          await api.removeReaction(commentId, emoji);
-        } catch {
-          setTimeline((prev) =>
-            prev.map((e) => {
-              if (e.id !== commentId) return e;
-              return { ...e, reactions: [...(e.reactions ?? []), existing] };
-            }),
-          );
-          toast.error("Failed to remove reaction");
-        }
-      } else {
-        const tempReaction = {
-          id: `temp-${Date.now()}`,
-          comment_id: commentId,
-          actor_type: "member",
-          actor_id: userId,
-          emoji,
-          created_at: new Date().toISOString(),
-        };
-        setTimeline((prev) =>
-          prev.map((e) => {
-            if (e.id !== commentId) return e;
-            return { ...e, reactions: [...(e.reactions ?? []), tempReaction] };
-          }),
-        );
-        try {
-          const reaction = await api.addReaction(commentId, emoji);
-          setTimeline((prev) =>
-            prev.map((e) => {
-              if (e.id !== commentId) return e;
-              return {
-                ...e,
-                reactions: (e.reactions ?? []).map((r) => (r.id === tempReaction.id ? reaction : r)),
-              };
-            }),
-          );
-        } catch {
-          setTimeline((prev) =>
-            prev.map((e) => {
-              if (e.id !== commentId) return e;
-              return { ...e, reactions: (e.reactions ?? []).filter((r) => r.id !== tempReaction.id) };
-            }),
-          );
-          toast.error("Failed to add reaction");
-        }
+      const entry = timeline.find((item) => item.id === commentId);
+      const existingReactionId = (entry?.reactions ?? []).find(
+        (reaction) => reaction.emoji === emoji && reaction.actor_type === "member" && reaction.actor_id === userId,
+      )?.id;
+
+      try {
+        await toggleCommentReaction(commentId, emoji, existingReactionId);
+      } catch {
+        toast.error(existingReactionId ? "Failed to remove reaction" : "Failed to add reaction");
       }
     },
-    [userId, timeline],
+    [timeline, toggleCommentReaction, userId],
   );
 
   return {
     timeline,
     loading,
     submitting,
-    submitComment,
-    submitReply,
-    editComment,
-    deleteComment,
+    submitComment: submitCommentSafe,
+    submitReply: submitReplySafe,
+    editComment: editCommentSafe,
+    deleteComment: deleteCommentSafe,
     toggleReaction,
   };
 }

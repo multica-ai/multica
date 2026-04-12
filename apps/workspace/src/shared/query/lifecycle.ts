@@ -10,6 +10,11 @@ function matchesWorkspaceScope(query: Query, workspaceId?: string | null): boole
     return true;
   }
 
+  const root = query.queryKey[0];
+  if (root === "issues" || root === "tasks") {
+    return true;
+  }
+
   return queryKeyIncludesWorkspace(query.queryKey, workspaceId);
 }
 

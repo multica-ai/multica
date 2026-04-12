@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Key, Trash2, Copy, Check } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import type { PersonalAccessToken } from "@/shared/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,58 +33,44 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { api } from "@/shared/api";
+import { usePersonalAccessTokensQuery } from "@/features/settings/queries";
+import { usePersonalAccessTokenMutations } from "@/features/settings/mutations";
 
 export function TokensTab() {
-  const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
-  const [tokenCreating, setTokenCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
-  const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
-  const [tokensLoading, setTokensLoading] = useState(true);
+  const tokensQuery = usePersonalAccessTokensQuery();
+  const tokens = tokensQuery.data ?? [];
+  const tokensLoading = tokensQuery.isPending;
+  const { createToken, revokeToken, creating, revokingId } = usePersonalAccessTokenMutations();
 
-  const loadTokens = useCallback(async () => {
-    try {
-      const list = await api.listPersonalAccessTokens();
-      setTokens(list);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load tokens");
-    } finally {
-      setTokensLoading(false);
+  useEffect(() => {
+    if (tokensQuery.error) {
+      toast.error(tokensQuery.error instanceof Error ? tokensQuery.error.message : "Failed to load tokens");
     }
-  }, []);
-
-  useEffect(() => { loadTokens(); }, [loadTokens]);
+  }, [tokensQuery.error]);
 
   const handleCreateToken = async () => {
-    setTokenCreating(true);
     try {
       const expiresInDays = tokenExpiry === "never" ? undefined : Number(tokenExpiry);
-      const result = await api.createPersonalAccessToken({ name: tokenName, expires_in_days: expiresInDays });
+      const result = await createToken({ name: tokenName, expires_in_days: expiresInDays });
       setNewToken(result.token);
       setTokenName("");
       setTokenExpiry("90");
-      await loadTokens();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create token");
-    } finally {
-      setTokenCreating(false);
     }
   };
 
   const handleRevokeToken = async (id: string) => {
-    setTokenRevoking(id);
     try {
-      await api.revokePersonalAccessToken(id);
-      await loadTokens();
+      await revokeToken(id);
       toast.success("Token revoked");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to revoke token");
-    } finally {
-      setTokenRevoking(null);
     }
   };
 
@@ -125,8 +110,8 @@ export function TokensTab() {
                   <SelectItem value="never">No expiry</SelectItem>
                 </SelectContent>
               </Select>
-              <Button onClick={handleCreateToken} disabled={tokenCreating || !tokenName.trim()}>
-                {tokenCreating ? "Creating..." : "Create"}
+              <Button onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
+                {creating ? "Creating..." : "Create"}
               </Button>
             </div>
           </CardContent>
@@ -165,7 +150,7 @@ export function TokensTab() {
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => setRevokeConfirmId(t.id)}
-                          disabled={tokenRevoking === t.id}
+                          disabled={revokingId === t.id}
                           aria-label={`Revoke ${t.name}`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />

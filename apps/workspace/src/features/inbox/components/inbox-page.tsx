@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useInboxStore } from "@/features/inbox";
+import { useInboxMutations } from "@/features/inbox/mutations";
 import { IssueDetail, StatusIcon, PriorityIcon } from "@/features/issues/components";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@/features/issues/config";
 import { useActorName } from "@/features/workspace";
@@ -32,7 +33,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { api } from "@/shared/api";
 import { usePathname, useRouter, useSearchParams } from "@/shared/router";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
@@ -248,6 +248,12 @@ export default function InboxPage() {
   const urlIssue = searchParams.get("issue") ?? "";
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
+  const notificationsBasePath =
+    pathname === "/"
+      ? "/"
+      : pathname === "/notifications"
+        ? "/notifications"
+        : "/inbox";
 
   // Sync from URL when searchParams change (e.g. Next.js navigation)
   useEffect(() => {
@@ -256,13 +262,20 @@ export default function InboxPage() {
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
-    const basePath = pathname === "/" ? "/" : "/inbox";
-    const url = key ? `${basePath}?issue=${key}` : basePath;
+    const url = key ? `${notificationsBasePath}?issue=${key}` : notificationsBasePath;
     router.replace(url);
-  }, [pathname, router]);
+  }, [notificationsBasePath, router]);
 
   const items = useInboxStore((s) => s.dedupedItems());
   const loading = useInboxStore((s) => s.loading);
+  const {
+    markRead,
+    archive,
+    markAllRead,
+    archiveAll,
+    archiveAllRead,
+    archiveCompleted,
+  } = useInboxMutations();
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
@@ -275,12 +288,9 @@ export default function InboxPage() {
   const handleSelect = async (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
     if (!item.read) {
-      useInboxStore.getState().markRead(item.id);
       try {
-        await api.markInboxRead(item.id);
+        await markRead(item.id);
       } catch {
-        // Rollback: refetch to get server truth
-        useInboxStore.getState().fetch();
         toast.error("Failed to mark as read");
       }
     }
@@ -288,8 +298,7 @@ export default function InboxPage() {
 
   const handleArchive = async (id: string) => {
     try {
-      await api.archiveInbox(id);
-      useInboxStore.getState().archive(id);
+      await archive(id);
       const archived = items.find((i) => i.id === id);
       if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
     } catch {
@@ -300,42 +309,35 @@ export default function InboxPage() {
   // Batch operations
   const handleMarkAllRead = async () => {
     try {
-      useInboxStore.getState().markAllRead();
-      await api.markAllInboxRead();
+      await markAllRead();
     } catch {
       toast.error("Failed to mark all as read");
-      useInboxStore.getState().fetch();
     }
   };
 
   const handleArchiveAll = async () => {
     try {
-      useInboxStore.getState().archiveAll();
+      await archiveAll();
       setSelectedKey("");
-      await api.archiveAllInbox();
     } catch {
       toast.error("Failed to archive all");
-      useInboxStore.getState().fetch();
     }
   };
 
   const handleArchiveAllRead = async () => {
     try {
       const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
-      useInboxStore.getState().archiveAllRead();
+      await archiveAllRead();
       if (readKeys.includes(selectedKey)) setSelectedKey("");
-      await api.archiveAllReadInbox();
     } catch {
       toast.error("Failed to archive read items");
-      useInboxStore.getState().fetch();
     }
   };
 
   const handleArchiveCompleted = async () => {
     try {
-      await api.archiveCompletedInbox();
+      await archiveCompleted();
       setSelectedKey("");
-      await useInboxStore.getState().fetch();
     } catch {
       toast.error("Failed to archive completed");
     }
@@ -378,7 +380,7 @@ export default function InboxPage() {
       return (
         <div className="flex flex-1 min-h-0 flex-col">
           <MobileDetailHeader
-            title="Inbox"
+            title="Notifications"
             subtitle={selected.title}
             onBack={() => setSelectedKey("")}
           />
@@ -426,7 +428,7 @@ export default function InboxPage() {
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
           <div className="flex items-center gap-2">
-            <h1 className="text-sm font-semibold">Inbox</h1>
+            <h1 className="text-sm font-semibold">Notifications</h1>
             {unreadCount > 0 && (
               <span className="text-xs text-muted-foreground">
                 {unreadCount}
@@ -498,7 +500,7 @@ export default function InboxPage() {
       <div className="flex flex-col border-r h-full">
         <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
           <div className="flex items-center gap-2">
-            <h1 className="text-sm font-semibold">Inbox</h1>
+            <h1 className="text-sm font-semibold">Notifications</h1>
             {unreadCount > 0 && (
               <span className="text-xs text-muted-foreground">
                 {unreadCount}
@@ -603,7 +605,7 @@ export default function InboxPage() {
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm">
               {items.length === 0
-                ? "Your inbox is empty"
+                ? "Your notifications are empty"
                 : "Select a notification to view details"}
             </p>
           </div>

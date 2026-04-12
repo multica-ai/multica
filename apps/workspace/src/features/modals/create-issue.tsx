@@ -28,9 +28,9 @@ import { TitleEditor } from "@/features/editor";
 import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker } from "@/features/issues/components";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
+import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
-import { api } from "@/shared/api";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
@@ -81,6 +81,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
   const { getActorName } = useActorName();
+  const { createIssue } = useIssueMutations();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -144,7 +145,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const issue = await api.createIssue({
+      const issue = await createIssue({
         title: title.trim(),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
@@ -155,11 +156,10 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         end_date: endDate || undefined,
         due_date: dueDate || undefined,
       });
-      useIssueStore.getState().addIssue(issue);
       clearDraft();
       onClose();
       toast.custom((t) => (
-        <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
+        <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-90">
           <div className="flex items-center gap-2 mb-2">
             <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
               <Check className="size-3" />
@@ -195,11 +195,11 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
-          "!top-1/2 !left-1/2 !-translate-x-1/2",
-          "!transition-all !duration-300 !ease-out",
+          "top-1/2! left-1/2! -translate-x-1/2!",
+          "transition-all! duration-300! ease-out!",
           isExpanded
-            ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-            : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
+            ? "max-w-4xl! w-full! h-5/6! -translate-y-1/2!"
+            : "max-w-2xl! w-full! h-96! -translate-y-1/2!",
         )}
       >
         <DialogTitle className="sr-only">New Issue</DialogTitle>
