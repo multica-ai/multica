@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserResponse struct {
@@ -55,6 +56,19 @@ type VerifyCodeRequest struct {
 	Email string `json:"email"`
 	Code  string `json:"code"`
 }
+
+type PasswordLoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type SetupPasswordRequest struct {
+	Email    string `json:"email"`
+	Code     string `json:"code"`
+	Password string `json:"password"`
+}
+
+const minPasswordLength = 8
 
 func defaultWorkspaceName(user db.User) string {
 	name := strings.TrimSpace(user.Name)
@@ -183,6 +197,25 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 	return token.SignedString(auth.JWTSecret())
 }
 
+func (h *Handler) writeLoginResponse(w http.ResponseWriter, user db.User, expiry time.Duration) {
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(expiry)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(user),
+	})
+}
+
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, error) {
 	user, err := h.Queries.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -194,14 +227,30 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, 
 			name = email[:at]
 		}
 		user, err = h.Queries.CreateUser(ctx, db.CreateUserParams{
-			Name:  name,
-			Email: email,
+			Name:         name,
+			Email:        email,
+			PasswordHash: pgtype.Text{},
 		})
 		if err != nil {
 			return db.User{}, err
 		}
 	}
 	return user, nil
+}
+
+func verifyStoredCode(submittedCode, actualCode string) bool {
+	isMasterCode := submittedCode == "888888" && os.Getenv("APP_ENV") != "production"
+	if isMasterCode {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(submittedCode), []byte(actualCode)) == 1
+}
+
+func validatePassword(password string) error {
+	if len(password) < minPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", minPasswordLength)
+	}
+	return nil
 }
 
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
@@ -273,8 +322,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMasterCode := code == "888888" && os.Getenv("APP_ENV") != "production"
-	if !isMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+	if !verifyStoredCode(code, dbCode.Code) {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return
@@ -296,25 +344,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenString, err := h.issueJWT(user)
-	if err != nil {
-		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", req.Email)...)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
-	// Set CloudFront signed cookies for CDN access.
-	if h.CFSigner != nil {
-		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
-			http.SetCookie(w, cookie)
-		}
-	}
-
 	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
-	writeJSON(w, http.StatusOK, LoginResponse{
-		Token: tokenString,
-		User:  userToResponse(user),
-	})
+	h.writeLoginResponse(w, user, 30*24*time.Hour)
 }
 
 func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
@@ -473,24 +504,112 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenString, err := h.issueJWT(user)
-	if err != nil {
-		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
+	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	h.writeLoginResponse(w, user, 72*time.Hour)
+}
+
+func (h *Handler) LoginWithPassword(w http.ResponseWriter, r *http.Request) {
+	var req PasswordLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if h.CFSigner != nil {
-		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(72 * time.Hour)) {
-			http.SetCookie(w, cookie)
-		}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	password := req.Password
+	if email == "" || password == "" {
+		writeError(w, http.StatusBadRequest, "email and password are required")
+		return
 	}
 
-	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
-	writeJSON(w, http.StatusOK, LoginResponse{
-		Token: tokenString,
-		User:  userToResponse(user),
+	user, err := h.Queries.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid email or password")
+		return
+	}
+
+	if !user.PasswordHash.Valid || user.PasswordHash.String == "" {
+		writeError(w, http.StatusBadRequest, "password login is not set up for this account")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(password)); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid password")
+		return
+	}
+
+	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
+		return
+	}
+
+	slog.Info("user logged in with password", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	h.writeLoginResponse(w, user, 30*24*time.Hour)
+}
+
+func (h *Handler) SetupPassword(w http.ResponseWriter, r *http.Request) {
+	var req SetupPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	code := strings.TrimSpace(req.Code)
+	if email == "" || code == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "email, code, and password are required")
+		return
+	}
+	if err := validatePassword(req.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid or expired code")
+		return
+	}
+
+	if !verifyStoredCode(code, dbCode.Code) {
+		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
+		writeError(w, http.StatusBadRequest, "invalid or expired code")
+		return
+	}
+
+	if err := h.Queries.MarkVerificationCodeUsed(r.Context(), dbCode.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify code")
+		return
+	}
+
+	user, err := h.findOrCreateUser(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store password")
+		return
+	}
+
+	user, err = h.Queries.SetUserPasswordHash(r.Context(), db.SetUserPasswordHashParams{
+		ID:           user.ID,
+		PasswordHash: pgtype.Text{String: string(passwordHash), Valid: true},
 	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store password")
+		return
+	}
+
+	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
+		return
+	}
+
+	slog.Info("user set password", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	h.writeLoginResponse(w, user, 30*24*time.Hour)
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {

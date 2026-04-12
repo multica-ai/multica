@@ -306,6 +306,82 @@ func TestSendCodeAndVerify(t *testing.T) {
 	meResp.Body.Close()
 }
 
+func TestPasswordSetupAndLogin(t *testing.T) {
+	const email = "integration-password@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		var userID string
+		err := testPool.QueryRow(ctx, `SELECT id FROM "user" WHERE email = $1`, email).Scan(&userID)
+		if err == nil {
+			rows, queryErr := testPool.Query(ctx, `
+				SELECT w.id FROM workspace w JOIN member m ON m.workspace_id = w.id WHERE m.user_id = $1
+			`, userID)
+			if queryErr == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var wsID string
+					if rows.Scan(&wsID) == nil {
+						testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsID)
+					}
+				}
+			}
+		}
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	body, _ := json.Marshal(map[string]string{"email": email})
+	resp, err := http.Post(testServer.URL+"/auth/send-code", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("send-code failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("send-code: expected 200, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	var code string
+	if err := testPool.QueryRow(ctx, `SELECT code FROM verification_code WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, email).Scan(&code); err != nil {
+		t.Fatalf("query verification code: %v", err)
+	}
+
+	setupBody, _ := json.Marshal(map[string]string{
+		"email":    email,
+		"code":     code,
+		"password": "Password123",
+	})
+	resp, err = http.Post(testServer.URL+"/auth/password/setup", "application/json", bytes.NewReader(setupBody))
+	if err != nil {
+		t.Fatalf("password setup failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("password setup: expected 200, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	loginBody, _ := json.Marshal(map[string]string{
+		"email":    email,
+		"password": "Password123",
+	})
+	resp, err = http.Post(testServer.URL+"/auth/password/login", "application/json", bytes.NewReader(loginBody))
+	if err != nil {
+		t.Fatalf("password login failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("password login: expected 200, got %d", resp.StatusCode)
+	}
+	defer resp.Body.Close()
+
+	var loginResp map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if loginResp["token"] == "" {
+		t.Fatal("expected password login token")
+	}
+}
+
 func TestVerifyCodeCreatesWorkspaceForNewUser(t *testing.T) {
 	const email = "new-integration-verify@multica.ai"
 	ctx := context.Background()

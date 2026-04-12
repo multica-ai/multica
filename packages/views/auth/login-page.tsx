@@ -87,9 +87,12 @@ export function LoginPage({
   lastWorkspaceId,
   onTokenObtained,
 }: LoginPageProps) {
-  const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
+  const [step, setStep] = useState<"email" | "code" | "set_password" | "cli_confirm">("email");
+  const [method, setMethod] = useState<"otp" | "password">("otp");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -148,6 +151,43 @@ export function LoginPage({
     [email],
   );
 
+  const handlePasswordLogin = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!email || !password) {
+        setError("Email and password are required");
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        if (cliCallback) {
+          const { token } = await api.loginWithPassword(email, password);
+          localStorage.setItem("multica_token", token);
+          api.setToken(token);
+          onTokenObtained?.();
+          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+          return;
+        }
+
+        await useAuthStore.getState().loginWithPassword(email, password);
+        const wsList = await api.listWorkspaces();
+        useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWorkspaceId);
+        onTokenObtained?.();
+        onSuccess();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to sign in with password",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [cliCallback, email, lastWorkspaceId, onSuccess, onTokenObtained, password],
+  );
+
   const handleVerify = useCallback(
     async (value: string) => {
       if (value.length !== 6) return;
@@ -193,6 +233,55 @@ export function LoginPage({
       );
     }
   };
+
+  const handleSetupPassword = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!email || !code || !password) {
+        setError("Email, code, and password are required");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Passwords do not match");
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+      try {
+        if (cliCallback) {
+          const { token } = await api.setupPassword(email, code, password);
+          localStorage.setItem("multica_token", token);
+          api.setToken(token);
+          onTokenObtained?.();
+          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+          return;
+        }
+
+        await useAuthStore.getState().setupPassword(email, code, password);
+        const wsList = await api.listWorkspaces();
+        useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWorkspaceId);
+        onTokenObtained?.();
+        onSuccess();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to set password",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      cliCallback,
+      code,
+      confirmPassword,
+      email,
+      lastWorkspaceId,
+      onSuccess,
+      onTokenObtained,
+      password,
+    ],
+  );
 
   const handleCliAuthorize = () => {
     if (!cliCallback) return;
@@ -298,6 +387,17 @@ export function LoginPage({
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setStep("set_password");
+                setError("");
+              }}
+            >
+              Set a password instead
+            </Button>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <button
                 type="button"
@@ -328,6 +428,90 @@ export function LoginPage({
     );
   }
 
+  if (step === "set_password") {
+    return (
+      <div className="flex min-h-svh items-center justify-center">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            <CardTitle className="text-2xl">Set your password</CardTitle>
+            <CardDescription>
+              Use the email code to create a password for{" "}
+              <span className="font-medium text-foreground">{email}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              id="set-password-form"
+              onSubmit={handleSetupPassword}
+              className="space-y-4"
+            >
+              <div className="space-y-2">
+                <Label htmlFor="setup-code">Verification code</Label>
+                <Input
+                  id="setup-code"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="setup-password">Password</Label>
+                <Input
+                  id="setup-password"
+                  type="password"
+                  placeholder="At least 8 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="setup-password-confirm">Confirm password</Label>
+                <Input
+                  id="setup-password-confirm"
+                  type="password"
+                  placeholder="Repeat password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+            </form>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button
+              type="submit"
+              form="set-password-form"
+              className="w-full"
+              size="lg"
+              disabled={!code || !password || !confirmPassword || loading}
+            >
+              {loading ? "Saving password..." : "Set password"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setStep("code");
+                setError("");
+                setPassword("");
+                setConfirmPassword("");
+              }}
+            >
+              Back
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Email step
   // -------------------------------------------------------------------------
@@ -339,11 +523,39 @@ export function LoginPage({
           {logo && <div className="mx-auto mb-4">{logo}</div>}
           <CardTitle className="text-2xl">Sign in to Multica</CardTitle>
           <CardDescription>
-            Enter your email to get a login code
+            {method === "otp"
+              ? "Enter your email to get a login code"
+              : "Sign in with your email and password"}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={method === "otp" ? "default" : "outline"}
+              onClick={() => {
+                setMethod("otp");
+                setError("");
+              }}
+            >
+              Email code
+            </Button>
+            <Button
+              type="button"
+              variant={method === "password" ? "default" : "outline"}
+              onClick={() => {
+                setMethod("password");
+                setError("");
+              }}
+            >
+              Password
+            </Button>
+          </div>
+          <form
+            id="login-form"
+            onSubmit={method === "otp" ? handleSendCode : handlePasswordLogin}
+            className="space-y-4"
+          >
             <div className="space-y-2">
               <Label htmlFor="login-email">Email</Label>
               <Input
@@ -356,6 +568,19 @@ export function LoginPage({
                 required
               />
             </div>
+            {method === "password" && (
+              <div className="space-y-2">
+                <Label htmlFor="login-password">Password</Label>
+                <Input
+                  id="login-password"
+                  type="password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            )}
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
@@ -367,10 +592,29 @@ export function LoginPage({
             form="login-form"
             className="w-full"
             size="lg"
-            disabled={!email || loading}
+            disabled={!email || (method === "password" && !password) || loading}
           >
-            {loading ? "Sending code..." : "Continue"}
+            {loading
+              ? method === "otp"
+                ? "Sending code..."
+                : "Signing in..."
+              : method === "otp"
+                ? "Continue"
+                : "Sign in with password"}
           </Button>
+          {method === "password" && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setMethod("otp");
+                setError("");
+              }}
+            >
+              Need to set a password? Use an email code
+            </Button>
+          )}
           {google && (
             <>
               <div className="relative w-full">

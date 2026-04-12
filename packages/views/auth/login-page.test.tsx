@@ -8,9 +8,13 @@ import userEvent from "@testing-library/user-event";
 
 const mockSendCode = vi.hoisted(() => vi.fn());
 const mockVerifyCode = vi.hoisted(() => vi.fn());
+const mockLoginWithPassword = vi.hoisted(() => vi.fn());
+const mockSetupPassword = vi.hoisted(() => vi.fn());
 const mockHydrateWorkspace = vi.hoisted(() => vi.fn());
 const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
+const mockApiLoginWithPassword = vi.hoisted(() => vi.fn());
+const mockApiSetupPassword = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
 
@@ -18,13 +22,20 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     // Zustand hook form — component may call useAuthStore(selector)
     (selector?: (s: unknown) => unknown) => {
-      const state = { sendCode: mockSendCode, verifyCode: mockVerifyCode };
+      const state = {
+        sendCode: mockSendCode,
+        verifyCode: mockVerifyCode,
+        loginWithPassword: mockLoginWithPassword,
+        setupPassword: mockSetupPassword,
+      };
       return selector ? selector(state) : state;
     },
     {
       getState: () => ({
         sendCode: mockSendCode,
         verifyCode: mockVerifyCode,
+        loginWithPassword: mockLoginWithPassword,
+        setupPassword: mockSetupPassword,
       }),
     },
   ),
@@ -48,6 +59,8 @@ vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockApiListWorkspaces,
     verifyCode: mockApiVerifyCode,
+    loginWithPassword: mockApiLoginWithPassword,
+    setupPassword: mockApiSetupPassword,
     setToken: mockApiSetToken,
     getMe: mockApiGetMe,
   },
@@ -209,6 +222,54 @@ describe("LoginPage", () => {
     });
   });
 
+  it("switches to password mode and signs in with email + password", async () => {
+    mockLoginWithPassword.mockResolvedValueOnce({
+      id: "u-1",
+      email: "test@example.com",
+      name: "Test User",
+    });
+    mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
+
+    render(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /password/i }));
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/^password$/i), "Password123");
+    await user.click(
+      screen.getByRole("button", { name: /sign in with password/i }),
+    );
+
+    await waitFor(() => {
+      expect(mockLoginWithPassword).toHaveBeenCalledWith(
+        "test@example.com",
+        "Password123",
+      );
+      expect(mockHydrateWorkspace).toHaveBeenCalledWith(
+        [{ id: "ws-1" }],
+        undefined,
+      );
+      expect(onSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it("shows password login errors", async () => {
+    mockLoginWithPassword.mockRejectedValueOnce(new Error("Invalid password"));
+    render(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /password/i }));
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/^password$/i), "Password123");
+    await user.click(
+      screen.getByRole("button", { name: /sign in with password/i }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Invalid password")).toBeInTheDocument();
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Code verification
   // -------------------------------------------------------------------------
@@ -296,6 +357,76 @@ describe("LoginPage", () => {
     // After transitioning to code step, cooldown is 10s
     const resendBtn = screen.getByRole("button", { name: /resend in/i });
     expect(resendBtn).toBeDisabled();
+  });
+
+  it("opens password setup from the code step and submits successfully", async () => {
+    mockSendCode.mockResolvedValueOnce(undefined);
+    mockSetupPassword.mockResolvedValueOnce({
+      id: "u-1",
+      email: "test@example.com",
+      name: "Test User",
+    });
+    mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
+
+    render(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /set a password instead/i }),
+    );
+    await user.type(screen.getByLabelText(/verification code/i), "123456");
+    await user.type(
+      screen.getByLabelText(/^password$/i),
+      "Password123",
+    );
+    await user.type(
+      screen.getByLabelText(/confirm password/i),
+      "Password123",
+    );
+    await user.click(screen.getByRole("button", { name: /set password/i }));
+
+    await waitFor(() => {
+      expect(mockSetupPassword).toHaveBeenCalledWith(
+        "test@example.com",
+        "123456",
+        "Password123",
+      );
+      expect(onSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it("blocks password setup when confirmation does not match", async () => {
+    mockSendCode.mockResolvedValueOnce(undefined);
+    render(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /set a password instead/i }),
+    );
+    await user.type(screen.getByLabelText(/verification code/i), "123456");
+    await user.type(screen.getByLabelText(/^password$/i), "Password123");
+    await user.type(
+      screen.getByLabelText(/confirm password/i),
+      "Mismatch123",
+    );
+    await user.click(screen.getByRole("button", { name: /set password/i }));
+
+    expect(screen.getByText(/passwords do not match/i)).toBeInTheDocument();
+    expect(mockSetupPassword).not.toHaveBeenCalled();
   });
 
   it("shows resend button with cooldown text after sending code", async () => {
@@ -512,6 +643,38 @@ describe("LoginPage", () => {
     expect(mockVerifyCode).not.toHaveBeenCalled();
     // onSuccess should NOT be called in CLI path — redirect handles it
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("CLI password login redirects to callback URL", async () => {
+    mockApiLoginWithPassword.mockResolvedValueOnce({ token: "pw-token" });
+    const onTokenObtained = vi.fn();
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        onTokenObtained={onTokenObtained}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "pw" }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /password/i }));
+    await user.type(screen.getByLabelText(/email/i), "cli@example.com");
+    await user.type(screen.getByLabelText(/^password$/i), "Password123");
+    await user.click(
+      screen.getByRole("button", { name: /sign in with password/i }),
+    );
+
+    await waitFor(() => {
+      expect(mockApiLoginWithPassword).toHaveBeenCalledWith(
+        "cli@example.com",
+        "Password123",
+      );
+      expect(window.location.href).toContain(
+        "http://localhost:9876/callback?token=pw-token&state=pw",
+      );
+      expect(onTokenObtained).toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
