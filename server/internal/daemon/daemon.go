@@ -160,6 +160,7 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 	}
 
 	var registered int
+	watchedIDs := make([]string, 0, len(cfg.WatchedWorkspaces))
 	for _, ws := range cfg.WatchedWorkspaces {
 		resp, err := d.registerRuntimesForWorkspace(ctx, ws.ID)
 		if err != nil {
@@ -178,16 +179,12 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 		}
 		d.mu.Unlock()
 
-		// Sync workspace repos to local cache.
-		if d.repoCache != nil && len(resp.Repos) > 0 {
-			if err := d.repoCache.Sync(ws.ID, repoDataToInfo(resp.Repos)); err != nil {
-				d.logger.Warn("repo cache sync failed", "workspace_id", ws.ID, "error", err)
-			}
-		}
-
 		d.logger.Info("watching workspace", "workspace_id", ws.ID, "name", ws.Name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
+		watchedIDs = append(watchedIDs, ws.ID)
 		registered++
 	}
+
+	d.syncWorkspaceRepos(ctx, watchedIDs)
 
 	if registered == 0 {
 		return fmt.Errorf("failed to register runtimes for any of the %d watched workspace(s)", len(cfg.WatchedWorkspaces))
@@ -312,6 +309,7 @@ func (d *Daemon) configWatchLoop(ctx context.Context) {
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	// Run immediately on startup before entering the periodic loop.
 	d.syncWorkspacesFromAPI(ctx)
+	d.syncWatchedWorkspaceRepos(ctx)
 
 	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
 	defer ticker.Stop()
@@ -322,6 +320,7 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			d.syncWorkspacesFromAPI(ctx)
+			d.syncWatchedWorkspaceRepos(ctx)
 		}
 	}
 }
@@ -361,6 +360,54 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) {
 		return
 	}
 	d.logger.Info("workspace sync: added new workspace(s) to config", "count", added)
+}
+
+// syncWatchedWorkspaceRepos refreshes cached repos for all watched workspaces.
+// It pulls the latest workspace details from the API so repository additions
+// made after daemon startup are eventually reflected in the local cache.
+func (d *Daemon) syncWatchedWorkspaceRepos(ctx context.Context) {
+	if d.repoCache == nil {
+		return
+	}
+
+	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
+	if err != nil {
+		d.logger.Warn("workspace repo sync: failed to load config", "error", err)
+		return
+	}
+
+	workspaceIDs := make([]string, 0, len(cfg.WatchedWorkspaces))
+	for _, ws := range cfg.WatchedWorkspaces {
+		workspaceIDs = append(workspaceIDs, ws.ID)
+	}
+	d.syncWorkspaceRepos(ctx, workspaceIDs)
+}
+
+// syncWorkspaceRepos pulls the latest repo list for each workspace ID and
+// refreshes the daemon's bare repo cache.
+func (d *Daemon) syncWorkspaceRepos(ctx context.Context, workspaceIDs []string) {
+	if d.repoCache == nil || len(workspaceIDs) == 0 {
+		return
+	}
+
+	for _, workspaceID := range workspaceIDs {
+		apiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ws, err := d.client.GetWorkspace(apiCtx, workspaceID)
+		cancel()
+		if err != nil {
+			d.logger.Warn("workspace repo sync: failed to load workspace", "workspace_id", workspaceID, "error", err)
+			continue
+		}
+		if len(ws.Repos) == 0 {
+			d.logger.Debug("workspace repo sync: no repos to refresh", "workspace_id", workspaceID, "name", ws.Name)
+			continue
+		}
+		if err := d.repoCache.Sync(workspaceID, repoDataToInfo(ws.Repos)); err != nil {
+			d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "name", ws.Name, "error", err)
+		} else {
+			d.logger.Info("workspace repos synced", "workspace_id", workspaceID, "name", ws.Name, "repos", len(ws.Repos))
+		}
+	}
 }
 
 // reloadWorkspaces reconciles the active workspace set with the config file.
@@ -407,13 +454,6 @@ func (d *Daemon) reloadWorkspaces(ctx context.Context) {
 			}
 			d.mu.Unlock()
 
-			// Sync workspace repos to local cache.
-			if d.repoCache != nil && len(resp.Repos) > 0 {
-				if err := d.repoCache.Sync(id, repoDataToInfo(resp.Repos)); err != nil {
-					d.logger.Warn("repo cache sync failed", "workspace_id", id, "error", err)
-				}
-			}
-
 			d.logger.Info("now watching workspace", "workspace_id", id, "name", name)
 		}
 	}
@@ -434,6 +474,8 @@ func (d *Daemon) reloadWorkspaces(ctx context.Context) {
 			d.logger.Info("stopped watching workspace", "workspace_id", id)
 		}
 	}
+
+	d.syncWatchedWorkspaceRepos(ctx)
 }
 
 func (d *Daemon) heartbeatLoop(ctx context.Context) {
