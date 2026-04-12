@@ -88,55 +88,70 @@ vi.mock("../../navigation", () => ({
 }));
 
 // Mock editor components (Tiptap requires real DOM)
+const MockContentEditor = forwardRef(function MockContentEditor(
+  { defaultValue, onUpdate, placeholder }: any,
+  ref: any,
+) {
+  const valueRef = useRef(defaultValue || "");
+  const [value, setValue] = useState(defaultValue || "");
+  useImperativeHandle(ref, () => ({
+    getMarkdown: () => valueRef.current,
+    clearContent: () => {
+      valueRef.current = "";
+      setValue("");
+    },
+    focus: () => {},
+    uploadFile: () => {},
+  }));
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => {
+        valueRef.current = e.target.value;
+        setValue(e.target.value);
+        onUpdate?.(e.target.value);
+      }}
+      placeholder={placeholder}
+      data-testid="rich-text-editor"
+    />
+  );
+});
+MockContentEditor.displayName = "MockContentEditor";
+
+const MockTitleEditor = forwardRef(function MockTitleEditor(
+  { defaultValue, placeholder, onBlur, onChange }: any,
+  ref: any,
+) {
+  const valueRef = useRef(defaultValue || "");
+  const [value, setValue] = useState(defaultValue || "");
+  useImperativeHandle(ref, () => ({
+    getText: () => valueRef.current,
+    focus: () => {},
+  }));
+  return (
+    <input
+      value={value}
+      onChange={(e) => {
+        valueRef.current = e.target.value;
+        setValue(e.target.value);
+        onChange?.(e.target.value);
+      }}
+      onBlur={() => onBlur?.(valueRef.current)}
+      placeholder={placeholder}
+      data-testid="title-editor"
+    />
+  );
+});
+MockTitleEditor.displayName = "MockTitleEditor";
+
 vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
-  ContentEditor: forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
-    const valueRef = useRef(defaultValue || "");
-    const [value, setValue] = useState(defaultValue || "");
-    useImperativeHandle(ref, () => ({
-      getMarkdown: () => valueRef.current,
-      clearContent: () => { valueRef.current = ""; setValue(""); },
-      focus: () => {},
-      uploadFile: () => {},
-    }));
-    return (
-      <textarea
-        value={value}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onUpdate?.(e.target.value);
-        }}
-        placeholder={placeholder}
-        data-testid="rich-text-editor"
-      />
-    );
-  }),
-  TitleEditor: forwardRef(({ defaultValue, placeholder, onBlur, onChange }: any, ref: any) => {
-    const valueRef = useRef(defaultValue || "");
-    const [value, setValue] = useState(defaultValue || "");
-    useImperativeHandle(ref, () => ({
-      getText: () => valueRef.current,
-      focus: () => {},
-    }));
-    return (
-      <input
-        value={value}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onChange?.(e.target.value);
-        }}
-        onBlur={() => onBlur?.(valueRef.current)}
-        placeholder={placeholder}
-        data-testid="title-editor"
-      />
-    );
-  }),
+  ContentEditor: MockContentEditor,
+  TitleEditor: MockTitleEditor,
 }));
 
 // Mock common components
