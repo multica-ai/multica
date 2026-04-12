@@ -36,9 +36,9 @@ type WorkspaceResponse struct {
 	Slug        string  `json:"slug"`
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix string  `json:"issue_prefix"`
+	Settings    any             `json:"settings"`
+	Repos       []WorkspaceRepo `json:"repos"`
+	IssuePrefix string          `json:"issue_prefix"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -51,12 +51,11 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
-	var repos any
-	if w.Repos != nil {
-		json.Unmarshal(w.Repos, &repos)
-	}
+	// Normalize repos to the v2 shape on read so clients always see ids/types,
+	// even if a row was written before migration 040 ran for some reason.
+	repos, _ := parseWorkspaceRepos(w.Repos)
 	if repos == nil {
-		repos = []any{}
+		repos = []WorkspaceRepo{}
 	}
 	return WorkspaceResponse{
 		ID:          uuidToString(w.ID),
@@ -235,9 +234,34 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
+	var removedRepoIDs []string
 	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
+		normalized, err := validateAndNormalizeRepos(req.Repos)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		reposJSON, err := json.Marshal(normalized)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode repos")
+			return
+		}
 		params.Repos = reposJSON
+
+		// Diff against the current row so we can cascade-clean project_repo.
+		if current, err := h.Queries.GetWorkspace(r.Context(), parseUUID(id)); err == nil {
+			if prev, perr := parseWorkspaceRepos(current.Repos); perr == nil {
+				keep := make(map[string]struct{}, len(normalized))
+				for _, r := range normalized {
+					keep[r.ID] = struct{}{}
+				}
+				for _, p := range prev {
+					if _, ok := keep[p.ID]; !ok {
+						removedRepoIDs = append(removedRepoIDs, p.ID)
+					}
+				}
+			}
+		}
 	}
 	if req.IssuePrefix != nil {
 		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
@@ -251,6 +275,13 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
 		return
+	}
+
+	// Cascade-clean project_repo rows that point at repos removed by this update.
+	for _, rid := range removedRepoIDs {
+		if derr := h.Queries.DeleteProjectRepoByID(r.Context(), rid); derr != nil {
+			slog.Warn("cascade project_repo cleanup failed", "repo_id", rid, "error", derr)
+		}
 	}
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)

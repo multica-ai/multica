@@ -66,9 +66,16 @@ func agentToResponse(a db.Agent) AgentResponse {
 }
 
 // RepoData holds repository information included in claim responses so the
-// daemon can set up worktrees for each workspace repo.
+// daemon can set up worktrees for each workspace repo. It represents a
+// workspace.repos[] entry in its full v2 shape — a github repo has URL, a
+// local repo has LocalPath. ID is the stable identifier used to link repos
+// to projects via the project_repo table.
 type RepoData struct {
-	URL         string `json:"url"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	URL         string `json:"url,omitempty"`
+	LocalPath   string `json:"local_path,omitempty"`
 	Description string `json:"description"`
 }
 

@@ -281,6 +281,13 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type ProjectRepo struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	RepoID    string             `json:"repo_id"`
+	Position  int32              `json:"position"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type RuntimeUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`

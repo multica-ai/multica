@@ -17,19 +17,20 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	ID          string   `json:"id"`
+	WorkspaceID string   `json:"workspace_id"`
+	Title       string   `json:"title"`
+	Description *string  `json:"description"`
+	Icon        *string  `json:"icon"`
+	Status      string   `json:"status"`
+	Priority    string   `json:"priority"`
+	LeadType    *string  `json:"lead_type"`
+	LeadID      *string  `json:"lead_id"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+	IssueCount  int64    `json:"issue_count"`
+	DoneCount   int64    `json:"done_count"`
+	RepoIDs     []string `json:"repo_ids"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -45,6 +46,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		LeadID:      uuidToPtr(p.LeadID),
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
+		RepoIDs:     []string{},
 	}
 }
 
@@ -57,23 +59,25 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 }
 
 type CreateProjectRequest struct {
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title       string   `json:"title"`
+	Description *string  `json:"description"`
+	Icon        *string  `json:"icon"`
+	Status      string   `json:"status"`
+	Priority    string   `json:"priority"`
+	LeadType    *string  `json:"lead_type"`
+	LeadID      *string  `json:"lead_id"`
+	RepoIDs     []string `json:"repo_ids,omitempty"`
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title       *string   `json:"title"`
+	Description *string   `json:"description"`
+	Icon        *string   `json:"icon"`
+	Status      *string   `json:"status"`
+	Priority    *string   `json:"priority"`
+	LeadType    *string   `json:"lead_type"`
+	LeadID      *string   `json:"lead_id"`
+	RepoIDs     *[]string `json:"repo_ids"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +100,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch issue stats for all projects
+	// Batch-fetch issue stats and repo links for all projects.
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	repoMap := make(map[string][]string)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
@@ -109,6 +114,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 				statsMap[uuidToString(s.ProjectID)] = s
 			}
 		}
+		if rows, err := h.Queries.ListProjectReposBatch(r.Context(), projectIDs); err == nil {
+			for _, row := range rows {
+				pid := uuidToString(row.ProjectID)
+				repoMap[pid] = append(repoMap[pid], row.RepoID)
+			}
+		}
 	}
 
 	resp := make([]ProjectResponse, len(projects))
@@ -117,6 +128,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		if s, ok := statsMap[resp[i].ID]; ok {
 			resp[i].IssueCount = s.TotalCount
 			resp[i].DoneCount = s.DoneCount
+		}
+		if ids, ok := repoMap[resp[i].ID]; ok {
+			resp[i].RepoIDs = ids
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
@@ -134,6 +148,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
+	if ids, err := h.Queries.ListProjectRepos(r.Context(), project.ID); err == nil {
+		resp.RepoIDs = ids
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -182,7 +199,27 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create project")
 		return
 	}
+
+	// Optional repo associations on create.
+	if len(req.RepoIDs) > 0 {
+		validIDs, verr := h.validateRepoIDsInWorkspace(r.Context(), workspaceID, req.RepoIDs)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		for i, rid := range validIDs {
+			_ = h.Queries.AddProjectRepo(r.Context(), db.AddProjectRepoParams{
+				ProjectID: project.ID,
+				RepoID:    rid,
+				Position:  int32(i),
+			})
+		}
+	}
+
 	resp := projectToResponse(project)
+	if ids, err := h.Queries.ListProjectRepos(r.Context(), project.ID); err == nil {
+		resp.RepoIDs = ids
+	}
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -263,9 +300,69 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update project")
 		return
 	}
+
+	// If repo_ids is present (even as empty array), replace the project's repo
+	// associations wholesale. Validate that every id exists in workspace.repos
+	// before committing so stale ids can't accumulate.
+	if req.RepoIDs != nil {
+		validIDs, verr := h.validateRepoIDsInWorkspace(r.Context(), workspaceID, *req.RepoIDs)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		if err := h.Queries.ClearProjectRepos(r.Context(), project.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clear project repos")
+			return
+		}
+		for i, rid := range validIDs {
+			if err := h.Queries.AddProjectRepo(r.Context(), db.AddProjectRepoParams{
+				ProjectID: project.ID,
+				RepoID:    rid,
+				Position:  int32(i),
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to link project repo")
+				return
+			}
+		}
+	}
+
 	resp := projectToResponse(project)
+	if ids, err := h.Queries.ListProjectRepos(r.Context(), project.ID); err == nil {
+		resp.RepoIDs = ids
+	}
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validateRepoIDsInWorkspace filters requested repo ids down to those actually
+// present in workspace.repos, preserving order and deduplicating. Unknown ids
+// are an error — a mismatched id usually means the caller is using stale data.
+func (h *Handler) validateRepoIDsInWorkspace(ctx context.Context, workspaceID string, ids []string) ([]string, error) {
+	ws, err := h.Queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil {
+		return nil, fmt.Errorf("workspace not found")
+	}
+	repos, err := parseWorkspaceRepos(ws.Repos)
+	if err != nil {
+		return nil, fmt.Errorf("parse workspace repos: %w", err)
+	}
+	known := make(map[string]struct{}, len(repos))
+	for _, r := range repos {
+		known[r.ID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := known[id]; !ok {
+			return nil, fmt.Errorf("repo id %q is not in this workspace", id)
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {

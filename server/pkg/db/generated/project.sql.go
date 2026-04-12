@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addProjectRepo = `-- name: AddProjectRepo :exec
+INSERT INTO project_repo (project_id, repo_id, position)
+VALUES ($1, $2, $3)
+ON CONFLICT (project_id, repo_id) DO UPDATE SET position = EXCLUDED.position
+`
+
+type AddProjectRepoParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	RepoID    string      `json:"repo_id"`
+	Position  int32       `json:"position"`
+}
+
+func (q *Queries) AddProjectRepo(ctx context.Context, arg AddProjectRepoParams) error {
+	_, err := q.db.Exec(ctx, addProjectRepo, arg.ProjectID, arg.RepoID, arg.Position)
+	return err
+}
+
+const clearProjectRepos = `-- name: ClearProjectRepos :exec
+DELETE FROM project_repo WHERE project_id = $1
+`
+
+func (q *Queries) ClearProjectRepos(ctx context.Context, projectID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearProjectRepos, projectID)
+	return err
+}
+
 const countIssuesByProject = `-- name: CountIssuesByProject :one
 SELECT count(*) FROM issue
 WHERE project_id = $1
@@ -77,6 +103,15 @@ DELETE FROM project WHERE id = $1
 
 func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteProject, id)
+	return err
+}
+
+const deleteProjectRepoByID = `-- name: DeleteProjectRepoByID :exec
+DELETE FROM project_repo WHERE repo_id = $1
+`
+
+func (q *Queries) DeleteProjectRepoByID(ctx context.Context, repoID string) error {
+	_, err := q.db.Exec(ctx, deleteProjectRepoByID, repoID)
 	return err
 }
 
@@ -168,6 +203,65 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 	return items, nil
 }
 
+const listProjectRepos = `-- name: ListProjectRepos :many
+SELECT repo_id FROM project_repo
+WHERE project_id = $1
+ORDER BY position ASC, created_at ASC
+`
+
+func (q *Queries) ListProjectRepos(ctx context.Context, projectID pgtype.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listProjectRepos, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var repo_id string
+		if err := rows.Scan(&repo_id); err != nil {
+			return nil, err
+		}
+		items = append(items, repo_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectReposBatch = `-- name: ListProjectReposBatch :many
+SELECT project_id, repo_id, position
+FROM project_repo
+WHERE project_id = ANY($1::uuid[])
+ORDER BY project_id, position ASC, created_at ASC
+`
+
+type ListProjectReposBatchRow struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	RepoID    string      `json:"repo_id"`
+	Position  int32       `json:"position"`
+}
+
+func (q *Queries) ListProjectReposBatch(ctx context.Context, projectIds []pgtype.UUID) ([]ListProjectReposBatchRow, error) {
+	rows, err := q.db.Query(ctx, listProjectReposBatch, projectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectReposBatchRow{}
+	for rows.Next() {
+		var i ListProjectReposBatchRow
+		if err := rows.Scan(&i.ProjectID, &i.RepoID, &i.Position); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
 WHERE workspace_id = $1
@@ -212,6 +306,46 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 		return nil, err
 	}
 	return items, nil
+}
+
+const listProjectsForRepo = `-- name: ListProjectsForRepo :many
+SELECT project_id FROM project_repo
+WHERE repo_id = $1
+`
+
+func (q *Queries) ListProjectsForRepo(ctx context.Context, repoID string) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listProjectsForRepo, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var project_id pgtype.UUID
+		if err := rows.Scan(&project_id); err != nil {
+			return nil, err
+		}
+		items = append(items, project_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const removeProjectRepo = `-- name: RemoveProjectRepo :exec
+DELETE FROM project_repo
+WHERE project_id = $1 AND repo_id = $2
+`
+
+type RemoveProjectRepoParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	RepoID    string      `json:"repo_id"`
+}
+
+func (q *Queries) RemoveProjectRepo(ctx context.Context, arg RemoveProjectRepoParams) error {
+	_, err := q.db.Exec(ctx, removeProjectRepo, arg.ProjectID, arg.RepoID)
+	return err
 }
 
 const updateProject = `-- name: UpdateProject :one
