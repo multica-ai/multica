@@ -71,7 +71,8 @@ Each team member who wants to run AI agents locally needs to:
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install multica-ai/tap/multica
+brew tap multica-ai/tap
+brew install multica
 ```
 
 You also need at least one AI agent CLI installed:
@@ -79,6 +80,7 @@ You also need at least one AI agent CLI installed:
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
 - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
 - [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
+- [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
 
 ### b) One-command setup
 
