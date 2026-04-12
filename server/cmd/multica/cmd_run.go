@@ -55,7 +55,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.GroupID = groupCore
 
-	runCmd.Flags().String("path", "", "Local path of the git repo (default: prompt)")
+	runCmd.Flags().String("path", "", "Local path of the git repo (default: current directory if it's a git repo; prompts otherwise)")
 	runCmd.Flags().String("issue", "", "Existing issue id to work on")
 	runCmd.Flags().Bool("autocreate", false, "Auto-create issue from prompt (default when no --issue)")
 	runCmd.Flags().String("project", "", "Project name or id")
@@ -158,21 +158,23 @@ func resolveRunPath(flagVal string, yes bool) (string, error) {
 	if flagVal != "" {
 		return normalizePath(flagVal)
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+	// Non-interactive: use cwd unconditionally. validateGitRepo runs after
+	// this and will return a clear error if cwd isn't a git repo.
 	if yes || !prompt.IsInteractive() {
-		// Fall back to current directory when non-interactive.
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("--path is required when non-interactive: %w", err)
-		}
 		return cwd, nil
 	}
-	// Pre-fill with CWD if it's a git repo — otherwise blank.
-	cwd, _ := os.Getwd()
-	initial := ""
-	if cwd != "" && isGitRepo(cwd) {
-		initial = cwd
+	// Interactive: if the current directory is already a git repo, just use
+	// it silently — prompting the user to confirm their own cwd is noise.
+	// Only prompt when we have nothing sensible to default to.
+	if isGitRepo(cwd) {
+		fmt.Fprintf(os.Stderr, "Using current directory as repo path: %s\n", cwd)
+		return cwd, nil
 	}
-	val, err := prompt.Input("Local repository path", "/absolute/path/to/repo", initial)
+	val, err := prompt.Input("Local repository path", "/absolute/path/to/repo", "")
 	if err != nil {
 		return "", err
 	}
@@ -554,10 +556,18 @@ func createIssueForRun(ctx context.Context, client *cli.APIClient, projectID, pr
 	return strVal(result, "id"), title, nil
 }
 
-// extractTitleAndBody splits a free-form prompt into a short title (first
-// non-blank line, capped at 80 chars) and the remainder as the description.
-// When titleOverride is non-empty, it wins and the entire promptText becomes
-// the description.
+// extractTitleAndBody derives (title, description) from a free-form prompt.
+//
+// Rules:
+//   - Title is always a short summary (capped at maxTitleLen) — never the
+//     full prompt. A long single-line prompt becomes a truncated title
+//     ending in "…", never an 80-character run-on.
+//   - Description always contains the full, original prompt so the agent
+//     (and anyone reading the issue in the UI) sees the whole ask. The only
+//     exception is a short single-line prompt where title == prompt; then
+//     the description is empty to avoid duplication.
+//   - titleOverride always wins; the entire promptText becomes the body.
+//   - Leading blank lines are skipped when picking the first "line".
 func extractTitleAndBody(promptText, titleOverride string) (string, string) {
 	promptText = strings.TrimSpace(promptText)
 	if titleOverride != "" {
@@ -566,32 +576,55 @@ func extractTitleAndBody(promptText, titleOverride string) (string, string) {
 	if promptText == "" {
 		return "", ""
 	}
-	// Split by first newline; if single line, use the full line as title.
-	nl := strings.IndexByte(promptText, '\n')
-	if nl < 0 {
-		return truncateTitle(promptText), ""
+
+	// First non-blank line is our title candidate.
+	firstLineRaw := promptText
+	if nl := strings.IndexByte(promptText, '\n'); nl >= 0 {
+		firstLineRaw = strings.TrimSpace(promptText[:nl])
+		// Skip leading blank lines.
+		rest := strings.TrimSpace(promptText[nl+1:])
+		for firstLineRaw == "" && rest != "" {
+			nl = strings.IndexByte(rest, '\n')
+			if nl < 0 {
+				firstLineRaw = rest
+				rest = ""
+				break
+			}
+			firstLineRaw = strings.TrimSpace(rest[:nl])
+			rest = strings.TrimSpace(rest[nl+1:])
+		}
 	}
-	title := strings.TrimSpace(promptText[:nl])
-	body := strings.TrimSpace(promptText[nl+1:])
-	if title == "" {
-		// Recurse on the body in case the user started with blank lines.
-		return extractTitleAndBody(body, "")
+
+	title := truncateTitle(firstLineRaw)
+
+	// Description rules:
+	//   - single-line prompt that wasn't truncated → no description (title
+	//     already says everything)
+	//   - anything else (multi-line, or truncated title) → full original
+	//     prompt as the description so no content is lost
+	isSingleLine := !strings.ContainsRune(promptText, '\n')
+	if isSingleLine && title == firstLineRaw {
+		return title, ""
 	}
-	return truncateTitle(title), body
+	return title, promptText
 }
+
+// maxTitleLen caps the issue title. Chosen short enough that the title fits
+// in one line of the board and the issue list without visually dominating
+// sibling rows, but long enough to meaningfully describe a task.
+const maxTitleLen = 60
 
 func truncateTitle(s string) string {
 	s = strings.TrimSpace(s)
-	const maxTitle = 80
-	if len(s) <= maxTitle {
+	if len(s) <= maxTitleLen {
 		return s
 	}
-	// Trim on a word boundary if possible.
-	cut := s[:maxTitle]
-	if i := strings.LastIndexByte(cut, ' '); i > maxTitle/2 {
+	// Trim on a word boundary if possible, leaving room for "…".
+	cut := s[:maxTitleLen]
+	if i := strings.LastIndexByte(cut, ' '); i > maxTitleLen/2 {
 		cut = cut[:i]
 	}
-	return cut + "…"
+	return strings.TrimRight(cut, " ,.;:") + "…"
 }
 
 func firstLine(s string) string {

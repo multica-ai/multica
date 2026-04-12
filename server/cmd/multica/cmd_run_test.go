@@ -7,12 +7,16 @@ import (
 	"testing"
 )
 
-// TestExtractTitleAndBody covers the prompt-parsing rules for `multica run`
-// when no explicit --title is given: single-line prompts become the title
-// verbatim; multi-line prompts split first non-blank line as title, rest as
-// description; overrides win; empty prompts stay empty.
+// TestExtractTitleAndBody pins the prompt-parsing rules for `multica run`
+// when no explicit --title is given. Short single-line prompts become a
+// bare title; long single-line prompts truncate the title AND preserve the
+// full text in the body; multi-line prompts split first non-blank line as
+// title with the full prompt as body; overrides win outright.
 func TestExtractTitleAndBody(t *testing.T) {
 	t.Parallel()
+
+	longPrompt := "investigate if the stripe webhooks handle duplicated events or events about the same thing happening like when a checkout session is completed also a subscription event might send"
+
 	tests := []struct {
 		name      string
 		prompt    string
@@ -21,32 +25,40 @@ func TestExtractTitleAndBody(t *testing.T) {
 		wantBody  string
 	}{
 		{
-			name:      "single line becomes title",
+			name:      "short single line: title only",
 			prompt:    "fix the login bug",
 			wantTitle: "fix the login bug",
 			wantBody:  "",
 		},
 		{
-			name:      "multi-line splits first line as title",
+			name:      "long single line: truncated title + full body",
+			prompt:    longPrompt,
+			// Title must end with an ellipsis and be under the cap.
+			wantTitle: "",       // asserted via length/prefix below
+			wantBody:  longPrompt, // full prompt preserved
+		},
+		{
+			name:      "multi-line: first line as title, full prompt as body",
 			prompt:    "refactor auth\n\nchange JWT to PASETO everywhere",
 			wantTitle: "refactor auth",
-			wantBody:  "change JWT to PASETO everywhere",
+			wantBody:  "refactor auth\n\nchange JWT to PASETO everywhere",
 		},
 		{
-			name:      "blank leading lines are skipped",
+			name:      "leading blank lines are skipped",
 			prompt:    "\n\nactual title\nwith body",
 			wantTitle: "actual title",
-			wantBody:  "with body",
+			// Outer TrimSpace normalizes leading whitespace before storing.
+			wantBody: "actual title\nwith body",
 		},
 		{
-			name:      "override takes precedence and body is full prompt",
+			name:      "override takes precedence; body is full prompt",
 			prompt:    "anything\nhere",
 			override:  "My Title",
 			wantTitle: "My Title",
 			wantBody:  "anything\nhere",
 		},
 		{
-			name:      "empty prompt empty title",
+			name:      "empty prompt stays empty",
 			prompt:    "",
 			wantTitle: "",
 			wantBody:  "",
@@ -55,7 +67,18 @@ func TestExtractTitleAndBody(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotTitle, gotBody := extractTitleAndBody(tt.prompt, tt.override)
-			if gotTitle != tt.wantTitle {
+			// The long-prompt case checks title shape, not exact value.
+			if tt.name == "long single line: truncated title + full body" {
+				if len(gotTitle) > maxTitleLen+3 { // +3 bytes for UTF-8 "…"
+					t.Errorf("title too long: %d chars, cap %d", len(gotTitle), maxTitleLen)
+				}
+				if !strings.HasSuffix(gotTitle, "…") {
+					t.Errorf("title should end with ellipsis, got %q", gotTitle)
+				}
+				if !strings.HasPrefix(tt.prompt, strings.TrimSuffix(gotTitle, "…")) {
+					t.Errorf("title should be a prefix of the prompt, got %q", gotTitle)
+				}
+			} else if gotTitle != tt.wantTitle {
 				t.Errorf("title: got %q, want %q", gotTitle, tt.wantTitle)
 			}
 			if gotBody != tt.wantBody {
@@ -72,9 +95,9 @@ func TestTruncateTitle(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("word ", 40)
 	got := truncateTitle(long)
-	// 80 chars max + up to 3 bytes for the UTF-8 "…".
-	if len(got) > 83 {
-		t.Errorf("truncated title too long: %d chars", len(got))
+	// maxTitleLen byte cap + up to 3 bytes for the UTF-8 "…".
+	if len(got) > maxTitleLen+3 {
+		t.Errorf("truncated title too long: %d chars, cap %d", len(got), maxTitleLen+3)
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("expected ellipsis suffix, got %q", got)
