@@ -134,6 +134,7 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 	}
 
 	affectedAgents := make(map[string]pgtype.UUID)
+	processedIssues := make(map[string]bool)
 
 	for _, ft := range items {
 		// Look up workspace ID from the issue so the event reaches the right WS room.
@@ -142,15 +143,22 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 			workspaceID = util.UUIDToString(issue.WorkspaceID)
 			// If the issue is still in_progress and no other active tasks remain,
 			// reset it back to todo so the daemon can pick it up again.
-			if issue.Status == "in_progress" {
+			issueKey := util.UUIDToString(ft.IssueID)
+			if issue.Status == "in_progress" && !processedIssues[issueKey] {
+				processedIssues[issueKey] = true
 				hasActive, checkErr := queries.HasActiveTaskForIssue(ctx, ft.IssueID)
-				if checkErr == nil && !hasActive {
+				if checkErr != nil {
+					slog.Warn("runtime sweeper: failed to check active tasks for issue",
+						"issue_id", issueKey,
+						"error", checkErr,
+					)
+				} else if !hasActive {
 					if _, updateErr := queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 						ID:     ft.IssueID,
 						Status: "todo",
 					}); updateErr != nil {
 						slog.Warn("runtime sweeper: failed to reset stuck issue to todo",
-							"issue_id", util.UUIDToString(ft.IssueID),
+							"issue_id", issueKey,
 							"error", updateErr,
 						)
 					}
