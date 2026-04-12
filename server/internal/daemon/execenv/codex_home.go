@@ -1,11 +1,14 @@
 package execenv
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 // Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
@@ -29,6 +32,13 @@ var codexCopiedFiles = []string{
 	"instructions.md",
 }
 
+var (
+	ensureCodexDirLink      = ensureDirSymlink
+	ensureCodexDirJunction  = ensureDirJunction
+	ensureCodexFileLink     = ensureSymlink
+	ensureCodexFileHardLink = ensureHardLink
+)
+
 // prepareCodexHome creates a per-task CODEX_HOME directory and seeds it with
 // config from the shared ~/.codex/ home. Auth is symlinked (shared), config
 // files are copied (isolated).
@@ -43,7 +53,7 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 	for _, name := range codexSymlinkedDirs {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
-		if err := ensureDirSymlink(src, dst); err != nil {
+		if err := prepareCodexHomeDir(src, dst, logger); err != nil {
 			logger.Warn("execenv: codex-home dir symlink failed", "dir", name, "error", err)
 		}
 	}
@@ -52,7 +62,7 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 	for _, name := range codexSymlinkedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
-		if err := ensureSymlink(src, dst); err != nil {
+		if err := prepareCodexHomeFile(src, dst, logger); err != nil {
 			logger.Warn("execenv: codex-home symlink failed", "file", name, "error", err)
 		}
 	}
@@ -67,6 +77,50 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+func prepareCodexHomeDir(src, dst string, logger *slog.Logger) error {
+	if err := ensureCodexDirLink(src, dst); err == nil {
+		return nil
+	} else {
+		linkErr := err
+
+		if runtime.GOOS == "windows" {
+			if err := ensureCodexDirJunction(src, dst); err == nil {
+				logger.Info("execenv: codex-home dir fallback linked via junction", "dir", filepath.Base(dst))
+				return nil
+			}
+		}
+
+		if err := os.MkdirAll(dst, 0o755); err == nil {
+			logger.Info("execenv: codex-home dir fallback using local directory", "dir", filepath.Base(dst))
+			return nil
+		} else {
+			return errors.Join(linkErr, fmt.Errorf("local dir fallback failed: %w", err))
+		}
+	}
+}
+
+func prepareCodexHomeFile(src, dst string, logger *slog.Logger) error {
+	if err := ensureCodexFileLink(src, dst); err == nil {
+		return nil
+	} else {
+		linkErr := err
+
+		if runtime.GOOS == "windows" {
+			if err := ensureCodexFileHardLink(src, dst); err == nil {
+				logger.Info("execenv: codex-home file fallback linked via hard link", "file", filepath.Base(dst))
+				return nil
+			}
+		}
+
+		if err := copyFileIfExists(src, dst); err == nil {
+			logger.Info("execenv: codex-home file fallback copied shared file", "file", filepath.Base(dst))
+			return nil
+		} else {
+			return errors.Join(linkErr, fmt.Errorf("copy fallback failed: %w", err))
+		}
+	}
 }
 
 // resolveSharedCodexHome returns the path to the user's shared Codex home.
@@ -110,6 +164,36 @@ func ensureDirSymlink(src, dst string) error {
 	return os.Symlink(src, dst)
 }
 
+func ensureDirJunction(src, dst string) error {
+	if runtime.GOOS != "windows" {
+		return fmt.Errorf("directory junctions are only supported on windows")
+	}
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		return fmt.Errorf("create shared dir %s: %w", src, err)
+	}
+
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(dst)
+			if err == nil && target == src {
+				return nil
+			}
+			_ = os.Remove(dst)
+		} else {
+			return nil
+		}
+	}
+
+	cmd := exec.Command("cmd.exe", "/c", "mklink", "/J", dst, src)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		if len(output) > 0 {
+			return fmt.Errorf("mklink /J %s -> %s: %w: %s", dst, src, err, string(output))
+		}
+		return fmt.Errorf("mklink /J %s -> %s: %w", dst, src, err)
+	}
+	return nil
+}
+
 // ensureSymlink creates a symlink dst → src. If src doesn't exist, it's a no-op.
 // If dst already exists as a correct symlink, it's a no-op. If dst is a broken
 // symlink, it's replaced.
@@ -135,6 +219,26 @@ func ensureSymlink(src, dst string) error {
 	}
 
 	return os.Symlink(src, dst)
+}
+
+func ensureHardLink(src, dst string) error {
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		return nil
+	}
+
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(dst)
+			if err == nil && target == src {
+				return nil
+			}
+			_ = os.Remove(dst)
+		} else {
+			return nil
+		}
+	}
+
+	return os.Link(src, dst)
 }
 
 // copyFileIfExists copies src to dst. If src doesn't exist, it's a no-op.

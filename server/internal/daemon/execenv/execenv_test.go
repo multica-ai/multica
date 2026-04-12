@@ -1,9 +1,11 @@
 package execenv
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -623,26 +625,31 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Error("sessions should be a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 {
+		sessTarget, _ := os.Readlink(sessionsPath)
+		if sessTarget != filepath.Join(sharedHome, "sessions") {
+			t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+		}
 	}
-	sessTarget, _ := os.Readlink(sessionsPath)
-	if sessTarget != filepath.Join(sharedHome, "sessions") {
-		t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+	resolvedInfo, err := os.Stat(sessionsPath)
+	if err != nil {
+		t.Fatalf("stat sessions: %v", err)
+	}
+	if !resolvedInfo.IsDir() {
+		t.Fatalf("sessions should resolve to a directory, got mode %v", resolvedInfo.Mode())
 	}
 
-	// auth.json should be a symlink.
+	// auth.json should remain readable whether it is a symlink, hard link, or copied fallback.
 	authPath := filepath.Join(codexHome, "auth.json")
 	fi, err = os.Lstat(authPath)
 	if err != nil {
 		t.Fatalf("auth.json not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Error("auth.json should be a symlink")
-	}
-	target, _ := os.Readlink(authPath)
-	if target != filepath.Join(sharedHome, "auth.json") {
-		t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
+	if fi.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(authPath)
+		if target != filepath.Join(sharedHome, "auth.json") {
+			t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
+		}
 	}
 	// Verify content is accessible through symlink.
 	data, _ := os.ReadFile(authPath)
@@ -703,12 +710,98 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 	// sessions should be a symlink to the shared sessions dir.
 	sessionsPath := filepath.Join(codexHome, "sessions")
-	fi, err := os.Lstat(sessionsPath)
-	if err != nil {
+	if _, err := os.Lstat(sessionsPath); err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Error("sessions should be a symlink")
+	resolvedInfo, err := os.Stat(sessionsPath)
+	if err != nil {
+		t.Fatalf("stat sessions: %v", err)
+	}
+	if !resolvedInfo.IsDir() {
+		t.Fatalf("sessions should resolve to a directory, got mode %v", resolvedInfo.Mode())
+	}
+}
+
+func TestPrepareCodexHomeFallsBackToLocalSessionsDir(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	origDirLink := ensureCodexDirLink
+	origDirJunction := ensureCodexDirJunction
+	t.Cleanup(func() {
+		ensureCodexDirLink = origDirLink
+		ensureCodexDirJunction = origDirJunction
+	})
+
+	ensureCodexDirLink = func(src, dst string) error {
+		if err := os.MkdirAll(src, 0o755); err != nil {
+			return err
+		}
+		return errors.New("symlink privilege denied")
+	}
+	ensureCodexDirJunction = func(src, dst string) error {
+		return errors.New("junction unavailable")
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	sessionsPath := filepath.Join(codexHome, "sessions")
+	fi, err := os.Lstat(sessionsPath)
+	if err != nil {
+		t.Fatalf("sessions fallback not created: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Fatalf("sessions fallback should be a directory, got mode %v", fi.Mode())
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("sessions fallback should not be a symlink")
+	}
+}
+
+func TestPrepareCodexHomeFallsBackToCopiedAuthFile(t *testing.T) {
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"token":"secret"}`), 0o644); err != nil {
+		t.Fatalf("write shared auth: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	origFileLink := ensureCodexFileLink
+	origHardLink := ensureCodexFileHardLink
+	t.Cleanup(func() {
+		ensureCodexFileLink = origFileLink
+		ensureCodexFileHardLink = origHardLink
+	})
+
+	ensureCodexFileLink = func(src, dst string) error {
+		return errors.New("symlink privilege denied")
+	}
+	ensureCodexFileHardLink = func(src, dst string) error {
+		return errors.New("hard link unavailable")
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	authPath := filepath.Join(codexHome, "auth.json")
+	fi, err := os.Lstat(authPath)
+	if err != nil {
+		t.Fatalf("auth fallback not created: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("auth fallback should be a regular file copy, not a symlink")
+	}
+
+	data, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("read auth fallback: %v", err)
+	}
+	if string(data) != `{"token":"secret"}` {
+		t.Fatalf("auth fallback content = %q", data)
 	}
 }
 
@@ -722,7 +815,12 @@ func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	os.WriteFile(src, []byte("real"), 0o644)
 
 	// Create a broken symlink pointing to a non-existent file.
-	os.Symlink(filepath.Join(dir, "old-source.json"), dst)
+	if err := os.Symlink(filepath.Join(dir, "old-source.json"), dst); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink privilege unavailable on this Windows host: %v", err)
+		}
+		t.Fatalf("create broken symlink: %v", err)
+	}
 
 	if err := ensureSymlink(src, dst); err != nil {
 		t.Fatalf("ensureSymlink failed: %v", err)
