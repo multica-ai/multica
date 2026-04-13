@@ -27,6 +27,11 @@ type PATResolver interface {
 	ResolveToken(ctx context.Context, token string) (userID string, ok bool)
 }
 
+const (
+	pongWait     = 60 * time.Second
+	pingInterval = (pongWait * 9) / 10 // Send ping at 90% of pong wait period
+)
+
 var allowedWSOrigins atomic.Value // holds []string
 
 func init() {
@@ -408,6 +413,13 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
+	// Set initial read deadline for auth
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func() error {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	for {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
@@ -422,12 +434,29 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	defer c.conn.Close()
+	ticker := time.NewTicker(pingInterval)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
 
-	for message := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			slog.Warn("websocket write error", "error", err)
-			return
+	for {
+		select {
+		case message, ok := <-c.send:
+			if !ok {
+				// Channel was closed, send close message
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				slog.Warn("websocket write error", "error", err)
+				return
+			}
+		case <-ticker.C:
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				slog.Warn("websocket ping failed", "error", err)
+				return
+			}
 		}
 	}
 }
