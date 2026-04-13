@@ -388,11 +388,14 @@ describe("LoginPage", () => {
 
   it("shows cli_confirm step when existing session + cliCallback", async () => {
     localStorage.setItem("multica_token", "existing-jwt");
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "user@example.com",
-      name: "Test User",
-    });
+    // Cookie attempt fails first, then localStorage fallback succeeds
+    mockApiGetMe
+      .mockRejectedValueOnce(new Error("no cookie"))
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
 
     render(
       <LoginPage
@@ -417,11 +420,14 @@ describe("LoginPage", () => {
 
   it("CLI authorize button redirects to callback URL", async () => {
     localStorage.setItem("multica_token", "existing-jwt");
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "user@example.com",
-      name: "Test User",
-    });
+    // Cookie attempt fails, localStorage fallback succeeds
+    mockApiGetMe
+      .mockRejectedValueOnce(new Error("no cookie"))
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
     const onTokenObtained = vi.fn();
 
     render(
@@ -449,11 +455,14 @@ describe("LoginPage", () => {
 
   it("'Use a different account' returns to email step", async () => {
     localStorage.setItem("multica_token", "existing-jwt");
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "user@example.com",
-      name: "Test User",
-    });
+    // Cookie attempt fails, localStorage fallback succeeds
+    mockApiGetMe
+      .mockRejectedValueOnce(new Error("no cookie"))
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
 
     render(
       <LoginPage
