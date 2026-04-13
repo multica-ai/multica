@@ -872,6 +872,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	}
 }
 
+// primaryRepoInfo tracks the pre-checked-out worktree so the daemon can clean
+// it up if the agent fails to launch. Successful runs preserve the worktree
+// so the user can inspect the agent branch afterwards (we only remove the
+// user-facing copy when the task cycle is definitively over).
+type primaryRepoInfo struct {
+	localPath    string
+	worktreePath string
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
 	entry, ok := d.cfg.Agents[provider]
 	if !ok {
@@ -928,7 +937,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
 
-	prompt := BuildPrompt(task)
+	// Pre-check out the first project-linked repo so the agent lands in the
+	// right directory instead of an empty workdir. We only do this for the
+	// first (position-0) repo to avoid ambiguity about which one is "the"
+	// starting directory; the agent can still `multica repo checkout` the rest.
+	startDir := ""
+	var primaryRepoStart *primaryRepoInfo
+	if task.PriorWorkDir == "" && len(task.Repos) > 0 {
+		primary := task.Repos[0]
+		if primary.IsLocal() && primary.LocalPath != "" {
+			res, err := d.repoCache.CreateWorktreeFromLocal(repocache.LocalWorktreeParams{
+				LocalPath: primary.LocalPath,
+				WorkDir:   env.WorkDir,
+				AgentName: agentName,
+				TaskID:    task.ID,
+			})
+			if err != nil {
+				d.logger.Warn("pre-checkout local repo failed (agent can retry)", "local_path", primary.LocalPath, "error", err)
+			} else {
+				startDir = res.Path
+				primaryRepoStart = &primaryRepoInfo{
+					localPath:    primary.LocalPath,
+					worktreePath: res.Path,
+				}
+				taskLog.Info("pre-checkout (local) complete", "path", res.Path, "branch", res.BranchName)
+			}
+		}
+	}
+
+	prompt := BuildPromptWithStartDir(task, startDir)
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -964,9 +1001,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	}
 
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
+	// When a local repo was pre-checked-out, run the agent directly inside
+	// the worktree so relative file ops and `git status` behave naturally.
+	cwd := env.WorkDir
+	if startDir != "" {
+		cwd = startDir
+	}
 	taskLog.Info("starting agent",
 		"provider", provider,
-		"workdir", env.WorkDir,
+		"workdir", cwd,
+		"env_root", env.WorkDir,
 		"model", entry.Model,
 		"reused", reused,
 	)
@@ -977,14 +1021,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	taskStart := time.Now()
 
 	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{
-		Cwd:             env.WorkDir,
+		Cwd:             cwd,
 		Model:           entry.Model,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 	})
 	if err != nil {
+		// On launch failure, clean up the pre-checked-out worktree so it
+		// doesn't linger. The agent branch is preserved.
+		if primaryRepoStart != nil {
+			_ = d.repoCache.RemoveLocalWorktree(primaryRepoStart.localPath, primaryRepoStart.worktreePath)
+		}
 		return TaskResult{}, err
 	}
+	_ = primaryRepoStart // cleanup at the end of the task is handled by the caller's defer in task lifecycle
 
 	// Drain message channel — forward to server for live output + log locally.
 	var toolCount atomic.Int32
@@ -1168,7 +1218,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
 	for i, r := range repos {
-		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description}
+		typ := r.Type
+		if typ == "" {
+			typ = repocache.TypeGitHub
+		}
+		info[i] = repocache.RepoInfo{
+			ID:          r.ID,
+			Name:        r.Name,
+			Type:        typ,
+			URL:         r.URL,
+			LocalPath:   r.LocalPath,
+			Description: r.Description,
+		}
 	}
 	return info
 }
@@ -1179,7 +1240,18 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		typ := r.Type
+		if typ == "" {
+			typ = "github"
+		}
+		result[i] = execenv.RepoContextForEnv{
+			ID:          r.ID,
+			Name:        r.Name,
+			Type:        typ,
+			URL:         r.URL,
+			LocalPath:   r.LocalPath,
+			Description: r.Description,
+		}
 	}
 	return result
 }

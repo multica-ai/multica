@@ -333,6 +333,70 @@ multica issue run-messages <task-id> --since 42 --output json
 
 The `runs` command shows all past and current executions for an issue, including running tasks. The `run-messages` command shows the detailed message log (tool calls, thinking, text, errors) for a single run. Use `--since` for efficient polling of in-progress runs.
 
+## Running Agents on Local Repositories
+
+`multica run` is the fastest way to put an agent on a task using code you've already checked out locally — no need to push to GitHub first.
+
+```bash
+# Fully interactive — walk through path, project, agent, issue prompts.
+multica run
+
+# Auto-create an issue from the prompt; use the current directory as the repo.
+multica run --path . "refactor the auth middleware to use JWT"
+
+# Run on an existing issue with an explicit agent.
+multica run --path ~/code/multica --issue a1b2c3d4 --agent Lambda
+
+# Non-interactive (CI/scripts): any missing required flag errors out.
+multica run --path . --agent Lambda --autocreate --yes "ship the CLI refactor"
+```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--path <dir>` | Local git repo path. Defaults to the current directory when interactive. |
+| `--issue <id>` | Existing issue to work on. Mutually exclusive with `--autocreate`. |
+| `--autocreate` | Auto-create an issue from the prompt (title = first line, body = rest). Implicit when no `--issue` is given. |
+| `--project <name\|id>` | Link the run to a project (fuzzy match). Optional. |
+| `--agent <name\|id>` | Agent to assign the issue to. Fuzzy match. |
+| `--title <string>` | Override the auto-generated title. |
+| `--yes` | Non-interactive: fail instead of prompting for missing values. |
+
+**How it works**
+
+1. Validates the path is a git repo (`git rev-parse --git-dir`).
+2. Adds the path to `workspace.repos` as a `type: "local"` entry if it isn't already there.
+3. If you picked a `--project`, links the repo to it (many-to-many).
+4. Resolves the agent (via name/id), creates or picks an issue, and PATCHes the issue's `assignee_id` so the daemon enqueues the task.
+5. Prints a summary and a `multica issue runs <id>` hint for tailing progress.
+
+Any flag you omit is collected via a one-at-a-time interactive picker with fuzzy filtering (arrow keys + typing).
+
+## Working with Local Repositories
+
+Workspace repos come in two flavors:
+
+- **`type: "github"`** — a URL. The daemon bare-clones it into `~/multica_workspaces/.repos/` and creates per-task worktrees from that cache. This is the original behavior and is unchanged.
+- **`type: "local"`** — an absolute path on the *daemon host*. Nothing is cloned. The daemon creates a `git worktree` directly off your on-disk `.git`, so your remotes, branches, and history are all shared. **Your working tree is never modified.**
+
+Add local repos from the web app under **Settings → Repositories** (toggle a row's type to "Local" and fill in the path) or by running `multica run --path <dir>` — the command transparently registers new paths.
+
+### Concurrency & isolation
+
+Multiple agents can work on the same local repo simultaneously:
+
+- Each task gets its own worktree under the daemon's workspaces root (never inside your repo).
+- Each task gets a dedicated branch: `agent/<agentname>/<shortTaskId>`.
+- Per-repo mutations are serialized with a process-local mutex keyed on the resolved git-common-dir, so `git worktree add` races are impossible.
+- On task completion or failure the worktree directory is removed; the agent branch is kept so you can inspect, diff, or merge it.
+
+### Projects ↔ repos
+
+A project can be linked to one or more repos. When an agent runs an issue that belongs to a project, the daemon only surfaces repos linked to that project, and the **first** linked repo is pre-checked-out so the agent lands inside the code immediately.
+
+Manage links via the project detail page's **Repos** property row, or the `repo_ids` array on `PATCH /api/projects/:id`.
+
 ## Setup
 
 ```bash

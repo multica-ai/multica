@@ -227,13 +227,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Include workspace repos so the daemon can cache them locally.
-	var repos []RepoData
-	if ws.Repos != nil {
-		json.Unmarshal(ws.Repos, &repos)
-	}
-	if repos == nil {
-		repos = []RepoData{}
-	}
+	repos := repoDataFromJSON(ws.Repos)
 
 	writeJSON(w, http.StatusOK, map[string]any{"runtimes": resp, "repos": repos})
 }
@@ -375,9 +369,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+				all := repoDataFromJSON(ws.Repos)
+				// If the issue belongs to a project, narrow to that project's
+				// linked repos so the agent lands in the right codebase. If
+				// the project has no linked repos, fall back to all workspace
+				// repos so the agent is never starved of context.
+				if issue.ProjectID.Valid {
+					if ids, err := h.Queries.ListProjectRepos(r.Context(), issue.ProjectID); err == nil && len(ids) > 0 {
+						all = filterReposByIDs(all, ids)
+					}
+				}
+				if len(all) > 0 {
+					resp.Repos = all
 				}
 			}
 		}
@@ -401,9 +404,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+				if all := repoDataFromJSON(ws.Repos); len(all) > 0 {
+					resp.Repos = all
 				}
 			}
 			// Resume from the chat session's persistent session.

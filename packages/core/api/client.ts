@@ -513,7 +513,19 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      context?: string;
+      settings?: Record<string, unknown>;
+      // Pass a fully-normalized list. The server will validate each entry,
+      // auto-generate missing ids, and cascade-clean project_repo rows that
+      // point at removed ids.
+      repos?: WorkspaceRepo[];
+    },
+  ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),

@@ -18,15 +18,25 @@ var repoCmd = &cobra.Command{
 }
 
 var repoCheckoutCmd = &cobra.Command{
-	Use:   "checkout <url>",
+	Use:   "checkout <url-or-path>",
 	Short: "Check out a repository into the working directory",
-	Long:  "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.",
-	Args:  exactArgs(1),
-	RunE:  runRepoCheckout,
+	Long: `Creates a git worktree for this task and prints its path on stdout.
+
+For GitHub workspace repos, the source is the daemon's bare clone cache.
+For local workspace repos (type=local), the source is the user's on-disk
+.git dir — remotes and history are shared, but the user's working tree is
+never touched.
+
+The first positional argument can be a GitHub URL or an absolute local path.
+The --type flag forces interpretation; otherwise the daemon auto-detects.`,
+	Args: exactArgs(1),
+	RunE: runRepoCheckout,
 }
 
 func init() {
 	repoCmd.AddCommand(repoCheckoutCmd)
+	repoCheckoutCmd.Flags().String("type", "", "Force repo type: 'github' or 'local' (default: auto-detect)")
+	repoCheckoutCmd.Flags().String("local-path", "", "Explicit local path (alternative to passing the path as the positional arg)")
 }
 
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
@@ -47,12 +57,21 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
+	repoType, _ := cmd.Flags().GetString("type")
+	localPath, _ := cmd.Flags().GetString("local-path")
+
 	reqBody := map[string]string{
 		"url":          repoURL,
 		"workspace_id": workspaceID,
 		"workdir":      workDir,
 		"agent_name":   agentName,
 		"task_id":      taskID,
+	}
+	if repoType != "" {
+		reqBody["type"] = repoType
+	}
+	if localPath != "" {
+		reqBody["local_path"] = localPath
 	}
 
 	data, err := json.Marshal(reqBody)

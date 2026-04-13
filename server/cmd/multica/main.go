@@ -33,6 +33,7 @@ func init() {
 	workspaceCmd.GroupID = groupCore
 	repoCmd.GroupID = groupCore
 	skillCmd.GroupID = groupCore
+	// runCmd already has GroupID set in cmd_run.go's init().
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime

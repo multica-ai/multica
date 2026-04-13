@@ -48,3 +48,33 @@ SELECT project_id,
 FROM issue
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: ListProjectRepos :many
+SELECT repo_id FROM project_repo
+WHERE project_id = $1
+ORDER BY position ASC, created_at ASC;
+
+-- name: ListProjectReposBatch :many
+SELECT project_id, repo_id, position
+FROM project_repo
+WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
+ORDER BY project_id, position ASC, created_at ASC;
+
+-- name: AddProjectRepo :exec
+INSERT INTO project_repo (project_id, repo_id, position)
+VALUES ($1, $2, $3)
+ON CONFLICT (project_id, repo_id) DO UPDATE SET position = EXCLUDED.position;
+
+-- name: RemoveProjectRepo :exec
+DELETE FROM project_repo
+WHERE project_id = $1 AND repo_id = $2;
+
+-- name: ClearProjectRepos :exec
+DELETE FROM project_repo WHERE project_id = $1;
+
+-- name: DeleteProjectRepoByID :exec
+DELETE FROM project_repo WHERE repo_id = $1;
+
+-- name: ListProjectsForRepo :many
+SELECT project_id FROM project_repo
+WHERE repo_id = $1;

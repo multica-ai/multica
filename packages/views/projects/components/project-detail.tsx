@@ -28,6 +28,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { ProjectReposRow } from "./project-repos-row";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
@@ -561,6 +562,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       </PopoverContent>
                     </Popover>
                   </PropRow>
+
+                  {/* Repos */}
+                  <ProjectReposRow
+                    projectId={project.id}
+                    repoIds={project.repo_ids ?? []}
+                    onChange={(ids) => handleUpdateField({ repo_ids: ids })}
+                  />
                 </div>}
               </div>
 
