@@ -28,11 +28,21 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
 	}
 
+	// Cap timeout at 20 minutes to prevent runaway agents.
+	// This is a hard limit - if the agent runs longer than this, the process is killed.
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	if timeout > 20*time.Minute {
+		timeout = 20 * time.Minute
+	}
+
+	// Activity timeout: if no output for this duration, assume the agent is stuck.
+	// This is shorter than the overall timeout to catch hangs early.
+	activityTimeout := 10 * time.Minute
+
+	runCtx, cancel := context.WithCancel(ctx)
 
 	cmd := exec.CommandContext(runCtx, execPath, "acp")
 	if opts.Cwd != "" {
@@ -68,14 +78,69 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	var outputMu sync.Mutex
 	var output strings.Builder
+	var lastActivityMu sync.Mutex
+	var lastActivity time.Time
+
+	// Track if watchdog killed the process
+	watchdogKilled := false
+
+	// Track activity time in onMessage callback
+	recordActivity := func() {
+		lastActivityMu.Lock()
+		lastActivity = time.Now()
+		lastActivityMu.Unlock()
+	}
+
+	// Record initial activity time
+	recordActivity()
+
+	// Watchdog goroutine: kills the process if activity timeout or overall timeout is exceeded.
+	// This handles the case where hermes hangs during session/prompt without producing output.
+	watchdogDone := make(chan struct{})
+	go func() {
+		defer close(watchdogDone)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				lastActivityMu.Lock()
+				elapsed := time.Since(lastActivity)
+				lastActivityMu.Unlock()
+
+				// Check overall timeout
+				if elapsed > timeout {
+					b.cfg.Logger.Warn("hermes watchdog: overall timeout exceeded, killing process",
+						"pid", cmd.Process.Pid, "elapsed", elapsed.String())
+					watchdogKilled = true
+					killProcess(cmd)
+					return
+				}
+
+				// Check activity timeout (only if we've been running long enough to be concerning)
+				// Only trigger if we're past the first few minutes and there's no activity
+				if elapsed > activityTimeout && elapsed > 3*time.Minute {
+					b.cfg.Logger.Warn("hermes watchdog: activity timeout exceeded, killing process",
+						"pid", cmd.Process.Pid, "silent_duration", elapsed.String())
+					watchdogKilled = true
+					killProcess(cmd)
+					return
+				}
+			}
+		}
+	}()
 
 	promptDone := make(chan hermesPromptResult, 1)
 
 	c := &hermesClient{
-		cfg:   b.cfg,
-		stdin: stdin,
+		cfg:     b.cfg,
+		stdin:   stdin,
 		pending: make(map[int]*pendingRPC),
 		onMessage: func(msg Message) {
+			recordActivity()
 			if msg.Type == MessageText {
 				outputMu.Lock()
 				output.WriteString(msg.Content)
@@ -234,6 +299,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Wait for the reader goroutine to finish so all output is accumulated.
 		<-readerDone
 
+		// Wait for watchdog to finish and check if it killed the process.
+		<-watchdogDone
+		if watchdogKilled && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = "hermes killed by watchdog: process hung or timed out"
+		}
+
 		outputMu.Lock()
 		finalOutput := output.String()
 		outputMu.Unlock()
@@ -273,13 +345,13 @@ type hermesPromptResult struct {
 }
 
 type hermesClient struct {
-	cfg       Config
-	stdin     interface{ Write([]byte) (int, error) }
-	mu        sync.Mutex
-	nextID    int
-	pending   map[int]*pendingRPC
-	sessionID string
-	onMessage func(Message)
+	cfg          Config
+	stdin        interface{ Write([]byte) (int, error) }
+	mu           sync.Mutex
+	nextID       int
+	pending      map[int]*pendingRPC
+	sessionID    string
+	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
 
 	usageMu sync.Mutex
@@ -417,8 +489,8 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	}
 	if resp.Usage != nil {
 		pr.usage = TokenUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
+			InputTokens:     resp.Usage.InputTokens,
+			OutputTokens:    resp.Usage.OutputTokens,
 			CacheReadTokens: resp.Usage.CachedReadTokens,
 		}
 	}
@@ -499,9 +571,9 @@ func (c *hermesClient) handleAgentThought(data json.RawMessage) {
 
 func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	var msg struct {
-		ToolCallID string `json:"toolCallId"`
-		Title      string `json:"title"`
-		Kind       string `json:"kind"`
+		ToolCallID string         `json:"toolCallId"`
+		Title      string         `json:"title"`
+		Kind       string         `json:"kind"`
 		RawInput   map[string]any `json:"rawInput"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -638,4 +710,13 @@ func hermesToolNameFromTitle(title string, kind string) string {
 	default:
 		return kind
 	}
+}
+
+// killProcess forcibly terminates a process by sending SIGKILL.
+// This is used by the watchdog to stop runaway hermes processes.
+func killProcess(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Kill()
 }
