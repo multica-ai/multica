@@ -149,6 +149,30 @@ func TestOpenclawProcessOutputWithLeadingLogLines(t *testing.T) {
 	close(ch)
 }
 
+func TestOpenclawProcessOutputIgnoresTrailingLogLinesAfterJSON(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "Done"}},
+	}
+	data, _ := json.Marshal(result)
+	input := string(data) + "\npost-result log line that should not block parsing"
+
+	res := b.processOutput(strings.NewReader(input), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.output != "Done" {
+		t.Errorf("output: got %q, want %q", res.output, "Done")
+	}
+
+	close(ch)
+}
+
 func TestOpenclawProcessOutputNoJSON(t *testing.T) {
 	t.Parallel()
 

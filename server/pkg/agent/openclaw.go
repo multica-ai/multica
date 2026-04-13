@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -129,50 +130,52 @@ type openclawEventResult struct {
 
 // processOutput reads the JSON output from openclaw --json stderr and returns
 // the parsed result. OpenClaw writes its JSON result to stderr, which may also
-// contain non-JSON log lines. We find the result JSON by trying each '{' until
-// one successfully unmarshals as an openclawResult with payloads.
+// contain non-JSON log lines. We scan line-by-line so a final result line can
+// be recognized without waiting for the entire stderr stream to be buffered.
 func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclawEventResult {
-	data, err := io.ReadAll(r)
-	if err != nil {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+
+	var rawLines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if result, ok := tryParseOpenclawResult(line); ok {
+			return b.buildOpenclawEventResult(result, ch)
+		}
+		b.cfg.Logger.Debug("[openclaw:stderr] " + line)
+		rawLines = append(rawLines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
 		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stderr: %v", err)}
 	}
 
-	raw := string(data)
+	trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
+	if trimmed != "" {
+		return openclawEventResult{status: "completed", output: trimmed}
+	}
+	return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}
+}
 
+func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	// Try each '{' position until we find valid openclawResult JSON.
 	// Earlier '{' chars may appear in log/error lines (e.g. raw_params={...}).
 	var result openclawResult
-	jsonStart := -1
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '{' {
 			continue
 		}
 		if err := json.Unmarshal([]byte(raw[i:]), &result); err == nil && result.Payloads != nil {
-			jsonStart = i
-			break
+			return result, true
 		}
 	}
+	return openclawResult{}, false
+}
 
-	// Log non-JSON lines before the result
-	if jsonStart > 0 {
-		for _, line := range strings.Split(raw[:jsonStart], "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				b.cfg.Logger.Debug("[openclaw:stderr] " + line)
-			}
-		}
-	}
-
-	if jsonStart < 0 {
-		trimmed := strings.TrimSpace(raw)
-		if trimmed != "" {
-			b.cfg.Logger.Debug("[openclaw:stderr] " + trimmed)
-			return openclawEventResult{status: "completed", output: trimmed}
-		}
-		return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}
-	}
-
-	// Extract text from payloads
+func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch chan<- Message) openclawEventResult {
 	var output strings.Builder
 	for _, p := range result.Payloads {
 		if p.Text != "" {
@@ -183,7 +186,6 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		}
 	}
 
-	// Extract session ID and usage from meta
 	var sessionID string
 	var usage TokenUsage
 	if result.Meta.AgentMeta != nil {
@@ -198,7 +200,6 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		}
 	}
 
-	// Send final text as a message
 	if output.Len() > 0 {
 		trySend(ch, Message{Type: MessageText, Content: output.String()})
 	}
