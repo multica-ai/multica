@@ -30,6 +30,21 @@ function Test-CommandExists {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Test-PortFree {
+    param([int]$Port)
+    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    return ($null -eq $listener)
+}
+
+function Find-FreePort {
+    param([int]$StartPort)
+    $max = $StartPort + 100
+    for ($p = $StartPort; $p -lt $max; $p++) {
+        if (Test-PortFree $p) { return $p }
+    }
+    return $null
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -248,6 +263,56 @@ function Install-Server {
         Write-Ok "Using existing .env"
     }
 
+    # --- Port availability check -------------------------------------------
+    $envContent = Get-Content ".env" -Raw
+    $backendPort  = if ($envContent -match '(?m)^PORT=(\d+)')          { [int]$Matches[1] } else { 8080 }
+    $frontendPort = if ($envContent -match '(?m)^FRONTEND_PORT=(\d+)') { [int]$Matches[1] } else { 3000 }
+    $pgPort       = if ($envContent -match '(?m)^POSTGRES_PORT=(\d+)') { [int]$Matches[1] } else { 5432 }
+
+    $portsChanged = $false
+
+    $portMap = @(
+        @{ Name = "backend";  Var = "backendPort";  Port = $backendPort }
+        @{ Name = "frontend"; Var = "frontendPort"; Port = $frontendPort }
+        @{ Name = "postgres"; Var = "pgPort";       Port = $pgPort }
+    )
+
+    foreach ($entry in $portMap) {
+        if (-not (Test-PortFree $entry.Port)) {
+            $newPort = Find-FreePort ($entry.Port + 1)
+            if (-not $newPort) {
+                Write-Fail "No free port found near $($entry.Port). Free the port or set a custom one in $InstallDir\.env"
+            }
+            Write-Warn "Port $($entry.Port) is already in use - switching to $newPort"
+            $oldPort = $entry.Port
+
+            switch ($entry.Name) {
+                "backend" {
+                    $backendPort = $newPort
+                    $envContent = $envContent -replace "(?m)^PORT=.*", "PORT=$newPort"
+                    $envContent = $envContent -replace "http://localhost:$oldPort", "http://localhost:$newPort"
+                    $envContent = $envContent -replace "ws://localhost:$oldPort", "ws://localhost:$newPort"
+                }
+                "frontend" {
+                    $frontendPort = $newPort
+                    $envContent = $envContent -replace "(?m)^FRONTEND_PORT=.*", "FRONTEND_PORT=$newPort"
+                    $envContent = $envContent -replace "(?m)^FRONTEND_ORIGIN=.*", "FRONTEND_ORIGIN=http://localhost:$newPort"
+                }
+                "postgres" {
+                    $pgPort = $newPort
+                    $envContent = $envContent -replace "(?m)^POSTGRES_PORT=.*", "POSTGRES_PORT=$newPort"
+                }
+            }
+            $portsChanged = $true
+        }
+    }
+
+    if ($portsChanged) {
+        Set-Content ".env" $envContent -NoNewline
+        Write-Ok "Ports adjusted in .env to avoid conflicts"
+    }
+    # -----------------------------------------------------------------------
+
     Write-Info "Starting Multica services (this may take a few minutes on first run)..."
     docker compose -f docker-compose.selfhost.yml up -d --build
 
@@ -255,7 +320,7 @@ function Install-Server {
     $ready = $false
     for ($i = 1; $i -le 45; $i++) {
         try {
-            $null = Invoke-WebRequest -Uri "http://localhost:8080/health" -UseBasicParsing -TimeoutSec 2
+            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
             $ready = $true
             break
         } catch {
@@ -278,13 +343,20 @@ function Install-Server {
 # ---------------------------------------------------------------------------
 function Set-ConfigLocal {
     Write-Info "Configuring CLI for local server..."
+    $envPath = Join-Path $InstallDir ".env"
+    $bp = 8080; $fp = 3000
+    if (Test-Path $envPath) {
+        $c = Get-Content $envPath -Raw
+        if ($c -match '(?m)^PORT=(\d+)')          { $bp = $Matches[1] }
+        if ($c -match '(?m)^FRONTEND_PORT=(\d+)') { $fp = $Matches[1] }
+    }
     try {
         multica config local 2>$null
     } catch {
-        multica config set app_url http://localhost:3000 2>$null
-        multica config set server_url http://localhost:8080 2>$null
+        multica config set app_url "http://localhost:$fp" 2>$null
+        multica config set server_url "http://localhost:$bp" 2>$null
     }
-    Write-Ok "CLI configured for localhost (backend :8080, frontend :3000)"
+    Write-Ok "CLI configured for localhost (backend :$bp, frontend :$fp)"
 }
 
 function Set-ConfigCloud {
@@ -339,17 +411,26 @@ function Start-LocalInstall {
     Install-Cli
     Set-ConfigLocal
 
+    # Read actual ports from .env for display
+    $bp = 8080; $fp = 3000
+    $envPath = Join-Path $InstallDir ".env"
+    if (Test-Path $envPath) {
+        $c = Get-Content $envPath -Raw
+        if ($c -match '(?m)^PORT=(\d+)')          { $bp = $Matches[1] }
+        if ($c -match '(?m)^FRONTEND_PORT=(\d+)') { $fp = $Matches[1] }
+    }
+
     Write-Host ""
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host "  [OK] Multica is installed and running!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Frontend:  http://localhost:3000"
-    Write-Host "  Backend:   http://localhost:8080"
+    Write-Host "  Frontend:  http://localhost:$fp"
+    Write-Host "  Backend:   http://localhost:$bp"
     Write-Host "  Server at: $InstallDir"
     Write-Host ""
     Write-Host "  Next steps:"
-    Write-Host "  1. Open http://localhost:3000 in your browser"
+    Write-Host "  1. Open http://localhost:$fp in your browser"
     Write-Host "  2. Log in with any email + verification code: 888888"
     Write-Host "  3. Then run:"
     Write-Host ""
