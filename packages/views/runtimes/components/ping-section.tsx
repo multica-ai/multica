@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
 import { Loader2, CheckCircle2, XCircle, Zap } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
-import type { RuntimePingStatus } from "@multica/core/types";
+import { usePingRuntime } from "@multica/core/runtimes/mutations";
+import { runtimeKeys } from "@multica/core/runtimes/queries";
+import type { RuntimePing, RuntimePingStatus } from "@multica/core/types";
 
 const pingStatusConfig: Record<
   RuntimePingStatus,
@@ -16,58 +17,18 @@ const pingStatusConfig: Record<
 };
 
 export function PingSection({ runtimeId }: { runtimeId: string }) {
-  const [status, setStatus] = useState<RuntimePingStatus | null>(null);
-  const [output, setOutput] = useState("");
-  const [error, setError] = useState("");
-  const [durationMs, setDurationMs] = useState<number | null>(null);
-  const [testing, setTesting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const qc = useQueryClient();
+  const cachedPing = qc.getQueryData<RuntimePing>(runtimeKeys.pingResult(runtimeId));
+  const pingMutation = usePingRuntime(runtimeId);
 
-  const cleanup = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
+  const status = pingMutation.isPending ? "pending" : (cachedPing?.status ?? null);
+  const output = cachedPing?.output ?? "";
+  const error = cachedPing?.error ?? "";
+  const durationMs = cachedPing?.duration_ms ?? null;
+  const testing = pingMutation.isPending;
 
-  useEffect(() => cleanup, [cleanup]);
-
-  const handleTest = async () => {
-    cleanup();
-    setTesting(true);
-    setStatus("pending");
-    setOutput("");
-    setError("");
-    setDurationMs(null);
-
-    try {
-      const ping = await api.pingRuntime(runtimeId);
-
-      pollRef.current = setInterval(async () => {
-        try {
-          const result = await api.getPingResult(runtimeId, ping.id);
-          setStatus(result.status as RuntimePingStatus);
-
-          if (result.status === "completed") {
-            setOutput(result.output ?? "");
-            setDurationMs(result.duration_ms ?? null);
-            setTesting(false);
-            cleanup();
-          } else if (result.status === "failed" || result.status === "timeout") {
-            setError(result.error ?? "Unknown error");
-            setDurationMs(result.duration_ms ?? null);
-            setTesting(false);
-            cleanup();
-          }
-        } catch {
-          // ignore poll errors
-        }
-      }, 2000);
-    } catch {
-      setStatus("failed");
-      setError("Failed to initiate test");
-      setTesting(false);
-    }
+  const handleTest = () => {
+    pingMutation.mutate();
   };
 
   const config = status ? pingStatusConfig[status] : null;
