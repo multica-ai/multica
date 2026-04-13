@@ -12,6 +12,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       searchSlot={<SearchTrigger />}
       extra={<><SearchCommand /><ChatWindow /><ChatFab /></>}
       onboardingPath="/onboarding"
+      loginPath="/login"
     >
       {children}
     </DashboardLayout>

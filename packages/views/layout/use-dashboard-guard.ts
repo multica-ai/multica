@@ -7,7 +7,7 @@ import { useWorkspaceStore } from "@multica/core/workspace";
 import { useNavigation } from "../navigation";
 
 export function useDashboardGuard(loginPath = "/", onboardingPath?: string) {
-  const { pathname, push } = useNavigation();
+  const { pathname, replace } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -15,13 +15,13 @@ export function useDashboardGuard(loginPath = "/", onboardingPath?: string) {
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      push(loginPath);
+      replace(loginPath);
       return;
     }
     if (!workspace && onboardingPath) {
-      push(onboardingPath);
+      replace(onboardingPath);
     }
-  }, [user, isLoading, workspace, push, loginPath, onboardingPath]);
+  }, [user, isLoading, workspace, replace, loginPath, onboardingPath]);
 
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);

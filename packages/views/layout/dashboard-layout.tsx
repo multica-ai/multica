@@ -14,6 +14,8 @@ interface DashboardLayoutProps {
   searchSlot?: ReactNode;
   /** Loading indicator */
   loadingIndicator?: ReactNode;
+  /** Path to redirect when user is not authenticated */
+  loginPath?: string;
   /** Path to redirect when user has no workspace */
   onboardingPath?: string;
 }
@@ -23,11 +25,12 @@ export function DashboardLayout({
   extra,
   searchSlot,
   loadingIndicator,
+  loginPath,
   onboardingPath,
 }: DashboardLayoutProps) {
   return (
     <DashboardGuard
-      loginPath="/"
+      loginPath={loginPath}
       onboardingPath={onboardingPath}
       loadingFallback={
         <div className="flex h-svh items-center justify-center">
