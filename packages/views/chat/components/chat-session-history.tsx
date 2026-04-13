@@ -164,10 +164,18 @@ function SessionItem({
   const timeAgo = formatTimeAgo(session.updated_at);
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       className={cn(
-        "group flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50",
+        "group flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50 cursor-pointer focus:outline-none focus-visible:bg-accent/40",
         isActive && "bg-accent/30",
       )}
     >
@@ -216,7 +224,7 @@ function SessionItem({
           <TooltipContent side="bottom">Archive</TooltipContent>
         </Tooltip>
       )}
-    </button>
+    </div>
   );
 }
 
