@@ -4,12 +4,29 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// tryResolveAppURL returns the app URL if configured, or "" if not available.
+// Unlike resolveAppURL, it never calls os.Exit.
+func tryResolveAppURL(cmd *cobra.Command) string {
+	for _, key := range []string{"MULTICA_APP_URL", "FRONTEND_ORIGIN"} {
+		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+			return strings.TrimRight(val, "/")
+		}
+	}
+	profile := resolveProfile(cmd)
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err == nil && cfg.AppURL != "" {
+		return strings.TrimRight(cfg.AppURL, "/")
+	}
+	return ""
+}
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
@@ -110,7 +127,15 @@ func waitForOnboarding(cmd *cobra.Command, client *cli.APIClient) ([]struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }, error) {
-	appURL := resolveAppURL(cmd)
+	appURL := tryResolveAppURL(cmd)
+	if appURL == "" {
+		// No app URL available (e.g. token login without prior setup).
+		// Can't open the browser — tell the user to create a workspace manually.
+		fmt.Fprintln(os.Stderr, "\nNo workspaces found.")
+		fmt.Fprintln(os.Stderr, "Create a workspace in the web dashboard, then run 'multica login' again.")
+		return nil, nil
+	}
+
 	onboardingURL := appURL + "/onboarding"
 
 	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening onboarding in your browser...")

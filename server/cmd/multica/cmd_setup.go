@@ -141,12 +141,12 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		if err := runDaemonBackground(cmd); err != nil {
 			return fmt.Errorf("start daemon: %w", err)
 		}
+		fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 	} else {
-		fmt.Fprintln(os.Stderr, "\nNo workspaces configured — skipping daemon start.")
+		fmt.Fprintln(os.Stderr, "\n⚠ Setup incomplete: no workspaces configured.")
 		fmt.Fprintln(os.Stderr, "Create a workspace at the web dashboard, then run 'multica login' and 'multica daemon start'.")
 	}
 
-	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 	return nil
 }
 
@@ -206,12 +206,12 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		if err := runDaemonBackground(cmd); err != nil {
 			return fmt.Errorf("start daemon: %w", err)
 		}
+		fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 	} else {
-		fmt.Fprintln(os.Stderr, "\nNo workspaces configured — skipping daemon start.")
+		fmt.Fprintln(os.Stderr, "\n⚠ Setup incomplete: no workspaces configured.")
 		fmt.Fprintln(os.Stderr, "Create a workspace at the web dashboard, then run 'multica login' and 'multica daemon start'.")
 	}
 
-	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 	return nil
 }
 
