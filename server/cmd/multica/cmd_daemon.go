@@ -61,6 +61,8 @@ func init() {
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
+	f.Bool("auto-publish", false, "Auto-commit and push completed code tasks (env: MULTICA_AUTO_PUBLISH)")
+	f.String("publish-remote", "", "Git remote used for automatic publishing (env: MULTICA_PUBLISH_REMOTE)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -226,6 +228,12 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		args = append(args, "--max-concurrent-tasks", strconv.Itoa(n))
 	}
+	if v, _ := cmd.Flags().GetBool("auto-publish"); v {
+		args = append(args, "--auto-publish")
+	}
+	if v, _ := cmd.Flags().GetString("publish-remote"); v != "" {
+		args = append(args, "--publish-remote", v)
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -247,6 +255,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			serverURL = c.ServerURL
 		}
 	}
+
+	profileCfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+
 	overrides := daemon.Overrides{
 		ServerURL:   serverURL,
 		DaemonID:    flagString(cmd, "daemon-id"),
@@ -266,6 +280,16 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		overrides.MaxConcurrentTasks = n
+	}
+	if v, _ := cmd.Flags().GetBool("auto-publish"); v {
+		overrides.AutoPublish = true
+	} else if os.Getenv("MULTICA_AUTO_PUBLISH") == "" && profileCfg.AutoPublish {
+		overrides.AutoPublish = true
+	}
+	if v, _ := cmd.Flags().GetString("publish-remote"); v != "" {
+		overrides.PublishRemote = v
+	} else if os.Getenv("MULTICA_PUBLISH_REMOTE") == "" && profileCfg.PublishRemote != "" {
+		overrides.PublishRemote = profileCfg.PublishRemote
 	}
 
 	cfg, err := daemon.LoadConfig(overrides)

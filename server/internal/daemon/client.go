@@ -189,6 +189,15 @@ type WorkspaceInfo struct {
 	Name string `json:"name"`
 }
 
+// WorkspaceDetails holds the full workspace payload returned by the API.
+// It is used when the daemon needs richer state than the lightweight list view,
+// such as repository URLs for cache synchronization.
+type WorkspaceDetails struct {
+	ID    string     `json:"id"`
+	Name  string     `json:"name"`
+	Repos []RepoData `json:"repos,omitempty"`
+}
+
 // ListWorkspaces fetches all workspaces the authenticated user belongs to.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	var workspaces []WorkspaceInfo
@@ -196,6 +205,15 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 		return nil, err
 	}
 	return workspaces, nil
+}
+
+// GetWorkspace fetches a single workspace with its repository list.
+func (c *Client) GetWorkspace(ctx context.Context, workspaceID string) (*WorkspaceDetails, error) {
+	var ws WorkspaceDetails
+	if err := c.getJSON(ctx, "/api/workspaces/"+workspaceID, &ws); err != nil {
+		return nil, err
+	}
+	return &ws, nil
 }
 
 func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {

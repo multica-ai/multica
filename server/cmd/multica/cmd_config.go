@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -24,7 +25,7 @@ var configShowCmd = &cobra.Command{
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "Set a CLI configuration value",
-	Long:  "Supported keys: server_url, app_url, workspace_id",
+	Long:  "Supported keys: server_url, app_url, workspace_id, auto_publish, publish_remote",
 	Args:  exactArgs(2),
 	RunE:  runConfigSet,
 }
@@ -60,6 +61,8 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "server_url:   %s\n", valueOrDefault(cfg.ServerURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "app_url:      %s\n", valueOrDefault(cfg.AppURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "workspace_id: %s\n", valueOrDefault(cfg.WorkspaceID, "(not set)"))
+	fmt.Fprintf(os.Stdout, "auto_publish: %t\n", cfg.AutoPublish)
+	fmt.Fprintf(os.Stdout, "publish_remote: %s\n", valueOrDefault(cfg.PublishRemote, "(default origin)"))
 	return nil
 }
 
@@ -79,8 +82,16 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		cfg.AppURL = value
 	case "workspace_id":
 		cfg.WorkspaceID = value
+	case "auto_publish":
+		v, err := parseBoolString(value)
+		if err != nil {
+			return err
+		}
+		cfg.AutoPublish = v
+	case "publish_remote":
+		cfg.PublishRemote = value
 	default:
-		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id)", key)
+		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id, auto_publish, publish_remote)", key)
 	}
 
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
@@ -89,6 +100,17 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, value)
 	return nil
+}
+
+func parseBoolString(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value %q (use true/false, 1/0, yes/no, or on/off)", raw)
+	}
 }
 
 func runConfigLocal(cmd *cobra.Command, _ []string) error {

@@ -23,6 +23,8 @@ type CLIConfig struct {
 	WorkspaceID        string             `json:"workspace_id,omitempty"`
 	Token              string             `json:"token,omitempty"`
 	WatchedWorkspaces  []WatchedWorkspace `json:"watched_workspaces,omitempty"`
+	AutoPublish        bool               `json:"auto_publish,omitempty"`
+	PublishRemote      string             `json:"publish_remote,omitempty"`
 }
 
 // AddWatchedWorkspace adds a workspace to the watch list. Returns true if added.

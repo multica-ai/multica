@@ -33,6 +33,8 @@ type Config struct {
 	Agents             map[string]AgentEntry // "claude" -> entry, "codex" -> entry, "opencode" -> entry, "openclaw" -> entry, "hermes" -> entry
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
+	AutoPublish        bool                  // auto-commit/push completed code tasks
+	PublishRemote      string                // git remote to push published changes to
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
 	PollInterval       time.Duration
@@ -54,6 +56,8 @@ type Overrides struct {
 	RuntimeName        string
 	Profile            string // profile name (empty = default)
 	HealthPort         int    // health check port (0 = use default)
+	AutoPublish        bool   // auto-publish completed code tasks
+	PublishRemote      string // git remote to push published changes to
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -202,6 +206,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
+	autoPublish := boolFromEnv("MULTICA_AUTO_PUBLISH", false)
+	publishRemote := envOrDefault("MULTICA_PUBLISH_REMOTE", "origin")
 
 	return Config{
 		ServerBaseURL:      serverBaseURL,
@@ -212,6 +218,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Agents:             agents,
 		WorkspacesRoot:     workspacesRoot,
 		KeepEnvAfterTask:   keepEnv,
+		AutoPublish:        autoPublish,
+		PublishRemote:      publishRemote,
 		HealthPort:         healthPort,
 		MaxConcurrentTasks: maxConcurrentTasks,
 		PollInterval:       pollInterval,
