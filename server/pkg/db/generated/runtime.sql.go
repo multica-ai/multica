@@ -44,7 +44,7 @@ const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
 DELETE FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => $1::double precision)
-  AND id NOT IN (SELECT runtime_id FROM agent WHERE archived_at IS NULL)
+  AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
 RETURNING id, workspace_id
 `
 
@@ -54,8 +54,8 @@ type DeleteStaleOfflineRuntimesRow struct {
 }
 
 // Deletes runtimes that have been offline for longer than the TTL and have
-// no active (non-archived) agents bound. Archived agents are cleaned up first
-// by the caller. The FK constraint (ON DELETE RESTRICT) provides a safety net.
+// no agents bound (active or archived). The FK constraint on agent.runtime_id
+// is ON DELETE RESTRICT, so we must exclude all agent references.
 func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds float64) ([]DeleteStaleOfflineRuntimesRow, error) {
 	rows, err := q.db.Query(ctx, deleteStaleOfflineRuntimes, staleSeconds)
 	if err != nil {
@@ -299,26 +299,31 @@ WHERE runtime_id IN (
       AND ar.owner_id = $4
       AND ar.id != $1
       AND ar.status = 'offline'
+      AND ar.daemon_id LIKE $5 || '-%'
 )
 `
 
 type MigrateAgentsToRuntimeParams struct {
-	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	Provider     string      `json:"provider"`
-	OwnerID      pgtype.UUID `json:"owner_id"`
+	NewRuntimeID   pgtype.UUID `json:"new_runtime_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Provider       string      `json:"provider"`
+	OwnerID        pgtype.UUID `json:"owner_id"`
+	DaemonIDPrefix pgtype.Text `json:"daemon_id_prefix"`
 }
 
 // Migrates agents from stale offline runtimes to the newly registered runtime.
-// Only migrates from runtimes with the same workspace, provider, and owner
-// that are currently offline. This handles the case where a user switches
-// profiles and the old runtime has agents bound to it.
+// Only migrates from runtimes that match the same workspace, provider, owner,
+// AND whose daemon_id starts with the current daemon_id followed by '-'.
+// This scopes migration to old profile-suffixed runtimes from the same machine
+// (e.g. "MacBook-staging" matches daemon_id_prefix "MacBook") without touching
+// runtimes from other machines belonging to the same user.
 func (q *Queries) MigrateAgentsToRuntime(ctx context.Context, arg MigrateAgentsToRuntimeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, migrateAgentsToRuntime,
 		arg.NewRuntimeID,
 		arg.WorkspaceID,
 		arg.Provider,
 		arg.OwnerID,
+		arg.DaemonIDPrefix,
 	)
 	if err != nil {
 		return 0, err

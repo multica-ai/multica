@@ -81,9 +81,11 @@ DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
 
 -- name: MigrateAgentsToRuntime :execrows
 -- Migrates agents from stale offline runtimes to the newly registered runtime.
--- Only migrates from runtimes with the same workspace, provider, and owner
--- that are currently offline. This handles the case where a user switches
--- profiles and the old runtime has agents bound to it.
+-- Only migrates from runtimes that match the same workspace, provider, owner,
+-- AND whose daemon_id starts with the current daemon_id followed by '-'.
+-- This scopes migration to old profile-suffixed runtimes from the same machine
+-- (e.g. "MacBook-staging" matches daemon_id_prefix "MacBook") without touching
+-- runtimes from other machines belonging to the same user.
 UPDATE agent
 SET runtime_id = @new_runtime_id
 WHERE runtime_id IN (
@@ -93,14 +95,15 @@ WHERE runtime_id IN (
       AND ar.owner_id = @owner_id
       AND ar.id != @new_runtime_id
       AND ar.status = 'offline'
+      AND ar.daemon_id LIKE @daemon_id_prefix || '-%'
 );
 
 -- name: DeleteStaleOfflineRuntimes :many
 -- Deletes runtimes that have been offline for longer than the TTL and have
--- no active (non-archived) agents bound. Archived agents are cleaned up first
--- by the caller. The FK constraint (ON DELETE RESTRICT) provides a safety net.
+-- no agents bound (active or archived). The FK constraint on agent.runtime_id
+-- is ON DELETE RESTRICT, so we must exclude all agent references.
 DELETE FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-  AND id NOT IN (SELECT runtime_id FROM agent WHERE archived_at IS NULL)
+  AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
 RETURNING id, workspace_id;

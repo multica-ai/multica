@@ -45,6 +45,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, bus)
 			sweepStaleTasks(ctx, queries, bus)
+			gcRuntimes(ctx, queries, bus)
 		}
 	}
 }
@@ -90,11 +91,6 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 			},
 		})
 	}
-
-	// GC: delete offline runtimes that have been stale beyond the TTL and
-	// have no active agents. This cleans up orphaned runtimes left behind
-	// by profile switches or uninstalled daemons.
-	gcRuntimes(ctx, queries, bus)
 }
 
 // gcRuntimes deletes offline runtimes that have exceeded the TTL and have

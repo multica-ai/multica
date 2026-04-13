@@ -218,15 +218,17 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Migrate agents from old offline runtimes (same workspace/provider/owner)
-		// to the newly registered runtime. This handles duplicate runtimes created
-		// by profile switches where the old daemon_id included a profile suffix.
+		// Migrate agents from old offline runtimes on the same machine to the
+		// newly registered runtime. Scoped by daemon_id prefix so that only
+		// old profile-suffixed runtimes (e.g. "hostname-staging") from this
+		// machine are affected — runtimes from other machines are untouched.
 		if ownerID.Valid {
 			migrated, err := h.Queries.MigrateAgentsToRuntime(r.Context(), db.MigrateAgentsToRuntimeParams{
-				NewRuntimeID: registered.ID,
-				WorkspaceID:  parseUUID(req.WorkspaceID),
-				Provider:     provider,
-				OwnerID:      ownerID,
+				NewRuntimeID:   registered.ID,
+				WorkspaceID:    parseUUID(req.WorkspaceID),
+				Provider:       provider,
+				OwnerID:        ownerID,
+				DaemonIDPrefix: strToText(req.DaemonID),
 			})
 			if err != nil {
 				slog.Warn("failed to migrate agents to new runtime", "runtime_id", uuidToString(registered.ID), "error", err)
