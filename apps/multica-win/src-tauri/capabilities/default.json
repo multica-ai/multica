@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "window:allow-minimize",
+    "window:allow-maximize",
+    "window:allow-close",
+    "window:allow-set-focus",
+    "window:allow-show",
+    "window:allow-hide"
+  ]
+}

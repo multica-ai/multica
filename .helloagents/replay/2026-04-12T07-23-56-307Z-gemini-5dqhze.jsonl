@@ -1,0 +1,3 @@
+{"ts":"2026-04-12T07:23:56.308Z","event":"session_started","host":"gemini","source":"startup","sessionId":"2026-04-12T07-23-56-306Z-gemini-w7xd4z"}
+{"ts":"2026-04-12T07:23:56.309Z","event":"session_injected","host":"gemini","source":"startup","sessionId":"2026-04-12T07-23-56-307Z-gemini-5dqhze","details":{"bootstrapFile":"bootstrap.md","installMode":"standby","activatedProject":true}}
+{"ts":"2026-04-12T07:24:02.963Z","event":"semantic_route_prompted","host":"gemini","source":"route","sessionId":"2026-04-12T07-23-56-307Z-gemini-5dqhze"}

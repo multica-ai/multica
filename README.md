@@ -44,15 +44,23 @@ Multica manages the full agent lifecycle: from task assignment to execution moni
 - **Autonomous Execution** — set it and forget it. Full task lifecycle management (enqueue, claim, start, complete/fail) with real-time progress streaming via WebSocket.
 - **Reusable Skills** — every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.
 - **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
+- **Windows Desktop App** — Multica Win provides a native, high-performance GUI for Windows users to manage their daemons and agents with ease.
 - **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
 
 ---
 
 ## Quick Install
 
+### macOS / Linux
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
+
+### Windows
+Download the latest **Multica-Win.exe** from our [Releases](https://github.com/JIANQIANG-YU/Multica-Win/releases) page.
+- Native GUI for daemon control.
+- DPI-aware modern interface.
+- One-click access to workspace folders.
 
 Installs the Multica CLI on macOS and Linux. Works with Homebrew or downloads the binary directly.
 
