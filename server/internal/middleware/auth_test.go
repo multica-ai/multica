@@ -41,7 +41,7 @@ func TestAuth_MissingHeader(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
-	if body := w.Body.String(); body != `{"error":"missing authorization header"}`+"\n" {
+	if body := w.Body.String(); body != `{"error":"missing authorization"}`+"\n" {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }
@@ -59,7 +59,8 @@ func TestAuth_NoBearerPrefix(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
-	if body := w.Body.String(); body != `{"error":"invalid authorization format"}`+"\n" {
+	// Non-Bearer Authorization header with no cookie falls through to "missing authorization".
+	if body := w.Body.String(); body != `{"error":"missing authorization"}`+"\n" {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }

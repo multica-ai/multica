@@ -208,7 +208,9 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   // Pick up newly dispatched tasks
   useWSEvent(
     "task:dispatch",
-    useCallback(() => {
+    useCallback((payload: unknown) => {
+      const p = payload as { issue_id?: string };
+      if (p.issue_id && p.issue_id !== issueId) return;
       api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
         setTaskStates((prev) => {
           const next = new Map(prev);

@@ -20,6 +20,9 @@ const (
 	DefaultWorkspaceSyncInterval = 30 * time.Second
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
+	DefaultGCInterval            = 1 * time.Hour
+	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
 )
 
 // Config holds all daemon configuration.
@@ -35,6 +38,10 @@ type Config struct {
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
+	GCEnabled          bool                  // enable periodic workspace garbage collection (default: true)
+	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
+	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
+	GCOrphanTTL        time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
@@ -203,6 +210,24 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// GC config: env > defaults
+	gcEnabled := true
+	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
+		gcEnabled = false
+	}
+	gcInterval, err := durationFromEnv("MULTICA_GC_INTERVAL", DefaultGCInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	gcTTL, err := durationFromEnv("MULTICA_GC_TTL", DefaultGCTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	gcOrphanTTL, err := durationFromEnv("MULTICA_GC_ORPHAN_TTL", DefaultGCOrphanTTL)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		ServerBaseURL:      serverBaseURL,
 		DaemonID:           daemonID,
@@ -212,6 +237,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Agents:             agents,
 		WorkspacesRoot:     workspacesRoot,
 		KeepEnvAfterTask:   keepEnv,
+		GCEnabled:          gcEnabled,
+		GCInterval:         gcInterval,
+		GCTTL:              gcTTL,
+		GCOrphanTTL:        gcOrphanTTL,
 		HealthPort:         healthPort,
 		MaxConcurrentTasks: maxConcurrentTasks,
 		PollInterval:       pollInterval,

@@ -1,0 +1,26 @@
+name: "Feature Request"
+description: Suggest a new feature or improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What do you want and why?
+      description: Describe the problem you're trying to solve or the improvement you'd like to see.
+      placeholder: |
+        I'm trying to do X but there's no way to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution (optional)
+      description: If you have an idea for how this should work, describe it here.
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / mockups (optional)
+      description: If applicable, add screenshots, mockups, or sketches to illustrate your idea.

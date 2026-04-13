@@ -7,12 +7,6 @@ import (
 )
 
 func TestLegacyCompatibilityCommandsRemainAvailable(t *testing.T) {
-	t.Run("auth login remains available", func(t *testing.T) {
-		if _, _, err := authCmd.Find([]string{"login"}); err != nil {
-			t.Fatalf("expected auth login command to exist: %v", err)
-		}
-	})
-
 	t.Run("workspace get remains available", func(t *testing.T) {
 		if _, _, err := workspaceCmd.Find([]string{"get"}); err != nil {
 			t.Fatalf("expected workspace get command to exist: %v", err)

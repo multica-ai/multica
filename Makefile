@@ -70,7 +70,7 @@ selfhost:
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup --local"; \
+		echo "  multica setup self-host"; \
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
@@ -190,10 +190,11 @@ multica:
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 build:
 	cd server && go build -o bin/server ./cmd/server
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/multica ./cmd/multica
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 	cd server && go build -o bin/migrate ./cmd/migrate
 
 test:

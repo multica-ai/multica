@@ -14,6 +14,8 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
+  childProgress: (wsId: string) =>
+    [...issueKeys.all(wsId), "child-progress"] as const,
   timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
@@ -86,6 +88,20 @@ export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+  });
+}
+
+export function childIssueProgressOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.childProgress(wsId),
+    queryFn: () => api.getChildIssueProgress(),
+    select: (data) => {
+      const map = new Map<string, { done: number; total: number }>();
+      for (const entry of data.progress) {
+        map.set(entry.parent_issue_id, { done: entry.done, total: entry.total });
+      }
+      return map;
+    },
   });
 }
 

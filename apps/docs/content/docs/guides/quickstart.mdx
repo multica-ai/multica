@@ -5,14 +5,13 @@ description: Assign your first task to an agent in under 5 minutes.
 
 Once you have the CLI installed (or signed up for [Multica Cloud](https://multica.ai)), follow these steps to assign your first task to an agent.
 
-## 1. Log in and start the daemon
+## 1. Set up and start the daemon
 
 ```bash
-multica login           # Authenticate with your Multica account
-multica daemon start    # Start the local agent runtime
+multica setup           # Configure, authenticate, and start the daemon
 ```
 
-The daemon runs in the background and keeps your machine connected to Multica. It auto-detects agent CLIs (`claude`, `codex`, `openclaw`, `opencode`) available on your PATH.
+This configures the CLI, opens your browser for login, discovers your workspaces, and starts the agent daemon in the background. It auto-detects agent CLIs (`claude`, `codex`, `openclaw`, `opencode`) available on your PATH.
 
 ## 2. Verify your runtime
 

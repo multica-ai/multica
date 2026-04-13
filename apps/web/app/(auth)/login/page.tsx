@@ -3,6 +3,7 @@
 import { Suspense, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@multica/core/auth";
+import { useWorkspaceStore } from "@multica/core/workspace";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 
@@ -16,6 +17,7 @@ function LoginPageContent() {
 
   const cliCallbackRaw = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state") || "";
+  const platform = searchParams.get("platform");
   const nextUrl = searchParams.get("next") || "/issues";
 
   // Already authenticated — redirect to dashboard (skip if CLI callback)
@@ -30,14 +32,20 @@ function LoginPageContent() {
       ? localStorage.getItem("multica_workspace_id")
       : null;
 
+  const handleSuccess = () => {
+    const ws = useWorkspaceStore.getState().workspace;
+    router.push(ws ? nextUrl : "/onboarding");
+  };
+
   return (
     <LoginPage
-      onSuccess={() => router.push(nextUrl)}
+      onSuccess={handleSuccess}
       google={
         googleClientId
           ? {
               clientId: googleClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
+              state: platform === "desktop" ? "platform:desktop" : undefined,
             }
           : undefined
       }

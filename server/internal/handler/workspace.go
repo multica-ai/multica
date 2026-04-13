@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -161,19 +162,31 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	qtx := h.Queries.WithTx(tx)
-	ws, err := qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
-		Name:        req.Name,
-		Slug:        req.Slug,
-		Description: ptrToText(req.Description),
-		Context:     ptrToText(req.Context),
-		IssuePrefix: issuePrefix,
-	})
-	if err != nil {
-		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "workspace slug already exists")
+
+	// Try the requested slug first, then append -2, -3, … on conflict.
+	const maxSlugAttempts = 10
+	var ws db.Workspace
+	slug := req.Slug
+	for attempt := 1; attempt <= maxSlugAttempts; attempt++ {
+		ws, err = qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
+			Name:        req.Name,
+			Slug:        slug,
+			Description: ptrToText(req.Description),
+			Context:     ptrToText(req.Context),
+			IssuePrefix: issuePrefix,
+		})
+		if err == nil {
+			break
+		}
+		if !isUniqueViolation(err) {
+			writeError(w, http.StatusInternalServerError, "failed to create workspace: "+err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create workspace: "+err.Error())
+		// Slug taken — try next suffix.
+		slug = fmt.Sprintf("%s-%d", req.Slug, attempt+1)
+	}
+	if err != nil {
+		writeError(w, http.StatusConflict, "workspace slug already exists")
 		return
 	}
 

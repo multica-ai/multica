@@ -66,14 +66,14 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onSelect={(file) => editorRef.current?.uploadFile(file)}
         />
         <Button
-          size="icon-xs"
+          size="icon-sm"
           disabled={isEmpty || submitting}
           onClick={handleSubmit}
         >
           {submitting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="animate-spin" />
           ) : (
-            <ArrowUp className="h-3.5 w-3.5" />
+            <ArrowUp />
           )}
         </Button>
       </div>

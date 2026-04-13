@@ -1,0 +1,39 @@
+name: "Bug Report"
+description: Report a bug — something that's broken, crashes, or behaves incorrectly.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead. Screenshots, error messages, or screen recordings are welcome.
+      placeholder: |
+        When I do X, Y happens. I expected Z instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: How can we trigger this bug?
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: If applicable, add screenshots or screen recordings to help explain the problem.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Environment info, logs, or anything else that might help.
+      render: shell

@@ -20,13 +20,11 @@ Fetch https://github.com/multica-ai/multica/blob/main/CLI_INSTALL.md and follow 
 Or install manually:
 
 ```bash
-# Install
-brew tap multica-ai/tap
-brew install multica
+# Install the CLI
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 
-# Authenticate and start
-multica login
-multica daemon start
+# Configure, authenticate, and start the daemon
+multica setup
 ```
 
 The daemon auto-detects available agent CLIs (`claude`, `codex`, `openclaw`, `opencode`) on your PATH. When an agent is assigned a task, the daemon creates an isolated environment, runs the agent, and reports results back.

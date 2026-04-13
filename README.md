@@ -18,10 +18,9 @@ The open-source managed agents platform.<br/>
 Turn coding agents into real teammates — assign tasks, track progress, compound skills.
 
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
 
-[Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/multica_hq) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
+[Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
 
 **English | [简体中文](README.zh-CN.md)**
 
@@ -57,18 +56,23 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 
 Installs the Multica CLI on macOS and Linux. Works with Homebrew or downloads the binary directly.
 
-After installation:
+**Windows (PowerShell):**
 
-```bash
-multica login          # Authenticate (opens browser)
-multica daemon start   # Start the local agent runtime
-multica daemon stop    # Stop the daemon when done
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
 
-> **Self-hosting?** Add `--local` to deploy a full Multica server on your machine:
+Then configure, authenticate, and start the daemon in one command:
+
+```bash
+multica setup          # Connect to Multica Cloud, log in, start daemon
+```
+
+> **Self-hosting?** Add `--with-server` to deploy a full Multica server on your machine:
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --local
+> curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+> multica setup self-host
 > ```
 >
 > Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
@@ -77,11 +81,10 @@ multica daemon stop    # Stop the daemon when done
 
 ## Getting Started
 
-### 1. Log in and start the daemon
+### 1. Set up and start the daemon
 
 ```bash
-multica login           # Authenticate with your Multica account
-multica daemon start    # Start the local agent runtime
+multica setup           # Configure, authenticate, and start the daemon
 ```
 
 The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `openclaw`, `opencode`) on your PATH.
@@ -111,9 +114,8 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica login` | Authenticate (opens browser) |
 | `multica daemon start` | Start the local agent runtime |
 | `multica daemon status` | Check daemon status |
-| `multica setup` | One-command setup (configure + login + start daemon) |
-| `multica setup --local` | Same, but for self-hosted deployments |
-| `multica config local` | Configure CLI for a local self-hosted server |
+| `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
+| `multica setup self-host` | Same, but for self-hosted deployments |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
 | `multica update` | Update to the latest version |

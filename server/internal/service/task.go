@@ -470,6 +470,8 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	}
 	payload["task_id"] = util.UUIDToString(task.ID)
 	payload["runtime_id"] = util.UUIDToString(task.RuntimeID)
+	payload["issue_id"] = util.UUIDToString(task.IssueID)
+	payload["agent_id"] = util.UUIDToString(task.AgentID)
 
 	workspaceID := s.resolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
@@ -734,6 +736,13 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("load issue: %w", err)
+	}
+	// Resolve thread root: if parentID points to a reply (has its own parent),
+	// use that parent instead so the comment lands in the top-level thread.
+	if parentID.Valid {
+		if parent, err := s.Queries.GetComment(ctx, parentID); err == nil && parent.ParentID.Valid {
+			parentID = parent.ParentID
+		}
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)

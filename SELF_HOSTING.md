@@ -14,20 +14,19 @@ Each user who runs AI agents locally also installs the **`multica` CLI** and run
 
 ## Quick Install (Recommended)
 
-One command to set up everything — server, CLI, and configuration:
+Two commands to set up everything — server, CLI, and configuration:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --local
+# 1. Install CLI + provision the self-host server
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+
+# 2. Configure CLI, authenticate, and start the daemon
+multica setup self-host
 ```
 
-This automatically clones the repository, starts all services via Docker Compose, and installs the `multica` CLI.
+This clones the repository, starts all services via Docker Compose, installs the `multica` CLI, then configures it for localhost.
 
-Once complete, open http://localhost:3000, log in with any email + verification code **`888888`**, then:
-
-```bash
-multica login          # Authenticate (opens browser)
-multica daemon start   # Start the agent daemon
-```
+Open http://localhost:3000, log in with any email + verification code **`888888`**.
 
 > **Prerequisites:** Docker and Docker Compose must be installed. The script checks for this and provides install links if missing.
 
@@ -71,17 +70,21 @@ Each team member who wants to run AI agents locally needs to:
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install multica-ai/tap/multica
+brew tap multica-ai/tap
+brew install multica
 ```
 
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
+- [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
+- [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
+- [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
 
 ### b) One-command setup
 
 ```bash
-multica setup --local
+multica setup self-host
 ```
 
 This automatically:
@@ -89,6 +92,12 @@ This automatically:
 2. Opens your browser for authentication
 3. Discovers your workspaces
 4. Starts the daemon in the background
+
+For on-premise deployments with custom domains:
+
+```bash
+multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+```
 
 To verify the daemon is running:
 
@@ -128,16 +137,10 @@ multica daemon stop
 If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
 
 ```bash
-multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
-multica login
+multica setup
 ```
 
-Or re-run the install script without `--local` — it will reconfigure the CLI automatically:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-```
+This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
 
 > Your local Docker services are unaffected. Stop them separately if you no longer need them.
 
@@ -180,11 +183,8 @@ If you prefer configuring the CLI step by step instead of `multica setup`:
 
 ```bash
 # Point CLI to your local server
-multica config local
-
-# Or set URLs manually:
-# multica config set app_url http://localhost:3000
-# multica config set server_url http://localhost:8080
+multica config set server_url http://localhost:8080
+multica config set app_url http://localhost:3000
 
 # Login (opens browser)
 multica login

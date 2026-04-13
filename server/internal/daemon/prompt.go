@@ -12,6 +12,9 @@ func BuildPrompt(task Task) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
+	if task.TriggerCommentID != "" {
+		return buildCommentPrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n", task.IssueID)
@@ -24,6 +27,21 @@ func BuildPrompt(task Task) string {
 	}
 	b.WriteString("\nStart by reading `.agent_context/issue_context.md` in your workdir. It contains the issue details Multica injected before launch, so do not depend on `multica issue get` just to understand the task.\n")
 	b.WriteString("Use the `multica` CLI only for follow-up platform reads or writeback when it is available.\n")
+	return b.String()
+}
+
+// buildCommentPrompt constructs a prompt for comment-triggered tasks.
+// The triggering comment content is embedded directly so the agent cannot
+// miss it, even when stale output files exist in a reused workdir.
+func buildCommentPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	if task.TriggerCommentContent != "" {
+		b.WriteString("A user left a comment that triggered this task. Here is their message:\n\n")
+		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
+	}
+	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	return b.String()
 }
 

@@ -95,17 +95,17 @@ func (q *Queries) GetRuntimeUsageSummary(ctx context.Context, runtimeID pgtype.U
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT id, runtime_id, date, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at FROM runtime_usage
 WHERE runtime_id = $1
+  AND date >= $2
 ORDER BY date DESC
-LIMIT $2
 `
 
 type ListRuntimeUsageParams struct {
 	RuntimeID pgtype.UUID `json:"runtime_id"`
-	Limit     int32       `json:"limit"`
+	Since     pgtype.Date `json:"since"`
 }
 
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]RuntimeUsage, error) {
-	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Limit)
+	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Since)
 	if err != nil {
 		return nil, err
 	}

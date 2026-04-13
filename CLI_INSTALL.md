@@ -27,7 +27,9 @@ multica version
 
 ## Step 2: Install the Multica CLI
 
-### Option A: Homebrew (preferred)
+> **Windows users:** Skip to [Option C: Windows (PowerShell)](#option-c-windows-powershell) below.
+
+### Option A: Homebrew (preferred — macOS/Linux)
 
 Check if Homebrew is available:
 
@@ -49,7 +51,7 @@ multica version
 
 If the version prints successfully, skip to **Step 3**.
 
-### Option B: Download from GitHub Releases (no Homebrew)
+### Option B: Download from GitHub Releases (macOS/Linux, no Homebrew)
 
 If Homebrew is not available, download the binary directly.
 
@@ -84,6 +86,27 @@ multica version
 - Check that `/usr/local/bin` is in `$PATH`.
 - On Linux, you may need `chmod +x /usr/local/bin/multica`.
 - If `sudo` is not available, install to a user-writable directory: `mv /tmp/multica ~/.local/bin/multica` and ensure `~/.local/bin` is in `$PATH`.
+
+### Option C: Windows (PowerShell)
+
+Run in PowerShell (no admin required):
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+This downloads the latest Windows binary from GitHub Releases, installs it to `%USERPROFILE%\.multica\bin\`, and adds it to your user PATH.
+
+Verify:
+
+```powershell
+multica version
+```
+
+**If this fails:**
+- Restart your terminal so the updated PATH takes effect.
+- If you use Scoop, the installer will use it automatically: `scoop bucket add multica https://github.com/multica-ai/scoop-bucket.git && scoop install multica`
+- If your execution policy blocks the script: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` then re-run.
 
 ---
 
@@ -136,12 +159,12 @@ Wait 3 seconds, then verify:
 multica daemon status
 ```
 
-Expected output should show `running` status with detected agents (e.g. `claude`, `codex`).
+Expected output should show `running` status with detected agents (e.g. `claude`, `codex`, `opencode`, `openclaw`, `hermes`).
 
 **If daemon fails to start:**
 - Check logs: `multica daemon logs`
 - If a port conflict occurs, the daemon may already be running under a different profile.
-- If no agents are detected, ensure at least one AI CLI (`claude` or `codex`) is installed and on the `$PATH`.
+- If no agents are detected, ensure at least one AI CLI (`claude`, `codex`, `opencode`, `openclaw`, or `hermes`) is installed and on the `$PATH`.
 
 ---
 
@@ -155,12 +178,12 @@ multica daemon status
 
 Confirm:
 1. Status is `running`
-2. At least one agent is listed (e.g. `claude`, `codex`)
+2. At least one agent is listed (e.g. `claude`, `codex`, `opencode`, `openclaw`, or `hermes`)
 3. At least one workspace is being watched
 
 If the agents list is empty, tell the user:
 
-> "The Multica daemon is running but no AI agent CLIs were detected. Please install at least one: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) or [Codex](https://github.com/openai/codex) (`codex`), then restart the daemon with `multica daemon stop && multica daemon start`."
+> "The Multica daemon is running but no AI agent CLIs were detected. Please install at least one supported CLI (`claude`, `codex`, `opencode`, `openclaw`, or `hermes`), then restart the daemon with `multica daemon stop && multica daemon start`."
 
 ---
 

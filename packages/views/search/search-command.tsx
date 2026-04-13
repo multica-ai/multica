@@ -228,7 +228,7 @@ export function SearchCommand() {
       setOpen(false);
       push(href);
     },
-    [push],
+    [push, setOpen],
   );
 
   return (

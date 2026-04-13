@@ -1,13 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Minus, Maximize2, Minimize2, Send, ChevronDown, Bot, Plus, History } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
+import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -26,19 +31,19 @@ import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatSessionHistory } from "./chat-session-history";
+import { ChatResizeHandles } from "./chat-resize-handles";
+import { useChatResize } from "./use-chat-resize";
 import { useWS } from "@multica/core/realtime";
 import type { TaskMessagePayload, ChatDonePayload, Agent, ChatMessage } from "@multica/core/types";
 
 export function ChatWindow() {
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
-  const isFullscreen = useChatStore((s) => s.isFullscreen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const pendingTaskId = useChatStore((s) => s.pendingTaskId);
   const timelineItems = useChatStore((s) => s.timelineItems);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const setOpen = useChatStore((s) => s.setOpen);
-  const toggleFullscreen = useChatStore((s) => s.toggleFullscreen);
   const showHistory = useChatStore((s) => s.showHistory);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setPendingTask = useChatStore((s) => s.setPendingTask);
@@ -46,7 +51,6 @@ export function ChatWindow() {
   const clearTimeline = useChatStore((s) => s.clearTimeline);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const setShowHistory = useChatStore((s) => s.setShowHistory);
-
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -221,57 +225,105 @@ export function ChatWindow() {
     [setSelectedAgentId, setActiveSession],
   );
 
-  if (!isOpen) return null;
+  const windowRef = useRef<HTMLDivElement>(null);
+  const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
 
   const hasMessages = messages.length > 0 || timelineItems.length > 0;
 
-  const containerClass = isFullscreen
-    ? "fixed inset-y-0 right-0 z-50 flex flex-col w-[50%] border-l bg-background shadow-2xl"
-    : "fixed bottom-4 right-4 z-50 flex flex-col w-[420px] h-[600px] rounded-xl border bg-background shadow-2xl overflow-hidden";
+  const isVisible = isOpen && boundsReady;
+
+  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
+  const containerStyle: React.CSSProperties = {
+    width: `${renderWidth}px`,
+    height: `${renderHeight}px`,
+    opacity: isVisible ? 1 : 0,
+    transform: isVisible ? "scale(1)" : "scale(0.95)",
+    transformOrigin: "bottom right",
+    pointerEvents: isOpen ? "auto" : "none",
+    transition: isDragging
+      ? "none"
+      : "width 200ms ease-out, height 200ms ease-out, opacity 150ms ease-out, transform 150ms ease-out",
+  };
 
   return (
-    <div className={containerClass}>
+    <div ref={windowRef} className={containerClass} style={containerStyle}>
+      <ChatResizeHandles onDragStart={startDrag} />
       {/* Header */}
       {!showHistory && (
         <div className="flex items-center justify-between border-b px-4 py-2.5">
           <AgentSelector
             agents={availableAgents}
             activeAgent={activeAgent}
+            userId={user?.id}
             onSelect={handleSelectAgent}
           />
           <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => setShowHistory(true)}
-              title="Chat history"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <History className="size-3.5" />
-            </button>
-            <button
-              onClick={() => {
-                setActiveSession(null);
-                clearTimeline();
-                setPendingTask(null);
-              }}
-              title="New chat"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <Plus className="size-3.5" />
-            </button>
-            <button
-              onClick={toggleFullscreen}
-              title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            </button>
-            <button
-              onClick={() => setOpen(false)}
-              title="Minimize"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <Minus className="size-3.5" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => setShowHistory(true)}
+                  />
+                }
+              >
+                <History />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Chat history</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => {
+                      setActiveSession(null);
+                      clearTimeline();
+                      setPendingTask(null);
+                    }}
+                  />
+                }
+              >
+                <Plus />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">New chat</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={toggleExpand}
+                  />
+                }
+              >
+                {isAtMax ? <Minimize2 /> : <Maximize2 />}
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isAtMax ? "Restore" : "Expand"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => setOpen(false)}
+                  />
+                }
+              >
+                <Minus />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Minimize</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -284,7 +336,6 @@ export function ChatWindow() {
           {hasMessages ? (
             <ChatMessageList
               messages={messages}
-              agent={activeAgent}
               timelineItems={timelineItems}
               isWaiting={!!pendingTaskId}
             />
@@ -308,10 +359,12 @@ export function ChatWindow() {
 function AgentSelector({
   agents,
   activeAgent,
+  userId,
   onSelect,
 }: {
   agents: Agent[];
   activeAgent: Agent | null;
+  userId: string | undefined;
   onSelect: (agent: Agent) => void;
 }) {
   if (!activeAgent) {
@@ -327,24 +380,48 @@ function AgentSelector({
     );
   }
 
+  const myAgents = agents.filter((a) => a.owner_id === userId);
+  const othersAgents = agents.filter((a) => a.owner_id !== userId);
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-1.5 py-1 -ml-1.5 transition-colors hover:bg-accent">
+      <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-1.5 py-1 -ml-1.5 transition-colors hover:bg-accent aria-expanded:bg-accent">
         <AgentAvatarSmall agent={activeAgent} />
         <span className="text-sm font-medium">{activeAgent.name}</span>
         <ChevronDown className="size-3 text-muted-foreground" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        {agents.map((agent) => (
-          <DropdownMenuItem
-            key={agent.id}
-            onClick={() => onSelect(agent)}
-            className="flex items-center gap-2"
-          >
-            <AgentAvatarSmall agent={agent} />
-            <span>{agent.name}</span>
-          </DropdownMenuItem>
-        ))}
+      <DropdownMenuContent align="start" className="max-h-60 w-auto max-w-56">
+        {myAgents.length > 0 && (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>My Agents</DropdownMenuLabel>
+            {myAgents.map((agent) => (
+              <DropdownMenuItem
+                key={agent.id}
+                onClick={() => onSelect(agent)}
+                className="flex min-w-0 items-center gap-2"
+              >
+                <AgentAvatarSmall agent={agent} />
+                <span className="truncate">{agent.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        )}
+        {myAgents.length > 0 && othersAgents.length > 0 && <DropdownMenuSeparator />}
+        {othersAgents.length > 0 && (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Others</DropdownMenuLabel>
+            {othersAgents.map((agent) => (
+              <DropdownMenuItem
+                key={agent.id}
+                onClick={() => onSelect(agent)}
+                className="flex min-w-0 items-center gap-2"
+              >
+                <AgentAvatarSmall agent={agent} />
+                <span className="truncate">{agent.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -354,7 +431,7 @@ function AgentAvatarSmall({ agent }: { agent: Agent }) {
   return (
     <Avatar className="size-5">
       {agent.avatar_url && <AvatarImage src={agent.avatar_url} />}
-      <AvatarFallback className="bg-purple-100 text-purple-700 text-[10px]">
+      <AvatarFallback className="bg-purple-100 text-purple-700">
         <Bot className="size-3" />
       </AvatarFallback>
     </Avatar>

@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const childIssueProgress = `-- name: ChildIssueProgress :many
+SELECT parent_issue_id,
+       COUNT(*)::bigint AS total,
+       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+FROM issue
+WHERE workspace_id = $1
+  AND parent_issue_id IS NOT NULL
+GROUP BY parent_issue_id
+`
+
+type ChildIssueProgressRow struct {
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	Total         int64       `json:"total"`
+	Done          int64       `json:"done"`
+}
+
+func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUID) ([]ChildIssueProgressRow, error) {
+	rows, err := q.db.Query(ctx, childIssueProgress, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChildIssueProgressRow{}
+	for rows.Next() {
+		var i ChildIssueProgressRow
+		if err := rows.Scan(&i.ParentIssueID, &i.Total, &i.Done); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countCreatedIssueAssignees = `-- name: CountCreatedIssueAssignees :many
 SELECT
   assignee_type,

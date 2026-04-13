@@ -21,16 +21,17 @@ Each user who wants to run AI agents locally also installs the **`multica` CLI**
 
 ## Quick Install
 
-One command to set up everything:
+Two commands to set up everything:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --local
+# Install CLI + provision self-host server
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+
+# Configure CLI, authenticate, and start the daemon
+multica setup self-host
 ```
 
-This clones the repo, starts all services, installs the CLI, and configures everything. Then:
-
-1. Open http://localhost:3000 — log in with any email + code **`888888`**
-2. Run `multica login` and `multica daemon start`
+This clones the repo, starts all services, installs the CLI, and configures it for localhost. Then open http://localhost:3000 — log in with any email + code **`888888`**.
 
 <Callout>
 For a step-by-step setup, see below.
@@ -72,17 +73,21 @@ The daemon runs on your local machine (not inside Docker). It detects installed 
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install multica-ai/tap/multica
+brew tap multica-ai/tap
+brew install multica
 ```
 
 You also need at least one AI agent CLI:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
+- OpenCode (`opencode` on PATH)
+- OpenClaw (`openclaw` on PATH)
+- Hermes (`hermes` on PATH)
 
 ### b) One-command setup
 
 ```bash
-multica setup --local
+multica setup self-host
 ```
 
 This automatically:
@@ -91,6 +96,12 @@ This automatically:
 3. Discovers your workspaces
 4. Starts the daemon in the background
 
+For on-premise deployments with custom domains:
+
+```bash
+multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+```
+
 Verify the daemon is running:
 
 ```bash
@@ -98,7 +109,7 @@ multica daemon status
 ```
 
 <Callout>
-Alternatively, configure manually: `multica config local && multica login && multica daemon start`
+Alternatively, configure step by step: `multica config set server_url http://localhost:8080 && multica config set app_url http://localhost:3000 && multica login && multica daemon start`
 </Callout>
 
 ### Step 4 — Verify & Start Using
@@ -123,16 +134,10 @@ multica daemon stop
 If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
 
 ```bash
-multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
-multica login
+multica setup
 ```
 
-Or re-run the install script without `--local` — it will reconfigure the CLI automatically:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-```
+This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
 
 <Callout>
 Your local Docker services are unaffected. Stop them separately if you no longer need them.
@@ -210,6 +215,21 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
+
+Agent-specific overrides:
+
+| Variable | Description |
+|----------|-------------|
+| `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
+| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
+| `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
+| `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
+| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
 
 ## Database Setup
 

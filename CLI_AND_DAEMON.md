@@ -35,7 +35,7 @@ This auto-detects your installation method (Homebrew or manual) and upgrades acc
 multica setup
 
 # For self-hosted (local) deployments:
-multica setup --local
+multica setup self-host
 ```
 
 Or step by step:
@@ -135,6 +135,9 @@ The daemon auto-detects these AI CLIs on your PATH:
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
+| OpenCode | `opencode` | Open-source coding agent |
+| OpenClaw | `openclaw` | Open-source coding agent |
+| Hermes | `hermes` | Nous Research coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -169,29 +172,35 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
+| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
 
 ### Self-Hosted Server
 
 When connecting to a self-hosted Multica instance, the easiest approach is:
 
 ```bash
-# One command — auto-detects local server, configures, authenticates, starts daemon
-multica setup --local
+# One command — configures for localhost, authenticates, starts daemon
+multica setup self-host
+
+# Or for on-premise with custom domains:
+multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
 Or configure manually:
 
 ```bash
-# Configure for local Docker Compose (default ports)
-multica config local
-
-# Or set URLs individually:
-# multica config set app_url http://localhost:3000
-# multica config set server_url http://localhost:8080
+# Set URLs individually
+multica config set server_url http://localhost:8080
+multica config set app_url http://localhost:3000
 
 # For production with TLS:
-# multica config set app_url https://app.example.com
 # multica config set server_url https://api.example.com
+# multica config set app_url https://app.example.com
 
 multica login
 multica daemon start
@@ -202,9 +211,11 @@ multica daemon start
 Profiles let you run multiple daemons on the same machine — for example, one for production and one for a staging server.
 
 ```bash
-# Start a daemon for the staging server
-multica --profile staging login
-multica --profile staging daemon start
+# Set up a staging profile
+multica setup self-host --profile staging --server-url https://api-staging.example.com --app-url https://staging.example.com
+
+# Start its daemon
+multica daemon start --profile staging
 
 # Default profile runs separately
 multica daemon start
@@ -327,17 +338,20 @@ The `runs` command shows all past and current executions for an issue, including
 ## Setup
 
 ```bash
-# One-command setup: configure, authenticate, and start the daemon
+# One-command setup for Multica Cloud: configure, authenticate, and start the daemon
 multica setup
 
-# For local self-hosted deployments (auto-detects or forces local mode)
-multica setup --local
+# For local self-hosted deployments
+multica setup self-host
 
 # Custom ports
-multica setup --local --port 9090 --frontend-port 4000
+multica setup self-host --port 9090 --frontend-port 4000
+
+# On-premise with custom domains
+multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
-`multica setup` detects whether a local Multica server is running, configures the CLI, opens your browser for authentication, and starts the daemon — all in one step.
+`multica setup` configures the CLI, opens your browser for authentication, and starts the daemon — all in one step. Use `multica setup self-host` to connect to a self-hosted server instead of Multica Cloud.
 
 ## Configuration
 
@@ -348,15 +362,6 @@ multica config show
 ```
 
 Shows config file path, server URL, app URL, and default workspace.
-
-### Configure for Local Self-Hosted
-
-```bash
-multica config local                                      # Uses default ports (8080/3000)
-multica config local --port 9090 --frontend-port 4000     # Custom ports
-```
-
-Sets `server_url` and `app_url` for a local Docker Compose deployment in one command.
 
 ### Set Values
 
