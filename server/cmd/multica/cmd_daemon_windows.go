@@ -1,12 +1,14 @@
-//go:build !windows
+//go:build windows
 
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -158,7 +160,10 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	child.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		HideWindow:    true,
+	}
 
 	if err := child.Start(); err != nil {
 		logFile.Close()
@@ -176,20 +181,12 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll health endpoint until the daemon is ready or timeout.
-	deadline := time.Now().Add(15 * time.Second)
-	started := false
-	for time.Now().Before(deadline) {
-		time.Sleep(500 * time.Millisecond)
-		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
-		health = checkDaemonHealthOnPort(hctx, healthPort)
-		hcancel()
-		if health["status"] == "running" {
-			started = true
-			break
-		}
-	}
-	if !started {
+	// Wait briefly and verify daemon started via health endpoint.
+	time.Sleep(2 * time.Second)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	health = checkDaemonHealthOnPort(ctx2, healthPort)
+	if health["status"] != "running" {
 		fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
 		return nil
 	}
@@ -276,7 +273,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	cfg.CLIVersion = version
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
@@ -308,7 +305,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		child.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+			HideWindow:    true,
+		}
 
 		if err := child.Start(); err != nil {
 			logFile.Close()
@@ -357,7 +357,8 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("find process %d: %w", int(pid), err)
 	}
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	// Windows does not support SIGTERM; terminate the process directly.
+	if err := process.Kill(); err != nil {
 		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
 	}
 
@@ -432,16 +433,59 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	lines, _ := cmd.Flags().GetInt("lines")
 
-	args := []string{"-n", strconv.Itoa(lines)}
-	if follow {
-		args = append(args, "-f")
+	f, err := os.Open(logPath)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
 	}
-	args = append(args, logPath)
+	defer f.Close()
 
-	tail := exec.Command("tail", args...)
-	tail.Stdout = os.Stdout
-	tail.Stderr = os.Stderr
-	return tail.Run()
+	// Read and display the last N lines.
+	last := readLastLines(f, lines)
+	for _, line := range last {
+		fmt.Println(line)
+	}
+
+	if !follow {
+		return nil
+	}
+
+	// Follow mode: continuously read new content appended to the file.
+	buf := make([]byte, 4096)
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			os.Stdout.Write(buf[:n])
+		}
+		if err == io.EOF {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// readLastLines returns the last n lines from r using a ring buffer.
+func readLastLines(r io.Reader, n int) []string {
+	scanner := bufio.NewScanner(r)
+	ring := make([]string, n)
+	total := 0
+	for scanner.Scan() {
+		ring[total%n] = scanner.Text()
+		total++
+	}
+
+	count := total
+	if count > n {
+		count = n
+	}
+	result := make([]string, count)
+	start := total - count
+	for i := 0; i < count; i++ {
+		result[i] = ring[(start+i)%n]
+	}
+	return result
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.
