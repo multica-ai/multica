@@ -56,6 +56,12 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 
 Installs the Multica CLI on macOS and Linux. Works with Homebrew or downloads the binary directly.
 
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
 After installation:
 
 ```bash

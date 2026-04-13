@@ -168,7 +168,7 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 		if raw[i] != '{' {
 			continue
 		}
-		if err := json.Unmarshal([]byte(raw[i:]), &result); err == nil && result.Payloads != nil {
+		if err := json.Unmarshal([]byte(raw[i:]), &result); err == nil && (result.Payloads != nil || result.Meta.DurationMs > 0) {
 			return result, true
 		}
 	}

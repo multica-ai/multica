@@ -1,9 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, MessageSquare, Archive, Trash2 } from "lucide-react";
+import { ArrowLeft, MessageSquare, Archive, Bot, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@multica/ui/lib/utils";
+import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
-import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { allChatSessionsOptions } from "@multica/core/chat/queries";
@@ -34,10 +37,12 @@ export function ChatSessionHistory() {
 
   const handleArchive = (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
-    archiveSession.mutate(sessionId);
     if (activeSessionId === sessionId) {
       setActiveSession(null);
     }
+    archiveSession.mutate(sessionId, {
+      onError: () => toast.error("Failed to archive session"),
+    });
   };
 
   const activeSessions = sessions.filter((s) => s.status === "active");
@@ -47,12 +52,21 @@ export function ChatSessionHistory() {
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-4 py-2.5">
-        <button
-          onClick={() => setShowHistory(false)}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-        >
-          <ArrowLeft className="size-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                onClick={() => setShowHistory(false)}
+              />
+            }
+          >
+            <ArrowLeft />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Back</TooltipContent>
+        </Tooltip>
         <span className="text-sm font-medium">Chat History</span>
       </div>
 
@@ -71,6 +85,7 @@ export function ChatSessionHistory() {
                 sessions={activeSessions}
                 agentMap={agentMap}
                 activeSessionId={activeSessionId}
+                archivingId={archiveSession.isPending ? (archiveSession.variables as string) : null}
                 onSelect={handleSelectSession}
                 onArchive={handleArchive}
               />
@@ -81,6 +96,7 @@ export function ChatSessionHistory() {
                 sessions={archivedSessions}
                 agentMap={agentMap}
                 activeSessionId={activeSessionId}
+                archivingId={null}
                 onSelect={handleSelectSession}
               />
             )}
@@ -96,6 +112,7 @@ function SessionGroup({
   sessions,
   agentMap,
   activeSessionId,
+  archivingId,
   onSelect,
   onArchive,
 }: {
@@ -103,6 +120,7 @@ function SessionGroup({
   sessions: ChatSession[];
   agentMap: Map<string, Agent>;
   activeSessionId: string | null;
+  archivingId: string | null;
   onSelect: (session: ChatSession) => void;
   onArchive?: (e: React.MouseEvent, sessionId: string) => void;
 }) {
@@ -119,6 +137,7 @@ function SessionGroup({
           session={session}
           agent={agentMap.get(session.agent_id) ?? null}
           isActive={session.id === activeSessionId}
+          isArchiving={session.id === archivingId}
           onSelect={() => onSelect(session)}
           onArchive={onArchive ? (e) => onArchive(e, session.id) : undefined}
         />
@@ -131,12 +150,14 @@ function SessionItem({
   session,
   agent,
   isActive,
+  isArchiving,
   onSelect,
   onArchive,
 }: {
   session: ChatSession;
   agent: Agent | null;
   isActive: boolean;
+  isArchiving: boolean;
   onSelect: () => void;
   onArchive?: (e: React.MouseEvent) => void;
 }) {
@@ -145,13 +166,14 @@ function SessionItem({
   return (
     <button
       onClick={onSelect}
-      className={`group flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50 ${
-        isActive ? "bg-accent/30" : ""
-      }`}
+      className={cn(
+        "group flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50",
+        isActive && "bg-accent/30",
+      )}
     >
       <Avatar className="size-6 shrink-0 mt-0.5">
         {agent?.avatar_url && <AvatarImage src={agent.avatar_url} />}
-        <AvatarFallback className="bg-purple-100 text-purple-700 text-[10px]">
+        <AvatarFallback className="bg-purple-100 text-purple-700">
           <Bot className="size-3" />
         </AvatarFallback>
       </Avatar>
@@ -174,13 +196,25 @@ function SessionItem({
         </div>
       </div>
       {onArchive && (
-        <button
-          onClick={onArchive}
-          title="Archive"
-          className="invisible group-hover:visible flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive shrink-0 mt-0.5"
-        >
-          <Trash2 className="size-3" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={cn(
+                  "shrink-0 mt-0.5 text-muted-foreground",
+                  !isArchiving && "invisible group-hover:visible",
+                )}
+                onClick={onArchive}
+                disabled={isArchiving}
+              />
+            }
+          >
+            {isArchiving ? <Loader2 className="animate-spin" /> : <Archive />}
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Archive</TooltipContent>
+        </Tooltip>
       )}
     </button>
   );

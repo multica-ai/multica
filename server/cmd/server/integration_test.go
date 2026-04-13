@@ -306,28 +306,12 @@ func TestSendCodeAndVerify(t *testing.T) {
 	meResp.Body.Close()
 }
 
-func TestVerifyCodeCreatesWorkspaceForNewUser(t *testing.T) {
+func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 	const email = "new-integration-verify@multica.ai"
 	ctx := context.Background()
 
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		var userID string
-		err := testPool.QueryRow(ctx, `SELECT id FROM "user" WHERE email = $1`, email).Scan(&userID)
-		if err == nil {
-			rows, queryErr := testPool.Query(ctx, `
-				SELECT w.id FROM workspace w JOIN member m ON m.workspace_id = w.id WHERE m.user_id = $1
-			`, userID)
-			if queryErr == nil {
-				defer rows.Close()
-				for rows.Next() {
-					var wsID string
-					if rows.Scan(&wsID) == nil {
-						testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsID)
-					}
-				}
-			}
-		}
 		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
 	})
 
@@ -363,7 +347,7 @@ func TestVerifyCodeCreatesWorkspaceForNewUser(t *testing.T) {
 	}
 	readJSON(t, resp, &loginResp)
 
-	// Check workspace was created
+	// New users should have no workspaces (onboarding creates one)
 	req, _ := http.NewRequest("GET", testServer.URL+"/api/workspaces", nil)
 	req.Header.Set("Authorization", "Bearer "+loginResp.Token)
 	workspacesResp, err := http.DefaultClient.Do(req)
@@ -382,11 +366,8 @@ func TestVerifyCodeCreatesWorkspaceForNewUser(t *testing.T) {
 	}
 	readJSON(t, workspacesResp, &workspaces)
 
-	if len(workspaces) != 1 {
-		t.Fatalf("expected 1 workspace, got %d", len(workspaces))
-	}
-	if !strings.Contains(workspaces[0].Name, "Workspace") {
-		t.Fatalf("expected workspace name containing 'Workspace', got %q", workspaces[0].Name)
+	if len(workspaces) != 0 {
+		t.Fatalf("expected 0 workspaces for new user, got %d", len(workspaces))
 	}
 }
 

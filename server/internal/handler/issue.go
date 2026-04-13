@@ -727,6 +727,34 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
+	wsID := resolveWorkspaceID(r)
+	wsUUID := parseUUID(wsID)
+
+	rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+		return
+	}
+
+	type progressEntry struct {
+		ParentIssueID string `json:"parent_issue_id"`
+		Total         int64  `json:"total"`
+		Done          int64  `json:"done"`
+	}
+	resp := make([]progressEntry, len(rows))
+	for i, row := range rows {
+		resp[i] = progressEntry{
+			ParentIssueID: uuidToString(row.ParentIssueID),
+			Total:         row.Total,
+			Done:          row.Done,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"progress": resp,
+	})
+}
+
 type CreateIssueRequest struct {
 	Title              string   `json:"title"`
 	Description        *string  `json:"description"`

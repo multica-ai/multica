@@ -278,6 +278,24 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.28",
+        date: "2026-04-13",
+        title: "Windows Support, Auth & Onboarding",
+        changes: [],
+        features: [
+          "Windows support — CLI installation, daemon, and release builds",
+          "Auth migrated to HttpOnly Cookie with WebSocket Origin whitelist",
+          "Full-screen onboarding wizard for new workspaces",
+          "Resizable Master Agent chat window with session history improvements",
+          "Token usage log scanning for OpenCode, OpenClaw, and Hermes runtimes",
+        ],
+        fixes: [
+          "WebSocket first-message authentication security fix",
+          "Content-Security-Policy response header",
+          "Sub-issue progress computed from database instead of paginated client cache",
+        ],
+      },
+      {
         version: "0.1.27",
         date: "2026-04-12",
         title: "One-Click Setup, Self-Hosting & Stability",

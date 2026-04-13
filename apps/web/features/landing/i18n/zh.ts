@@ -278,6 +278,24 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.28",
+        date: "2026-04-13",
+        title: "Windows 支持、认证与引导",
+        changes: [],
+        features: [
+          "Windows 支持——CLI 安装、Daemon 运行和发布构建",
+          "认证迁移至 HttpOnly Cookie，WebSocket 新增 Origin 白名单",
+          "新工作区全屏引导向导",
+          "Master Agent 聊天窗口可调整大小，会话历史体验优化",
+          "OpenCode、OpenClaw 和 Hermes 运行时 Token 用量日志扫描",
+        ],
+        fixes: [
+          "WebSocket 首条消息认证安全修复",
+          "新增 Content-Security-Policy 响应头",
+          "子 Issue 进度改为从数据库计算而非分页客户端缓存",
+        ],
+      },
+      {
         version: "0.1.27",
         date: "2026-04-12",
         title: "一键安装、自部署与稳定性",

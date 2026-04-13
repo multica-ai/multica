@@ -14,7 +14,7 @@ import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions } from "@multica/core/issues/queries";
+import { issueListOptions, childIssueProgressOptions } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { IssuesHeader } from "./issues-header";
@@ -59,22 +59,9 @@ export function IssuesPage() {
     [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject],
   );
 
-  // Compute sub-issue progress for each parent from the full (unfiltered) issue list
-  const childProgressMap = useMemo(() => {
-    const map = new Map<string, { done: number; total: number }>();
-    for (const issue of allIssues) {
-      if (!issue.parent_issue_id) continue;
-      const entry = map.get(issue.parent_issue_id);
-      const isDone = issue.status === "done" || issue.status === "cancelled";
-      if (entry) {
-        entry.total++;
-        if (isDone) entry.done++;
-      } else {
-        map.set(issue.parent_issue_id, { done: isDone ? 1 : 0, total: 1 });
-      }
-    }
-    return map;
-  }, [allIssues]);
+  // Fetch sub-issue progress from the backend so counts are accurate
+  // regardless of client-side pagination or filtering of done issues.
+  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)

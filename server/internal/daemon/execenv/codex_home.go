@@ -87,7 +87,7 @@ func resolveSharedCodexHome() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("/tmp", ".codex") // last resort fallback
+		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
 }
@@ -114,7 +114,7 @@ func ensureDirSymlink(src, dst string) error {
 		}
 	}
 
-	return os.Symlink(src, dst)
+	return createDirLink(src, dst)
 }
 
 // ensureSymlink creates a symlink dst → src. If src doesn't exist, it's a no-op.
@@ -141,7 +141,7 @@ func ensureSymlink(src, dst string) error {
 		}
 	}
 
-	return os.Symlink(src, dst)
+	return createFileLink(src, dst)
 }
 
 // defaultCodexConfig is the minimal config.toml for Codex tasks.
@@ -204,6 +204,11 @@ func copyFileIfExists(src, dst string) error {
 		return nil
 	}
 
+	return copyFile(src, dst)
+}
+
+// copyFile copies src to dst unconditionally.
+func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)

@@ -39,12 +39,14 @@ function AppContent() {
   return <DesktopShell />;
 }
 
+const remoteProxy = Boolean(import.meta.env.VITE_REMOTE_API);
+
 export default function App() {
   return (
     <ThemeProvider>
       <CoreProvider
-        apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
-        wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
+        apiBaseUrl={remoteProxy ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8080")}
+        wsUrl={remoteProxy ? "ws://localhost:5173/ws" : (import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws")}
       >
         <AppContent />
       </CoreProvider>

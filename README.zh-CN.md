@@ -56,6 +56,12 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 
 安装 Multica CLI，支持 macOS 和 Linux。有 Homebrew 用 Homebrew，没有则直接下载二进制。
 
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
 安装完成后：
 
 ```bash

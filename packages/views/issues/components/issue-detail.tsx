@@ -505,7 +505,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                       }
                     }}
                   >
-                    {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                    {isPinned ? <PinOff /> : <Pin />}
                   </Button>
                 }
               />

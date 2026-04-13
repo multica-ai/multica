@@ -43,7 +43,10 @@ detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
     Linux)  OS="linux" ;;
-    *)      fail "Unsupported operating system: $(uname -s). Multica supports macOS and Linux." ;;
+    MINGW*|MSYS*|CYGWIN*)
+            fail "This script does not support Windows. Use the PowerShell installer instead:
+  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex" ;;
+    *)      fail "Unsupported operating system: $(uname -s). Multica supports macOS, Linux, and Windows." ;;
   esac
 
   ARCH="$(uname -m)"

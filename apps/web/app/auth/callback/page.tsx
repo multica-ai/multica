@@ -62,8 +62,8 @@ function CallbackContent() {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
           const lastWsId = localStorage.getItem("multica_workspace_id");
-          await hydrateWorkspace(wsList, lastWsId);
-          router.push("/issues");
+          const ws = await hydrateWorkspace(wsList, lastWsId);
+          router.push(ws ? "/issues" : "/onboarding");
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

@@ -279,7 +279,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       </DropdownMenuItem>
                     ))}
                     <DropdownMenuItem
-                      onClick={() => useModalStore.getState().open("create-workspace")}
+                      onClick={() => push("/onboarding")}
                     >
                       <Plus className="h-3.5 w-3.5" />
                       Create workspace

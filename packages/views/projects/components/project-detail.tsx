@@ -12,7 +12,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { issueListOptions } from "@multica/core/issues/queries";
+import { issueListOptions, childIssueProgressOptions } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -92,6 +92,7 @@ function PropRow({
 const projectViewStore = createIssueViewStore("project_issues_view");
 
 function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
+  const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -108,21 +109,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
     [projectIssues],
   );
 
-  const childProgressMap = useMemo(() => {
-    const map = new Map<string, { done: number; total: number }>();
-    for (const issue of projectIssues) {
-      if (!issue.parent_issue_id) continue;
-      const entry = map.get(issue.parent_issue_id);
-      const isDone = issue.status === "done" || issue.status === "cancelled";
-      if (entry) {
-        entry.total++;
-        if (isDone) entry.done++;
-      } else {
-        map.set(issue.parent_issue_id, { done: isDone ? 1 : 0, total: 1 });
-      }
-    }
-    return map;
-  }, [projectIssues]);
+  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)

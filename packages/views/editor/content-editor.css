@@ -458,3 +458,32 @@
 .rich-text-editor .image-toolbar button:hover {
   background: color-mix(in srgb, white 15%, transparent);
 }
+
+/* Bubble menu — floating toolbar pill */
+.bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0.25rem;
+  background: var(--popover);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 12px color-mix(in srgb, black 12%, transparent),
+    0 0 0 1px color-mix(in srgb, black 4%, transparent);
+}
+
+/* Link edit mode — inline URL input */
+.bubble-menu-link-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--popover);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 12px color-mix(in srgb, black 12%, transparent),
+    0 0 0 1px color-mix(in srgb, black 4%, transparent);
+  min-width: 300px;
+}

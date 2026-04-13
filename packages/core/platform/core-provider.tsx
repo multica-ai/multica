@@ -74,7 +74,7 @@ export function CoreProvider({
 
   return (
     <QueryProvider>
-      <AuthInitializer onLogin={onLogin} onLogout={onLogout} storage={storage}>
+      <AuthInitializer onLogin={onLogin} onLogout={onLogout} storage={storage} cookieAuth={cookieAuth}>
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}
