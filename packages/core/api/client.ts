@@ -198,6 +198,10 @@ export class ApiClient {
     await this.fetch("/auth/logout", { method: "POST" });
   }
 
+  async issueCliToken(): Promise<{ token: string }> {
+    return this.fetch("/api/cli-token", { method: "POST" });
+  }
+
   async getMe(): Promise<User> {
     return this.fetch("/api/me");
   }

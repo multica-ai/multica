@@ -390,6 +390,31 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// IssueCliToken returns a fresh JWT for the authenticated user.
+// This allows cookie-authenticated browser sessions to obtain a bearer token
+// that can be handed off to the CLI via the cli_callback redirect.
+func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		slog.Warn("cli-token: failed to issue JWT", append(logger.RequestAttrs(r), "error", err, "user_id", userID)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"token": tokenString})
+}
+
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	auth.ClearAuthCookies(w)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})

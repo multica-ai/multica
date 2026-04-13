@@ -13,6 +13,7 @@ const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
+const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", async () => {
@@ -58,6 +59,7 @@ vi.mock("@multica/core/api", () => ({
     verifyCode: mockApiVerifyCode,
     setToken: mockApiSetToken,
     getMe: mockApiGetMe,
+    issueCliToken: mockApiIssueCliToken,
   },
 }));
 
@@ -88,7 +90,8 @@ describe("LoginPage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    // Default: no existing session
+    // Default: no existing session (getMe rejects when no auth)
+    mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
     // Reset window.location for tests that change it
     Object.defineProperty(window, "location", {
@@ -473,6 +476,65 @@ describe("LoginPage", () => {
     expect(
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // CLI callback — cookie-based session (no localStorage token)
+  // -------------------------------------------------------------------------
+
+  it("detects cookie-based session and shows cli_confirm when no localStorage token", async () => {
+    // No localStorage token — getMe succeeds via HttpOnly cookie
+    mockApiGetMe.mockResolvedValueOnce({
+      id: "u-1",
+      email: "cookie@example.com",
+      name: "Cookie User",
+    });
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/cookie@example.com/)).toBeInTheDocument();
+  });
+
+  it("CLI authorize with cookie session calls issueCliToken and redirects", async () => {
+    // No localStorage token — getMe succeeds via cookie
+    mockApiGetMe.mockResolvedValueOnce({
+      id: "u-1",
+      email: "cookie@example.com",
+      name: "Cookie User",
+    });
+    mockApiIssueCliToken.mockResolvedValueOnce({ token: "fresh-jwt" });
+    const onTokenObtained = vi.fn();
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        onTokenObtained={onTokenObtained}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^authorize$/i }));
+
+    await waitFor(() => {
+      expect(mockApiIssueCliToken).toHaveBeenCalled();
+      expect(onTokenObtained).toHaveBeenCalled();
+      expect(window.location.href).toContain(
+        "http://localhost:9876/callback?token=fresh-jwt&state=abc",
+      );
+    });
   });
 
   // -------------------------------------------------------------------------

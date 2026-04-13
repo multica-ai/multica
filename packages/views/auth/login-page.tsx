@@ -103,13 +103,28 @@ export function LoginPage({
   const [cooldown, setCooldown] = useState(0);
   const [existingUser, setExistingUser] = useState<User | null>(null);
 
-  // Check for existing session when CLI callback is present
+  // Check for existing session when CLI callback is present.
+  // Tries localStorage token first, then falls back to HttpOnly cookie auth.
   useEffect(() => {
     if (!cliCallback) return;
-    const token = localStorage.getItem("multica_token");
-    if (!token) return;
 
-    api.setToken(token);
+    const token = localStorage.getItem("multica_token");
+    if (token) {
+      api.setToken(token);
+      api
+        .getMe()
+        .then((user) => {
+          setExistingUser(user);
+          setStep("cli_confirm");
+        })
+        .catch(() => {
+          api.setToken(null);
+          localStorage.removeItem("multica_token");
+        });
+      return;
+    }
+
+    // No localStorage token — try cookie-based session (browser sends HttpOnly cookie automatically)
     api
       .getMe()
       .then((user) => {
@@ -117,8 +132,7 @@ export function LoginPage({
         setStep("cli_confirm");
       })
       .catch(() => {
-        api.setToken(null);
-        localStorage.removeItem("multica_token");
+        // No valid session — user will need to log in
       });
   }, [cliCallback]);
 
@@ -203,13 +217,29 @@ export function LoginPage({
     }
   };
 
-  const handleCliAuthorize = () => {
+  const handleCliAuthorize = async () => {
     if (!cliCallback) return;
-    const token = localStorage.getItem("multica_token");
-    if (!token) return;
     setLoading(true);
-    onTokenObtained?.();
-    redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+
+    // Try localStorage token first
+    const token = localStorage.getItem("multica_token");
+    if (token) {
+      onTokenObtained?.();
+      redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+      return;
+    }
+
+    // No localStorage token — request one from the server (cookie auth)
+    try {
+      const { token: newToken } = await api.issueCliToken();
+      onTokenObtained?.();
+      redirectToCliCallback(cliCallback.url, newToken, cliCallback.state);
+    } catch {
+      setError("Failed to authorize CLI. Please log in again.");
+      setExistingUser(null);
+      setStep("email");
+      setLoading(false);
+    }
   };
 
   const handleGoogleLogin = () => {
