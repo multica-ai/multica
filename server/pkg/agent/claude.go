@@ -129,6 +129,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Content: msg.Log.Message,
 					})
 				}
+			case "control_request":
+				// Auto-approve tool-use permission requests so that Claude
+				// can proceed in daemon / bypass-permissions mode.
+				b.handleControlRequest(msg, stdin)
 			}
 		}
 
