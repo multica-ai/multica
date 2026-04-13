@@ -78,3 +78,29 @@ SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 
 -- name: DeleteArchivedAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+
+-- name: MigrateAgentsToRuntime :execrows
+-- Migrates agents from stale offline runtimes to the newly registered runtime.
+-- Only migrates from runtimes with the same workspace, provider, and owner
+-- that are currently offline. This handles the case where a user switches
+-- profiles and the old runtime has agents bound to it.
+UPDATE agent
+SET runtime_id = @new_runtime_id
+WHERE runtime_id IN (
+    SELECT ar.id FROM agent_runtime ar
+    WHERE ar.workspace_id = @workspace_id
+      AND ar.provider = @provider
+      AND ar.owner_id = @owner_id
+      AND ar.id != @new_runtime_id
+      AND ar.status = 'offline'
+);
+
+-- name: DeleteStaleOfflineRuntimes :many
+-- Deletes runtimes that have been offline for longer than the TTL and have
+-- no active (non-archived) agents bound. Archived agents are cleaned up first
+-- by the caller. The FK constraint (ON DELETE RESTRICT) provides a safety net.
+DELETE FROM agent_runtime
+WHERE status = 'offline'
+  AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+  AND id NOT IN (SELECT runtime_id FROM agent WHERE archived_at IS NULL)
+RETURNING id, workspace_id;

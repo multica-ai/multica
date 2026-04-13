@@ -40,6 +40,42 @@ func (q *Queries) DeleteArchivedAgentsByRuntime(ctx context.Context, runtimeID p
 	return err
 }
 
+const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
+DELETE FROM agent_runtime
+WHERE status = 'offline'
+  AND last_seen_at < now() - make_interval(secs => $1::double precision)
+  AND id NOT IN (SELECT runtime_id FROM agent WHERE archived_at IS NULL)
+RETURNING id, workspace_id
+`
+
+type DeleteStaleOfflineRuntimesRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Deletes runtimes that have been offline for longer than the TTL and have
+// no active (non-archived) agents bound. Archived agents are cleaned up first
+// by the caller. The FK constraint (ON DELETE RESTRICT) provides a safety net.
+func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds float64) ([]DeleteStaleOfflineRuntimesRow, error) {
+	rows, err := q.db.Query(ctx, deleteStaleOfflineRuntimes, staleSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeleteStaleOfflineRuntimesRow{}
+	for rows.Next() {
+		var i DeleteStaleOfflineRuntimesRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline'
@@ -251,6 +287,43 @@ func (q *Queries) MarkStaleRuntimesOffline(ctx context.Context, staleSeconds flo
 		return nil, err
 	}
 	return items, nil
+}
+
+const migrateAgentsToRuntime = `-- name: MigrateAgentsToRuntime :execrows
+UPDATE agent
+SET runtime_id = $1
+WHERE runtime_id IN (
+    SELECT ar.id FROM agent_runtime ar
+    WHERE ar.workspace_id = $2
+      AND ar.provider = $3
+      AND ar.owner_id = $4
+      AND ar.id != $1
+      AND ar.status = 'offline'
+)
+`
+
+type MigrateAgentsToRuntimeParams struct {
+	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Provider     string      `json:"provider"`
+	OwnerID      pgtype.UUID `json:"owner_id"`
+}
+
+// Migrates agents from stale offline runtimes to the newly registered runtime.
+// Only migrates from runtimes with the same workspace, provider, and owner
+// that are currently offline. This handles the case where a user switches
+// profiles and the old runtime has agents bound to it.
+func (q *Queries) MigrateAgentsToRuntime(ctx context.Context, arg MigrateAgentsToRuntimeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, migrateAgentsToRuntime,
+		arg.NewRuntimeID,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.OwnerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setAgentRuntimeOffline = `-- name: SetAgentRuntimeOffline :exec

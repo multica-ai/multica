@@ -217,6 +217,24 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
 			return
 		}
+
+		// Migrate agents from old offline runtimes (same workspace/provider/owner)
+		// to the newly registered runtime. This handles duplicate runtimes created
+		// by profile switches where the old daemon_id included a profile suffix.
+		if ownerID.Valid {
+			migrated, err := h.Queries.MigrateAgentsToRuntime(r.Context(), db.MigrateAgentsToRuntimeParams{
+				NewRuntimeID: registered.ID,
+				WorkspaceID:  parseUUID(req.WorkspaceID),
+				Provider:     provider,
+				OwnerID:      ownerID,
+			})
+			if err != nil {
+				slog.Warn("failed to migrate agents to new runtime", "runtime_id", uuidToString(registered.ID), "error", err)
+			} else if migrated > 0 {
+				slog.Info("migrated agents to new runtime", "runtime_id", uuidToString(registered.ID), "provider", provider, "migrated_count", migrated)
+			}
+		}
+
 		resp = append(resp, runtimeToResponse(registered))
 	}
 

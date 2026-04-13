@@ -164,11 +164,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.DaemonID != "" {
 		daemonID = overrides.DaemonID
 	}
-	// Suffix daemon ID with profile name to avoid collisions when multiple
-	// daemons register against the same server.
-	if profile != "" && !strings.HasSuffix(daemonID, "-"+profile) {
-		daemonID = daemonID + "-" + profile
-	}
+	// NOTE: daemon_id is intentionally stable (hostname or explicit override).
+	// The unique constraint (workspace_id, daemon_id, provider) already prevents
+	// collisions within the same workspace. Appending the profile name caused
+	// duplicate runtimes when users switched profiles.
 
 	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", host)
 	if overrides.DeviceName != "" {
