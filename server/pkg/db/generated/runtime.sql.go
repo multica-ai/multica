@@ -79,7 +79,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]FailTasksF
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id FROM agent_runtime
 WHERE id = $1
 `
 
@@ -100,12 +100,13 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OwnerID,
+		&i.SandboxConfigID,
 	)
 	return i, err
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -131,12 +132,13 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OwnerID,
+		&i.SandboxConfigID,
 	)
 	return i, err
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -164,6 +166,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.OwnerID,
+			&i.SandboxConfigID,
 		); err != nil {
 			return nil, err
 		}
@@ -176,7 +179,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -209,6 +212,88 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.OwnerID,
+			&i.SandboxConfigID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCloudRuntimes = `-- name: ListCloudRuntimes :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id FROM agent_runtime
+WHERE runtime_mode = 'cloud' AND status = 'online'
+ORDER BY workspace_id
+`
+
+func (q *Queries) ListCloudRuntimes(ctx context.Context) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listCloudRuntimes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.SandboxConfigID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuntimesBySandboxConfig = `-- name: ListRuntimesBySandboxConfig :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id FROM agent_runtime
+WHERE sandbox_config_id = $1
+`
+
+func (q *Queries) ListRuntimesBySandboxConfig(ctx context.Context, sandboxConfigID pgtype.UUID) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listRuntimesBySandboxConfig, sandboxConfigID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.SandboxConfigID,
 		); err != nil {
 			return nil, err
 		}
@@ -268,7 +353,7 @@ const updateAgentRuntimeHeartbeat = `-- name: UpdateAgentRuntimeHeartbeat :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id
 `
 
 func (q *Queries) UpdateAgentRuntimeHeartbeat(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
@@ -288,8 +373,20 @@ func (q *Queries) UpdateAgentRuntimeHeartbeat(ctx context.Context, id pgtype.UUI
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OwnerID,
+		&i.SandboxConfigID,
 	)
 	return i, err
+}
+
+const updateCloudRuntimesHeartbeat = `-- name: UpdateCloudRuntimesHeartbeat :exec
+UPDATE agent_runtime
+SET last_seen_at = now(), updated_at = now()
+WHERE runtime_mode = 'cloud' AND status = 'online'
+`
+
+func (q *Queries) UpdateCloudRuntimesHeartbeat(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, updateCloudRuntimesHeartbeat)
+	return err
 }
 
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one
@@ -303,8 +400,9 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
+    sandbox_config_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -313,21 +411,23 @@ DO UPDATE SET
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    sandbox_config_id = COALESCE(EXCLUDED.sandbox_config_id, agent_runtime.sandbox_config_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, sandbox_config_id
 `
 
 type UpsertAgentRuntimeParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	SandboxConfigID pgtype.UUID `json:"sandbox_config_id"`
 }
 
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (AgentRuntime, error) {
@@ -341,6 +441,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.DeviceInfo,
 		arg.Metadata,
 		arg.OwnerID,
+		arg.SandboxConfigID,
 	)
 	var i AgentRuntime
 	err := row.Scan(
@@ -357,6 +458,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OwnerID,
+		&i.SandboxConfigID,
 	)
 	return i, err
 }

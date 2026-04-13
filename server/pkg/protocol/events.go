@@ -71,6 +71,9 @@ const (
 	EventPinCreated = "pin:created"
 	EventPinDeleted = "pin:deleted"
 
+	// Runtime events
+	EventRuntimeUpdated = "runtime:updated"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

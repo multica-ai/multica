@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, sandboxConfigListOptions } from "@multica/core/workspace/queries";
 import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -27,6 +27,7 @@ import { ProviderLogo } from "./provider-logo";
 import { PingSection } from "./ping-section";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
+import { ProviderPanel } from "./provider-panel";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -46,6 +47,10 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: sandboxConfigs = [] } = useQuery({
+    ...sandboxConfigListOptions(wsId),
+    enabled: runtime.runtime_mode === "cloud",
+  });
   const deleteMutation = useDeleteRuntime(wsId);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -109,7 +114,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Info grid */}
         <div className="grid grid-cols-2 gap-4">
           <InfoField label="Runtime Mode" value={runtime.runtime_mode} />
-          <InfoField label="Provider" value={runtime.provider} />
+          {runtime.runtime_mode !== "cloud" && (
+            <InfoField label="Provider" value={runtime.provider} />
+          )}
           <InfoField label="Status" value={runtime.status} />
           <InfoField
             label="Last Seen"
@@ -131,10 +138,23 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           {runtime.device_info && (
             <InfoField label="Device" value={runtime.device_info} />
           )}
-          {runtime.daemon_id && (
+          {runtime.daemon_id && runtime.runtime_mode !== "cloud" && (
             <InfoField label="Daemon ID" value={runtime.daemon_id} mono />
           )}
         </div>
+
+        {/* Sandbox Config (cloud only) */}
+        {runtime.runtime_mode === "cloud" && runtime.sandbox_config_id && (() => {
+          const cfg = sandboxConfigs.find((c) => c.id === runtime.sandbox_config_id);
+          if (!cfg) return null;
+          return (
+            <div className="grid grid-cols-2 gap-4">
+              <InfoField label="Sandbox Provider" value={cfg.provider.toUpperCase()} />
+              <InfoField label="Template" value={cfg.template_id ?? "base (default)"} />
+              <InfoField label="API Key" value={cfg.provider_api_key} mono />
+            </div>
+          );
+        })()}
 
         {/* CLI Version & Update */}
         {runtime.runtime_mode === "local" && (
@@ -157,6 +177,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           </h3>
           <PingSection runtimeId={runtime.id} />
         </div>
+
+        {/* Agent Providers (cloud only) */}
+        {runtime.runtime_mode === "cloud" && (
+          <ProviderPanel runtimeId={runtime.id} sandboxConfigId={runtime.sandbox_config_id} />
+        )}
 
         {/* Usage */}
         <div>

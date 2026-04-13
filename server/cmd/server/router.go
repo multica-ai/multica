@@ -53,7 +53,7 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, encryptionKey []byte, pingStore *handler.PingStore) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -71,6 +71,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner)
+	h.EncryptionKey = encryptionKey
+	if pingStore != nil {
+		h.PingStore = pingStore
+	}
 
 	r := chi.NewRouter()
 
@@ -173,6 +177,22 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
+					})
+				})
+				// Admin-level: sandbox config
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					// Legacy single-config endpoints (used by settings tab)
+					r.Get("/sandbox-config", h.GetSandboxConfig)
+					r.Delete("/sandbox-config", h.DeleteSandboxConfig)
+					// Multi-config CRUD
+					r.Route("/sandbox-configs", func(r chi.Router) {
+						r.Post("/", h.CreateSandboxConfig)
+						r.Get("/", h.ListSandboxConfigs)
+						r.Route("/{configId}", func(r chi.Router) {
+							r.Put("/", h.UpdateSandboxConfigByID)
+							r.Delete("/", h.DeleteSandboxConfigByID)
+						})
 					})
 				})
 				// Owner-only access
@@ -299,9 +319,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/ping/{pingId}", h.GetPing)
 					r.Post("/update", h.InitiateUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
+					r.Post("/detect-providers", h.DetectProviders)
+					r.Get("/templates", h.ListTemplates)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
 			})
+
+			// Sandbox utilities (no runtime needed)
+			r.Post("/api/sandbox/templates", h.ListTemplatesByKey)
 
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)

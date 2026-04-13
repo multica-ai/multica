@@ -21,8 +21,11 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
   IssueUsageSummary,
+  ProviderDetection,
+  ProviderInstallResult,
+  SandboxTemplate,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, SandboxConfig, SandboxProvider, CreateSandboxConfigRequest, UpdateSandboxConfigRequest } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";

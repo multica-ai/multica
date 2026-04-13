@@ -21,6 +21,9 @@ import type {
   IssueReaction,
   Workspace,
   WorkspaceRepo,
+  SandboxConfig,
+  CreateSandboxConfigRequest,
+  UpdateSandboxConfigRequest,
   MemberWithUser,
   User,
   Skill,
@@ -35,6 +38,9 @@ import type {
   RuntimeHourlyActivity,
   RuntimePing,
   RuntimeUpdate,
+  ProviderDetection,
+  ProviderInstallResult,
+  SandboxTemplate,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -413,6 +419,28 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/activity`);
   }
 
+  async listTemplates(runtimeId: string): Promise<SandboxTemplate[]> {
+    return this.fetch(`/api/runtimes/${runtimeId}/templates`);
+  }
+
+  async listTemplatesByKey(providerApiKey: string): Promise<SandboxTemplate[]> {
+    return this.fetch("/api/sandbox/templates", {
+      method: "POST",
+      body: JSON.stringify({ provider_api_key: providerApiKey }),
+    });
+  }
+
+  async detectProviders(runtimeId: string): Promise<ProviderDetection[]> {
+    return this.fetch(`/api/runtimes/${runtimeId}/detect-providers`, { method: "POST" });
+  }
+
+  async installProvider(runtimeId: string, provider: string): Promise<ProviderInstallResult> {
+    return this.fetch(`/api/runtimes/${runtimeId}/install-provider`, {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+    });
+  }
+
   async pingRuntime(runtimeId: string): Promise<RuntimePing> {
     return this.fetch(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
   }
@@ -518,6 +546,36 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  // Sandbox Config
+  async getSandboxConfig(workspaceId: string): Promise<SandboxConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/sandbox-config`);
+  }
+
+  async listSandboxConfigs(workspaceId: string): Promise<SandboxConfig[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/sandbox-configs`);
+  }
+
+  async createSandboxConfig(workspaceId: string, data: CreateSandboxConfigRequest): Promise<SandboxConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/sandbox-configs`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateSandboxConfig(workspaceId: string, configId: string, data: UpdateSandboxConfigRequest): Promise<SandboxConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/sandbox-configs/${configId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSandboxConfig(workspaceId: string, configId?: string): Promise<void> {
+    const path = configId
+      ? `/api/workspaces/${workspaceId}/sandbox-configs/${configId}`
+      : `/api/workspaces/${workspaceId}/sandbox-config`;
+    await this.fetch(path, { method: "DELETE" });
   }
 
   // Members

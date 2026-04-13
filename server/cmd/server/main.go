@@ -12,8 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/sandbox"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/pkg/crypto"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -66,11 +70,41 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
-	r := NewRouter(pool, hub, bus)
+	// Parse encryption key (used by both router/handler and CloudDaemon)
+	var encKey []byte
+	if hexKey := os.Getenv("ENCRYPTION_KEY"); hexKey != "" {
+		var keyErr error
+		encKey, keyErr = crypto.ParseHexKey(hexKey)
+		if keyErr != nil {
+			slog.Error("invalid ENCRYPTION_KEY", "error", keyErr)
+			os.Exit(1)
+		}
+	}
+
+	// Shared PingStore — used by both HTTP handler and CloudDaemon.
+	pingStore := handler.NewPingStore()
+
+	r := NewRouter(pool, hub, bus, encKey, pingStore)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
+	}
+
+	// Start CloudDaemon BEFORE sweeper so first heartbeat runs before first sweep tick.
+	var cloudDaemon *sandbox.CloudDaemon
+
+	taskService := service.NewTaskService(queries, hub, bus)
+	cloudDaemon = sandbox.NewCloudDaemon(sandbox.CloudDaemonConfig{
+		Queries:       queries,
+		TaskService:   taskService,
+		Bus:           bus,
+		EncryptionKey: encKey,
+		PingChecker:   &pingStoreAdapter{store: pingStore},
+	})
+	cloudDaemonCtx, cloudDaemonCancel := context.WithCancel(context.Background())
+	if cloudDaemon != nil {
+		cloudDaemon.Start(cloudDaemonCtx)
 	}
 
 	// Start background sweeper to mark stale runtimes as offline.
@@ -91,6 +125,13 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server")
+
+	// Stop CloudDaemon first (drains active tasks)
+	cloudDaemonCancel()
+	if cloudDaemon != nil {
+		cloudDaemon.Stop()
+	}
+
 	sweepCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -100,4 +141,25 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+// pingStoreAdapter adapts handler.PingStore to the sandbox.PingChecker interface.
+type pingStoreAdapter struct {
+	store *handler.PingStore
+}
+
+func (a *pingStoreAdapter) PopPending(runtimeID string) (string, bool) {
+	p := a.store.PopPending(runtimeID)
+	if p == nil {
+		return "", false
+	}
+	return p.ID, true
+}
+
+func (a *pingStoreAdapter) Complete(pingID, output string, durationMs int64) {
+	a.store.Complete(pingID, output, durationMs)
+}
+
+func (a *pingStoreAdapter) Fail(pingID, errMsg string, durationMs int64) {
+	a.store.Fail(pingID, errMsg, durationMs)
 }

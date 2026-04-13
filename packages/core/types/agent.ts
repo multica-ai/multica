@@ -1,5 +1,29 @@
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
+export interface ProviderDetection {
+  name: string;
+  display: string;
+  installed: boolean;
+  path?: string;
+  can_install: boolean;
+}
+
+export interface ProviderInstallResult {
+  name: string;
+  success: boolean;
+  output?: string;
+  error?: string;
+  duration_ms: number;
+}
+
+export interface SandboxTemplate {
+  template_id: string;
+  name: string;
+  aliases: string[];
+  cpu_count: number;
+  memory_mb: number;
+}
+
 export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
@@ -15,6 +39,7 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
+  sandbox_config_id: string | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

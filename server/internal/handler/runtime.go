@@ -14,19 +14,20 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	DaemonID    *string `json:"daemon_id"`
-	Name        string  `json:"name"`
-	RuntimeMode string  `json:"runtime_mode"`
-	Provider    string  `json:"provider"`
-	Status      string  `json:"status"`
-	DeviceInfo  string  `json:"device_info"`
-	Metadata    any     `json:"metadata"`
-	OwnerID     *string `json:"owner_id"`
-	LastSeenAt  *string `json:"last_seen_at"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	DaemonID        *string `json:"daemon_id"`
+	Name            string  `json:"name"`
+	RuntimeMode     string  `json:"runtime_mode"`
+	Provider        string  `json:"provider"`
+	Status          string  `json:"status"`
+	DeviceInfo      string  `json:"device_info"`
+	Metadata        any     `json:"metadata"`
+	OwnerID         *string `json:"owner_id"`
+	SandboxConfigID *string `json:"sandbox_config_id"`
+	LastSeenAt      *string `json:"last_seen_at"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -39,19 +40,20 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	}
 
 	return AgentRuntimeResponse{
-		ID:          uuidToString(rt.ID),
-		WorkspaceID: uuidToString(rt.WorkspaceID),
-		DaemonID:    textToPtr(rt.DaemonID),
-		Name:        rt.Name,
-		RuntimeMode: rt.RuntimeMode,
-		Provider:    rt.Provider,
-		Status:      rt.Status,
-		DeviceInfo:  rt.DeviceInfo,
-		Metadata:    metadata,
-		OwnerID:     uuidToPtr(rt.OwnerID),
-		LastSeenAt:  timestampToPtr(rt.LastSeenAt),
-		CreatedAt:   timestampToString(rt.CreatedAt),
-		UpdatedAt:   timestampToString(rt.UpdatedAt),
+		ID:              uuidToString(rt.ID),
+		WorkspaceID:     uuidToString(rt.WorkspaceID),
+		DaemonID:        textToPtr(rt.DaemonID),
+		Name:            rt.Name,
+		RuntimeMode:     rt.RuntimeMode,
+		Provider:        rt.Provider,
+		Status:          rt.Status,
+		DeviceInfo:      rt.DeviceInfo,
+		Metadata:        metadata,
+		OwnerID:         uuidToPtr(rt.OwnerID),
+		SandboxConfigID: uuidToPtr(rt.SandboxConfigID),
+		LastSeenAt:      timestampToPtr(rt.LastSeenAt),
+		CreatedAt:       timestampToString(rt.CreatedAt),
+		UpdatedAt:       timestampToString(rt.UpdatedAt),
 	}
 }
 
