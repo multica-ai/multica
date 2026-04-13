@@ -154,10 +154,11 @@ export function useUpdateIssue() {
         );
       }
       // Sync status update to recent issues store
+      const prevRecentItems = useRecentIssuesStore.getState().items;
       if (data.status) {
         useRecentIssuesStore.getState().updateIssueStatus(id, data.status);
       }
-      return { prevList, prevDetail, prevChildren, parentId, id };
+      return { prevList, prevDetail, prevChildren, parentId, id, prevRecentItems };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
@@ -168,6 +169,9 @@ export function useUpdateIssue() {
           issueKeys.children(wsId, ctx.parentId),
           ctx.prevChildren,
         );
+      }
+      if (ctx?.prevRecentItems) {
+        useRecentIssuesStore.setState({ items: ctx.prevRecentItems });
       }
     },
     onSettled: (_data, _err, vars, ctx) => {
@@ -204,11 +208,15 @@ export function useDeleteIssue() {
       });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
       // Mark as deleted in recent issues store
+      const prevRecentItems = useRecentIssuesStore.getState().items;
       useRecentIssuesStore.getState().markAsDeleted(id);
-      return { prevList, parentIssueId: deleted?.parent_issue_id };
+      return { prevList, parentIssueId: deleted?.parent_issue_id, prevRecentItems };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevRecentItems) {
+        useRecentIssuesStore.setState({ items: ctx.prevRecentItems });
+      }
     },
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -245,14 +253,18 @@ export function useBatchUpdateIssues() {
           : old,
       );
       // Sync status update to recent issues store
+      const prevRecentItems = useRecentIssuesStore.getState().items;
       if (updates.status) {
         const { updateIssueStatus } = useRecentIssuesStore.getState();
         ids.forEach((id) => updateIssueStatus(id, updates.status!));
       }
-      return { prevList };
+      return { prevList, prevRecentItems };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevRecentItems) {
+        useRecentIssuesStore.setState({ items: ctx.prevRecentItems });
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -287,12 +299,16 @@ export function useBatchDeleteIssues() {
         };
       });
       // Mark as deleted in recent issues store
+      const prevRecentItems = useRecentIssuesStore.getState().items;
       const { markAsDeleted } = useRecentIssuesStore.getState();
       ids.forEach((id) => markAsDeleted(id));
-      return { prevList, parentIssueIds };
+      return { prevList, parentIssueIds, prevRecentItems };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevRecentItems) {
+        useRecentIssuesStore.setState({ items: ctx.prevRecentItems });
+      }
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
