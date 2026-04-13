@@ -11,6 +11,24 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function normalizeServerUrl(raw: string) {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (!trimmed) return trimmed;
+
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === 'multica.ai' ||
+    lower === 'https://multica.ai' ||
+    lower === 'http://multica.ai' ||
+    lower === 'https://www.multica.ai' ||
+    lower === 'http://www.multica.ai'
+  ) {
+    return 'https://api.multica.ai';
+  }
+
+  return trimmed;
+}
+
 interface Props {
   initialConfig?: AppConfig | null;
   onComplete: () => void;
@@ -36,7 +54,7 @@ export default function Setup({ initialConfig, onComplete, allowCancel }: Props)
     try {
       const newConfig: AppConfig = {
         ...initialConfig,
-        server_url: serverUrl.trim().replace(/\/+$/, ''),
+        server_url: normalizeServerUrl(serverUrl),
         token: token.trim(),
       };
 
@@ -54,7 +72,7 @@ export default function Setup({ initialConfig, onComplete, allowCancel }: Props)
         }, 800);
       } else {
         setStatus('error');
-        setErrorMsg('Connection failed or Invalid Token. Please verify your settings.');
+        setErrorMsg('Connection failed. For cloud mesh, use https://api.multica.ai as the Server URL.');
       }
     } catch (err: any) {
       setStatus('error');
@@ -124,7 +142,7 @@ export default function Setup({ initialConfig, onComplete, allowCancel }: Props)
                 type="text" 
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value)}
-                placeholder="http://localhost:8080"
+                placeholder="https://api.multica.ai"
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all"
                 required
               />

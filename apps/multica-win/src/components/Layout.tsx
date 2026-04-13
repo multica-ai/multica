@@ -93,8 +93,8 @@ export default function Layout({ onOpenSetup }: { onOpenSetup: () => void }) {
     <div className="h-screen w-screen flex overflow-hidden bg-zinc-950 font-sans antialiased text-zinc-200">
       {/* Sidebar - Scalable width */}
       <aside className="w-64 min-w-[16rem] border-r border-zinc-800/60 bg-zinc-950 flex flex-col shrink-0 grow-0 select-none z-20 shadow-2xl overflow-hidden">
-        <div className="min-h-14 py-2 flex items-center px-5 drag-region shrink-0">
-          <div className="flex items-center gap-3 no-drag">
+        <div className="min-h-14 py-2 flex items-center px-5 shrink-0" data-tauri-drag-region>
+          <div className="flex items-center gap-3 pointer-events-none">
             <div className="w-7 h-7 shrink-0 bg-white rounded flex items-center justify-center p-0.5 shadow-lg shadow-white/5">
               <img src={logo} alt="Multica" className="w-full h-full" />
             </div>
@@ -201,10 +201,10 @@ export default function Layout({ onOpenSetup }: { onOpenSetup: () => void }) {
       </aside>
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col min-w-0 bg-zinc-950/50 relative overflow-hidden">
-        <header data-tauri-drag-region className="min-h-14 py-2 flex items-center justify-between px-6 shrink-0 bg-zinc-950/80 backdrop-blur-xl z-10 border-b border-zinc-900/50">
-          <div className="flex items-center gap-4 min-w-0" data-tauri-drag-region="false">
-             <div className="flex items-center gap-2 text-zinc-600 shrink-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative overflow-hidden">
+        <header data-tauri-drag-region className="min-h-14 py-2 flex items-center justify-between px-6 shrink-0 bg-zinc-950/90 z-10 border-b border-zinc-900/50">
+          <div className="flex items-center gap-4 min-w-0">
+             <div className="flex items-center gap-2 text-zinc-600 shrink-0 pointer-events-none">
                 <span className="text-xs font-bold tracking-tight">Main</span>
                 <ChevronRight className="w-4 h-4" />
                 <h1 className="text-sm font-black text-white uppercase tracking-tighter truncate">
@@ -227,15 +227,15 @@ export default function Layout({ onOpenSetup }: { onOpenSetup: () => void }) {
              </button>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0" data-tauri-drag-region="false">
+          <div className="flex items-center gap-2 shrink-0">
             <button 
-              onClick={() => appWindow.minimize()}
+              onClick={async () => await appWindow.minimize()}
               className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-zinc-900 text-zinc-600 transition-all cursor-pointer"
             >
               <Minus className="w-5 h-5 pointer-events-none" />
             </button>
             <button 
-              onClick={() => appWindow.close()}
+              onClick={async () => await appWindow.close()}
               className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-rose-500/10 hover:text-rose-500 text-zinc-600 transition-all cursor-pointer"
             >
               <X className="w-5 h-5 pointer-events-none" />

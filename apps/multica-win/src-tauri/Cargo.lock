@@ -1964,7 +1964,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "multica-app"
+name = "multica-win"
 version = "0.1.0"
 dependencies = [
  "dirs",

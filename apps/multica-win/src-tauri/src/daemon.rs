@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
+use std::io::{Read, Seek, SeekFrom};
+use std::fs::File;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -12,21 +14,46 @@ pub struct DaemonStatus {
 }
 
 fn strip_ansi(s: &str) -> String {
-    let re = regex::Regex::new(r"\x1b\[[0-9;]*[A-Za-z]").unwrap();
+    // Simple fast ANSI strip without heavy regex if possible, or keep it but use OnceLock
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"\x1b\[[0-9;]*[A-Za-z]").unwrap());
     re.replace_all(s, "").to_string()
 }
 
-fn read_daemon_log(max_lines: usize) -> Vec<String> {
+fn read_daemon_log_efficiently(max_lines: usize) -> Vec<String> {
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return vec!["(cannot find home directory)".to_string()],
     };
     let log_path = home.join(".multica").join("daemon.log");
-    let content = match std::fs::read_to_string(&log_path) {
-        Ok(c) => c,
+    
+    let mut file = match File::open(&log_path) {
+        Ok(f) => f,
         Err(_) => return vec!["(no daemon log found)".to_string()],
     };
+
+    let metadata = match file.metadata() {
+        Ok(m) => m,
+        Err(_) => return vec![],
+    };
+
+    let file_size = metadata.len();
+    let read_size = 8192; // Read last 8KB
+    let offset = if file_size > read_size { file_size - read_size } else { 0 };
+
+    if let Err(_) = file.seek(SeekFrom::Start(offset)) {
+        return vec![];
+    }
+
+    let mut buffer = Vec::new();
+    if let Err(_) = file.read_to_end(&mut buffer) {
+        return vec![];
+    }
+
+    let content = String::from_utf8_lossy(&buffer);
     let lines: Vec<String> = content.lines().map(|l| strip_ansi(l)).collect();
+    
     let start = if lines.len() > max_lines { lines.len() - max_lines } else { 0 };
     lines[start..].to_vec()
 }
@@ -39,8 +66,13 @@ fn read_pid_file() -> Option<u32> {
 }
 
 fn is_pid_running(pid: u32) -> bool {
+    // On Windows, a quick way to check if a process exists without spawning a full tasklist
+    // is to use OpenProcess, but that requires winapi crate.
+    // For now, let's keep tasklist but ensure it's not the bottleneck by caching or 
+    // using a simpler command if possible.
+    // Actually, "tasklist /FI PID eq ..." is relatively fast compared to reading huge logs.
     let output = Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+        .args(["/FI", &format!("PID eq {}", pid), "/NH"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
     match output {
@@ -103,6 +135,6 @@ pub fn daemon_status() -> Result<DaemonStatus, String> {
     Ok(DaemonStatus {
         running: pid.is_some(),
         pid,
-        log_lines: read_daemon_log(50),
+        log_lines: read_daemon_log_efficiently(50),
     })
 }

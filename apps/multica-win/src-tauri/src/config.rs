@@ -1,5 +1,26 @@
 use serde::{Deserialize, Serialize};
 
+fn normalize_server_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return "http://localhost:8080".to_string();
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "multica.ai"
+            | "https://multica.ai"
+            | "http://multica.ai"
+            | "https://www.multica.ai"
+            | "http://www.multica.ai"
+    ) {
+        return "https://api.multica.ai".to_string();
+    }
+
+    trimmed.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchedWorkspace {
     pub id: String,
@@ -31,7 +52,10 @@ impl AppConfig {
         }
         let data = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
-        serde_json::from_str(&data).map_err(|e| format!("Failed to parse config: {}", e))
+        let mut config: Self =
+            serde_json::from_str(&data).map_err(|e| format!("Failed to parse config: {}", e))?;
+        config.server_url = normalize_server_url(&config.server_url);
+        Ok(config)
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -42,7 +66,9 @@ impl AppConfig {
                 .map_err(|e| format!("Failed to create .multica directory: {}", e))?;
         }
         let config_path = multica_dir.join("config.json");
-        let data = serde_json::to_string_pretty(self)
+        let mut normalized = self.clone();
+        normalized.server_url = normalize_server_url(&normalized.server_url);
+        let data = serde_json::to_string_pretty(&normalized)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
         std::fs::write(&config_path, data)
             .map_err(|e| format!("Failed to write config: {}", e))?;

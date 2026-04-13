@@ -15,14 +15,14 @@ export const useHealth = () =>
       const h = await api.checkHealth();
       return h !== null;
     },
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   });
 
 export const useUser = () =>
   useQuery({
     queryKey: ['user'],
     queryFn: () => api.getCurrentUser(),
-    refetchInterval: 60000,
+    refetchInterval: 120000,
   });
 
 export const useWorkspaces = () =>
@@ -32,7 +32,7 @@ export const useWorkspaces = () =>
       const ws = await api.getWorkspaces();
       return ws || [];
     },
-    refetchInterval: 30000,
+    refetchInterval: 60000,
   });
 
 export const useDaemon = () =>
@@ -45,7 +45,7 @@ export const useDaemon = () =>
         return null;
       }
     },
-    refetchInterval: 5000,
+    refetchInterval: 10000,
   });
 
 export const useWorkspaceData = (workspaces: any[] = []) =>
@@ -84,5 +84,5 @@ export const useWorkspaceData = (workspaces: any[] = []) =>
       };
     },
     enabled: workspaces.length > 0,
-    refetchInterval: 15000,
+    refetchInterval: 30000,
   });
