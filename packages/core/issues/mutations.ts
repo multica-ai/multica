@@ -203,6 +203,8 @@ export function useDeleteIssue() {
         };
       });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
+      // Mark as deleted in recent issues store
+      useRecentIssuesStore.getState().markAsDeleted(id);
       return { prevList, parentIssueId: deleted?.parent_issue_id };
     },
     onError: (_err, _id, ctx) => {
@@ -284,6 +286,9 @@ export function useBatchDeleteIssues() {
           doneTotal: (old.doneTotal ?? 0) - doneDeleted,
         };
       });
+      // Mark as deleted in recent issues store
+      const { markAsDeleted } = useRecentIssuesStore.getState();
+      ids.forEach((id) => markAsDeleted(id));
       return { prevList, parentIssueIds };
     },
     onError: (_err, _ids, ctx) => {

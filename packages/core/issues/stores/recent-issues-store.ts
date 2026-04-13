@@ -17,12 +17,14 @@ export interface RecentIssueEntry {
   title: string;
   status: IssueStatus;
   visitedAt: number;
+  isDeleted?: boolean;
 }
 
 interface RecentIssuesState {
   items: RecentIssueEntry[];
-  recordVisit: (entry: Omit<RecentIssueEntry, "visitedAt">) => void;
+  recordVisit: (entry: Omit<RecentIssueEntry, "visitedAt" | "isDeleted">) => void;
   updateIssueStatus: (id: string, status: IssueStatus) => void;
+  markAsDeleted: (id: string) => void;
 }
 
 export const useRecentIssuesStore = create<RecentIssuesState>()(
@@ -41,6 +43,12 @@ export const useRecentIssuesStore = create<RecentIssuesState>()(
         set((state) => ({
           items: state.items.map((item) =>
             item.id === id ? { ...item, status } : item,
+          ),
+        })),
+      markAsDeleted: (id) =>
+        set((state) => ({
+          items: state.items.map((item) =>
+            item.id === id ? { ...item, isDeleted: true } : item,
           ),
         })),
     }),

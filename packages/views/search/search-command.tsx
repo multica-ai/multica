@@ -404,7 +404,9 @@ export function SearchCommand() {
                     <span className="text-xs text-muted-foreground shrink-0">
                       {item.identifier}
                     </span>
-                    <span className="truncate">{item.title}</span>
+                    <span className={`truncate ${item.isDeleted ? "line-through text-muted-foreground" : ""}`}>
+                      {item.title}
+                    </span>
                     <span
                       className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[item.status]?.iconColor ?? ""}`}
                     >

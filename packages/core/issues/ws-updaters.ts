@@ -107,4 +107,6 @@ export function onIssueDeleted(
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, deleted.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
   }
+  // Mark as deleted in recent issues store
+  useRecentIssuesStore.getState().markAsDeleted(issueId);
 }
