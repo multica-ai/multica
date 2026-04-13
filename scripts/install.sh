@@ -39,6 +39,34 @@ fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+# Check whether a TCP port is available to bind.
+# Works on both macOS (lsof) and Linux (ss).
+port_is_free() {
+  local port="$1"
+  if command_exists ss; then
+    ! ss -tlnH "sport = :$port" 2>/dev/null | grep -q .
+  elif command_exists lsof; then
+    ! lsof -iTCP:"$port" -sTCP:LISTEN -P -n >/dev/null 2>&1
+  else
+    # Can't check — assume free and let Docker fail with a clear message
+    return 0
+  fi
+}
+
+# Find the next free port starting from a given value.
+find_free_port() {
+  local port="$1"
+  local max=$((port + 100))
+  while [ "$port" -lt "$max" ]; do
+    if port_is_free "$port"; then
+      echo "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  return 1
+}
+
 detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
@@ -257,6 +285,66 @@ setup_server() {
     ok "Using existing .env"
   fi
 
+  # --- Port availability check -------------------------------------------
+  # Read desired ports from .env (fall back to defaults)
+  local backend_port frontend_port pg_port
+  backend_port=$(grep -E '^PORT=' .env 2>/dev/null | head -1 | cut -d= -f2 || echo "8080")
+  frontend_port=$(grep -E '^FRONTEND_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2 || echo "3000")
+  pg_port=$(grep -E '^POSTGRES_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2 || echo "5432")
+  backend_port="${backend_port:-8080}"
+  frontend_port="${frontend_port:-3000}"
+  pg_port="${pg_port:-5432}"
+
+  local ports_changed=false
+
+  for var_name in backend_port frontend_port pg_port; do
+    eval "local port=\$$var_name"
+    if ! port_is_free "$port"; then
+      local new_port
+      new_port=$(find_free_port "$((port + 1))") || fail "No free port found near $port. Free the port or set a custom one in $INSTALL_DIR/.env"
+      warn "Port $port is already in use — switching to $new_port"
+
+      case "$var_name" in
+        backend_port)
+          eval "$var_name=$new_port"
+          if [ "$OS" = "darwin" ]; then
+            sed -i '' "s/^PORT=.*/PORT=$new_port/" .env
+            sed -i '' "s|http://localhost:$port|http://localhost:$new_port|g" .env
+            sed -i '' "s|ws://localhost:$port|ws://localhost:$new_port|g" .env
+          else
+            sed -i "s/^PORT=.*/PORT=$new_port/" .env
+            sed -i "s|http://localhost:$port|http://localhost:$new_port|g" .env
+            sed -i "s|ws://localhost:$port|ws://localhost:$new_port|g" .env
+          fi
+          ;;
+        frontend_port)
+          eval "$var_name=$new_port"
+          if [ "$OS" = "darwin" ]; then
+            sed -i '' "s/^FRONTEND_PORT=.*/FRONTEND_PORT=$new_port/" .env
+            sed -i '' "s|^FRONTEND_ORIGIN=.*|FRONTEND_ORIGIN=http://localhost:$new_port|" .env
+          else
+            sed -i "s/^FRONTEND_PORT=.*/FRONTEND_PORT=$new_port/" .env
+            sed -i "s|^FRONTEND_ORIGIN=.*|FRONTEND_ORIGIN=http://localhost:$new_port|" .env
+          fi
+          ;;
+        pg_port)
+          eval "$var_name=$new_port"
+          if [ "$OS" = "darwin" ]; then
+            sed -i '' "s/^POSTGRES_PORT=.*/POSTGRES_PORT=$new_port/" .env
+          else
+            sed -i "s/^POSTGRES_PORT=.*/POSTGRES_PORT=$new_port/" .env
+          fi
+          ;;
+      esac
+      ports_changed=true
+    fi
+  done
+
+  if [ "$ports_changed" = true ]; then
+    ok "Ports adjusted in .env to avoid conflicts"
+  fi
+  # -----------------------------------------------------------------------
+
   # Start Docker Compose
   info "Starting Multica services (this may take a few minutes on first run)..."
   docker compose -f docker-compose.selfhost.yml up -d --build
@@ -265,7 +353,7 @@ setup_server() {
   info "Waiting for backend to be ready..."
   local ready=false
   for i in $(seq 1 45); do
-    if curl -sf http://localhost:8080/health >/dev/null 2>&1; then
+    if curl -sf "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
       ready=true
       break
     fi
@@ -286,12 +374,17 @@ setup_server() {
 # ---------------------------------------------------------------------------
 configure_local() {
   info "Configuring CLI for local server..."
+  local bp fp
+  bp=$(grep -E '^PORT=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2 || echo "8080")
+  fp=$(grep -E '^FRONTEND_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2 || echo "3000")
+  bp="${bp:-8080}"
+  fp="${fp:-3000}"
+
   multica config local 2>/dev/null || {
-    # Fallback if config local doesn't exist in installed version
-    multica config set app_url http://localhost:3000 2>/dev/null || true
-    multica config set server_url http://localhost:8080 2>/dev/null || true
+    multica config set app_url "http://localhost:$fp" 2>/dev/null || true
+    multica config set server_url "http://localhost:$bp" 2>/dev/null || true
   }
-  ok "CLI configured for localhost (backend :8080, frontend :3000)"
+  ok "CLI configured for localhost (backend :$bp, frontend :$fp)"
 }
 
 # ---------------------------------------------------------------------------
@@ -351,17 +444,24 @@ run_local() {
   install_cli
   configure_local
 
+  # Read actual ports from .env for display
+  local bp fp
+  bp=$(grep -E '^PORT=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2 || echo "8080")
+  fp=$(grep -E '^FRONTEND_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2 || echo "3000")
+  bp="${bp:-8080}"
+  fp="${fp:-3000}"
+
   printf "\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "${BOLD}${GREEN}  ✓ Multica is installed and running!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  printf "  ${BOLD}Frontend:${RESET}  http://localhost:3000\n"
-  printf "  ${BOLD}Backend:${RESET}   http://localhost:8080\n"
+  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$fp"
+  printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$bp"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"
   printf "  ${BOLD}Next steps:${RESET}\n"
-  printf "  1. Open ${CYAN}http://localhost:3000${RESET} in your browser\n"
+  printf "  1. Open ${CYAN}http://localhost:%s${RESET} in your browser\n" "$fp"
   printf "  2. Log in with any email + verification code: ${BOLD}888888${RESET}\n"
   printf "  3. Then run:\n"
   printf "\n"
