@@ -9,7 +9,6 @@ import {
   ListTodo,
   Trash2,
   AlertCircle,
-  MoreHorizontal,
   Settings,
 } from "lucide-react";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
@@ -21,12 +20,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@multica/ui/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@multica/ui/components/ui/dropdown-menu";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { statusConfig } from "../config";
@@ -107,24 +100,15 @@ export function AgentDetail({
           </div>
         </div>
         {!isArchived && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" />
-              }
-            >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setConfirmArchive(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Archive Agent
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => setConfirmArchive(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Archive Agent
+          </Button>
         )}
       </div>
 
