@@ -278,6 +278,29 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.28",
+        date: "2026-04-13",
+        title: "Windows 支持、认证与引导",
+        changes: [],
+        features: [
+          "Windows 支持——CLI 安装、Daemon 运行和 GoReleaser 构建",
+          "新工作区全屏引导向导",
+          "认证 Token 迁移至 HttpOnly Cookie，WebSocket 新增 Origin 白名单",
+          "Master Agent 聊天窗口可调整大小，会话历史体验优化",
+          "指派人选择器支持键盘导航",
+          "OpenCode、OpenClaw 和 Hermes 运行时 Token 用量日志扫描",
+          "Daemon 定期 GC 工作区隔离目录",
+        ],
+        fixes: [
+          "WebSocket 首条消息认证（MUL-580）",
+          "新增 Content-Security-Policy 响应头",
+          "Daemon 会话恢复失败时的回退处理",
+          "OpenClaw 结果解析改为增量处理",
+          "Codex 沙箱网络访问以连接 Multica CLI",
+          "Issue 创建默认状态改为「todo」而非「backlog」",
+        ],
+      },
+      {
         version: "0.1.27",
         date: "2026-04-12",
         title: "一键安装、自部署与稳定性",

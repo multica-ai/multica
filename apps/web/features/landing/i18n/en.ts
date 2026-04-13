@@ -278,6 +278,29 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.28",
+        date: "2026-04-13",
+        title: "Windows Support, Auth & Onboarding",
+        changes: [],
+        features: [
+          "Windows support — CLI install, daemon, and GoReleaser build targets",
+          "Full-screen onboarding wizard for new workspaces",
+          "Auth token migrated to HttpOnly Cookie with WebSocket Origin whitelist",
+          "Resizable Master Agent chat window with improved session history UX",
+          "Keyboard navigation in assignee picker",
+          "Token usage log scanning for OpenCode, OpenClaw, and Hermes runtimes",
+          "Daemon periodic GC for workspace isolation directories",
+        ],
+        fixes: [
+          "WebSocket first-message authentication (MUL-580)",
+          "Content-Security-Policy response header added",
+          "Daemon session resume fallback for failed sessions",
+          "OpenClaw result parsing rewritten to handle incremental output",
+          "Codex sandbox network access for Multica CLI",
+          "Default issue creation status changed to \"todo\" instead of \"backlog\"",
+        ],
+      },
+      {
         version: "0.1.27",
         date: "2026-04-12",
         title: "One-Click Setup, Self-Hosting & Stability",
