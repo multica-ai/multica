@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
+import { useRecentIssuesStore } from "./stores";
 import type { Issue } from "../types";
 import type { ListIssuesResponse } from "../types";
 
@@ -70,6 +71,10 @@ export function onIssueUpdated(
     if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
+  }
+  // Sync status update to recent issues store
+  if (issue.status) {
+    useRecentIssuesStore.getState().updateIssueStatus(issue.id, issue.status);
   }
 }
 

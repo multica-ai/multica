@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { issueKeys, CLOSED_PAGE_SIZE, type MyIssuesFilter } from "./queries";
 import { useWorkspaceId } from "../hooks";
+import { useRecentIssuesStore } from "./stores";
 import type { Issue, IssueReaction } from "../types";
 import type {
   CreateIssueRequest,
@@ -152,6 +153,10 @@ export function useUpdateIssue() {
             old?.map((c) => (c.id === id ? { ...c, ...data } : c)),
         );
       }
+      // Sync status update to recent issues store
+      if (data.status) {
+        useRecentIssuesStore.getState().updateIssueStatus(id, data.status);
+      }
       return { prevList, prevDetail, prevChildren, parentId, id };
     },
     onError: (_err, _vars, ctx) => {
@@ -237,6 +242,11 @@ export function useBatchUpdateIssues() {
             }
           : old,
       );
+      // Sync status update to recent issues store
+      if (updates.status) {
+        const { updateIssueStatus } = useRecentIssuesStore.getState();
+        ids.forEach((id) => updateIssueStatus(id, updates.status!));
+      }
       return { prevList };
     },
     onError: (_err, _vars, ctx) => {
