@@ -38,6 +38,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { EditorBubbleMenu } from "./bubble-menu";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -210,6 +211,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     return (
       <div className="relative min-h-full">
         <EditorContent editor={editor} />
+        {editable && <EditorBubbleMenu editor={editor} />}
       </div>
     );
   },

@@ -94,7 +94,10 @@ vi.mock("../../editor", () => ({
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
-  ContentEditor: forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+  ContentEditor: forwardRef(function MockContentEditor(
+    { defaultValue, onUpdate, placeholder }: any,
+    ref: any,
+  ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -116,7 +119,10 @@ vi.mock("../../editor", () => ({
       />
     );
   }),
-  TitleEditor: forwardRef(({ defaultValue, placeholder, onBlur, onChange }: any, ref: any) => {
+  TitleEditor: forwardRef(function MockTitleEditor(
+    { defaultValue, placeholder, onBlur, onChange }: any,
+    ref: any,
+  ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -208,6 +214,18 @@ vi.mock("@multica/core/issues/config", () => ({
     low: { label: "Low", bars: 1, color: "text-info", badgeBg: "bg-info/10", badgeText: "text-info" },
     none: { label: "No priority", bars: 0, color: "text-muted-foreground", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
   },
+}));
+
+// Mock recent issues store
+const mockRecordVisit = vi.fn();
+vi.mock("@multica/core/issues/stores", () => ({
+  useRecentIssuesStore: Object.assign(
+    (selector?: any) => {
+      const state = { items: [], recordVisit: mockRecordVisit };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ items: [], recordVisit: mockRecordVisit }) },
+  ),
 }));
 
 // Mock modals

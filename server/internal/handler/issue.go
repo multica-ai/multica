@@ -580,6 +580,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if c := r.URL.Query().Get("creator_id"); c != "" {
 		creatorFilter = parseUUID(c)
 	}
+	var projectFilter pgtype.UUID
+	if p := r.URL.Query().Get("project_id"); p != "" {
+		projectFilter = parseUUID(p)
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
@@ -589,6 +593,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeID:  assigneeFilter,
 			AssigneeIds: assigneeIdsFilter,
 			CreatorID:   creatorFilter,
+			ProjectID:   projectFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -635,6 +640,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:  assigneeFilter,
 		AssigneeIds: assigneeIdsFilter,
 		CreatorID:   creatorFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -649,6 +655,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:  assigneeFilter,
 		AssigneeIds: assigneeIdsFilter,
 		CreatorID:   creatorFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		total = int64(len(issues))
@@ -720,6 +727,34 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
+	wsID := resolveWorkspaceID(r)
+	wsUUID := parseUUID(wsID)
+
+	rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+		return
+	}
+
+	type progressEntry struct {
+		ParentIssueID string `json:"parent_issue_id"`
+		Total         int64  `json:"total"`
+		Done          int64  `json:"done"`
+	}
+	resp := make([]progressEntry, len(rows))
+	for i, row := range rows {
+		resp[i] = progressEntry{
+			ParentIssueID: uuidToString(row.ParentIssueID),
+			Total:         row.Total,
+			Done:          row.Done,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"progress": resp,
+	})
+}
+
 type CreateIssueRequest struct {
 	Title              string   `json:"title"`
 	Description        *string  `json:"description"`
@@ -755,7 +790,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	status := req.Status
 	if status == "" {
-		status = "backlog"
+		status = "todo"
 	}
 	priority := req.Priority
 	if priority == "" {
@@ -1245,6 +1280,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeID:    prevIssue.AssigneeID,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
+			ProjectID:     prevIssue.ProjectID,
 		}
 
 		if req.Updates.Title != nil {
@@ -1285,6 +1321,50 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
 			} else {
 				params.DueDate = pgtype.Timestamptz{Valid: false}
+			}
+		}
+
+		if _, ok := rawUpdates["parent_issue_id"]; ok {
+			if req.Updates.ParentIssueID != nil {
+				newParentID := parseUUID(*req.Updates.ParentIssueID)
+				// Cannot set self as parent.
+				if uuidToString(newParentID) == issueID {
+					continue
+				}
+				// Validate parent exists in the same workspace.
+				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          newParentID,
+					WorkspaceID: prevIssue.WorkspaceID,
+				}); err != nil {
+					continue
+				}
+				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
+				cycleDetected := false
+				cursor := newParentID
+				for depth := 0; depth < 10; depth++ {
+					ancestor, err := h.Queries.GetIssue(r.Context(), cursor)
+					if err != nil || !ancestor.ParentIssueID.Valid {
+						break
+					}
+					if uuidToString(ancestor.ParentIssueID) == issueID {
+						cycleDetected = true
+						break
+					}
+					cursor = ancestor.ParentIssueID
+				}
+				if cycleDetected {
+					continue
+				}
+				params.ParentIssueID = newParentID
+			} else {
+				params.ParentIssueID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["project_id"]; ok {
+			if req.Updates.ProjectID != nil {
+				params.ProjectID = parseUUID(*req.Updates.ProjectID)
+			} else {
+				params.ProjectID = pgtype.UUID{Valid: false}
 			}
 		}
 
@@ -1365,10 +1445,15 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), parseUUID(issueID)); err != nil {
+		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
+		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+
+		if err := h.Queries.DeleteIssue(r.Context(), issue.ID); err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}
+
+		h.deleteS3Objects(r.Context(), attachmentURLs)
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})

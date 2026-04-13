@@ -80,7 +80,11 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 	if len(commentIDs) == 0 {
 		return nil
 	}
-	attachments, err := h.Queries.ListAttachmentsByCommentIDs(r.Context(), commentIDs)
+	workspaceID := resolveWorkspaceID(r)
+	attachments, err := h.Queries.ListAttachmentsByCommentIDs(r.Context(), db.ListAttachmentsByCommentIDsParams{
+		Column1:     commentIDs,
+		WorkspaceID: parseUUID(workspaceID),
+	})
 	if err != nil {
 		slog.Error("failed to load attachments for comments", "error", err)
 		return nil
@@ -180,12 +184,25 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			SizeBytes:    int64(len(data)),
 		}
 
-		// Optional issue_id / comment_id from form fields
+		// Optional issue_id / comment_id from form fields — validate ownership.
 		if issueID := r.FormValue("issue_id"); issueID != "" {
-			params.IssueID = parseUUID(issueID)
+			issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          parseUUID(issueID),
+				WorkspaceID: parseUUID(workspaceID),
+			})
+			if err != nil {
+				writeError(w, http.StatusForbidden, "invalid issue_id")
+				return
+			}
+			params.IssueID = issue.ID
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
-			params.CommentID = parseUUID(commentID)
+			comment, err := h.Queries.GetComment(r.Context(), parseUUID(commentID))
+			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID {
+				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
+			params.CommentID = comment.ID
 		}
 
 		att, err := h.Queries.CreateAttachment(r.Context(), params)

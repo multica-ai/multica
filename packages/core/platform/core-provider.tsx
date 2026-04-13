@@ -25,6 +25,7 @@ function initCore(
   storage: StorageAdapter,
   onLogin?: () => void,
   onLogout?: () => void,
+  cookieAuth?: boolean,
 ) {
   if (initialized) return;
 
@@ -37,13 +38,15 @@ function initCore(
   });
   setApiInstance(api);
 
-  // Hydrate token from storage
-  const token = storage.getItem("multica_token");
-  if (token) api.setToken(token);
+  // In token mode, hydrate token from storage.
+  if (!cookieAuth) {
+    const token = storage.getItem("multica_token");
+    if (token) api.setToken(token);
+  }
   const wsId = storage.getItem("multica_workspace_id");
   if (wsId) api.setWorkspaceId(wsId);
 
-  authStore = createAuthStore({ api, storage, onLogin, onLogout });
+  authStore = createAuthStore({ api, storage, onLogin, onLogout, cookieAuth });
   registerAuthStore(authStore);
 
   workspaceStore = createWorkspaceStore(api, { storage });
@@ -60,22 +63,24 @@ export function CoreProvider({
   apiBaseUrl = "",
   wsUrl = "ws://localhost:8080/ws",
   storage = defaultStorage,
+  cookieAuth,
   onLogin,
   onLogout,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout), []);
+  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth), []);
 
   return (
     <QueryProvider>
-      <AuthInitializer onLogin={onLogin} onLogout={onLogout} storage={storage}>
+      <AuthInitializer onLogin={onLogin} onLogout={onLogout} storage={storage} cookieAuth={cookieAuth}>
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}
           workspaceStore={workspaceStore}
           storage={storage}
+          cookieAuth={cookieAuth}
         >
           {children}
         </WSProvider>

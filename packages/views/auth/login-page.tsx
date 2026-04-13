@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
   CardHeader,
@@ -19,6 +20,7 @@ import {
 } from "@multica/ui/components/ui/input-otp";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
 
@@ -29,6 +31,8 @@ import type { User } from "@multica/core/types";
 interface GoogleAuthConfig {
   clientId: string;
   redirectUri: string;
+  /** Opaque state passed through Google OAuth (e.g. "platform:desktop"). */
+  state?: string;
 }
 
 interface CliCallbackConfig {
@@ -51,6 +55,8 @@ interface LoginPageProps {
   lastWorkspaceId?: string | null;
   /** Called after a token is obtained (e.g. to set cookies). */
   onTokenObtained?: () => void;
+  /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
+  onGoogleLogin?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +92,9 @@ export function LoginPage({
   cliCallback,
   lastWorkspaceId,
   onTokenObtained,
+  onGoogleLogin,
 }: LoginPageProps) {
+  const qc = useQueryClient();
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -167,6 +175,7 @@ export function LoginPage({
         // Normal path
         await useAuthStore.getState().verifyCode(email, value);
         const wsList = await api.listWorkspaces();
+        qc.setQueryData(workspaceKeys.list(), wsList);
         useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWorkspaceId);
         onTokenObtained?.();
         onSuccess();
@@ -178,7 +187,7 @@ export function LoginPage({
         setLoading(false);
       }
     },
-    [email, onSuccess, cliCallback, lastWorkspaceId, onTokenObtained],
+    [email, onSuccess, cliCallback, lastWorkspaceId, onTokenObtained, qc],
   );
 
   const handleResend = async () => {
@@ -204,6 +213,10 @@ export function LoginPage({
   };
 
   const handleGoogleLogin = () => {
+    if (onGoogleLogin) {
+      onGoogleLogin();
+      return;
+    }
     if (!google) return;
     const params = new URLSearchParams({
       client_id: google.clientId,
@@ -213,6 +226,7 @@ export function LoginPage({
       access_type: "offline",
       prompt: "select_account",
     });
+    if (google.state) params.set("state", google.state);
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
@@ -371,7 +385,7 @@ export function LoginPage({
           >
             {loading ? "Sending code..." : "Continue"}
           </Button>
-          {google && (
+          {(google || onGoogleLogin) && (
             <>
               <div className="relative w-full">
                 <div className="absolute inset-0 flex items-center">

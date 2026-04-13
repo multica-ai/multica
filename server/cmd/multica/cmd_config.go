@@ -29,9 +29,20 @@ var configSetCmd = &cobra.Command{
 	RunE:  runConfigSet,
 }
 
+var configLocalCmd = &cobra.Command{
+	Use:   "local",
+	Short: "Configure CLI for a local Docker Compose deployment",
+	Long:  "Sets server_url and app_url to localhost defaults for a local self-hosted deployment.",
+	RunE:  runConfigLocal,
+}
+
 func init() {
+	configLocalCmd.Flags().Int("port", 8080, "Backend server port")
+	configLocalCmd.Flags().Int("frontend-port", 3000, "Frontend port")
+
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configLocalCmd)
 }
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
@@ -77,6 +88,30 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, value)
+	return nil
+}
+
+func runConfigLocal(cmd *cobra.Command, _ []string) error {
+	port, _ := cmd.Flags().GetInt("port")
+	frontendPort, _ := cmd.Flags().GetInt("frontend-port")
+
+	profile := resolveProfile(cmd)
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+
+	cfg.AppURL = fmt.Sprintf("http://localhost:%d", frontendPort)
+	cfg.ServerURL = fmt.Sprintf("http://localhost:%d", port)
+
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "Configured for local deployment:\n")
+	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
+	fmt.Fprintf(os.Stderr, "  server_url: %s\n", cfg.ServerURL)
+	fmt.Fprintf(os.Stderr, "\nNext: run 'multica login' to authenticate.\n")
 	return nil
 }
 

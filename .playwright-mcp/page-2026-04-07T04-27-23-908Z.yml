@@ -1,0 +1,210 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation [ref=e4]:
+      - generic [ref=e5]:
+        - img "Hesworth" [ref=e9]
+        - generic [ref=e10]:
+          - link "HOME" [ref=e11] [cursor=pointer]:
+            - /url: /
+          - link "ABOUT US" [ref=e12] [cursor=pointer]:
+            - /url: /about
+          - link "COLLECTION" [ref=e13] [cursor=pointer]:
+            - /url: /collection
+          - link "FEATURES" [ref=e14] [cursor=pointer]:
+            - /url: /features
+          - link "CONTACT US" [ref=e15] [cursor=pointer]:
+            - /url: /contact
+          - link "FIND US" [ref=e16] [cursor=pointer]:
+            - /url: /find-us
+  - main [ref=e17]:
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - img "Hesworth Hero" [ref=e21]
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - heading "STYLE BEGINS IN YOUR HANDS" [level=1] [ref=e25]
+            - paragraph [ref=e26]: Textiles engineered for tailor-led precision and modern movement.
+          - link "Explore Collections" [ref=e28] [cursor=pointer]:
+            - /url: /collection
+            - text: Explore Collections
+      - generic [ref=e30]:
+        - img [ref=e32]
+        - generic [ref=e34]:
+          - heading "Tailored for Possibilities" [level=1] [ref=e35]
+          - paragraph [ref=e36]: Every Hesworth textile is engineered to hold form, flow with movement, and elevate the maker's craft. Refined in feel, disciplined in performance, and made for those who value quiet strength.
+      - generic [ref=e38]:
+        - heading "Craft Meets Technical Precision" [level=1] [ref=e39]
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - generic [ref=e42]:
+              - img "Crease Resistance" [ref=e44]
+              - generic [ref=e45]:
+                - heading "Crease Resistance" [level=3] [ref=e46]
+                - paragraph [ref=e47]: Holds form through movement and daily wear.
+            - paragraph [ref=e49]: Engineered fibres maintain structure, reducing wrinkles and keeping garments sharp throughout the day.
+          - generic [ref=e50]:
+            - generic [ref=e51]:
+              - img "Structural Stability" [ref=e53]
+              - generic [ref=e54]:
+                - heading "Structural Stability" [level=3] [ref=e55]
+                - paragraph [ref=e56]: Built for silhouette precision.
+            - paragraph [ref=e58]: A reinforced weave ensures consistent shape retention, giving tailors better control over fit and form.
+          - generic [ref=e59]:
+            - generic [ref=e60]:
+              - img "Movement Flexibility" [ref=e62]
+              - generic [ref=e63]:
+                - heading "Movement Flexibility" [level=3] [ref=e64]
+                - paragraph [ref=e65]: Drapes with intention and fluidity.
+            - paragraph [ref=e67]: Designed to enhance motion, making garments feel natural, balanced, and effortlessly wearable.
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - img "Breathable Comfort" [ref=e71]
+              - generic [ref=e72]:
+                - heading "Breathable Comfort" [level=3] [ref=e73]
+                - paragraph [ref=e74]: Lightweight ease with natural airflow.
+            - paragraph [ref=e76]: Ideal for warm climates and everyday wear, maintaining comfort without compromising elegance.
+        - generic [ref=e77]:
+          - generic [ref=e78]: 1/2
+          - generic "Feature pagination" [ref=e79]:
+            - button "Previous" [ref=e80] [cursor=pointer]:
+              - img [ref=e81]
+            - button "Next" [ref=e83] [cursor=pointer]:
+              - img [ref=e84]
+        - link "Explore OUR Collections" [ref=e87] [cursor=pointer]:
+          - /url: /collection
+          - text: Explore OUR Collections
+      - generic [ref=e90]:
+        - heading "Our Collection" [level=1] [ref=e91]
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - img "SPOTLIGHT" [ref=e96]
+            - generic [ref=e97]:
+              - heading "SPOTLIGHT" [level=3] [ref=e98]
+              - paragraph [ref=e99]: Hopsack and Wool Cashmere (240–300g/m)
+          - generic [ref=e100]:
+            - img "LA TERRA" [ref=e102]
+            - generic [ref=e103]:
+              - heading "LA TERRA" [level=3] [ref=e104]
+              - paragraph [ref=e105]: Super Level 110 (260–300g/m)
+          - generic [ref=e106]:
+            - img "TRAVELER" [ref=e108]
+            - generic [ref=e109]:
+              - heading "TRAVELER" [level=3] [ref=e110]
+              - paragraph [ref=e111]: Resistance To Crease (240–410g/m)
+          - generic [ref=e112]:
+            - img "SPOTLIGHT" [ref=e114]
+            - generic [ref=e115]:
+              - heading "SPOTLIGHT" [level=3] [ref=e116]
+              - paragraph [ref=e117]: Hopsack and Wool Cashmere (240–300g/m)
+          - generic [ref=e118]:
+            - img "LA TERRA" [ref=e120]
+            - generic [ref=e121]:
+              - heading "LA TERRA" [level=3] [ref=e122]
+              - paragraph [ref=e123]: Super Level 110 (260–300g/m)
+          - generic [ref=e124]:
+            - img "TRAVELER" [ref=e126]
+            - generic [ref=e127]:
+              - heading "TRAVELER" [level=3] [ref=e128]
+              - paragraph [ref=e129]: Resistance To Crease (240–410g/m)
+          - generic [ref=e130]:
+            - img "SPOTLIGHT" [ref=e132]
+            - generic [ref=e133]:
+              - heading "SPOTLIGHT" [level=3] [ref=e134]
+              - paragraph [ref=e135]: Hopsack and Wool Cashmere (240–300g/m)
+          - generic [ref=e136]:
+            - img "LA TERRA" [ref=e138]
+            - generic [ref=e139]:
+              - heading "LA TERRA" [level=3] [ref=e140]
+              - paragraph [ref=e141]: Super Level 110 (260–300g/m)
+          - generic [ref=e142]:
+            - img "TRAVELER" [ref=e144]
+            - generic [ref=e145]:
+              - heading "TRAVELER" [level=3] [ref=e146]
+              - paragraph [ref=e147]: Resistance To Crease (240–410g/m)
+        - generic [ref=e148]:
+          - button "Go to slide 1" [ref=e149] [cursor=pointer]
+          - button "Go to slide 2" [ref=e150] [cursor=pointer]
+          - button "Go to slide 3" [ref=e151] [cursor=pointer]
+        - link "Learn More" [ref=e153] [cursor=pointer]:
+          - /url: /collection
+          - text: Learn More
+      - generic [ref=e156]:
+        - heading "Our Story" [level=1] [ref=e157]
+        - generic [ref=e158]:
+          - generic [ref=e159]:
+            - generic [ref=e160]:
+              - paragraph [ref=e161]:
+                - generic [ref=e162]: At
+                - img "Hesworth" [ref=e164]
+                - generic [ref=e165]: ","
+              - paragraph [ref=e166]: Refinement is a Discipline.
+            - paragraph [ref=e167]: We believe fabric is more than material, it is the beginning of form, movement, and identity. Every weave, structure, and finish is engineered with intention, crafted for the hands that shape modern menswear.
+          - generic [ref=e168]:
+            - generic [ref=e169]:
+              - paragraph [ref=e170]: Our Approach Blends
+              - paragraph [ref=e171]: Exploration With Precision.
+            - paragraph [ref=e172]: We study the way fabric responds to motion, how structure supports form, and how comfort enhances confidence. This balance of discipline and freedom defines every Hesworth textile, fluid when needed, firm when required, and always quietly powerful.
+          - generic [ref=e173]:
+            - paragraph [ref=e175]: We Design For The Makers.
+            - paragraph [ref=e176]: For tailors who value fit, feel, and integrity. For those who elevate their craft through thoughtful choices. For ateliers who understand that true style begins long before the first stitch, it begins with the fabric they choose.
+        - generic [ref=e179]:
+          - generic:
+            - img "Tailor at work"
+        - generic [ref=e180]:
+          - paragraph [ref=e181]:
+            - generic [ref=e182]: This is Refinement in Motion. This is
+            - generic [ref=e183]: Hesworth
+          - link "Learn More" [ref=e184] [cursor=pointer]:
+            - /url: /about
+            - text: Learn More
+      - generic [ref=e187]:
+        - heading "Trusted by Tailor" [level=1] [ref=e189]
+        - paragraph [ref=e191]: From boutique ateliers to established tailoring houses, these makers trust Hesworth to elevate every cut, drape, and detail.
+        - generic [ref=e193]:
+          - img "Partners" [ref=e195]
+          - img "Partners" [ref=e197]
+      - generic [ref=e200]:
+        - generic [ref=e201]:
+          - heading "Find Us" [level=1] [ref=e202]
+          - paragraph [ref=e203]: Visit our tailoring house and retail boutiques across the world to experience Hesworth.
+          - link "Find Us" [ref=e205] [cursor=pointer]:
+            - /url: /find-us
+            - text: Find Us
+        - img "World Map" [ref=e209]
+      - generic [ref=e210]:
+        - img [ref=e212]
+        - generic [ref=e213]:
+          - heading "Begin Your Legacy with Hesworth" [level=2] [ref=e214]
+          - generic [ref=e215]:
+            - textbox "Email address" [ref=e216]:
+              - /placeholder: ENTER EMAIL ADDRESS
+            - button "Submit" [ref=e217] [cursor=pointer]
+  - contentinfo [ref=e218]:
+    - generic [ref=e220]:
+      - generic [ref=e221]:
+        - heading "ABOUT" [level=3] [ref=e222]
+        - list [ref=e223]:
+          - listitem [ref=e224]: Our Story
+          - listitem [ref=e225]: Code of Ethics
+          - listitem [ref=e226]: Careers
+          - listitem [ref=e227]: Legal
+          - listitem [ref=e228]: Privacy Policy
+          - listitem [ref=e229]: Cookie Policy
+          - listitem [ref=e230]: COOKIES SETTINGS
+      - generic [ref=e231]:
+        - heading "CUSTOMER ASSISTANCE" [level=3] [ref=e232]
+        - list [ref=e233]:
+          - listitem [ref=e234]: Contact Us
+          - listitem [ref=e235]: My Order
+          - listitem [ref=e236]: FAQs
+          - listitem [ref=e237]: Email
+          - listitem [ref=e238]: Unsubscribe
+          - listitem [ref=e239]: Sitemap
+      - generic [ref=e240]:
+        - heading "SIGN UP TO RECEIVE EMAIL UPDATES ON SPECIAL PROMOTIONS, NEW PRODUCT ANNOUNCEMENTS, GIFTS IDEAS AND MORE" [level=3] [ref=e241]
+        - generic [ref=e243]:
+          - textbox "ENTER EMAIL ADDRESS" [ref=e244]
+          - button "SUBMIT" [ref=e245] [cursor=pointer]
+        - paragraph [ref=e246]: You can unsubscribe at any time by clicking on the unsubscribing link in each e-mail.
+        - paragraph [ref=e247]: For more information, see our Privacy Notice
+  - alert [ref=e248]

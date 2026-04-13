@@ -80,11 +80,16 @@ type RuntimeUsageResponse struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }
 
-// ReportRuntimeUsage receives usage data from the daemon (unauthenticated daemon route).
+// ReportRuntimeUsage receives usage data from the daemon.
 func (h *Handler) ReportRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	if runtimeID == "" {
 		writeError(w, http.StatusBadRequest, "runtimeId is required")
+		return
+	}
+
+	// Verify the caller owns this runtime's workspace.
+	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
 		return
 	}
 
@@ -130,16 +135,17 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := int32(90)
-	if l := r.URL.Query().Get("days"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 365 {
-			limit = int32(parsed)
+	days := 90
+	if d := r.URL.Query().Get("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 365 {
+			days = parsed
 		}
 	}
+	since := pgtype.Date{Time: time.Now().AddDate(0, 0, -days), Valid: true}
 
 	rows, err := h.Queries.ListRuntimeUsage(r.Context(), db.ListRuntimeUsageParams{
 		RuntimeID: parseUUID(runtimeID),
-		Limit:     limit,
+		Since:     since,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")

@@ -4,6 +4,7 @@ import type {
   UpdateIssueRequest,
   ListIssuesResponse,
   SearchIssuesResponse,
+  SearchProjectsResponse,
   UpdateMeRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
@@ -45,8 +46,13 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  PinnedItem,
+  CreatePinRequest,
+  PinnedItemType,
+  ReorderPinsRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
+import { createRequestId } from "../utils";
 
 export interface ApiClientOptions {
   logger?: Logger;
@@ -79,10 +85,20 @@ export class ApiClient {
     this.workspaceId = id;
   }
 
+  private readCsrfToken(): string | null {
+    if (typeof document === "undefined") return null;
+    const match = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("multica_csrf="));
+    return match ? match.split("=")[1] ?? null : null;
+  }
+
   private authHeaders(): Record<string, string> {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    const csrf = this.readCsrfToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
     return headers;
   }
 
@@ -103,7 +119,7 @@ export class ApiClient {
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
@@ -162,6 +178,10 @@ export class ApiClient {
     });
   }
 
+  async logout(): Promise<void> {
+    await this.fetch("/auth/logout", { method: "POST" });
+  }
+
   async getMe(): Promise<User> {
     return this.fetch("/api/me");
   }
@@ -197,6 +217,14 @@ export class ApiClient {
     return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    if (params.include_closed) search.set("include_closed", "true");
+    return this.fetch(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+  }
+
   async getIssue(id: string): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`);
   }
@@ -219,6 +247,10 @@ export class ApiClient {
 
   async listChildIssues(id: string): Promise<{ issues: Issue[] }> {
     return this.fetch(`/api/issues/${id}/children`);
+  }
+
+  async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
+    return this.fetch("/api/issues/child-progress");
   }
 
   async deleteIssue(id: string): Promise<void> {
@@ -419,7 +451,7 @@ export class ApiClient {
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
-    return this.fetch(`/api/daemon/tasks/${taskId}/messages`);
+    return this.fetch(`/api/tasks/${taskId}/messages`);
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
@@ -597,7 +629,7 @@ export class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = createRequestId();
     const start = Date.now();
     this.logger.info("→ POST /api/upload-file", { rid });
 
@@ -692,5 +724,28 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  // Pins
+  async listPins(): Promise<PinnedItem[]> {
+    return this.fetch("/api/pins");
+  }
+
+  async createPin(data: CreatePinRequest): Promise<PinnedItem> {
+    return this.fetch("/api/pins", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePin(itemType: PinnedItemType, itemId: string): Promise<void> {
+    await this.fetch(`/api/pins/${itemType}/${itemId}`, { method: "DELETE" });
+  }
+
+  async reorderPins(data: ReorderPinsRequest): Promise<void> {
+    await this.fetch("/api/pins/reorder", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 }

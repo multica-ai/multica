@@ -135,6 +135,7 @@ func init() {
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name")
+	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 
 	// issue get
@@ -231,6 +232,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
 		params.Set("assignee_id", aID)
+	}
+	if v, _ := cmd.Flags().GetString("project"); v != "" {
+		params.Set("project_id", v)
 	}
 
 	path := "/api/issues"

@@ -67,6 +67,10 @@ const (
 	EventProjectUpdated = "project:updated"
 	EventProjectDeleted = "project:deleted"
 
+	// Pin events
+	EventPinCreated = "pin:created"
+	EventPinDeleted = "pin:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

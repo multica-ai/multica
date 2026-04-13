@@ -15,22 +15,26 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
-// Auth middleware validates JWT tokens or Personal Access Tokens from the Authorization header.
+// Auth middleware validates JWT tokens or Personal Access Tokens.
+// Token sources (in priority order):
+//  1. Authorization: Bearer <token> header (PAT or JWT)
+//  2. multica_auth HttpOnly cookie (JWT) — requires valid CSRF token for state-changing requests
+//
 // Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
 func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				slog.Debug("auth: missing authorization header", "path", r.URL.Path)
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+			tokenString, fromCookie := extractToken(r)
+			if tokenString == "" {
+				slog.Debug("auth: no token found", "path", r.URL.Path)
+				http.Error(w, `{"error":"missing authorization"}`, http.StatusUnauthorized)
 				return
 			}
 
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-			if tokenString == authHeader {
-				slog.Debug("auth: invalid format", "path", r.URL.Path)
-				http.Error(w, `{"error":"invalid authorization format"}`, http.StatusUnauthorized)
+			// Cookie-based auth requires CSRF validation for state-changing methods.
+			if fromCookie && !auth.ValidateCSRF(r) {
+				slog.Debug("auth: CSRF validation failed", "path", r.URL.Path)
+				http.Error(w, `{"error":"CSRF validation failed"}`, http.StatusForbidden)
 				return
 			}
 
@@ -91,4 +95,21 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// extractToken returns the bearer token and whether it came from a cookie.
+// Priority: Authorization header > multica_auth cookie.
+func extractToken(r *http.Request) (token string, fromCookie bool) {
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString != authHeader {
+			return tokenString, false
+		}
+	}
+
+	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
+		return cookie.Value, true
+	}
+
+	return "", false
 }

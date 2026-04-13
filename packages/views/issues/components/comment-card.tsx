@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronRight, Copy, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,7 +35,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
-import type { TimelineEntry } from "@multica/core/types";
+import type { TimelineEntry, Attachment } from "@multica/core/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,6 +88,44 @@ function DeleteCommentDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Standalone attachment list — renders attachments not already in the markdown
+// ---------------------------------------------------------------------------
+
+function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  if (!attachments?.length) return null;
+  // Skip attachments whose URL is already referenced in the markdown content
+  const standalone = content
+    ? attachments.filter((a) => !content.includes(a.url))
+    : attachments;
+  if (!standalone.length) return null;
+
+  return (
+    <div className={cn("flex flex-col gap-1", className)}>
+      {standalone.map((a) => (
+        <div
+          key={a.id}
+          className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
+        >
+          <FileText className="size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm">{a.filename}</p>
+          </div>
+          {a.download_url && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
+            >
+              <Download className="size-3.5" />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -256,6 +294,7 @@ function CommentRow({
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
             <ReadonlyContent content={entry.content ?? ""} />
           </div>
+          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
             <ReactionBar
               reactions={reactions}
@@ -472,6 +511,7 @@ function CommentCard({
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
                   <ReadonlyContent content={entry.content ?? ""} />
                 </div>
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
                   <ReactionBar
                     reactions={reactions}

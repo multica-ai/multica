@@ -31,7 +31,7 @@ COPY --from=builder /src/server/bin/multica .
 COPY --from=builder /src/server/bin/migrate .
 COPY server/migrations/ ./migrations/
 COPY docker/entrypoint.sh .
-RUN chmod +x entrypoint.sh
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 EXPOSE 8080
 

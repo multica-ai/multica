@@ -198,6 +198,21 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	return workspaces, nil
 }
 
+// IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
+type IssueGCStatus struct {
+	Status    string    `json:"status"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetIssueGCCheck returns the status and updated_at of an issue for GC decisions.
+func (c *Client) GetIssueGCCheck(ctx context.Context, issueID string) (*IssueGCStatus, error) {
+	var resp IssueGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
 		"runtime_ids": runtimeIDs,

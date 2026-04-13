@@ -1,8 +1,18 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../navigation";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Inbox,
   ListTodo,
@@ -18,6 +28,7 @@ import {
   CircleUser,
   FolderKanban,
   Ellipsis,
+  PinOff,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -32,6 +43,7 @@ import {
   SidebarFooter,
   SidebarMenu,
   SidebarMenuButton,
+  SidebarMenuAction,
   SidebarMenuItem,
   SidebarRail,
 } from "@multica/ui/components/ui/sidebar";
@@ -44,14 +56,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
+import { pinListOptions } from "@multica/core/pins/queries";
+import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
+import type { PinnedItem } from "@multica/core/types";
 
 const personalNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
@@ -76,6 +91,60 @@ function DraftDot() {
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
 }
 
+function SortablePinItem({ pin, pathname, onUnpin }: { pin: PinnedItem; pathname: string; onUnpin: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
+  const wasDragged = useRef(false);
+
+  useEffect(() => {
+    if (isDragging) wasDragged.current = true;
+  }, [isDragging]);
+
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const href = pin.item_type === "issue" ? `/issues/${pin.item_id}` : `/projects/${pin.item_id}`;
+  const isActive = pathname === href;
+  const label = pin.item_type === "issue" && pin.identifier ? `${pin.identifier} ${pin.title}` : pin.title;
+
+  return (
+    <SidebarMenuItem
+      ref={setNodeRef}
+      style={style}
+      className={cn("group/pin", isDragging && "opacity-30")}
+      {...attributes}
+      {...listeners}
+    >
+      <SidebarMenuButton
+        isActive={isActive}
+        render={<AppLink href={href} />}
+        onClick={(event) => {
+          if (wasDragged.current) {
+            wasDragged.current = false;
+            event.preventDefault();
+            return;
+          }
+        }}
+        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+      >
+        {pin.item_type === "issue" ? (
+          <ListTodo className="size-4 shrink-0" />
+        ) : (
+          <FolderKanban className="size-4 shrink-0" />
+        )}
+        <span className="truncate">{label}</span>
+      </SidebarMenuButton>
+      <SidebarMenuAction
+        showOnHover
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onUnpin();
+        }}
+      >
+        <PinOff className="size-3 text-muted-foreground" />
+      </SidebarMenuAction>
+    </SidebarMenuItem>
+  );
+}
+
 interface AppSidebarProps {
   /** Rendered above SidebarHeader (e.g. desktop traffic light spacer) */
   topSlot?: React.ReactNode;
@@ -90,10 +159,11 @@ interface AppSidebarProps {
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
+  const userId = useAuthStore((s) => s.user?.id);
   const authLogout = useAuthStore((s) => s.logout);
   const workspace = useWorkspaceStore((s) => s.workspace);
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
 
   const wsId = workspace?.id;
   const { data: inboxItems = [] } = useQuery({
@@ -106,6 +176,25 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     [inboxItems],
   );
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
+  const { data: pinnedItems = [] } = useQuery({
+    ...pinListOptions(wsId ?? "", userId ?? ""),
+    enabled: !!wsId && !!userId,
+  });
+  const deletePin = useDeletePin();
+  const reorderPins = useReorderPins();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = pinnedItems.findIndex((p) => p.id === active.id);
+      const newIndex = pinnedItems.findIndex((p) => p.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const reordered = arrayMove(pinnedItems, oldIndex, newIndex);
+      reorderPins.mutate(reordered);
+    },
+    [pinnedItems, reorderPins],
+  );
 
   const queryClient = useQueryClient();
   const logout = () => {
@@ -168,20 +257,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </DropdownMenuLabel>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
-                  <DropdownMenuGroup className="group/ws-section">
-                    <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
                       Workspaces
-                      <Tooltip>
-                        <TooltipTrigger
-                          className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
-                          onClick={() => useModalStore.getState().open("create-workspace")}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          Create workspace
-                        </TooltipContent>
-                      </Tooltip>
                     </DropdownMenuLabel>
                     {workspaces.map((ws) => (
                       <DropdownMenuItem
@@ -189,7 +267,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         onClick={() => {
                           if (ws.id !== workspace?.id) {
                             push("/issues");
-                            switchWorkspace(ws.id);
+                            switchWorkspace(ws);
                           }
                         }}
                       >
@@ -200,6 +278,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                       </DropdownMenuItem>
                     ))}
+                    <DropdownMenuItem
+                      onClick={() => push("/onboarding")}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Create workspace
+                    </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
@@ -262,6 +346,28 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+
+          {pinnedItems.length > 0 && (
+            <SidebarGroup>
+              <SidebarGroupLabel>Pinned</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={pinnedItems.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+                    <SidebarMenu className="gap-0.5">
+                      {pinnedItems.map((pin: PinnedItem) => (
+                        <SortablePinItem
+                          key={pin.id}
+                          pin={pin}
+                          pathname={pathname}
+                          onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
+                        />
+                      ))}
+                    </SidebarMenu>
+                  </SortableContext>
+                </DndContext>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
 
           <SidebarGroup>
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>

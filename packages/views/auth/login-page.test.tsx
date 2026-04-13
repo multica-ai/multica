@@ -13,6 +13,14 @@ const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
+const mockSetQueryData = vi.hoisted(() => vi.fn());
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query",
+  );
+  return { ...actual, useQueryClient: () => ({ setQueryData: mockSetQueryData }) };
+});
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(

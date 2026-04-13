@@ -110,6 +110,8 @@ const mockViewState = {
   assigneeFilters: [] as { type: string; id: string }[],
   includeNoAssignee: false,
   creatorFilters: [] as { type: string; id: string }[],
+  projectFilters: [] as string[],
+  includeNoProject: false,
   sortBy: "position" as const,
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true },
@@ -120,6 +122,8 @@ const mockViewState = {
   toggleAssigneeFilter: vi.fn(),
   toggleNoAssignee: vi.fn(),
   toggleCreatorFilter: vi.fn(),
+  toggleProjectFilter: vi.fn(),
+  toggleNoProject: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -131,6 +135,9 @@ const mockViewState = {
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
   initFilterWorkspaceSync: vi.fn(),
+  registerViewStoreForWorkspaceSync: vi.fn(),
+  viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
+  viewStoreSlice: vi.fn(),
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
     { getState: () => mockViewState, setState: vi.fn() },
@@ -178,6 +185,16 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
       return selector ? selector(state) : state;
     },
     { getState: () => ({ selectedIds: new Set(), toggle: vi.fn(), clear: vi.fn(), setAll: vi.fn() }) },
+  ),
+}));
+
+vi.mock("@multica/core/issues/stores/recent-issues-store", () => ({
+  useRecentIssuesStore: Object.assign(
+    (selector?: any) => {
+      const state = { items: [], recordVisit: vi.fn() };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ items: [], recordVisit: vi.fn() }) },
   ),
 }));
 

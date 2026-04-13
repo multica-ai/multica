@@ -23,6 +23,7 @@ import ReactMarkdown, {
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 // @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
@@ -42,6 +43,36 @@ import "./content-editor.css";
 const lowlight = createLowlight(common);
 
 // ---------------------------------------------------------------------------
+// Sanitization schema — extends GitHub defaults to allow file-card data attrs
+// ---------------------------------------------------------------------------
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+  },
+  attributes: {
+    ...defaultSchema.attributes,
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      "dataType",
+      "dataHref",
+      "dataFilename",
+    ],
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      ["className", /^language-/],
+      ["className", /^hljs/],
+    ],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      "alt",
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
 // URL transform — allow mention:// protocol through react-markdown's sanitizer
 // ---------------------------------------------------------------------------
 
@@ -55,7 +86,7 @@ function urlTransform(url: string): string {
 // ---------------------------------------------------------------------------
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { openInNewTab } = useNavigation();
+  const { push, openInNewTab } = useNavigation();
   const path = `/issues/${issueId}`;
   return (
     <span
@@ -63,11 +94,13 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (openInNewTab) {
-          openInNewTab(path, label);
-        } else {
-          window.open(path, "_blank", "noopener,noreferrer");
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
         }
+        push(path);
       }}
     >
       <IssueMentionCard issueId={issueId} fallbackLabel={label} />
@@ -159,7 +192,9 @@ const components: Partial<Components> = {
   div: ({ node, children, ...props }) => {
     const dataType = node?.properties?.dataType as string | undefined;
     if (dataType === "fileCard") {
-      const href = (node?.properties?.dataHref as string) || "";
+      const rawHref = (node?.properties?.dataHref as string) || "";
+      // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
+      const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
       const filename = (node?.properties?.dataFilename as string) || "";
       return (
         <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
@@ -243,7 +278,7 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
     <div className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
         remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
         urlTransform={urlTransform}
         components={components}
       >

@@ -41,7 +41,12 @@ apps/web/test-results/
 # feature tracking
 _features/
 
+# runtime
+*.pid
+
 # platform specific
 *.dmg
 *.app
 server/server
+data/
+.kilo

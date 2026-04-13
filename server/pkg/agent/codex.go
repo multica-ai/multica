@@ -149,7 +149,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			"profile":                  nil,
 			"cwd":                      opts.Cwd,
 			"approvalPolicy":           nil,
-			"sandbox":                  "workspace-write",
+			"sandbox":                  nil,
 			"config":                   nil,
 			"baseInstructions":         nil,
 			"developerInstructions":    nilIfEmpty(opts.SystemPrompt),

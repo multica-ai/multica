@@ -20,6 +20,7 @@ export function onIssueCreated(
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
+    qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
   }
 }
 
@@ -66,6 +67,9 @@ export function onIssueUpdated(
     qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
       old?.map((c) => (c.id === issue.id ? { ...c, ...issue } : c)),
     );
+    if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
+      qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+    }
   }
 }
 
@@ -96,5 +100,6 @@ export function onIssueDeleted(
   qc.removeQueries({ queryKey: issueKeys.children(wsId, issueId) });
   if (deleted?.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, deleted.parent_issue_id) });
+    qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
   }
 }

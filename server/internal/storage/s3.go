@@ -37,7 +37,7 @@ type S3Storage struct {
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
-		slog.Info("S3_BUCKET not set, file upload disabled")
+		slog.Info("S3_BUCKET not set, cloud upload disabled")
 		return nil
 	}
 
@@ -104,19 +104,13 @@ func NewS3StorageFromEnv() *S3Storage {
 	}
 }
 
-// sanitizeFilename removes characters that could cause header injection in Content-Disposition.
-func sanitizeFilename(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		// Strip control chars, newlines, null bytes, quotes, semicolons, backslashes
-		if r < 0x20 || r == 0x7f || r == '"' || r == ';' || r == '\\' || r == '\x00' {
-			b.WriteRune('_')
-		} else {
-			b.WriteRune(r)
-		}
+// storageClass returns the appropriate S3 storage class.
+// Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
+func (s *S3Storage) storageClass() types.StorageClass {
+	if s.endpointURL != "" {
+		return types.StorageClassStandard
 	}
-	return b.String()
+	return types.StorageClassIntelligentTiering
 }
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
@@ -179,16 +173,6 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	}
 }
 
-// isInlineContentType returns true for media types that browsers should
-// display inline (images, video, audio, PDF). Everything else triggers a
-// download via Content-Disposition: attachment.
-func isInlineContentType(ct string) bool {
-	return strings.HasPrefix(ct, "image/") ||
-		strings.HasPrefix(ct, "video/") ||
-		strings.HasPrefix(ct, "audio/") ||
-		ct == "application/pdf"
-}
-
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	safe := sanitizeFilename(filename)
 	disposition := "attachment"
@@ -203,6 +187,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
+<<<<<<< HEAD
 		ContentLength:      aws.Int64(int64(len(data))),
 	}
 
@@ -213,10 +198,15 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 	}
 
 	_, err := s.client.PutObject(ctx, input)
+=======
+		StorageClass:       s.storageClass(),
+	})
+>>>>>>> main
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 
+<<<<<<< HEAD
 	return s.objectURL(key), nil
 }
 

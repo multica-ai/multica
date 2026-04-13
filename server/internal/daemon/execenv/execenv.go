@@ -4,10 +4,12 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -140,8 +142,60 @@ func Reuse(workDir, provider string, task TaskContextForEnv, logger *slog.Logger
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
 
+	// Restore CodexHome for Codex provider — the per-task codex-home directory
+	// lives alongside the workdir. Re-run prepareCodexHome to ensure config
+	// (especially network access) is up to date.
+	if provider == "codex" {
+		codexHome := filepath.Join(env.RootDir, "codex-home")
+		if err := prepareCodexHome(codexHome, logger); err != nil {
+			logger.Warn("execenv: refresh codex-home failed", "error", err)
+		} else {
+			env.CodexHome = codexHome
+		}
+	}
+
 	logger.Info("execenv: reusing env", "workdir", workDir)
 	return env
+}
+
+// GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
+// can determine which issue this directory belongs to.
+type GCMeta struct {
+	IssueID     string    `json:"issue_id"`
+	WorkspaceID string    `json:"workspace_id"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+const gcMetaFile = ".gc_meta.json"
+
+// WriteGCMeta writes GC metadata into the given directory.
+func WriteGCMeta(envRoot, issueID, workspaceID string) error {
+	if envRoot == "" {
+		return nil
+	}
+	meta := GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: workspaceID,
+		CompletedAt: time.Now().UTC(),
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal gc meta: %w", err)
+	}
+	return os.WriteFile(filepath.Join(envRoot, gcMetaFile), data, 0o644)
+}
+
+// ReadGCMeta reads GC metadata from a task directory root.
+func ReadGCMeta(envRoot string) (*GCMeta, error) {
+	data, err := os.ReadFile(filepath.Join(envRoot, gcMetaFile))
+	if err != nil {
+		return nil, err
+	}
+	var meta GCMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
 }
 
 // Cleanup tears down the execution environment.

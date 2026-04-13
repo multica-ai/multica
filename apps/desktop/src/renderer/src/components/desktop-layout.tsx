@@ -85,17 +85,17 @@ export function DesktopShell() {
               >
                 <TabBar />
               </header>
-              {/* Content area with inset styling */}
-              <div className="flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
+              {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
+              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
                 <TabContent />
+                <ChatWindow />
+                <ChatFab />
               </div>
             </div>
           </SidebarProvider>
         </div>
         <ModalRegistry />
         <SearchCommand />
-        <ChatWindow />
-        <ChatFab />
       </DashboardGuard>
     </DesktopNavigationProvider>
   );

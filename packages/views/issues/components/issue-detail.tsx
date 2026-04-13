@@ -12,6 +12,8 @@ import {
   Link2,
   MoreHorizontal,
   PanelRight,
+  Pin,
+  PinOff,
   Plus,
   Trash2,
   UserMinus,
@@ -68,6 +70,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
+import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
@@ -77,6 +80,8 @@ import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
+import { pinListOptions } from "@multica/core/pins";
+import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
 import { ProgressRing } from "./progress-ring";
 
@@ -190,6 +195,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
+  const userId = useAuthStore((s) => s.user?.id);
   const workspace = useWorkspaceStore((s) => s.workspace);
 
   // Issue navigation — read from TQ list cache
@@ -227,6 +233,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     },
   });
 
+  // Record recent visit
+  const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  useEffect(() => {
+    if (issue) {
+      recordVisit({
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        status: issue.status,
+      });
+    }
+  }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
     timeline, loading: timelineLoading, submitComment, submitReply,
@@ -244,6 +263,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
+
+  // Pinned state
+  const { data: pinnedItems = [] } = useQuery({
+    ...pinListOptions(wsId, userId ?? ""),
+    enabled: !!userId,
+  });
+  const isPinned = pinnedItems.some((p) => p.item_type === "issue" && p.item_id === id);
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -462,6 +490,27 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 </Tooltip>
               </div>
             )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className={cn("text-muted-foreground", isPinned && "text-foreground")}
+                    onClick={() => {
+                      if (isPinned) {
+                        deletePin.mutate({ itemType: "issue", itemId: issue.id });
+                      } else {
+                        createPin.mutate({ item_type: "issue", item_id: issue.id });
+                      }
+                    }}
+                  >
+                    {isPinned ? <PinOff /> : <Pin />}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
+            </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -594,6 +643,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 }}>
                   <Plus className="h-3.5 w-3.5" />
                   Create sub-issue
+                </DropdownMenuItem>
+
+                {/* Pin / Unpin */}
+                <DropdownMenuItem onClick={() => {
+                  if (isPinned) {
+                    deletePin.mutate({ itemType: "issue", itemId: issue.id });
+                  } else {
+                    createPin.mutate({ item_type: "issue", item_id: issue.id });
+                  }
+                }}>
+                  {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                  {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
                 </DropdownMenuItem>
 
                 {/* Copy link */}

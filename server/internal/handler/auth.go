@@ -56,113 +56,6 @@ type VerifyCodeRequest struct {
 	Code  string `json:"code"`
 }
 
-func defaultWorkspaceName(user db.User) string {
-	name := strings.TrimSpace(user.Name)
-	if name == "" {
-		email := strings.TrimSpace(user.Email)
-		if at := strings.Index(email, "@"); at > 0 {
-			name = email[:at]
-		}
-	}
-	if name == "" {
-		name = "Personal"
-	}
-	return name + "'s Workspace"
-}
-
-func slugifyWorkspacePart(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	var b strings.Builder
-	lastWasDash := false
-
-	for _, r := range value {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			lastWasDash = false
-		case b.Len() > 0 && !lastWasDash:
-			b.WriteByte('-')
-			lastWasDash = true
-		}
-	}
-
-	return strings.Trim(b.String(), "-")
-}
-
-func defaultWorkspaceSlug(user db.User) string {
-	candidates := []string{
-		slugifyWorkspacePart(user.Name),
-		slugifyWorkspacePart(strings.Split(strings.TrimSpace(user.Email), "@")[0]),
-		"workspace",
-	}
-
-	base := "workspace"
-	for _, candidate := range candidates {
-		if candidate != "" {
-			base = candidate
-			break
-		}
-	}
-
-	userID := uuidToString(user.ID)
-	if len(userID) >= 8 {
-		return base + "-" + userID[:8]
-	}
-	return base
-}
-
-func (h *Handler) ensureUserWorkspace(ctx context.Context, user db.User) error {
-	workspaces, err := h.Queries.ListWorkspaces(ctx, user.ID)
-	if err != nil {
-		return err
-	}
-	if len(workspaces) > 0 {
-		return nil
-	}
-
-	tx, err := h.TxStarter.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	qtx := h.Queries.WithTx(tx)
-	workspaces, err = qtx.ListWorkspaces(ctx, user.ID)
-	if err != nil {
-		return err
-	}
-	if len(workspaces) > 0 {
-		return nil
-	}
-
-	wsName := defaultWorkspaceName(user)
-	workspace, err := qtx.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		Name:        wsName,
-		Slug:        defaultWorkspaceSlug(user),
-		Description: pgtype.Text{},
-		IssuePrefix: generateIssuePrefix(wsName),
-	})
-	if err != nil {
-		if isUniqueViolation(err) {
-			workspaces, lookupErr := h.Queries.ListWorkspaces(ctx, user.ID)
-			if lookupErr == nil && len(workspaces) > 0 {
-				return nil
-			}
-		}
-		return err
-	}
-
-	if _, err := qtx.CreateMember(ctx, db.CreateMemberParams{
-		WorkspaceID: workspace.ID,
-		UserID:      user.ID,
-		Role:        "owner",
-	}); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 func generateCode() (string, error) {
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -241,6 +134,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
+		slog.Error("failed to send verification code", "email", email, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send verification code")
 		return
 	}
@@ -290,16 +184,16 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
-		return
-	}
-
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", req.Email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
+	}
+
+	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
 	// Set CloudFront signed cookies for CDN access.
@@ -411,7 +305,12 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user info from Google.
-	userInfoReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		slog.Error("failed to create userinfo request", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
 
 	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
@@ -467,16 +366,15 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.ensureUserWorkspace(r.Context(), user); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
-		return
-	}
-
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
+	}
+
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
 	if h.CFSigner != nil {
@@ -490,6 +388,11 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	auth.ClearAuthCookies(w)
+	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {

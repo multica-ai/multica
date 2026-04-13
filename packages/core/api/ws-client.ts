@@ -8,6 +8,7 @@ export class WSClient {
   private baseUrl: string;
   private token: string | null = null;
   private workspaceId: string | null = null;
+  private cookieAuth = false;
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private hasConnectedBefore = false;
@@ -15,40 +16,45 @@ export class WSClient {
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
 
-  constructor(url: string, options?: { logger?: Logger }) {
+  constructor(url: string, options?: { logger?: Logger; cookieAuth?: boolean }) {
     this.baseUrl = url;
     this.logger = options?.logger ?? noopLogger;
+    this.cookieAuth = options?.cookieAuth ?? false;
   }
 
-  setAuth(token: string, workspaceId: string) {
+  setAuth(token: string | null, workspaceId: string) {
     this.token = token;
     this.workspaceId = workspaceId;
   }
 
   connect() {
     const url = new URL(this.baseUrl);
-    if (this.token) url.searchParams.set("token", this.token);
+    // Token is never sent as a URL query parameter — it would be logged by
+    // proxies, CDNs, and browser history.  In cookie mode the HttpOnly cookie
+    // is sent automatically with the upgrade request.  In token mode the token
+    // is delivered as the first WebSocket message after the connection opens.
     if (this.workspaceId)
       url.searchParams.set("workspace_id", this.workspaceId);
 
     this.ws = new WebSocket(url.toString());
 
     this.ws.onopen = () => {
-      this.logger.info("connected");
-      if (this.hasConnectedBefore) {
-        for (const cb of this.onReconnectCallbacks) {
-          try {
-            cb();
-          } catch {
-            // ignore reconnect callback errors
-          }
-        }
+      if (!this.cookieAuth && this.token) {
+        this.ws!.send(
+          JSON.stringify({ type: "auth", payload: { token: this.token } }),
+        );
+        return;
       }
-      this.hasConnectedBefore = true;
+
+      this.onAuthenticated();
     };
 
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data as string) as WSMessage;
+      if ((msg as any).type === "auth_ack") {
+        this.onAuthenticated();
+        return;
+      }
       this.logger.debug("received", msg.type);
       const eventHandlers = this.handlers.get(msg.type);
       if (eventHandlers) {
@@ -70,6 +76,20 @@ export class WSClient {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };
+  }
+
+  private onAuthenticated() {
+    this.logger.info("connected");
+    if (this.hasConnectedBefore) {
+      for (const cb of this.onReconnectCallbacks) {
+        try {
+          cb();
+        } catch {
+          // ignore reconnect callback errors
+        }
+      }
+    }
+    this.hasConnectedBefore = true;
   }
 
   disconnect() {

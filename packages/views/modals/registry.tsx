@@ -1,7 +1,6 @@
 "use client";
 
 import { useModalStore } from "@multica/core/modals";
-import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueModal } from "./create-issue";
 
 export function ModalRegistry() {
@@ -10,8 +9,6 @@ export function ModalRegistry() {
   const close = useModalStore((s) => s.close);
 
   switch (modal) {
-    case "create-workspace":
-      return <CreateWorkspaceModal onClose={close} />;
     case "create-issue":
       return <CreateIssueModal onClose={close} data={data} />;
     default:

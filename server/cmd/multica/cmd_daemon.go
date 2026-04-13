@@ -8,10 +8,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -84,11 +83,11 @@ func daemonDirForProfile(profile string) string {
 }
 
 func daemonPIDPathForProfile(profile string) string {
-	return daemonDirForProfile(profile) + "/daemon.pid"
+	return filepath.Join(daemonDirForProfile(profile), "daemon.pid")
 }
 
 func daemonLogPathForProfile(profile string) string {
-	return daemonDirForProfile(profile) + "/daemon.log"
+	return filepath.Join(daemonDirForProfile(profile), "daemon.log")
 }
 
 // healthPortForProfile returns the health check port for the given profile.
@@ -156,7 +155,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	child.SysProcAttr = daemonSysProcAttr()
 
 	if err := child.Start(); err != nil {
 		logFile.Close()
@@ -174,12 +173,20 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Wait briefly and verify daemon started via health endpoint.
-	time.Sleep(2 * time.Second)
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel2()
-	health = checkDaemonHealthOnPort(ctx2, healthPort)
-	if health["status"] != "running" {
+	// Poll health endpoint until the daemon is ready or timeout.
+	deadline := time.Now().Add(15 * time.Second)
+	started := false
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health = checkDaemonHealthOnPort(hctx, healthPort)
+		hcancel()
+		if health["status"] == "running" {
+			started = true
+			break
+		}
+	}
+	if !started {
 		fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
 		return nil
 	}
@@ -266,7 +273,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	cfg.CLIVersion = version
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
@@ -298,7 +305,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		child.SysProcAttr = daemonSysProcAttr()
 
 		if err := child.Start(); err != nil {
 			logFile.Close()
@@ -347,7 +354,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("find process %d: %w", int(pid), err)
 	}
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	if err := stopDaemonProcess(process); err != nil {
 		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
 	}
 
@@ -422,16 +429,7 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	lines, _ := cmd.Flags().GetInt("lines")
 
-	args := []string{"-n", strconv.Itoa(lines)}
-	if follow {
-		args = append(args, "-f")
-	}
-	args = append(args, logPath)
-
-	tail := exec.Command("tail", args...)
-	tail.Stdout = os.Stdout
-	tail.Stderr = os.Stderr
-	return tail.Run()
+	return tailLogFile(logPath, lines, follow)
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.

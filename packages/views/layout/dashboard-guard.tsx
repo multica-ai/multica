@@ -8,6 +8,8 @@ interface DashboardGuardProps {
   children: ReactNode;
   /** Path to redirect to when user is not authenticated */
   loginPath?: string;
+  /** Path to redirect to when user has no workspace (onboarding) */
+  onboardingPath?: string;
   /** Rendered when auth or workspace is loading */
   loadingFallback?: ReactNode;
 }
@@ -21,9 +23,10 @@ interface DashboardGuardProps {
 export function DashboardGuard({
   children,
   loginPath = "/",
+  onboardingPath,
   loadingFallback = null,
 }: DashboardGuardProps) {
-  const { user, isLoading, workspace } = useDashboardGuard(loginPath);
+  const { user, isLoading, workspace } = useDashboardGuard(loginPath, onboardingPath);
 
   if (isLoading || !workspace) return <>{loadingFallback}</>;
   if (!user) return null;

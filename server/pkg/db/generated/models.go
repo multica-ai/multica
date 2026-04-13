@@ -257,6 +257,16 @@ type PersonalAccessToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PinnedItem struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ItemType    string             `json:"item_type"`
+	ItemID      pgtype.UUID        `json:"item_id"`
+	Position    float64            `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Project struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

@@ -67,7 +67,7 @@ export function AssigneePicker({
 
   const getFreq = (type: string, id: string) => freqMap.get(`${type}:${id}`) ?? 0;
 
-  const query = filter.toLowerCase();
+  const query = filter.trim().toLowerCase();
   const filteredMembers = members
     .filter((m) => m.name.toLowerCase().includes(query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
@@ -107,17 +107,19 @@ export function AssigneePicker({
         )
       }
     >
-      {/* Unassigned option */}
-      <PickerItem
-        selected={!assigneeType && !assigneeId}
-        onClick={() => {
-          onUpdate({ assignee_type: null, assignee_id: null });
-          setOpen(false);
-        }}
-      >
-        <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Unassigned</span>
-      </PickerItem>
+      {/* Unassigned option — hidden when search is active */}
+      {!query && (
+        <PickerItem
+          selected={!assigneeType && !assigneeId}
+          onClick={() => {
+            onUpdate({ assignee_type: null, assignee_id: null });
+            setOpen(false);
+          }}
+        >
+          <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Unassigned</span>
+        </PickerItem>
+      )}
 
       {/* Members */}
       {filteredMembers.length > 0 && (

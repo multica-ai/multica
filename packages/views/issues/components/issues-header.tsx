@@ -9,6 +9,8 @@ import {
   CircleDot,
   Columns3,
   Filter,
+  FolderKanban,
+  FolderMinus,
   List,
   SignalHigh,
   SlidersHorizontal,
@@ -46,6 +48,7 @@ import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   SORT_OPTIONS,
@@ -88,12 +91,15 @@ function getActiveFilterCount(state: {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
 }) {
   let count = 0;
   if (state.statusFilters.length > 0) count++;
   if (state.priorityFilters.length > 0) count++;
   if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
   if (state.creatorFilters.length > 0) count++;
+  if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   return count;
 }
 
@@ -103,7 +109,9 @@ function useIssueCounts(allIssues: Issue[]) {
     const priority = new Map<string, number>();
     const assignee = new Map<string, number>();
     const creator = new Map<string, number>();
+    const project = new Map<string, number>();
     let noAssignee = 0;
+    let noProject = 0;
 
     for (const issue of allIssues) {
       status.set(issue.status, (status.get(issue.status) ?? 0) + 1);
@@ -118,9 +126,15 @@ function useIssueCounts(allIssues: Issue[]) {
 
       const cKey = `${issue.creator_type}:${issue.creator_id}`;
       creator.set(cKey, (creator.get(cKey) ?? 0) + 1);
+
+      if (!issue.project_id) {
+        noProject++;
+      } else {
+        project.set(issue.project_id, (project.get(issue.project_id) ?? 0) + 1);
+      }
     }
 
-    return { status, priority, assignee, creator, noAssignee };
+    return { status, priority, assignee, creator, noAssignee, project, noProject };
   }, [allIssues]);
 }
 
@@ -159,7 +173,7 @@ function ActorSubContent({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const query = search.toLowerCase();
+  const query = search.trim().toLowerCase();
   const filteredMembers = members.filter((m) =>
     m.name.toLowerCase().includes(query),
   );
@@ -271,6 +285,98 @@ function ActorSubContent({
 }
 
 // ---------------------------------------------------------------------------
+// Project sub-menu content
+// ---------------------------------------------------------------------------
+
+function ProjectSubContent({
+  counts,
+  selected,
+  onToggle,
+  includeNoProject,
+  onToggleNoProject,
+  noProjectCount,
+}: {
+  counts: Map<string, number>;
+  selected: string[];
+  onToggle: (projectId: string) => void;
+  includeNoProject: boolean;
+  onToggleNoProject: () => void;
+  noProjectCount: number;
+}) {
+  const [search, setSearch] = useState("");
+  const wsId = useWorkspaceId();
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const query = search.trim().toLowerCase();
+  const filtered = projects.filter((p) =>
+    p.title.toLowerCase().includes(query),
+  );
+
+  return (
+    <>
+      <div className="px-2 py-1.5 border-b border-foreground/5">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter..."
+          className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+          autoFocus
+        />
+      </div>
+
+      <div className="max-h-64 overflow-y-auto p-1">
+        {(!query || "no project".includes(query) || "unassigned".includes(query)) && (
+          <DropdownMenuCheckboxItem
+            checked={includeNoProject}
+            onCheckedChange={() => onToggleNoProject()}
+            className={FILTER_ITEM_CLASS}
+          >
+            <HoverCheck checked={includeNoProject} />
+            <FolderMinus className="size-3.5 text-muted-foreground" />
+            No project
+            {noProjectCount > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {noProjectCount}
+              </span>
+            )}
+          </DropdownMenuCheckboxItem>
+        )}
+
+        {filtered.map((p) => {
+          const checked = selected.includes(p.id);
+          const count = counts.get(p.id) ?? 0;
+          return (
+            <DropdownMenuCheckboxItem
+              key={p.id}
+              checked={checked}
+              onCheckedChange={() => onToggle(p.id)}
+              className={FILTER_ITEM_CLASS}
+            >
+              <HoverCheck checked={checked} />
+              <span className="size-3.5 flex items-center justify-center shrink-0">
+                {p.icon || <FolderKanban className="size-3.5 text-muted-foreground" />}
+              </span>
+              <span className="truncate">{p.title}</span>
+              {count > 0 && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {count}
+                </span>
+              )}
+            </DropdownMenuCheckboxItem>
+          );
+        })}
+
+        {filtered.length === 0 && search && (
+          <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+            No results
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
@@ -284,6 +390,8 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const projectFilters = useViewStore((s) => s.projectFilters);
+  const includeNoProject = useViewStore((s) => s.includeNoProject);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -298,6 +406,8 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
       assigneeFilters,
       includeNoAssignee,
       creatorFilters,
+      projectFilters,
+      includeNoProject,
     }) > 0;
 
   const sortLabel =
@@ -464,6 +574,29 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                   counts={counts.creator}
                   selected={creatorFilters}
                   onToggle={act.toggleCreatorFilter}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Project */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <FolderKanban className="size-3.5" />
+                <span className="flex-1">Project</span>
+                {(projectFilters.length > 0 || includeNoProject) && (
+                  <span className="text-xs text-primary font-medium">
+                    {projectFilters.length + (includeNoProject ? 1 : 0)}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+                <ProjectSubContent
+                  counts={counts.project}
+                  selected={projectFilters}
+                  onToggle={act.toggleProjectFilter}
+                  includeNoProject={includeNoProject}
+                  onToggleNoProject={act.toggleNoProject}
+                  noProjectCount={counts.noProject}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>

@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 WORKDIR /app
 
 # Copy workspace config and all package.json files for dependency resolution
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
 COPY apps/web/package.json apps/web/
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
@@ -23,22 +23,22 @@ RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
-COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
-COPY --from=deps /app/packages/views/node_modules ./packages/views/node_modules
-COPY --from=deps /app/packages/tsconfig/node_modules ./packages/tsconfig/node_modules
-COPY --from=deps /app/packages/eslint-config/node_modules ./packages/eslint-config/node_modules
+# Copy installed dependencies (preserves pnpm symlink structure)
+COPY --from=deps /app ./
 
 # Copy source
 COPY package.json turbo.json pnpm-workspace.yaml ./
 COPY apps/web/ apps/web/
 COPY packages/ packages/
 
+# Re-link after source overlay (fixes any symlinks overwritten by COPY)
+RUN pnpm install --frozen-lockfile --offline
+
 # Set build-time env: tells Next.js rewrites to proxy API calls to the backend service
 ARG REMOTE_API_URL=http://backend:8080
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV REMOTE_API_URL=$REMOTE_API_URL
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV STANDALONE=true
 
 # Build the web app (standalone output for minimal runtime)
@@ -55,11 +55,11 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
 # Copy standalone output (includes traced node_modules)
-COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 # Copy static files (not included in standalone)
-COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 # Copy public assets
-COPY --from=builder /app/apps/web/public ./apps/web/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
 
 USER nextjs
 

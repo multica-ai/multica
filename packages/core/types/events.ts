@@ -50,7 +50,9 @@ export type WSEventType =
   | "chat:done"
   | "project:created"
   | "project:updated"
-  | "project:deleted";
+  | "project:deleted"
+  | "pin:created"
+  | "pin:deleted";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

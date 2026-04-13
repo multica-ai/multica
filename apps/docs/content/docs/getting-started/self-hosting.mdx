@@ -13,49 +13,145 @@ Multica has three components:
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
-Additionally, each user who wants to run AI agents locally installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
+Each user who wants to run AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
 ## Prerequisites
 
-- Docker and Docker Compose (recommended), or:
-  - Go 1.26+ (to build from source)
-  - Node.js 20+ and pnpm 10.28+ (to build the frontend)
-  - PostgreSQL 17 with the pgvector extension
+- Docker and Docker Compose
 
-## Quick Start (Docker Compose)
+## Quick Install
+
+One command to set up everything:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --local
+```
+
+This clones the repo, starts all services, installs the CLI, and configures everything. Then:
+
+1. Open http://localhost:3000 — log in with any email + code **`888888`**
+2. Run `multica login` and `multica daemon start`
+
+<Callout>
+For a step-by-step setup, see below.
+</Callout>
+
+## Step-by-Step Setup
+
+### Step 1 — Start the Server
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
 cd multica
-cp .env.example .env
+make selfhost
 ```
 
-Edit `.env` with your production values (see [Configuration](#configuration) below), then:
+`make selfhost` automatically creates `.env`, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
+
+Once ready:
+
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8080
+
+<Callout>
+If you prefer running the Docker Compose steps manually: `cp .env.example .env`, edit `JWT_SECRET`, then `docker compose -f docker-compose.selfhost.yml up -d`.
+</Callout>
+
+### Step 2 — Log In
+
+Open http://localhost:3000. Enter any email address and use verification code **`888888`** to log in.
+
+<Callout>
+This master code works in all non-production environments (when `APP_ENV` is not set to `production`). For production, configure an email provider — see [Configuration](#configuration) below.
+</Callout>
+
+### Step 3 — Install CLI & Start Daemon
+
+The daemon runs on your local machine (not inside Docker). It detects installed AI agent CLIs, registers them with the server, and executes tasks.
+
+### a) Install the CLI and an AI agent
 
 ```bash
-# Start PostgreSQL
-docker compose up -d
-
-# Build the backend
-make build
-
-# Run database migrations
-DATABASE_URL="your-database-url" ./server/bin/migrate up
-
-# Start the backend server
-DATABASE_URL="your-database-url" PORT=8080 ./server/bin/server
+brew tap multica-ai/tap
+brew install multica
 ```
 
-For the frontend:
+You also need at least one AI agent CLI:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
+- [Codex](https://github.com/openai/codex) (`codex` on PATH)
+- OpenCode (`opencode` on PATH)
+- OpenClaw (`openclaw` on PATH)
+- Hermes (`hermes` on PATH)
+
+### b) One-command setup
 
 ```bash
-pnpm install
-pnpm build
-
-# Start the frontend (production mode)
-cd apps/web
-REMOTE_API_URL=http://localhost:8080 pnpm start
+multica setup --local
 ```
+
+This automatically:
+1. Configures the CLI to connect to `localhost`
+2. Opens your browser for authentication
+3. Discovers your workspaces
+4. Starts the daemon in the background
+
+Verify the daemon is running:
+
+```bash
+multica daemon status
+```
+
+<Callout>
+Alternatively, configure manually: `multica config local && multica login && multica daemon start`
+</Callout>
+
+### Step 4 — Verify & Start Using
+
+1. Open your workspace at http://localhost:3000
+2. Navigate to **Settings → Runtimes** — you should see your machine listed
+3. Go to **Settings → Agents** and create a new agent
+4. Create an issue and assign it to your agent
+
+## Stopping Services
+
+```bash
+# Stop Docker Compose services
+make selfhost-stop
+
+# Stop the local daemon
+multica daemon stop
+```
+
+## Switching to Multica Cloud
+
+If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
+
+```bash
+multica config set server_url https://api.multica.ai
+multica config set app_url https://multica.ai
+multica login
+```
+
+Or re-run the install script without `--local` — it will reconfigure the CLI automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+<Callout>
+Your local Docker services are unaffected. Stop them separately if you no longer need them.
+</Callout>
+
+## Rebuilding After Updates
+
+```bash
+git pull
+make selfhost
+```
+
+Migrations run automatically on backend startup.
+
+---
 
 ## Configuration
 
@@ -119,6 +215,21 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 
+Agent-specific overrides:
+
+| Variable | Description |
+|----------|-------------|
+| `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
+| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
+| `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
+| `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
+| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
+
 ## Database Setup
 
 Multica requires PostgreSQL 17 with the pgvector extension.
@@ -149,6 +260,36 @@ Migrations must be run before starting the server:
 
 # Or from source
 cd server && go run ./cmd/migrate up
+```
+
+## Manual Setup (Without Docker Compose)
+
+If you prefer to build and run services manually:
+
+**Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
+
+```bash
+# Start your PostgreSQL (or use: docker compose up -d postgres)
+
+# Build the backend
+make build
+
+# Run database migrations
+DATABASE_URL="your-database-url" ./server/bin/migrate up
+
+# Start the backend server
+DATABASE_URL="your-database-url" PORT=8080 JWT_SECRET="your-secret" ./server/bin/server
+```
+
+For the frontend:
+
+```bash
+pnpm install
+pnpm build
+
+# Start the frontend (production mode)
+cd apps/web
+REMOTE_API_URL=http://localhost:8080 pnpm start
 ```
 
 ## Reverse Proxy
@@ -238,39 +379,6 @@ GET /health
 ```
 
 Use this for load balancer health checks or monitoring.
-
-## Setting Up the Agent Daemon
-
-Each team member who wants to run AI agents locally needs to:
-
-1. **Install the CLI**
-
-   ```bash
-   brew tap multica-ai/tap
-   brew install multica-cli
-   ```
-
-2. **Install an AI agent CLI** — at least one of:
-   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
-   - [Codex](https://github.com/openai/codex) (`codex` on PATH)
-
-3. **Authenticate and start**
-
-   ```bash
-   # Point CLI to your server
-   export MULTICA_APP_URL=https://app.example.com
-   export MULTICA_SERVER_URL=wss://api.example.com/ws
-
-   # Login (opens browser)
-   multica login
-
-   # Start the daemon
-   multica daemon start
-   ```
-
-   > **Note:** Use `https://` and `wss://` for production deployments behind a TLS-terminating reverse proxy. For local or development deployments without TLS, use `http://` and `ws://` instead.
-
-The daemon auto-detects installed agent CLIs and registers itself with the server.
 
 ## Upgrading
 
