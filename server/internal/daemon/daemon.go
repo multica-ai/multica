@@ -484,8 +484,21 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 		return
 	}
 
+	// Forward CLAUDE_CODE_* env vars that the filter in claude.go strips from
+	// os.Environ(). Without this, child Claude Code processes lose critical
+	// config like CLAUDE_CODE_USE_BEDROCK.
+	pingEnv := map[string]string{}
+	for _, key := range []string{
+		"CLAUDE_CODE_USE_BEDROCK",
+		"ANTHROPIC_SMALL_FAST_MODEL",
+	} {
+		if v := os.Getenv(key); v != "" {
+			pingEnv[key] = v
+		}
+	}
 	backend, err := agent.New(rt.Provider, agent.Config{
 		ExecutablePath: entry.Path,
+		Env:            pingEnv,
 		Logger:         d.logger,
 	})
 	if err != nil {
@@ -940,6 +953,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+	}
+	// Forward CLAUDE_CODE_* env vars that the filter in claude.go strips from
+	// os.Environ(). Without this, child Claude Code processes lose critical
+	// config like CLAUDE_CODE_USE_BEDROCK.
+	for _, key := range []string{
+		"CLAUDE_CODE_USE_BEDROCK",
+		"ANTHROPIC_SMALL_FAST_MODEL",
+	} {
+		if v := os.Getenv(key); v != "" {
+			agentEnv[key] = v
+		}
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
