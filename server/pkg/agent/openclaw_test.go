@@ -220,8 +220,8 @@ func TestOpenclawProcessOutputReadError(t *testing.T) {
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
 	}
-	if !strings.Contains(res.errMsg, "read stderr") {
-		t.Errorf("errMsg: got %q, want it to contain 'read stderr'", res.errMsg)
+	if !strings.Contains(res.errMsg, "read stdout") {
+		t.Errorf("errMsg: got %q, want it to contain 'read stdout'", res.errMsg)
 	}
 
 	close(ch)
@@ -276,5 +276,31 @@ func TestOpenclawInt64Nil(t *testing.T) {
 	data := map[string]any{"count": "not a number"}
 	if got := openclawInt64(data, "count"); got != 0 {
 		t.Errorf("got %d, want 0", got)
+	}
+}
+
+// ── Gateway mode tests ──
+
+func TestOpenclawGatewayModeConfig(t *testing.T) {
+	t.Parallel()
+
+	// Verify GatewayMode and SessionPrefix fields are wired through Config.
+	b, err := New("openclaw", Config{
+		ExecutablePath: "/nonexistent/openclaw",
+		GatewayMode:    true,
+		SessionPrefix:  "myproject",
+	})
+	if err != nil {
+		t.Fatalf("New(openclaw) error: %v", err)
+	}
+	oc, ok := b.(*openclawBackend)
+	if !ok {
+		t.Fatalf("expected *openclawBackend, got %T", b)
+	}
+	if !oc.cfg.GatewayMode {
+		t.Error("GatewayMode not set on backend config")
+	}
+	if oc.cfg.SessionPrefix != "myproject" {
+		t.Errorf("SessionPrefix = %q, want %q", oc.cfg.SessionPrefix, "myproject")
 	}
 }

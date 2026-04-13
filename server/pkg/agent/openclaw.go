@@ -7,13 +7,25 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
-// openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
-// --output-format stream-json --yes` and reading streaming NDJSON events from
-// stdout — similar to the opencode backend.
+// openclawBackend implements Backend by spawning `openclaw agent --json
+// --session-id <id> --message <prompt>`.
+//
+// By default it runs in embedded mode (--local), which starts a blank agent
+// instance without any persistent context. When GatewayMode is enabled via
+// MULTICA_OPENCLAW_GATEWAY=1, the --local flag is omitted and the task is
+// routed through the OpenClaw Gateway, giving agents access to the full
+// workspace context (memory, skills, tools, identity).
+//
+// Session lifecycle:
+//   - Gateway mode: each task gets an isolated session derived from its workdir
+//     (multica-<task-id>). Comment-triggered follow-ups reuse PriorSessionID
+//     for continuity within the same issue thread.
+//   - Local mode: session IDs are random per-run (no persistence).
 type openclawBackend struct {
 	cfg Config
 }
@@ -35,9 +47,31 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	sessionID := opts.ResumeSessionID
 	if sessionID == "" {
-		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
+		if b.cfg.GatewayMode {
+			// Derive a stable per-task session ID from the task workdir so each
+			// Multica task gets its own isolated Gateway session. The workdir path
+			// is <workspacesRoot>/<task-id>/workdir — two levels up from workdir
+			// gives the short task ID.
+			prefix := b.cfg.SessionPrefix
+			if prefix == "" {
+				prefix = "multica"
+			}
+			if opts.Cwd != "" {
+				sessionID = prefix + "-" + filepath.Base(filepath.Dir(opts.Cwd))
+			} else {
+				sessionID = fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+			}
+		} else {
+			sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
+		}
 	}
-	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
+
+	args := []string{"agent", "--json", "--session-id", sessionID}
+	if !b.cfg.GatewayMode {
+		// Embedded mode: run a blank local agent instance.
+		args = append([]string{"agent", "--local", "--json", "--session-id", sessionID}, args[3:]...)
+		args = []string{"agent", "--local", "--json", "--session-id", sessionID}
+	}
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
@@ -49,20 +83,20 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	// openclaw writes its --json output to stderr, not stdout.
-	stderr, err := cmd.StderrPipe()
+	// openclaw agent --json writes its result JSON to stdout.
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("openclaw stderr pipe: %w", err)
+		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stdout = newLogWriter(b.cfg.Logger, "[openclaw:stdout] ")
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start openclaw: %w", err)
 	}
 
-	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model, "gateway", b.cfg.GatewayMode, "session", sessionID)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -73,7 +107,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processOutput(stderr, msgCh)
+		scanResult := b.processOutput(stdout, msgCh)
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
@@ -128,10 +162,9 @@ type openclawEventResult struct {
 	usage     TokenUsage
 }
 
-// processOutput reads the JSON output from openclaw --json stderr and returns
-// the parsed result. OpenClaw writes its JSON result to stderr, which may also
-// contain non-JSON log lines. We scan line-by-line so a final result line can
-// be recognized without waiting for the entire stderr stream to be buffered.
+// processOutput reads the JSON output from `openclaw agent --json` stdout and
+// returns the parsed result. It scans line-by-line so a final result line can
+// be recognized without waiting for the entire stream to buffer.
 func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclawEventResult {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -145,12 +178,12 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		if result, ok := tryParseOpenclawResult(line); ok {
 			return b.buildOpenclawEventResult(result, ch)
 		}
-		b.cfg.Logger.Debug("[openclaw:stderr] " + line)
+		b.cfg.Logger.Debug("[openclaw:stdout] " + line)
 		rawLines = append(rawLines, line)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stderr: %v", err)}
+		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", err)}
 	}
 
 	trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
@@ -162,7 +195,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 
 func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	// Try each '{' position until we find valid openclawResult JSON.
-	// Earlier '{' chars may appear in log/error lines (e.g. raw_params={...}).
+	// Earlier '{' chars may appear in log/info lines (e.g. raw_params={...}).
 	var result openclawResult
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '{' {
