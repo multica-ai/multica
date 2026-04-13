@@ -393,6 +393,38 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 	return items, nil
 }
 
+const getActiveTaskByChatSession = `-- name: GetActiveTaskByChatSession :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id FROM agent_task_queue
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetActiveTaskByChatSession(ctx context.Context, chatSessionID pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, getActiveTaskByChatSession, chatSessionID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+	)
+	return i, err
+}
+
 const getAgent = `-- name: GetAgent :one
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by FROM agent
 WHERE id = $1

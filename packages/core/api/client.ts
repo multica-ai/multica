@@ -450,6 +450,10 @@ export class ApiClient {
     return this.fetch(`/api/daemon/tasks/${taskId}/messages`);
   }
 
+  async getActiveChatTask(sessionId: string): Promise<{ task_id: string; status: string } | null> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/active-task`);
+  }
+
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
   }

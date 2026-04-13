@@ -175,6 +175,12 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 ORDER BY created_at DESC;
 
+-- name: GetActiveTaskByChatSession :one
+SELECT * FROM agent_task_queue
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: ListTasksByIssue :many
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1

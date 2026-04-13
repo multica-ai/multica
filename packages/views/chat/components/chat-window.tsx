@@ -100,21 +100,8 @@ export function ChatWindow() {
   const { subscribe } = useWS();
 
   useEffect(() => {
-    // Returns true if the event was for our pending task and was handled.
-    // Caller still decides whether to invalidate cache (chat:done / completed do; failed doesn't).
     const matchesPending = (taskId: string) =>
       !!pendingTaskRef.current && taskId === pendingTaskRef.current;
-
-    const finalizePending = (invalidateCache: boolean) => {
-      if (invalidateCache) {
-        const sid = useChatStore.getState().activeSessionId;
-        if (sid) {
-          qc.invalidateQueries({ queryKey: chatKeys.messages(sid) });
-        }
-      }
-      clearTimeline();
-      setPendingTask(null);
-    };
 
     const unsubMessage = subscribe("task:message", (payload) => {
       const p = payload as TaskMessagePayload;
@@ -129,22 +116,40 @@ export function ChatWindow() {
       });
     });
 
+    // chat:done carries the session ID in the payload, so we can always
+    // invalidate the correct session's cache — even if the user clicked
+    // "New Chat" (which clears activeSessionId/pendingTaskId) while the
+    // task was still running.
     const unsubDone = subscribe("chat:done", (payload) => {
       const p = payload as ChatDonePayload;
-      if (!matchesPending(p.task_id)) return;
-      finalizePending(true);
+      if (p.chat_session_id) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(p.chat_session_id) });
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+      qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+      if (matchesPending(p.task_id)) {
+        clearTimeline();
+        setPendingTask(null);
+      }
     });
 
+    // Fallback for non-chat tasks or if chat:done wasn't emitted.
     const unsubCompleted = subscribe("task:completed", (payload) => {
       const p = payload as { task_id: string };
       if (!matchesPending(p.task_id)) return;
-      finalizePending(true);
+      const sid = useChatStore.getState().activeSessionId;
+      if (sid) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sid) });
+      }
+      clearTimeline();
+      setPendingTask(null);
     });
 
     const unsubFailed = subscribe("task:failed", (payload) => {
       const p = payload as { task_id: string };
       if (!matchesPending(p.task_id)) return;
-      finalizePending(false);
+      clearTimeline();
+      setPendingTask(null);
     });
 
     return () => {
@@ -153,7 +158,41 @@ export function ChatWindow() {
       unsubCompleted();
       unsubFailed();
     };
-  }, [subscribe, addTimelineItem, clearTimeline, setPendingTask, qc]);
+  }, [subscribe, addTimelineItem, clearTimeline, setPendingTask, qc, wsId]);
+
+  // Reconnect to a running task when switching to a session that has one.
+  // This handles the case where the user clicked "New Chat" while a task was
+  // still running, then returned to the session via history.
+  useEffect(() => {
+    if (!activeSessionId || pendingTaskRef.current) return;
+
+    let cancelled = false;
+
+    api.getActiveChatTask(activeSessionId).then((activeTask) => {
+      if (cancelled || !activeTask) return;
+
+      setPendingTask(activeTask.task_id);
+
+      // Backfill timeline with already-persisted task messages.
+      api.listTaskMessages(activeTask.task_id).then((msgs) => {
+        if (cancelled) return;
+        for (const msg of msgs) {
+          addTimelineItem({
+            seq: msg.seq,
+            type: msg.type,
+            tool: msg.tool,
+            content: msg.content,
+            input: msg.input,
+            output: msg.output,
+          });
+        }
+      });
+    }).catch(() => {
+      // No active task or fetch error — nothing to reconnect to.
+    });
+
+    return () => { cancelled = true; };
+  }, [activeSessionId, setPendingTask, addTimelineItem]);
 
   const handleSend = useCallback(
     async (content: string) => {

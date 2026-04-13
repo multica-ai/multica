@@ -274,6 +274,45 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Active task for a chat session (used by the frontend to reconnect to a
+// running task after navigating away and back).
+// ---------------------------------------------------------------------------
+
+func (h *Handler) GetActiveChatTask(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+		ID:          parseUUID(sessionID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat session not found")
+		return
+	}
+	if uuidToString(session.CreatorID) != userID {
+		writeError(w, http.StatusForbidden, "not your chat session")
+		return
+	}
+
+	task, err := h.Queries.GetActiveTaskByChatSession(r.Context(), parseUUID(sessionID))
+	if err != nil {
+		// No active task — return null.
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"task_id": uuidToString(task.ID),
+		"status":  task.Status,
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Task cancellation (user-facing, with ownership check)
 // ---------------------------------------------------------------------------
 
