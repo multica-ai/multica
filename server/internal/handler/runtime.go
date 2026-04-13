@@ -135,16 +135,17 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := int32(90)
-	if l := r.URL.Query().Get("days"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 365 {
-			limit = int32(parsed)
+	days := 90
+	if d := r.URL.Query().Get("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 365 {
+			days = parsed
 		}
 	}
+	since := pgtype.Date{Time: time.Now().AddDate(0, 0, -days), Valid: true}
 
 	rows, err := h.Queries.ListRuntimeUsage(r.Context(), db.ListRuntimeUsageParams{
 		RuntimeID: parseUUID(runtimeID),
-		Limit:     limit,
+		Since:     since,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")

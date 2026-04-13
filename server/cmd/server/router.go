@@ -56,9 +56,21 @@ func allowedOrigins() []string {
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
+
+	// Initialize storage with S3 as primary, fallback to local
+	var store storage.Storage
 	s3 := storage.NewS3StorageFromEnv()
+	if s3 != nil {
+		store = s3
+	} else {
+		local := storage.NewLocalStorageFromEnv()
+		if local != nil {
+			store = local
+		}
+	}
+
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
+	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner)
 
 	r := chi.NewRouter()
 
@@ -66,10 +78,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Use(chimw.RequestID)
 	r.Use(middleware.RequestLogger)
 	r.Use(chimw.Recoverer)
+	r.Use(middleware.ContentSecurityPolicy)
+	origins := allowedOrigins()
+
+	// Share allowed origins with WebSocket origin checker.
+	realtime.SetAllowedOrigins(origins)
+
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins(),
+		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Request-ID", "X-Agent-ID", "X-Task-ID"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -87,10 +105,19 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		realtime.HandleWebSocket(hub, mc, pr, w, r)
 	})
 
+	// Local file serving (when using local storage)
+	if local, ok := store.(*storage.LocalStorage); ok {
+		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
+			local.ServeFile(w, r, file)
+		})
+	}
+
 	// Auth (public)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/logout", h.Logout)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {

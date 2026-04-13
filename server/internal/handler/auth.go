@@ -303,6 +303,11 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+
 	// Set CloudFront signed cookies for CDN access.
 	if h.CFSigner != nil {
 		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
@@ -412,7 +417,12 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user info from Google.
-	userInfoReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		slog.Error("failed to create userinfo request", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
 
 	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
@@ -480,6 +490,10 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+
 	if h.CFSigner != nil {
 		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(72 * time.Hour)) {
 			http.SetCookie(w, cookie)
@@ -491,6 +505,11 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	auth.ClearAuthCookies(w)
+	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {

@@ -1252,6 +1252,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeID:    prevIssue.AssigneeID,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
+			ProjectID:     prevIssue.ProjectID,
 		}
 
 		if req.Updates.Title != nil {
@@ -1292,6 +1293,50 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
 			} else {
 				params.DueDate = pgtype.Timestamptz{Valid: false}
+			}
+		}
+
+		if _, ok := rawUpdates["parent_issue_id"]; ok {
+			if req.Updates.ParentIssueID != nil {
+				newParentID := parseUUID(*req.Updates.ParentIssueID)
+				// Cannot set self as parent.
+				if uuidToString(newParentID) == issueID {
+					continue
+				}
+				// Validate parent exists in the same workspace.
+				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          newParentID,
+					WorkspaceID: prevIssue.WorkspaceID,
+				}); err != nil {
+					continue
+				}
+				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
+				cycleDetected := false
+				cursor := newParentID
+				for depth := 0; depth < 10; depth++ {
+					ancestor, err := h.Queries.GetIssue(r.Context(), cursor)
+					if err != nil || !ancestor.ParentIssueID.Valid {
+						break
+					}
+					if uuidToString(ancestor.ParentIssueID) == issueID {
+						cycleDetected = true
+						break
+					}
+					cursor = ancestor.ParentIssueID
+				}
+				if cycleDetected {
+					continue
+				}
+				params.ParentIssueID = newParentID
+			} else {
+				params.ParentIssueID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["project_id"]; ok {
+			if req.Updates.ProjectID != nil {
+				params.ProjectID = parseUUID(*req.Updates.ProjectID)
+			} else {
+				params.ProjectID = pgtype.UUID{Valid: false}
 			}
 		}
 
@@ -1372,10 +1417,15 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), parseUUID(issueID)); err != nil {
+		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
+		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+
+		if err := h.Queries.DeleteIssue(r.Context(), issue.ID); err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}
+
+		h.deleteS3Objects(r.Context(), attachmentURLs)
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})

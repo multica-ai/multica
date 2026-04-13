@@ -12,6 +12,7 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
     <CoreProvider
       apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
       wsUrl={process.env.NEXT_PUBLIC_WS_URL}
+      cookieAuth
       onLogin={setLoggedInCookie}
       onLogout={clearLoggedInCookie}
     >

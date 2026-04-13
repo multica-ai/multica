@@ -664,10 +664,14 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("config.json content = %q", data)
 	}
 
-	// config.toml should be copied.
+	// config.toml should be copied and have network access appended.
 	data, _ = os.ReadFile(filepath.Join(codexHome, "config.toml"))
-	if string(data) != `model = "o3"` {
-		t.Errorf("config.toml content = %q", data)
+	tomlStr := string(data)
+	if !strings.Contains(tomlStr, `model = "o3"`) {
+		t.Errorf("config.toml missing original model setting, got: %q", tomlStr)
+	}
+	if !strings.Contains(tomlStr, "network_access = true") {
+		t.Errorf("config.toml missing network_access, got: %q", tomlStr)
 	}
 
 	// instructions.md should be copied.
@@ -689,17 +693,25 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should only contain the sessions symlink (no auth.json, no config.json, etc.).
+	// Directory should contain sessions symlink + auto-generated config.toml.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
 	}
-	if len(entries) != 1 {
-		names := make([]string, len(entries))
-		for i, e := range entries {
-			names[i] = e.Name()
+	entryNames := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		entryNames[e.Name()] = true
+	}
+	if !entryNames["sessions"] {
+		t.Error("expected sessions symlink")
+	}
+	if !entryNames["config.toml"] {
+		t.Error("expected config.toml (auto-generated for network access)")
+	}
+	for name := range entryNames {
+		if name != "sessions" && name != "config.toml" {
+			t.Errorf("unexpected entry: %s", name)
 		}
-		t.Errorf("expected only sessions symlink in codex-home, got: %v", names)
 	}
 	// sessions should be a symlink to the shared sessions dir.
 	sessionsPath := filepath.Join(codexHome, "sessions")
@@ -709,6 +721,176 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 	if fi.Mode()&os.ModeSymlink == 0 {
 		t.Error("sessions should be a symlink")
+	}
+}
+
+func TestEnsureCodexNetworkAccessCreatesDefault(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	if err := ensureCodexNetworkAccess(configPath); err != nil {
+		t.Fatalf("ensureCodexNetworkAccess failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config.toml: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+		t.Error("missing sandbox_mode")
+	}
+	if !strings.Contains(s, "[sandbox_workspace_write]") {
+		t.Error("missing [sandbox_workspace_write] section")
+	}
+	if !strings.Contains(s, "network_access = true") {
+		t.Error("missing network_access = true")
+	}
+}
+
+func TestEnsureCodexNetworkAccessPreservesExisting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "o3"
+
+[sandbox_workspace_write]
+network_access = true
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	if err := ensureCodexNetworkAccess(configPath); err != nil {
+		t.Fatalf("ensureCodexNetworkAccess failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	if string(data) != existing {
+		t.Errorf("config should be unchanged, got:\n%s", data)
+	}
+}
+
+func TestEnsureCodexNetworkAccessAppendsToExisting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "o3"
+sandbox_mode = "workspace-write"
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	if err := ensureCodexNetworkAccess(configPath); err != nil {
+		t.Fatalf("ensureCodexNetworkAccess failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if !strings.Contains(s, `model = "o3"`) {
+		t.Error("lost existing model setting")
+	}
+	if !strings.Contains(s, "[sandbox_workspace_write]") {
+		t.Error("missing [sandbox_workspace_write] section")
+	}
+	if !strings.Contains(s, "network_access = true") {
+		t.Error("missing network_access = true")
+	}
+}
+
+func TestEnsureCodexNetworkAccessAddsMissingKey(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	// Section exists but without network_access.
+	existing := `[sandbox_workspace_write]
+allow_commands = ["git"]
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	if err := ensureCodexNetworkAccess(configPath); err != nil {
+		t.Fatalf("ensureCodexNetworkAccess failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if !strings.Contains(s, "network_access = true") {
+		t.Error("missing network_access = true")
+	}
+	if !strings.Contains(s, `allow_commands = ["git"]`) {
+		t.Error("lost existing allow_commands")
+	}
+}
+
+func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	// Empty shared home — no config.toml to copy.
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	// config.toml should be created with network access defaults.
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("config.toml not created: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "network_access = true") {
+		t.Error("config.toml missing network_access = true")
+	}
+	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+		t.Error("config.toml missing sandbox_mode")
+	}
+}
+
+func TestReuseRestoresCodexHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+
+	// First, Prepare a codex env.
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-reuse",
+		TaskID:         "e5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.CodexHome == "" {
+		t.Fatal("expected CodexHome to be set after Prepare")
+	}
+
+	// Reuse should restore CodexHome.
+	reused := Reuse(env.WorkDir, "codex", TaskContextForEnv{IssueID: "reuse-test"}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if reused.CodexHome == "" {
+		t.Fatal("expected CodexHome to be restored after Reuse")
+	}
+
+	// Verify config.toml has network access.
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("config.toml not found in reused CodexHome: %v", err)
+	}
+	if !strings.Contains(string(data), "network_access = true") {
+		t.Error("reused config.toml missing network_access = true")
 	}
 }
 

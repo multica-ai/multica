@@ -8,6 +8,7 @@ export class WSClient {
   private baseUrl: string;
   private token: string | null = null;
   private workspaceId: string | null = null;
+  private cookieAuth = false;
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private hasConnectedBefore = false;
@@ -15,19 +16,23 @@ export class WSClient {
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
 
-  constructor(url: string, options?: { logger?: Logger }) {
+  constructor(url: string, options?: { logger?: Logger; cookieAuth?: boolean }) {
     this.baseUrl = url;
     this.logger = options?.logger ?? noopLogger;
+    this.cookieAuth = options?.cookieAuth ?? false;
   }
 
-  setAuth(token: string, workspaceId: string) {
+  setAuth(token: string | null, workspaceId: string) {
     this.token = token;
     this.workspaceId = workspaceId;
   }
 
   connect() {
     const url = new URL(this.baseUrl);
-    if (this.token) url.searchParams.set("token", this.token);
+    // In cookie mode, the browser sends the HttpOnly cookie automatically
+    // with the WebSocket upgrade request — no token in URL needed.
+    if (!this.cookieAuth && this.token)
+      url.searchParams.set("token", this.token);
     if (this.workspaceId)
       url.searchParams.set("workspace_id", this.workspaceId);
 

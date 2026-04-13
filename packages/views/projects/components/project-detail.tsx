@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
@@ -193,6 +194,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsId = useWorkspaceId();
   const router = useNavigation();
+  const userId = useAuthStore((s) => s.user?.id);
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
@@ -201,7 +203,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
-  const { data: pinnedItems = [] } = useQuery(pinListOptions(wsId));
+  const { data: pinnedItems = [] } = useQuery({
+    ...pinListOptions(wsId, userId ?? ""),
+    enabled: !!userId,
+  });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();

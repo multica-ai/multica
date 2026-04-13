@@ -278,6 +278,28 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.27",
+        date: "2026-04-12",
+        title: "一键安装、自部署与稳定性",
+        changes: [],
+        features: [
+          "一键安装与配置——`curl | bash` 安装 CLI，`--local` 完整自部署，`multica setup` 自动检测本地服务器",
+          "自部署存储——无 S3 时本地文件存储回退，支持自定义 S3 端点（MinIO）",
+          "项目列表页支持行内编辑属性（优先级、状态、负责人）",
+        ],
+        improvements: [
+          "过期 Agent 任务自动清扫；执行卡片立即显示，无需等待首条消息",
+          "通过 CLI 上传的评论附件现在可在 UI 中显示",
+          "置顶项按用户隔离，修复侧边栏置顶操作",
+        ],
+        fixes: [
+          "Daemon API 路由和附件上传新增工作区所有权校验",
+          "Markdown 清洗器保留代码块不被 HTML 实体转义",
+          "Next.js 升级至 ^16.2.3 修复 CVE-2026-23869",
+          "OpenClaw 后端重写以匹配实际 CLI 接口",
+        ],
+      },
+      {
         version: "0.1.24",
         date: "2026-04-11",
         title: "安全加固与通知",

@@ -52,6 +52,7 @@ import type {
   ReorderPinsRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
+import { createRequestId } from "../utils";
 
 export interface ApiClientOptions {
   logger?: Logger;
@@ -94,10 +95,20 @@ export class ApiClient {
     this.workspaceId = id;
   }
 
+  private readCsrfToken(): string | null {
+    if (typeof document === "undefined") return null;
+    const match = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("multica_csrf="));
+    return match ? match.split("=")[1] ?? null : null;
+  }
+
   private authHeaders(): Record<string, string> {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    const csrf = this.readCsrfToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
     return headers;
   }
 
@@ -117,17 +128,8 @@ export class ApiClient {
     return fallback;
   }
 
-  private createRequestId(): string {
-    const randomUUID = globalThis.crypto?.randomUUID;
-    if (typeof randomUUID === "function") {
-      return randomUUID.call(globalThis.crypto).slice(0, 8);
-    }
-
-    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, 8);
-  }
-
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const rid = this.createRequestId();
+    const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
@@ -184,6 +186,10 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
+  }
+
+  async logout(): Promise<void> {
+    await this.fetch("/auth/logout", { method: "POST" });
   }
 
   async getMe(): Promise<User> {
@@ -629,7 +635,7 @@ export class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    const rid = this.createRequestId();
+    const rid = createRequestId();
     const start = Date.now();
     this.logger.info("→ POST /api/upload-file", { rid });
 

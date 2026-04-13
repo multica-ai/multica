@@ -278,6 +278,28 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.27",
+        date: "2026-04-12",
+        title: "One-Click Setup, Self-Hosting & Stability",
+        changes: [],
+        features: [
+          "One-click install & setup — `curl | bash` installs CLI, `--local` bootstraps full self-hosting, `multica setup` auto-detects local server",
+          "Self-hosted storage — local file fallback when S3 is unavailable, plus custom S3 endpoint support (MinIO)",
+          "Inline property editing (priority, status, lead) on project list page",
+        ],
+        improvements: [
+          "Stale agent tasks auto-swept; agent live card shows immediately without waiting for first message",
+          "Comment attachments uploaded via CLI now visible in the UI",
+          "Pinned items scoped per user with fixed sidebar pin action",
+        ],
+        fixes: [
+          "Workspace ownership checks on daemon API routes and attachment uploads",
+          "Markdown sanitizer preserves code blocks from HTML entity escaping",
+          "Next.js upgraded to ^16.2.3 for CVE-2026-23869",
+          "OpenClaw backend rewritten to match actual CLI interface",
+        ],
+      },
+      {
         version: "0.1.24",
         date: "2026-04-11",
         title: "Security & Notifications",

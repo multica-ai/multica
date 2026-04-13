@@ -195,6 +195,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
+  const userId = useAuthStore((s) => s.user?.id);
   const workspace = useWorkspaceStore((s) => s.workspace);
 
   // Issue navigation — read from TQ list cache
@@ -264,7 +265,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const { data: usage } = useQuery(issueUsageOptions(id));
 
   // Pinned state
-  const { data: pinnedItems = [] } = useQuery(pinListOptions(wsId));
+  const { data: pinnedItems = [] } = useQuery({
+    ...pinListOptions(wsId, userId ?? ""),
+    enabled: !!userId,
+  });
   const isPinned = pinnedItems.some((p) => p.item_type === "issue" && p.item_id === id);
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
