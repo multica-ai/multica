@@ -316,6 +316,17 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// Workspace Memory
+			r.Route("/api/memory", func(r chi.Router) {
+				r.Get("/", h.ListWorkspaceMemory)
+				r.Post("/", h.CreateWorkspaceMemory)
+				r.Route("/{memoryID}", func(r chi.Router) {
+					r.Get("/", h.GetWorkspaceMemory)
+					r.Put("/", h.UpdateWorkspaceMemory)
+					r.Delete("/", h.DeleteWorkspaceMemory)
+				})
+			})
+
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)

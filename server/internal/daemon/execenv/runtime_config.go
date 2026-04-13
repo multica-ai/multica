@@ -41,7 +41,34 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	b.WriteString("You are an agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	b.WriteString("## Execution Model\n\n")
+	b.WriteString("**You are running autonomously — there is no user available for real-time interaction.**\n\n")
+	b.WriteString("If you need clarification before proceeding:\n")
+	b.WriteString("1. Run `multica issue comment add <issue-id> --content \"...\"` to post your questions\n")
+	b.WriteString("2. Stop immediately after posting — do NOT mark the issue blocked\n")
+	b.WriteString("3. Keep the issue assigned to yourself\n")
+	b.WriteString("The user will reply in the comment thread, which will automatically re-trigger you with their answer.\n")
+	b.WriteString("**Do NOT write questions in your internal reasoning — they must be posted as a comment or the user will never see them.**\n\n")
+
+	// Inject workspace-level shared context before agent identity.
+	if ctx.WorkspaceContext != "" {
+		b.WriteString("## Workspace Context\n\n")
+		b.WriteString(ctx.WorkspaceContext)
+		b.WriteString("\n\n")
+	}
+
+	// Inject workspace memory index so agents can fetch entries on demand.
+	if len(ctx.MemoryIndex) > 0 {
+		b.WriteString("## Workspace Memory\n\n")
+		b.WriteString("The workspace has the following memory entries. Use `multica memory get <id>` to fetch the full content of any entry.\n\n")
+		b.WriteString("| ID | Name | Description |\n")
+		b.WriteString("|----|------|-------------|\n")
+		for _, m := range ctx.MemoryIndex {
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", m.ID, m.Name, m.Description)
+		}
+		b.WriteString("\n")
+	}
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
@@ -79,7 +106,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
 	b.WriteString("- `multica autopilot list [--status X] --output json` — List autopilots (scheduled/triggered agent automations) in the workspace\n")
 	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")
-	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n\n")
+	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n")
+	b.WriteString("- `multica memory list --output json` — List workspace memory entries (id, name, description)\n")
+	b.WriteString("- `multica memory get <id>` — Fetch the full content of a memory entry\n\n")
 
 	b.WriteString("### Write\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--assignee X] [--parent <issue-id>] [--status X]` — Create a new issue\n")
@@ -92,7 +121,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n")
+	b.WriteString("- `multica memory add --name \"...\" --description \"...\" --content \"...\"` — Add a new workspace memory entry\n")
+	b.WriteString("- `multica memory update <id> [--name X] [--description X] [--content X]` — Update a memory entry\n\n")
 
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
@@ -135,7 +166,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString(BuildCommentReplyInstructions(ctx.IssueID, ctx.TriggerCommentID))
 		b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 	} else {
-		// Assignment-triggered: defer to agent Skills for workflow specifics.
+		// Assignment-triggered: defer entirely to agent Skills and Identity.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
 		fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)

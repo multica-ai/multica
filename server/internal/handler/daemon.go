@@ -602,10 +602,27 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				if ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
+				}
+				if ws.Context.Valid && ws.Context.String != "" {
+					resp.WorkspaceContext = ws.Context.String
+				}
+				// Inject workspace memory index so agents can fetch entries on demand.
+				if memRows, err := h.Queries.ListWorkspaceMemoryIndex(r.Context(), issue.WorkspaceID); err == nil && len(memRows) > 0 {
+					resp.MemoryIndex = make([]MemoryIndexEntry, len(memRows))
+					for i, row := range memRows {
+						resp.MemoryIndex[i] = MemoryIndexEntry{
+							ID:          uuidToString(row.ID),
+							Name:        row.Name,
+							Description: row.Description,
+							UpdatedAt:   timestampToString(row.UpdatedAt),
+						}
+					}
 				}
 			}
 		}
