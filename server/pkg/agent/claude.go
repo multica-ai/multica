@@ -64,18 +64,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("write claude input: %w", err)
 	}
-	if err := stdin.Close(); err != nil {
-		cancel()
-		_ = cmd.Wait()
-		return nil, fmt.Errorf("close claude stdin: %w", err)
-	}
-
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
 	go func() {
+		defer stdin.Close()
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
