@@ -6,6 +6,8 @@ export const runtimeKeys = {
   list: (wsId: string) => [...runtimeKeys.all(wsId), "list"] as const,
   listMine: (wsId: string) => [...runtimeKeys.all(wsId), "list", "mine"] as const,
   latestVersion: () => ["runtimes", "latestVersion"] as const,
+  pingResult: (runtimeId: string) => ["runtimes", "ping", runtimeId] as const,
+  updateResult: (runtimeId: string) => ["runtimes", "update", runtimeId] as const,
 };
 
 export function runtimeListOptions(wsId: string, owner?: "me") {

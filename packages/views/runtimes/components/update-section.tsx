@@ -1,39 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  ArrowUpCircle,
-  Check,
-} from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, ArrowUpCircle, Check } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
-import type { RuntimeUpdateStatus } from "@multica/core/types";
-
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-let cachedLatestVersion: string | null = null;
-let cachedAt = 0;
-
-async function fetchLatestVersion(): Promise<string | null> {
-  if (cachedLatestVersion && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return cachedLatestVersion;
-  }
-  try {
-    const resp = await fetch(GITHUB_RELEASES_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    cachedLatestVersion = data.tag_name ?? null;
-    cachedAt = Date.now();
-    return cachedLatestVersion;
-  } catch {
-    return null;
-  }
-}
+import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import { latestCliVersionOptions, runtimeKeys } from "@multica/core/runtimes/queries";
+import type { RuntimeUpdate, RuntimeUpdateStatus } from "@multica/core/types";
 
 function stripV(v: string): string {
   return v.replace(/^v/, "");
@@ -85,67 +55,19 @@ export function UpdateSection({
   currentVersion,
   isOnline,
 }: UpdateSectionProps) {
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
-  const [error, setError] = useState("");
-  const [output, setOutput] = useState("");
-  const [updating, setUpdating] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const qc = useQueryClient();
+  const { data: latestVersion } = useQuery(latestCliVersionOptions());
+  const cachedUpdate = qc.getQueryData<RuntimeUpdate>(runtimeKeys.updateResult(runtimeId));
+  const updateMutation = useUpdateRuntime(runtimeId);
 
-  const cleanup = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
+  const status = updateMutation.isPending ? "pending" : (cachedUpdate?.status ?? null);
+  const error = cachedUpdate?.error ?? "";
+  const output = cachedUpdate?.output ?? "";
+  const updating = updateMutation.isPending;
 
-  useEffect(() => cleanup, [cleanup]);
-
-  // Fetch latest version on mount.
-  useEffect(() => {
-    fetchLatestVersion().then(setLatestVersion);
-  }, []);
-
-  const handleUpdate = async () => {
+  const handleUpdate = () => {
     if (!latestVersion) return;
-    cleanup();
-    setUpdating(true);
-    setStatus("pending");
-    setError("");
-    setOutput("");
-
-    try {
-      const update = await api.initiateUpdate(runtimeId, latestVersion);
-
-      pollRef.current = setInterval(async () => {
-        try {
-          const result = await api.getUpdateResult(runtimeId, update.id);
-          setStatus(result.status as RuntimeUpdateStatus);
-
-          if (result.status === "completed") {
-            setOutput(result.output ?? "");
-            setUpdating(false);
-            cleanup();
-            // Auto-clear status after a few seconds so the UI
-            // refreshes to show the new version from the re-fetched runtime data.
-            setTimeout(() => setStatus(null), 5000);
-          } else if (
-            result.status === "failed" ||
-            result.status === "timeout"
-          ) {
-            setError(result.error ?? "Unknown error");
-            setUpdating(false);
-            cleanup();
-          }
-        } catch {
-          // ignore poll errors
-        }
-      }, 2000);
-    } catch {
-      setStatus("failed");
-      setError("Failed to initiate update");
-      setUpdating(false);
-    }
+    updateMutation.mutate(latestVersion);
   };
 
   const hasUpdate =
