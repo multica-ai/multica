@@ -161,9 +161,11 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filename := id.String() + path.Ext(header.Filename)
-	key := filename
+	var key string
 	if workspaceID != "" {
 		key = "workspaces/" + workspaceID + "/" + filename
+	} else {
+		key = "users/" + userID + "/" + filename
 	}
 
 	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
