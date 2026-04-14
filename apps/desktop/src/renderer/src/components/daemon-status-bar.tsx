@@ -83,6 +83,9 @@ export function DaemonStatusBar() {
               )}
             </Button>
           )}
+          {status.state === "installing_cli" && (
+            <Activity className="size-3.5 shrink-0 animate-pulse text-muted-foreground" />
+          )}
         </button>
       </div>
 

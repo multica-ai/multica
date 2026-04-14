@@ -1,4 +1,10 @@
-export type DaemonState = "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
+export type DaemonState =
+  | "running"
+  | "stopped"
+  | "starting"
+  | "stopping"
+  | "installing_cli"
+  | "cli_not_found";
 
 export interface DaemonStatus {
   state: DaemonState;
@@ -8,6 +14,10 @@ export interface DaemonStatus {
   deviceName?: string;
   agents?: string[];
   workspaceCount?: number;
+  /** CLI profile this daemon belongs to. Empty string means the default profile. */
+  profile?: string;
+  /** Backend URL the daemon connects to. */
+  serverUrl?: string;
 }
 
 export interface DaemonPrefs {
@@ -20,7 +30,8 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   stopped: "bg-muted-foreground/40",
   starting: "bg-amber-500 animate-pulse",
   stopping: "bg-amber-500 animate-pulse",
-  cli_not_found: "bg-muted-foreground/20",
+  installing_cli: "bg-sky-500 animate-pulse",
+  cli_not_found: "bg-red-500",
 };
 
 export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
@@ -28,7 +39,8 @@ export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
   stopped: "Stopped",
   starting: "Starting…",
   stopping: "Stopping…",
-  cli_not_found: "CLI Not Found",
+  installing_cli: "Setting up…",
+  cli_not_found: "Setup Failed",
 };
 
 export function formatUptime(uptime?: string): string {

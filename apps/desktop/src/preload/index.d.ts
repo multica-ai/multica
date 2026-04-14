@@ -8,13 +8,15 @@ interface DesktopAPI {
 }
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
+  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
   pid?: number;
   uptime?: string;
   daemonId?: string;
   deviceName?: string;
   agents?: string[];
   workspaceCount?: number;
+  profile?: string;
+  serverUrl?: string;
 }
 
 interface DaemonPrefs {
@@ -28,12 +30,20 @@ interface DaemonAPI {
   restart: () => Promise<{ success: boolean; error?: string }>;
   getStatus: () => Promise<DaemonStatus>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
+  setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  listWatched: () => Promise<{
+    watched: Array<{ id: string; name: string; runtime_count?: number }>;
+    unwatched: string[];
+  }>;
+  watchWorkspace: (id: string, name: string) => Promise<void>;
+  unwatchWorkspace: (id: string) => Promise<void>;
   isCliInstalled: () => Promise<boolean>;
   getPrefs: () => Promise<DaemonPrefs>;
   setPrefs: (prefs: Partial<DaemonPrefs>) => Promise<DaemonPrefs>;
   autoStart: () => Promise<void>;
+  retryInstall: () => Promise<void>;
   startLogStream: () => void;
   stopLogStream: () => void;
   onLogLine: (callback: (line: string) => void) => () => void;

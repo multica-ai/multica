@@ -5,98 +5,371 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
+import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 
-const HEALTH_PORT = 19514;
-const HEALTH_URL = `http://127.0.0.1:${HEALTH_PORT}/health`;
+const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
-const CONFIG_PATH = join(homedir(), ".multica", "config.json");
-const LOG_PATH = join(homedir(), ".multica", "daemon.log");
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
 const LOG_TAIL_RETRY_MS = 2_000;
 const LOG_TAIL_MAX_RETRIES = 5;
 
 const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 
+interface ActiveProfile {
+  name: string; // "" = default profile
+  port: number;
+}
+
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 let logTailProcess: ChildProcess | null = null;
-let currentState: DaemonStatus["state"] = "stopped";
+let currentState: DaemonStatus["state"] = "installing_cli";
 let getMainWindow: () => BrowserWindow | null = () => null;
 let operationInProgress = false;
 let cachedCliBinary: string | null | undefined = undefined;
+let cliResolvePromise: Promise<string | null> | null = null;
+let targetApiBaseUrl: string | null = null;
+let activeProfile: ActiveProfile | null = null;
+
+// Keep the Go impl in sync: server/cmd/multica/cmd_daemon.go healthPortForProfile.
+function healthPortForProfile(profile: string): number {
+  if (!profile) return DEFAULT_HEALTH_PORT;
+  let sum = 0;
+  for (const b of Buffer.from(profile, "utf-8")) sum += b;
+  return DEFAULT_HEALTH_PORT + 1 + (sum % 1000);
+}
+
+function profileDir(profile: string): string {
+  return profile
+    ? join(homedir(), ".multica", "profiles", profile)
+    : join(homedir(), ".multica");
+}
+
+function profileConfigPath(profile: string): string {
+  return join(profileDir(profile), "config.json");
+}
+
+function profileLogPath(profile: string): string {
+  return join(profileDir(profile), "daemon.log");
+}
+
+function normalizeUrl(u: string): string {
+  if (!u) return "";
+  try {
+    const parsed = new URL(u);
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+  } catch {
+    return u.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+function urlsMatch(a: string, b: string): boolean {
+  const na = normalizeUrl(a);
+  const nb = normalizeUrl(b);
+  return na.length > 0 && na === nb;
+}
 
 function sendStatus(status: DaemonStatus): void {
   const win = getMainWindow();
   win?.webContents.send("daemon:status", status);
 }
 
-async function fetchHealth(): Promise<DaemonStatus> {
+interface HealthPayload {
+  status?: string;
+  pid?: number;
+  uptime?: string;
+  daemon_id?: string;
+  device_name?: string;
+  server_url?: string;
+  agents?: string[];
+  workspaces?: unknown[];
+}
+
+async function fetchHealthAtPort(
+  port: number,
+): Promise<HealthPayload | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2_000);
-    const res = await fetch(HEALTH_URL, { signal: controller.signal });
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
+      signal: controller.signal,
+    });
     clearTimeout(timeout);
-
-    if (!res.ok) return { state: "stopped" };
-    const data = await res.json();
-    if (data.status === "running") {
-      return {
-        state: "running",
-        pid: data.pid,
-        uptime: data.uptime,
-        daemonId: data.daemon_id,
-        deviceName: data.device_name,
-        agents: data.agents ?? [],
-        workspaceCount: Array.isArray(data.workspaces)
-          ? data.workspaces.length
-          : 0,
-      };
-    }
-    return { state: "stopped" };
+    if (!res.ok) return null;
+    return (await res.json()) as HealthPayload;
   } catch {
-    return { state: currentState === "starting" ? "starting" : "stopped" };
+    return null;
   }
 }
 
-function findCliBinary(): string | null {
-  if (cachedCliBinary !== undefined) return cachedCliBinary;
+// Desktop owns a dedicated CLI profile named after the target API host, so it
+// never reads or writes the user's hand-configured profiles. Profile dir:
+//   ~/.multica/profiles/desktop-<host>/
+function deriveProfileName(targetUrl: string): string {
+  try {
+    const url = new URL(targetUrl);
+    const host = url.host.replace(/:/g, "-").toLowerCase();
+    return `desktop-${host}`;
+  } catch {
+    return "desktop";
+  }
+}
 
-  const candidates =
-    process.platform === "win32"
-      ? ["multica.exe"]
-      : ["multica"];
+async function readProfileConfig(
+  profile: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const raw = await readFile(profileConfigPath(profile), "utf-8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
+async function writeProfileConfig(
+  profile: string,
+  cfg: Record<string, unknown>,
+): Promise<void> {
+  await mkdir(profileDir(profile), { recursive: true });
+  await writeFile(
+    profileConfigPath(profile),
+    JSON.stringify(cfg, null, 2),
+    "utf-8",
+  );
+}
+
+/**
+ * Returns the Desktop-owned profile for the current target API URL. Creates
+ * the profile's config.json on demand with `server_url` pinned to the target.
+ *
+ * This function never falls back to the default profile, and never touches a
+ * profile whose name doesn't start with `desktop-`, so the user's manually
+ * configured CLI profiles are untouched.
+ */
+async function resolveActiveProfile(): Promise<ActiveProfile> {
+  const target = targetApiBaseUrl;
+  if (!target) return { name: "", port: DEFAULT_HEALTH_PORT };
+
+  const name = deriveProfileName(target);
+  const cfg = await readProfileConfig(name);
+
+  if (cfg.server_url !== target) {
+    cfg.server_url = target;
+    await writeProfileConfig(name, cfg);
+    console.log(`[daemon] initialized profile "${name}" → ${target}`);
+  }
+
+  return { name, port: healthPortForProfile(name) };
+}
+
+async function ensureActiveProfile(): Promise<ActiveProfile> {
+  if (activeProfile) return activeProfile;
+  activeProfile = await resolveActiveProfile();
+  return activeProfile;
+}
+
+function invalidateActiveProfile(): void {
+  activeProfile = null;
+}
+
+async function fetchHealth(): Promise<DaemonStatus> {
+  // While the CLI is being downloaded or has permanently failed, short-circuit
+  // polling — there's nothing to probe yet and /health calls would just return
+  // "stopped", which would overwrite the correct setup state in the UI.
+  if (currentState === "installing_cli" || currentState === "cli_not_found") {
+    return { state: currentState };
+  }
+
+  const active = await ensureActiveProfile();
+  const data = await fetchHealthAtPort(active.port);
+
+  if (!data || data.status !== "running") {
+    return {
+      state: currentState === "starting" ? "starting" : "stopped",
+      profile: active.name,
+    };
+  }
+
+  // Safety: if we have a target URL and the daemon on our port reports a
+  // different server_url, it's not "our" daemon — drop it and re-resolve.
+  if (
+    targetApiBaseUrl &&
+    data.server_url &&
+    !urlsMatch(data.server_url, targetApiBaseUrl)
+  ) {
+    invalidateActiveProfile();
+    return { state: "stopped" };
+  }
+
+  return {
+    state: "running",
+    pid: data.pid,
+    uptime: data.uptime,
+    daemonId: data.daemon_id,
+    deviceName: data.device_name,
+    agents: data.agents ?? [],
+    workspaceCount: Array.isArray(data.workspaces)
+      ? data.workspaces.length
+      : 0,
+    profile: active.name,
+    serverUrl: data.server_url,
+  };
+}
+
+function findCliOnPath(): string | null {
+  const candidates = process.platform === "win32" ? ["multica.exe"] : ["multica"];
+  const paths = (process.env["PATH"] ?? "").split(
+    process.platform === "win32" ? ";" : ":",
+  );
+  if (process.platform === "darwin") {
+    paths.push("/opt/homebrew/bin", "/usr/local/bin");
+  }
   for (const name of candidates) {
-    const paths = (process.env["PATH"] ?? "").split(
-      process.platform === "win32" ? ";" : ":",
-    );
-    if (process.platform === "darwin") {
-      paths.push("/opt/homebrew/bin", "/usr/local/bin");
-    }
     for (const dir of paths) {
       const full = join(dir, name);
-      if (existsSync(full)) {
-        cachedCliBinary = full;
-        return full;
-      }
+      if (existsSync(full)) return full;
     }
   }
-  cachedCliBinary = null;
   return null;
 }
 
-async function syncToken(token: string): Promise<void> {
-  const dir = join(homedir(), ".multica");
-  await mkdir(dir, { recursive: true });
+/**
+ * Returns the path to the CLI binary bundled inside the Desktop app.
+ *
+ * - Dev (`electron-vite dev`): `app.getAppPath()` → `apps/desktop`, resolving
+ *   to `apps/desktop/resources/bin/multica`. `bundle-cli.mjs` populates this
+ *   before dev starts, so iterating on Go changes is "make build → restart".
+ * - Packaged: `app.getAppPath()` → `<Multica.app>/Contents/Resources/app.asar`.
+ *   electron-builder's `asarUnpack: resources/**` extracts the binary to
+ *   `app.asar.unpacked/`, so we swap the path segment to execute it.
+ */
+function bundledCliPath(): string {
+  const binName = process.platform === "win32" ? "multica.exe" : "multica";
+  return join(app.getAppPath(), "resources", "bin", binName).replace(
+    "app.asar",
+    "app.asar.unpacked",
+  );
+}
 
-  let config: Record<string, unknown> = {};
+/**
+ * Returns a usable `multica` binary path. Priority:
+ *   1. Cached result from a previous successful resolve.
+ *   2. Bundled binary shipped with the Desktop app (`bundle-cli.mjs`).
+ *   3. Managed binary already installed in userData (`managedCliPath`).
+ *   4. Download + install latest release into userData.
+ *   5. `multica` on PATH (dev convenience / user-installed via brew).
+ * Returns `null` only when all of the above fail.
+ *
+ * Bundled is preferred so Desktop iterates in lockstep with Go changes in
+ * the same repo — avoids the 404 / stale-API problem when the Desktop's
+ * TS side is ahead of the last published CLI release.
+ *
+ * This function is idempotent and safe to call concurrently — in-flight
+ * installs are de-duplicated via `cliResolvePromise`.
+ */
+async function resolveCliBinary(): Promise<string | null> {
+  if (cachedCliBinary !== undefined) return cachedCliBinary;
+  if (cliResolvePromise) return cliResolvePromise;
+
+  cliResolvePromise = (async () => {
+    const bundled = bundledCliPath();
+    if (existsSync(bundled)) {
+      console.log(`[daemon] using bundled CLI at ${bundled}`);
+      cachedCliBinary = bundled;
+      return bundled;
+    }
+
+    const managed = managedCliPath();
+    if (existsSync(managed)) {
+      cachedCliBinary = managed;
+      return managed;
+    }
+
+    try {
+      const installed = await ensureManagedCli();
+      cachedCliBinary = installed;
+      return installed;
+    } catch (err) {
+      console.warn("[daemon] CLI auto-install failed, falling back to PATH:", err);
+      const onPath = findCliOnPath();
+      cachedCliBinary = onPath;
+      return onPath;
+    }
+  })();
+
   try {
-    const raw = await readFile(CONFIG_PATH, "utf-8");
-    config = JSON.parse(raw);
-  } catch {
-    // File doesn't exist or invalid JSON — start fresh
+    return await cliResolvePromise;
+  } finally {
+    cliResolvePromise = null;
   }
-  config.token = token;
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+}
+
+/**
+ * Exchange the user's JWT for a long-lived PAT via POST /api/tokens. The
+ * daemon needs a PAT (or `mul_` / `mdt_` token) because JWTs expire in 30
+ * days and signatures are tied to a specific backend instance.
+ */
+async function mintPat(jwt: string): Promise<string> {
+  if (!targetApiBaseUrl) {
+    throw new Error("mint PAT: target API URL not set");
+  }
+  const url = `${targetApiBaseUrl.replace(/\/+$/, "")}/api/tokens`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${jwt}`,
+    },
+    // Omit expires_in_days → server treats as null → non-expiring PAT.
+    body: JSON.stringify({ name: "Multica Desktop" }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`mint PAT failed: ${res.status} ${res.statusText} ${body}`);
+  }
+  const data = (await res.json()) as { token?: unknown };
+  if (typeof data.token !== "string" || !data.token.startsWith("mul_")) {
+    throw new Error("mint PAT: response missing token");
+  }
+  return data.token;
+}
+
+/**
+ * Ensure the active profile's config.json has a usable token for the daemon.
+ *
+ * - Input from the renderer is the user's JWT (from localStorage).
+ * - If the profile already has a cached PAT (`mul_...`), keep it — minting a
+ *   fresh one on every launch would accumulate garbage in the user's tokens
+ *   page.
+ * - Otherwise call POST /api/tokens with the JWT to get a fresh PAT, write it
+ *   to config, and use that.
+ * - If the caller happens to pass a PAT directly, write it through.
+ */
+async function syncToken(tokenFromRenderer: string): Promise<void> {
+  const active = await ensureActiveProfile();
+  const config = await readProfileConfig(active.name);
+
+  let finalToken: string;
+  if (tokenFromRenderer.startsWith("mul_")) {
+    finalToken = tokenFromRenderer;
+  } else if (
+    typeof config.token === "string" &&
+    config.token.startsWith("mul_")
+  ) {
+    finalToken = config.token;
+  } else {
+    try {
+      finalToken = await mintPat(tokenFromRenderer);
+      console.log(`[daemon] minted PAT for profile "${active.name}"`);
+    } catch (err) {
+      console.error("[daemon] failed to mint PAT:", err);
+      throw err;
+    }
+  }
+
+  config.token = finalToken;
+  if (targetApiBaseUrl) config.server_url = targetApiBaseUrl;
+  await writeProfileConfig(active.name, config);
 }
 
 async function loadPrefs(): Promise<DaemonPrefs> {
@@ -116,13 +389,83 @@ async function savePrefs(prefs: DaemonPrefs): Promise<void> {
 }
 
 async function clearToken(): Promise<void> {
+  const active = await ensureActiveProfile();
+  const config = await readProfileConfig(active.name);
+  if (!("token" in config)) return;
+  delete config.token;
+  await writeProfileConfig(active.name, config);
+}
+
+interface WatchedWorkspace {
+  id: string;
+  name: string;
+  runtime_count?: number;
+}
+
+interface WatchListResponse {
+  watched: WatchedWorkspace[];
+  unwatched: string[];
+}
+
+async function daemonFetch(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const active = await ensureActiveProfile();
+  const url = `http://127.0.0.1:${active.port}${path}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const raw = await readFile(CONFIG_PATH, "utf-8");
-    const config = JSON.parse(raw);
-    delete config.token;
-    await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
-  } catch {
-    // Ignore — file doesn't exist
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function listWatchedWorkspaces(): Promise<WatchListResponse> {
+  const empty: WatchListResponse = { watched: [], unwatched: [] };
+  try {
+    const res = await daemonFetch("/watch");
+    if (!res.ok) {
+      // Older daemon versions don't have /watch. Treat as "nothing watched
+      // yet" so the UI renders cleanly; the user can take manual action.
+      if (res.status === 404) return empty;
+      throw new Error(`list /watch failed: ${res.status} ${res.statusText}`);
+    }
+    const data = (await res.json()) as WatchListResponse;
+    return {
+      watched: Array.isArray(data.watched) ? data.watched : [],
+      unwatched: Array.isArray(data.unwatched) ? data.unwatched : [],
+    };
+  } catch (err) {
+    // Network errors (ECONNREFUSED when daemon is still starting, etc.) are
+    // expected during startup races — return empty instead of throwing so
+    // we don't spam the main-process error log on every poll.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[daemon] list /watch unreachable: ${msg}`);
+    return empty;
+  }
+}
+
+async function watchWorkspace(id: string, name: string): Promise<void> {
+  const res = await daemonFetch("/watch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: id, name }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`watch failed: ${res.status} ${body}`);
+  }
+}
+
+async function unwatchWorkspace(id: string): Promise<void> {
+  const res = await daemonFetch(`/watch/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`unwatch failed: ${res.status} ${body}`);
   }
 }
 
@@ -138,18 +481,28 @@ async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false;
   }
 }
 
-async function startDaemon(): Promise<{ success: boolean; error?: string }> {
-  const bin = findCliBinary();
-  if (!bin) return { success: false, error: "multica CLI not found in PATH" };
+function profileArgs(active: ActiveProfile): string[] {
+  return active.name ? ["--profile", active.name] : [];
+}
 
-  const status = await fetchHealth();
-  if (status.state === "running") return { success: true };
+async function startDaemon(): Promise<{ success: boolean; error?: string }> {
+  const bin = await resolveCliBinary();
+  if (!bin) return { success: false, error: "multica CLI is not installed" };
+
+  const active = await ensureActiveProfile();
+  const existing = await fetchHealthAtPort(active.port);
+  if (existing?.status === "running") {
+    pollOnce();
+    return { success: true };
+  }
 
   currentState = "starting";
   sendStatus({ state: "starting" });
 
+  const args = ["daemon", "start", ...profileArgs(active)];
+
   return new Promise((resolve) => {
-    execFile(bin, ["daemon", "start"], { timeout: 20_000 }, (err) => {
+    execFile(bin, args, { timeout: 20_000 }, (err) => {
       if (err) {
         currentState = "stopped";
         sendStatus({ state: "stopped" });
@@ -164,14 +517,17 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
 }
 
 async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
-  const bin = findCliBinary();
-  if (!bin) return { success: false, error: "multica CLI not found in PATH" };
+  const bin = await resolveCliBinary();
+  if (!bin) return { success: false, error: "multica CLI is not installed" };
 
+  const active = await ensureActiveProfile();
   currentState = "stopping";
   sendStatus({ state: "stopping" });
 
+  const args = ["daemon", "stop", ...profileArgs(active)];
+
   return new Promise((resolve) => {
-    execFile(bin, ["daemon", "stop"], { timeout: 15_000 }, (err) => {
+    execFile(bin, args, { timeout: 15_000 }, (err) => {
       if (err) {
         resolve({ success: false, error: err.message });
       } else {
@@ -201,6 +557,23 @@ function startPolling(): void {
   statusPollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
 }
 
+/**
+ * Ensures the CLI binary is available, then transitions into the normal
+ * stopped/running state machine. Called once at startup and again on
+ * user-triggered `daemon:retry-install`.
+ */
+async function bootstrapCli(): Promise<void> {
+  const bin = await resolveCliBinary();
+  if (!bin) {
+    currentState = "cli_not_found";
+    sendStatus({ state: "cli_not_found" });
+    return;
+  }
+  currentState = "stopped";
+  sendStatus({ state: "stopped" });
+  startPolling();
+}
+
 function stopPolling(): void {
   if (statusPollTimer) {
     clearInterval(statusPollTimer);
@@ -211,22 +584,25 @@ function stopPolling(): void {
 function startLogTail(win: BrowserWindow, retryCount = 0): void {
   stopLogTail();
 
-  if (!existsSync(LOG_PATH)) {
-    if (retryCount < LOG_TAIL_MAX_RETRIES) {
-      setTimeout(() => startLogTail(win, retryCount + 1), LOG_TAIL_RETRY_MS);
+  ensureActiveProfile().then((active) => {
+    const logPath = profileLogPath(active.name);
+    if (!existsSync(logPath)) {
+      if (retryCount < LOG_TAIL_MAX_RETRIES) {
+        setTimeout(() => startLogTail(win, retryCount + 1), LOG_TAIL_RETRY_MS);
+      }
+      return;
     }
-    return;
-  }
 
-  logTailProcess = spawn("tail", ["-n", "200", "-f", LOG_PATH]);
-  logTailProcess.stdout?.on("data", (chunk: Buffer) => {
-    const lines = chunk.toString("utf-8").split("\n").filter(Boolean);
-    for (const line of lines) {
-      win.webContents.send("daemon:log-line", line);
-    }
-  });
-  logTailProcess.on("error", () => {
-    // Ignore tail errors
+    logTailProcess = spawn("tail", ["-n", "200", "-f", logPath]);
+    logTailProcess.stdout?.on("data", (chunk: Buffer) => {
+      const lines = chunk.toString("utf-8").split("\n").filter(Boolean);
+      for (const line of lines) {
+        win.webContents.send("daemon:log-line", line);
+      }
+    });
+    logTailProcess.on("error", () => {
+      // Ignore tail errors
+    });
   });
 }
 
@@ -242,6 +618,15 @@ export function setupDaemonManager(
 ): void {
   getMainWindow = windowGetter;
 
+  ipcMain.handle("daemon:set-target-api-url", async (_e, url: string) => {
+    const normalized = url || null;
+    if (targetApiBaseUrl !== normalized) {
+      console.log(`[daemon] target API URL set to ${normalized ?? "(none)"}`);
+      targetApiBaseUrl = normalized;
+      invalidateActiveProfile();
+      await pollOnce();
+    }
+  });
   ipcMain.handle("daemon:start", () => withGuard(() => startDaemon()));
   ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
   ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
@@ -250,7 +635,23 @@ export function setupDaemonManager(
     syncToken(token),
   );
   ipcMain.handle("daemon:clear-token", () => clearToken());
-  ipcMain.handle("daemon:is-cli-installed", () => findCliBinary() !== null);
+  ipcMain.handle("daemon:list-watched", () => listWatchedWorkspaces());
+  ipcMain.handle(
+    "daemon:watch-workspace",
+    (_event, id: string, name: string) => watchWorkspace(id, name),
+  );
+  ipcMain.handle("daemon:unwatch-workspace", (_event, id: string) =>
+    unwatchWorkspace(id),
+  );
+  ipcMain.handle("daemon:is-cli-installed", async () => {
+    const bin = await resolveCliBinary();
+    return bin !== null;
+  });
+  ipcMain.handle("daemon:retry-install", async () => {
+    cachedCliBinary = undefined;
+    cliResolvePromise = null;
+    await bootstrapCli();
+  });
   ipcMain.handle("daemon:get-prefs", () => loadPrefs());
   ipcMain.handle(
     "daemon:set-prefs",
@@ -263,7 +664,7 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:auto-start", async () => {
     const prefs = await loadPrefs();
     if (!prefs.autoStart) return;
-    const bin = findCliBinary();
+    const bin = await resolveCliBinary();
     if (!bin) return;
     const health = await fetchHealth();
     if (health.state === "running") return;
@@ -279,7 +680,11 @@ export function setupDaemonManager(
     stopLogTail();
   });
 
-  startPolling();
+  // First-run CLI install kicks off here. Status bar shows "Setting up…"
+  // until the managed binary is on disk (instant on subsequent launches).
+  currentState = "installing_cli";
+  sendStatus({ state: "installing_cli" });
+  void bootstrapCli();
 
   let isQuitting = false;
   app.on("before-quit", (event) => {

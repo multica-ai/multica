@@ -6,8 +6,11 @@ import {
   Server,
   ChevronDown,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { workspaceListOptions } from "@multica/core/workspace";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -64,6 +67,46 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
+
+  // Watched workspaces — populated from the daemon when the panel opens and
+  // refreshed after every toggle so the checkbox state reflects reality.
+  const { data: allWorkspaces } = useQuery({
+    ...workspaceListOptions(),
+    enabled: open,
+  });
+  const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set());
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const refreshWatched = useCallback(async () => {
+    const state = await window.daemonAPI.listWatched().catch(() => null);
+    if (state) setWatchedIds(new Set(state.watched.map((w) => w.id)));
+  }, []);
+
+  useEffect(() => {
+    if (open && status.state === "running") void refreshWatched();
+  }, [open, status.state, refreshWatched]);
+
+  const handleToggleWatch = useCallback(
+    async (id: string, name: string, nextChecked: boolean) => {
+      setTogglingId(id);
+      try {
+        if (nextChecked) {
+          await window.daemonAPI.watchWorkspace(id, name);
+        } else {
+          await window.daemonAPI.unwatchWorkspace(id);
+        }
+        await refreshWatched();
+      } catch (err) {
+        toast.error(
+          nextChecked ? "Failed to watch workspace" : "Failed to unwatch workspace",
+          { description: err instanceof Error ? err.message : String(err) },
+        );
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [refreshWatched],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -154,6 +197,17 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
               }
             />
             {status.uptime && <InfoRow label="Uptime" value={status.uptime} />}
+            <InfoRow label="Profile" value={status.profile || "default"} />
+            {status.serverUrl && (
+              <InfoRow
+                label="Server"
+                value={
+                  <span className="font-mono text-xs" title={status.serverUrl}>
+                    {status.serverUrl}
+                  </span>
+                }
+              />
+            )}
             {status.agents && status.agents.length > 0 && (
               <InfoRow label="Agents" value={status.agents.join(", ")} />
             )}
@@ -176,39 +230,97 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2">
-            {status.state === "stopped" || status.state === "cli_not_found" ? (
+          {status.state === "installing_cli" ? (
+            <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+              Setting up the local runtime… this only happens the first time.
+            </div>
+          ) : status.state === "cli_not_found" ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+              <p className="text-sm">
+                Couldn't download the local runtime. Check your network
+                connection and try again.
+              </p>
               <Button
                 size="sm"
-                onClick={handleStart}
-                disabled={actionLoading || status.state === "cli_not_found"}
+                variant="outline"
+                onClick={async () => {
+                  setActionLoading(true);
+                  try {
+                    await window.daemonAPI.retryInstall();
+                  } finally {
+                    setActionLoading(false);
+                  }
+                }}
+                disabled={actionLoading}
               >
-                <Play className="size-3.5 mr-1.5" />
-                Start
+                <RotateCw className="size-3.5 mr-1.5" />
+                Retry
               </Button>
-            ) : (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleStop}
-                  disabled={actionLoading || isTransitioning}
-                >
-                  <Square className="size-3.5 mr-1.5" />
-                  Stop
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              {status.state === "stopped" ? (
+                <Button size="sm" onClick={handleStart} disabled={actionLoading}>
+                  <Play className="size-3.5 mr-1.5" />
+                  Start
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRestart}
-                  disabled={actionLoading || isTransitioning}
-                >
-                  <RotateCw className="size-3.5 mr-1.5" />
-                  Restart
-                </Button>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleStop}
+                    disabled={actionLoading || isTransitioning}
+                  >
+                    <Square className="size-3.5 mr-1.5" />
+                    Stop
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRestart}
+                    disabled={actionLoading || isTransitioning}
+                  >
+                    <RotateCw className="size-3.5 mr-1.5" />
+                    Restart
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Watched workspaces */}
+          {status.state === "running" && allWorkspaces && allWorkspaces.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium">Watched Workspaces</h3>
+              <div className="rounded-lg border divide-y">
+                {allWorkspaces.map((ws) => {
+                  const checked = watchedIds.has(ws.id);
+                  const disabled = togglingId === ws.id;
+                  return (
+                    <label
+                      key={ws.id}
+                      className={cn(
+                        "flex items-center gap-2.5 px-3 py-2",
+                        disabled
+                          ? "opacity-60 cursor-wait"
+                          : "cursor-pointer hover:bg-muted/40",
+                      )}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        disabled={disabled}
+                        onCheckedChange={(next) =>
+                          handleToggleWatch(ws.id, ws.name, next === true)
+                        }
+                      />
+                      <span className="truncate text-sm">{ws.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Logs */}
           <div className="space-y-2">

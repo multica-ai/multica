@@ -16,13 +16,15 @@ const desktopAPI = {
 };
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
+  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
   pid?: number;
   uptime?: string;
   daemonId?: string;
   deviceName?: string;
   agents?: string[];
   workspaceCount?: number;
+  profile?: string;
+  serverUrl?: string;
 }
 
 const daemonAPI = {
@@ -39,10 +41,20 @@ const daemonAPI = {
     ipcRenderer.on("daemon:status", handler);
     return () => ipcRenderer.removeListener("daemon:status", handler);
   },
+  setTargetApiUrl: (url: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:set-target-api-url", url),
   syncToken: (token: string): Promise<void> =>
     ipcRenderer.invoke("daemon:sync-token", token),
   clearToken: (): Promise<void> =>
     ipcRenderer.invoke("daemon:clear-token"),
+  listWatched: (): Promise<{
+    watched: Array<{ id: string; name: string; runtime_count?: number }>;
+    unwatched: string[];
+  }> => ipcRenderer.invoke("daemon:list-watched"),
+  watchWorkspace: (id: string, name: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:watch-workspace", id, name),
+  unwatchWorkspace: (id: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:unwatch-workspace", id),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
   getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>
@@ -51,6 +63,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:set-prefs", prefs),
   autoStart: (): Promise<void> =>
     ipcRenderer.invoke("daemon:auto-start"),
+  retryInstall: (): Promise<void> =>
+    ipcRenderer.invoke("daemon:retry-install"),
   startLogStream: () => ipcRenderer.send("daemon:start-log-stream"),
   stopLogStream: () => ipcRenderer.send("daemon:stop-log-stream"),
   onLogLine: (callback: (line: string) => void) => {
