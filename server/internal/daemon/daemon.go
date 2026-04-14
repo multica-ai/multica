@@ -156,8 +156,13 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
 
+	// It's fine to start with an empty watched list — workspaceSyncLoop runs
+	// immediately on startup and will populate the list from the server. The
+	// daemon also accepts HTTP POST /watch for explicit adds from clients
+	// like the Desktop app.
 	if len(cfg.WatchedWorkspaces) == 0 {
-		return fmt.Errorf("no watched workspaces configured: run 'multica workspace watch <id>' to add one")
+		d.logger.Info("no watched workspaces in config; workspaceSyncLoop will populate from API")
+		return nil
 	}
 
 	var registered int
@@ -350,6 +355,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) {
 
 	var added int
 	for _, ws := range workspaces {
+		if cfg.IsUnwatched(ws.ID) {
+			continue // user explicitly opted out
+		}
 		if cfg.AddWatchedWorkspace(ws.ID, ws.Name) {
 			added++
 			d.logger.Info("workspace sync: discovered new workspace", "workspace_id", ws.ID, "name", ws.Name)
