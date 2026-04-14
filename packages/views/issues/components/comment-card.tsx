@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -36,6 +36,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
+import { useCommentCollapseStore } from "@multica/core/issues/stores";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -328,7 +329,10 @@ function CommentCard({
 }: CommentCardProps) {
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
-  const [open, setOpen] = useState(true);
+  const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
+  const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
+  const open = !isCollapsed;
+  const handleOpenChange = useCallback((_open: boolean) => toggleCollapse(issueId, entry.id), [toggleCollapse, issueId, entry.id]);
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
@@ -390,7 +394,7 @@ function CommentCard({
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
-      <Collapsible open={open} onOpenChange={setOpen}>
+      <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
         <div className="px-4 py-3">
           <div className="flex items-center gap-2.5">
