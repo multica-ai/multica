@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -759,77 +760,99 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 
 // --- GitHub direct import ---
 
-// parseGitHubURL extracts owner, repo, branch, and skill directory path from a
-// github.com URL. Supported formats:
+// parseGitHubURL extracts owner, repo, and the raw path remainder from a
+// github.com URL. The branch and skill directory are resolved later via the
+// GitHub API because branch names can contain `/` (e.g. `feat/some-feature`),
+// making naive URL-segment splitting unreliable.
+//
+// Supported URL formats:
 //
 //	github.com/owner/repo/tree/branch/path/to/skill
-//	github.com/owner/repo/tree/branch/path/to/skill/SKILL.md
+//	github.com/owner/repo/tree/feat/branch-name/path/to/skill
+//	github.com/owner/repo/blob/branch/path/to/SKILL.md
 //	github.com/owner/repo (root-level skill)
-func parseGitHubURL(rawURL string) (owner, repo, branch, skillDir string, err error) {
+func parseGitHubURL(rawURL string) (owner, repo, pathRemainder string, err error) {
 	parsed, parseErr := url.Parse(rawURL)
 	if parseErr != nil {
-		return "", "", "", "", fmt.Errorf("invalid URL: %w", parseErr)
+		return "", "", "", fmt.Errorf("invalid URL: %w", parseErr)
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(parts) < 2 {
-		return "", "", "", "", fmt.Errorf("GitHub URL must include owner and repo: %s", rawURL)
+		return "", "", "", fmt.Errorf("GitHub URL must include owner and repo: %s", rawURL)
 	}
 	owner = parts[0]
 	repo = parts[1]
-	// github.com/owner/repo (no /tree/) — skill at repo root
 	if len(parts) == 2 {
-		return owner, repo, "", "", nil
+		return owner, repo, "", nil
 	}
-	// github.com/owner/repo/tree/branch/path...
-	if len(parts) >= 4 && parts[2] == "tree" {
-		branch = parts[3]
-		if len(parts) > 4 {
-			dir := strings.Join(parts[4:], "/")
-			// Strip trailing SKILL.md if the user copied the full file URL
-			dir = strings.TrimSuffix(dir, "/SKILL.md")
-			dir = strings.TrimSuffix(dir, "/skill.md")
-			return owner, repo, branch, dir, nil
+	// Skip "tree" or "blob" prefix — everything after is branch+path
+	if len(parts) >= 3 && (parts[2] == "tree" || parts[2] == "blob") {
+		pathRemainder = strings.Join(parts[3:], "/")
+	} else {
+		pathRemainder = strings.Join(parts[2:], "/")
+	}
+	// Strip trailing SKILL.md if the user copied a direct file link
+	pathRemainder = strings.TrimSuffix(pathRemainder, "/SKILL.md")
+	pathRemainder = strings.TrimSuffix(pathRemainder, "/skill.md")
+	return owner, repo, pathRemainder, nil
+}
+
+// resolveGitHubBranchAndDir uses the GitHub API to split a raw path remainder
+// (e.g. "feat/my-branch/skills/my-skill") into a valid branch name and the
+// remaining directory path. This handles branch names with slashes correctly.
+//
+// Strategy: try progressively longer prefixes of the path as the branch name,
+// starting with the default branch, then single-segment, then two-segment, etc.
+func resolveGitHubBranchAndDir(httpClient *http.Client, owner, repo, pathRemainder string) (branch, skillDir string) {
+	if pathRemainder == "" {
+		return fetchGitHubDefaultBranch(httpClient, owner, repo), ""
+	}
+
+	// Try the default branch first — if pathRemainder starts after it, great.
+	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
+	if strings.HasPrefix(pathRemainder, defaultBranch+"/") {
+		return defaultBranch, strings.TrimPrefix(pathRemainder, defaultBranch+"/")
+	}
+	if pathRemainder == defaultBranch {
+		return defaultBranch, ""
+	}
+
+	// Try progressively longer prefixes as branch names via the GitHub API.
+	segments := strings.Split(pathRemainder, "/")
+	for i := 1; i <= len(segments) && i <= 10; i++ {
+		candidate := strings.Join(segments[:i], "/")
+		apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/branches/%s",
+			url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(candidate))
+		resp, err := httpClient.Get(apiURL)
+		if resp != nil {
+			resp.Body.Close()
 		}
-		return owner, repo, branch, "", nil
-	}
-	// github.com/owner/repo/blob/branch/path... (link to a specific file)
-	if len(parts) >= 4 && parts[2] == "blob" {
-		branch = parts[3]
-		if len(parts) > 4 {
-			filePath := strings.Join(parts[4:], "/")
-			dir := strings.TrimSuffix(filePath, "/SKILL.md")
-			dir = strings.TrimSuffix(dir, "/skill.md")
-			// If filePath == dir, the link was to a non-SKILL.md file — use parent
-			if dir == filePath {
-				idx := strings.LastIndex(filePath, "/")
-				if idx >= 0 {
-					dir = filePath[:idx]
-				} else {
-					dir = ""
-				}
+		if err == nil && resp.StatusCode == http.StatusOK {
+			dir := ""
+			if i < len(segments) {
+				dir = strings.Join(segments[i:], "/")
 			}
-			return owner, repo, branch, dir, nil
+			return candidate, dir
 		}
-		return owner, repo, branch, "", nil
 	}
-	// Fallback: treat remaining path as the skill directory
-	return owner, repo, "", strings.Join(parts[2:], "/"), nil
+
+	// Fallback: assume single-segment branch or default
+	if len(segments) > 1 {
+		return segments[0], strings.Join(segments[1:], "/")
+	}
+	return defaultBranch, pathRemainder
 }
 
 // fetchFromGitHub imports a skill directly from a github.com URL. It supports
-// any repo layout — the user provides the full path to the skill directory
-// containing SKILL.md, so there's no need for the skills.sh candidate-path
-// guessing.
+// any repo layout and branch names containing slashes — the branch is resolved
+// via the GitHub API rather than naive URL parsing.
 func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, error) {
-	owner, repo, branch, skillDir, err := parseGitHubURL(rawURL)
+	owner, repo, pathRemainder, err := parseGitHubURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// Resolve branch if not specified in the URL
-	if branch == "" {
-		branch = fetchGitHubDefaultBranch(httpClient, owner, repo)
-	}
+	branch, skillDir := resolveGitHubBranchAndDir(httpClient, owner, repo, pathRemainder)
 
 	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(branch))
@@ -850,7 +873,6 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 
 	name, description := parseSkillFrontmatter(string(skillMdBody))
 	if name == "" {
-		// Fall back to the last segment of the directory path, or the repo name
 		if skillDir != "" {
 			parts := strings.Split(skillDir, "/")
 			name = parts[len(parts)-1]
@@ -872,7 +894,7 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 	}
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
 		url.PathEscape(owner), url.PathEscape(repo), contentsPath, url.QueryEscape(branch))
-	dirResp, err := httpClient.Get(apiURL)
+	dirResp, err := githubGet(httpClient, apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		if dirResp != nil {
 			dirResp.Body.Close()
@@ -886,9 +908,10 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 		return result, nil
 	}
 
-	// Recursively collect files (reuses the existing helper)
+	// Recursively collect files with depth and count limits to prevent
+	// abuse from deeply nested or file-heavy repositories.
 	var allFiles []githubContentEntry
-	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
+	collectGitHubFilesLimited(httpClient, entries, &allFiles, apiURL, 0)
 
 	basePath := ""
 	if skillDir != "" {
@@ -908,6 +931,70 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 	}
 
 	return result, nil
+}
+
+// Maximum recursion depth and file count for GitHub directory traversal.
+const (
+	maxGitHubRecurseDepth = 10
+	maxGitHubFiles        = 100
+)
+
+// collectGitHubFilesLimited is a bounded version of collectGitHubFiles that
+// stops recursing beyond maxGitHubRecurseDepth and stops collecting beyond
+// maxGitHubFiles. This prevents excessive API calls on malicious/huge repos.
+func collectGitHubFilesLimited(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string, depth int) {
+	if depth >= maxGitHubRecurseDepth {
+		return
+	}
+	for _, entry := range entries {
+		if len(*out) >= maxGitHubFiles {
+			return
+		}
+		lower := strings.ToLower(entry.Name)
+		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
+			continue
+		}
+		if entry.Type == "file" {
+			*out = append(*out, entry)
+		} else if entry.Type == "dir" {
+			subURL := parentURL + "/" + url.PathEscape(entry.Name)
+			subResp, err := githubGet(httpClient, subURL)
+			if err != nil || subResp.StatusCode != http.StatusOK {
+				if subResp != nil {
+					subResp.Body.Close()
+				}
+				continue
+			}
+			var subEntries []githubContentEntry
+			json.NewDecoder(subResp.Body).Decode(&subEntries)
+			subResp.Body.Close()
+			collectGitHubFilesLimited(httpClient, subEntries, out, subURL, depth+1)
+		}
+	}
+}
+
+// githubGet performs an HTTP GET with an optional GitHub token for higher rate
+// limits. Without a token, the GitHub API allows 60 requests/hour per IP;
+// with a token, 5000/hour. Set GITHUB_TOKEN env var to enable.
+//
+// Also detects rate-limit responses and returns a clear error.
+func githubGet(httpClient *http.Client, apiURL string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == 429 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("GitHub API rate limit exceeded — set GITHUB_TOKEN env var for higher limits (5000 req/hour)")
+	}
+	return resp, nil
 }
 
 // parseSkillFrontmatter extracts name and description from YAML frontmatter in SKILL.md.
@@ -1052,6 +1139,9 @@ func (h *Handler) ImportLocalSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Cap request body to 10MB to prevent abuse (skills with many files).
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 
 	var req struct {
 		Name        string `json:"name"`

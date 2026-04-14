@@ -450,8 +450,9 @@ func importFromLocal(ctx context.Context, client *cli.APIClient, dirPath string)
 }
 
 // parseLocalFrontmatter is a minimal YAML frontmatter parser matching the
-// server-side parseSkillFrontmatter. Duplicated here to avoid importing
-// the handler package from the CLI.
+// server-side parseSkillFrontmatter in handler/skill.go. Duplicated here to
+// avoid importing the handler package from the CLI.
+// Keep in sync with handler.parseSkillFrontmatter.
 func parseLocalFrontmatter(content string) (name, description string) {
 	if !strings.HasPrefix(content, "---") {
 		return "", ""
