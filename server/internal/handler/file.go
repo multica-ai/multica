@@ -160,7 +160,11 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	key := id.String() + path.Ext(header.Filename)
+	filename := id.String() + path.Ext(header.Filename)
+	key := filename
+	if workspaceID != "" {
+		key = "workspaces/" + workspaceID + "/" + filename
+	}
 
 	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 	if err != nil {
