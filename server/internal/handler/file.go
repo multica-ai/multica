@@ -168,8 +168,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		key = "users/" + userID + "/" + filename
 	}
 
-	// If workspace context is available, validate ownership before uploading.
+	// If workspace context is available, validate membership before uploading.
 	if workspaceID != "" {
+		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+			writeError(w, http.StatusForbidden, "not a member of this workspace")
+			return
+		}
+
 		uploaderType, uploaderID := h.resolveActor(r, userID, workspaceID)
 
 		params := db.CreateAttachmentParams{
@@ -213,6 +218,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		att, err := h.Queries.CreateAttachment(r.Context(), params)
 		if err != nil {
 			slog.Error("failed to create attachment record", "error", err)
+			// S3 upload succeeded but DB record failed — still return the link
+			// so the file is usable. Log the error for investigation.
 		} else {
 			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
 			return
