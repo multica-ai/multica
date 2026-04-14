@@ -198,6 +198,8 @@ type Issue struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy         pgtype.UUID        `json:"archived_by"`
 }
 
 type IssueDependency struct {

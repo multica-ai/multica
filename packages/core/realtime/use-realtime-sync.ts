@@ -148,11 +148,11 @@ export function useRealtimeSync(
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
-      const { issue } = p as IssueUpdatedPayload;
+      const { issue, archived, restored } = p as IssueUpdatedPayload;
       if (!issue?.id) return;
       const wsId = workspaceStore.getState().workspace?.id;
       if (wsId) {
-        onIssueUpdated(qc, wsId, issue);
+        onIssueUpdated(qc, wsId, issue, { archived, restored });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
         }

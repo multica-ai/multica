@@ -66,6 +66,8 @@ export interface IssueCreatedPayload {
 
 export interface IssueUpdatedPayload {
   issue: Issue;
+  archived?: boolean;
+  restored?: boolean;
 }
 
 export interface IssueDeletedPayload {

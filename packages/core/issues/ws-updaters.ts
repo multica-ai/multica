@@ -28,7 +28,12 @@ export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,
   issue: Partial<Issue> & { id: string },
+  options?: { archived?: boolean; restored?: boolean },
 ) {
+  const isArchived = issue.archived_at != null || options?.archived === true;
+  const isRestored = options?.restored === true;
+  const archiveStateChanged = isArchived || isRestored;
+
   // Look up the parent before mutating list state, so we can also keep the
   // parent's children cache in sync (powers the sub-issues list shown on
   // the parent issue page).
@@ -43,6 +48,14 @@ export function onIssueUpdated(
   qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
     if (!old) return old;
     const prev = old.issues.find((i) => i.id === issue.id);
+    if (isArchived) {
+      return {
+        ...old,
+        issues: old.issues.filter((i) => i.id !== issue.id),
+        total: prev ? old.total - 1 : old.total,
+        doneTotal: (old.doneTotal ?? 0) - (prev?.status === "done" ? 1 : 0),
+      };
+    }
     const wasDone = prev?.status === "done";
     const isDone = issue.status === "done";
     // Only adjust doneTotal when status field is present and actually changed
@@ -59,14 +72,22 @@ export function onIssueUpdated(
       doneTotal: (old.doneTotal ?? 0) + doneDelta,
     };
   });
+  if (isRestored && !listData?.issues.some((i) => i.id === issue.id)) {
+    qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
     old ? { ...old, ...issue } : old,
   );
   if (parentId) {
     qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
-      old?.map((c) => (c.id === issue.id ? { ...c, ...issue } : c)),
+      isArchived
+        ? old?.filter((c) => c.id !== issue.id)
+        : old?.map((c) => (c.id === issue.id ? { ...c, ...issue } : c)),
     );
+    if (archiveStateChanged) {
+      qc.invalidateQueries({ queryKey: issueKeys.children(wsId, parentId) });
+    }
     if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }

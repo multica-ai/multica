@@ -157,3 +157,26 @@ func TestValidIssueStatuses(t *testing.T) {
 	}
 }
 
+func TestIssueArchiveCommandsRegistered(t *testing.T) {
+	if _, _, err := issueCmd.Find([]string{"archive"}); err != nil {
+		t.Fatalf("archive command not registered: %v", err)
+	}
+	if _, _, err := issueCmd.Find([]string{"restore"}); err != nil {
+		t.Fatalf("restore command not registered: %v", err)
+	}
+	if issueArchiveCmd.Flags().Lookup("force") == nil {
+		t.Fatal("archive command should expose --force")
+	}
+	if issueArchiveCmd.Flags().Lookup("output") == nil {
+		t.Fatal("archive command should expose --output")
+	}
+	if issueRestoreCmd.Flags().Lookup("output") == nil {
+		t.Fatal("restore command should expose --output")
+	}
+	if issueListCmd.Flags().Lookup("include-archived") == nil {
+		t.Fatal("list command should expose --include-archived")
+	}
+	if issueSearchCmd.Flags().Lookup("include-archived") == nil {
+		t.Fatal("search command should expose --include-archived")
+	}
+}

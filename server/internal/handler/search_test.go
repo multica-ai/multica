@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false)
+	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, false)
 
 	// Pattern should be lowercased in Go.
 	if args[0] != "hello" {
@@ -42,7 +42,7 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false)
+	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, false)
 
 	// Both phrase and terms should be lowercased.
 	if args[0] != "foo bar" {
@@ -63,7 +63,7 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_WithNumber(t *testing.T) {
-	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false)
+	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, false)
 
 	_ = args
 	// Number match should be in WHERE.
@@ -77,15 +77,23 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 }
 
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true)
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, false)
 
 	if strings.Contains(query, "NOT IN ('done', 'cancelled')") {
 		t.Error("query should not exclude done/cancelled when includeClosed=true")
 	}
 }
 
+func TestBuildSearchQuery_IncludeArchived(t *testing.T) {
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, false, true)
+
+	if strings.Contains(query, "i.archived_at IS NULL") {
+		t.Error("query should not exclude archived issues when includeArchived=true")
+	}
+}
+
 func TestBuildSearchQuery_SpecialChars(t *testing.T) {
-	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false)
+	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, false)
 
 	_ = query
 	// % should be escaped in the phrase arg.

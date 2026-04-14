@@ -60,6 +60,20 @@ var issueStatusCmd = &cobra.Command{
 	RunE:  runIssueStatus,
 }
 
+var issueArchiveCmd = &cobra.Command{
+	Use:   "archive <id>",
+	Short: "Archive an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueArchive,
+}
+
+var issueRestoreCmd = &cobra.Command{
+	Use:   "restore <id>",
+	Short: "Restore an archived issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueRestore,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -122,6 +136,8 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueArchiveCmd)
+	issueCmd.AddCommand(issueRestoreCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
@@ -138,6 +154,7 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
+	issueListCmd.Flags().Bool("include-archived", false, "Include archived issues")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -167,6 +184,11 @@ func init() {
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// issue archive / restore
+	issueArchiveCmd.Flags().Bool("force", false, "Archive even when issue status is not done or cancelled (owner/admin only)")
+	issueArchiveCmd.Flags().String("output", "table", "Output format: table or json")
+	issueRestoreCmd.Flags().String("output", "table", "Output format: table or json")
+
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
@@ -195,6 +217,7 @@ func init() {
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
+	issueSearchCmd.Flags().Bool("include-archived", false, "Include archived issues")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -237,6 +260,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		params.Set("project_id", v)
+	}
+	if v, _ := cmd.Flags().GetBool("include-archived"); v {
+		params.Set("include_archived", "true")
 	}
 
 	path := "/api/issues"
@@ -558,6 +584,61 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runIssueArchive(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	params := url.Values{}
+	if v, _ := cmd.Flags().GetBool("force"); v {
+		params.Set("force", "true")
+	}
+	path := "/api/issues/" + args[0] + "/archive"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, nil, &result); err != nil {
+		return fmt.Errorf("archive issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Printf("Issue archived: %s (%s)\n", strVal(result, "identifier"), strVal(result, "id"))
+	return nil
+}
+
+func runIssueRestore(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/restore", nil, &result); err != nil {
+		return fmt.Errorf("restore issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Printf("Issue restored: %s (%s)\n", strVal(result, "identifier"), strVal(result, "id"))
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Comment commands
 // ---------------------------------------------------------------------------
@@ -851,6 +932,9 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("include-closed"); v {
 		params.Set("include_closed", "true")
+	}
+	if v, _ := cmd.Flags().GetBool("include-archived"); v {
+		params.Set("include_archived", "true")
 	}
 
 	path := "/api/issues/search?" + params.Encode()
