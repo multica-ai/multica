@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -54,7 +55,7 @@ var skillDeleteCmd = &cobra.Command{
 
 var skillImportCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import a skill from a URL (clawhub.ai or skills.sh)",
+	Short: "Import a skill from a URL (clawhub.ai, skills.sh, github.com) or local directory",
 	RunE:  runSkillImport,
 }
 
@@ -123,7 +124,8 @@ func init() {
 	skillDeleteCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 
 	// skill import
-	skillImportCmd.Flags().String("url", "", "URL to import from (required)")
+	skillImportCmd.Flags().String("url", "", "URL to import from (clawhub.ai, skills.sh, or github.com)")
+	skillImportCmd.Flags().String("path", "", "Local directory path containing SKILL.md")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// skill files list
@@ -333,19 +335,29 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	}
 
 	importURL, _ := cmd.Flags().GetString("url")
-	if importURL == "" {
-		return fmt.Errorf("--url is required")
-	}
+	localPath, _ := cmd.Flags().GetString("path")
 
-	body := map[string]any{
-		"url": importURL,
+	if importURL == "" && localPath == "" {
+		return fmt.Errorf("--url or --path is required")
+	}
+	if importURL != "" && localPath != "" {
+		return fmt.Errorf("specify either --url or --path, not both")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/skills/import", body, &result); err != nil {
+
+	if localPath != "" {
+		// Local import: read files from disk, send to /api/skills/import-local
+		result, err = importFromLocal(ctx, client, localPath)
+	} else {
+		// URL import (clawhub, skills.sh, or github)
+		body := map[string]any{"url": importURL}
+		err = client.PostJSON(ctx, "/api/skills/import", body, &result)
+	}
+	if err != nil {
 		return fmt.Errorf("import skill: %w", err)
 	}
 
@@ -356,6 +368,110 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
+}
+
+// importFromLocal reads a local directory containing SKILL.md and optional
+// supporting files, then sends them to the server via /api/skills/import-local.
+func importFromLocal(ctx context.Context, client *cli.APIClient, dirPath string) (map[string]any, error) {
+	// Read SKILL.md
+	skillMdPath := filepath.Join(dirPath, "SKILL.md")
+	skillMdBytes, err := os.ReadFile(skillMdPath)
+	if err != nil {
+		return nil, fmt.Errorf("SKILL.md not found in %s: %w", dirPath, err)
+	}
+
+	// Parse frontmatter for name/description
+	content := string(skillMdBytes)
+	name, description := parseLocalFrontmatter(content)
+	if name == "" {
+		name = filepath.Base(dirPath)
+	}
+
+	// Collect supporting files (walk the directory, skip SKILL.md, LICENSE, hidden files)
+	type fileEntry struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	var files []fileEntry
+
+	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if strings.HasPrefix(base, ".") && path != dirPath {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(dirPath, path)
+		lower := strings.ToLower(filepath.Base(relPath))
+
+		// Skip SKILL.md (already read), LICENSE, hidden files, and large files
+		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
+			return nil
+		}
+		if strings.HasPrefix(filepath.Base(relPath), ".") {
+			return nil
+		}
+		if info.Size() > 1<<20 { // 1MB limit per file
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s (>1MB)\n", relPath)
+			return nil
+		}
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", relPath, readErr)
+			return nil
+		}
+		// Use forward slashes for consistency (same as GitHub imports)
+		relPath = filepath.ToSlash(relPath)
+		files = append(files, fileEntry{Path: relPath, Content: string(data)})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading directory %s: %w", dirPath, err)
+	}
+
+	body := map[string]any{
+		"name":        name,
+		"description": description,
+		"content":     content,
+		"files":       files,
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/skills/import-local", body, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// parseLocalFrontmatter is a minimal YAML frontmatter parser matching the
+// server-side parseSkillFrontmatter. Duplicated here to avoid importing
+// the handler package from the CLI.
+func parseLocalFrontmatter(content string) (name, description string) {
+	if !strings.HasPrefix(content, "---") {
+		return "", ""
+	}
+	end := strings.Index(content[3:], "---")
+	if end < 0 {
+		return "", ""
+	}
+	frontmatter := content[3 : 3+end]
+	for _, line := range strings.Split(frontmatter, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name:") {
+			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+			name = strings.Trim(name, "\"'")
+		} else if strings.HasPrefix(line, "description:") {
+			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			description = strings.Trim(description, "\"'")
+		}
+	}
+	return name, description
 }
 
 // ---------------------------------------------------------------------------
