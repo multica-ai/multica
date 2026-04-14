@@ -21,7 +21,7 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
 )
 
@@ -33,7 +33,7 @@ type Config struct {
 	RuntimeName        string
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
 	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini
+	Agents             map[string]AgentEntry // keyed by provider: claude, codex, cursor, opencode, openclaw, hermes, gemini
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -92,6 +92,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
 		}
 	}
+	cursorPath := envOrDefault("MULTICA_CURSOR_PATH", "cursor-agent")
+	if _, err := exec.LookPath(cursorPath); err == nil {
+		agents["cursor"] = AgentEntry{
+			Path:  cursorPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_CURSOR_MODEL")),
+		}
+	}
 	opencodePath := envOrDefault("MULTICA_OPENCODE_PATH", "opencode")
 	if _, err := exec.LookPath(opencodePath); err == nil {
 		agents["opencode"] = AgentEntry{
@@ -121,7 +128,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, openclaw, hermes, or gemini and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, cursor-agent, opencode, openclaw, hermes, or gemini and ensure it is on PATH")
 	}
 
 	// Host info
