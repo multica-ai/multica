@@ -43,8 +43,8 @@ const daemonAPI = {
   },
   setTargetApiUrl: (url: string): Promise<void> =>
     ipcRenderer.invoke("daemon:set-target-api-url", url),
-  syncToken: (token: string): Promise<void> =>
-    ipcRenderer.invoke("daemon:sync-token", token),
+  syncToken: (token: string, userId: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:sync-token", token, userId),
   clearToken: (): Promise<void> =>
     ipcRenderer.invoke("daemon:clear-token"),
   listWatched: (): Promise<{

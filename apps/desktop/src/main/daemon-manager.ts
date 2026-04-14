@@ -1,7 +1,19 @@
 import { app, ipcMain, BrowserWindow } from "electron";
-import { spawn, execFile, type ChildProcess } from "child_process";
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { existsSync } from "fs";
+import { execFile } from "child_process";
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  rm,
+  open,
+  stat,
+} from "fs/promises";
+import {
+  existsSync,
+  watchFile,
+  unwatchFile,
+  type StatsListener,
+} from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
@@ -21,7 +33,7 @@ interface ActiveProfile {
 }
 
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
-let logTailProcess: ChildProcess | null = null;
+let logTailWatcher: { path: string; listener: StatsListener } | null = null;
 let currentState: DaemonStatus["state"] = "installing_cli";
 let getMainWindow: () => BrowserWindow | null = () => null;
 let operationInProgress = false;
@@ -29,6 +41,12 @@ let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
+
+// Serialize all writes to any profile config file. Multiple paths
+// (syncToken, resolveActiveProfile, clearToken, watch/unwatch handlers)
+// may try to write concurrently; chaining them avoids interleaved writes
+// corrupting the JSON.
+let configWriteChain: Promise<void> = Promise.resolve();
 
 // Keep the Go impl in sync: server/cmd/multica/cmd_daemon.go healthPortForProfile.
 function healthPortForProfile(profile: string): number {
@@ -50,6 +68,40 @@ function profileConfigPath(profile: string): string {
 
 function profileLogPath(profile: string): string {
   return join(profileDir(profile), "daemon.log");
+}
+
+// Sidecar file that records which Multica user the cached PAT in config.json
+// was minted for. The Go CLI/daemon never read or write this file, so it
+// survives Go-side config rewrites. Used to detect user switches and mint a
+// fresh PAT instead of reusing a token that belongs to a previous user.
+function profileUserIdPath(profile: string): string {
+  return join(profileDir(profile), ".desktop-user-id");
+}
+
+async function readProfileUserId(profile: string): Promise<string | null> {
+  try {
+    const raw = await readFile(profileUserIdPath(profile), "utf-8");
+    const trimmed = raw.trim();
+    return trimmed || null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeProfileUserId(
+  profile: string,
+  userId: string,
+): Promise<void> {
+  await mkdir(profileDir(profile), { recursive: true });
+  await writeFile(profileUserIdPath(profile), userId, "utf-8");
+}
+
+async function removeProfileUserId(profile: string): Promise<void> {
+  try {
+    await rm(profileUserIdPath(profile));
+  } catch {
+    // Already gone — nothing to do.
+  }
 }
 
 function normalizeUrl(u: string): string {
@@ -130,12 +182,17 @@ async function writeProfileConfig(
   profile: string,
   cfg: Record<string, unknown>,
 ): Promise<void> {
-  await mkdir(profileDir(profile), { recursive: true });
-  await writeFile(
-    profileConfigPath(profile),
-    JSON.stringify(cfg, null, 2),
-    "utf-8",
-  );
+  const op = async () => {
+    await mkdir(profileDir(profile), { recursive: true });
+    await writeFile(
+      profileConfigPath(profile),
+      JSON.stringify(cfg, null, 2),
+      "utf-8",
+    );
+  };
+  const next = configWriteChain.catch(() => {}).then(op);
+  configWriteChain = next.catch(() => {});
+  return next;
 }
 
 /**
@@ -337,30 +394,43 @@ async function mintPat(jwt: string): Promise<string> {
 /**
  * Ensure the active profile's config.json has a usable token for the daemon.
  *
- * - Input from the renderer is the user's JWT (from localStorage).
- * - If the profile already has a cached PAT (`mul_...`), keep it — minting a
- *   fresh one on every launch would accumulate garbage in the user's tokens
- *   page.
- * - Otherwise call POST /api/tokens with the JWT to get a fresh PAT, write it
- *   to config, and use that.
+ * - Input from the renderer is the user's JWT (from localStorage) plus the
+ *   current user's id, so we can detect session changes.
+ * - If the profile already has a cached PAT (`mul_...`) AND the sidecar user
+ *   id matches the caller, reuse it — minting fresh on every launch would
+ *   accumulate garbage in the user's tokens page.
+ * - On user mismatch (or first run) call POST /api/tokens with the JWT to
+ *   mint a fresh PAT, overwriting any stale cached PAT. This is the critical
+ *   path: without it, a previous user's PAT would be used by a new session.
  * - If the caller happens to pass a PAT directly, write it through.
+ * - When we mint fresh and a daemon is already running, restart it so the
+ *   new credentials take effect (the Go daemon reads config at startup).
  */
-async function syncToken(tokenFromRenderer: string): Promise<void> {
+async function syncToken(
+  tokenFromRenderer: string,
+  userId: string,
+): Promise<void> {
   const active = await ensureActiveProfile();
   const config = await readProfileConfig(active.name);
+  const previousUserId = await readProfileUserId(active.name);
+  const userChanged = Boolean(previousUserId) && previousUserId !== userId;
+  const sameUserWithCachedPat =
+    !userChanged &&
+    previousUserId === userId &&
+    typeof config.token === "string" &&
+    config.token.startsWith("mul_");
 
   let finalToken: string;
   if (tokenFromRenderer.startsWith("mul_")) {
     finalToken = tokenFromRenderer;
-  } else if (
-    typeof config.token === "string" &&
-    config.token.startsWith("mul_")
-  ) {
-    finalToken = config.token;
+  } else if (sameUserWithCachedPat) {
+    finalToken = config.token as string;
   } else {
     try {
       finalToken = await mintPat(tokenFromRenderer);
-      console.log(`[daemon] minted PAT for profile "${active.name}"`);
+      console.log(
+        `[daemon] minted PAT for profile "${active.name}" (user_changed=${userChanged})`,
+      );
     } catch (err) {
       console.error("[daemon] failed to mint PAT:", err);
       throw err;
@@ -370,6 +440,23 @@ async function syncToken(tokenFromRenderer: string): Promise<void> {
   config.token = finalToken;
   if (targetApiBaseUrl) config.server_url = targetApiBaseUrl;
   await writeProfileConfig(active.name, config);
+  await writeProfileUserId(active.name, userId);
+
+  // If we just rotated credentials onto a running daemon, restart it so the
+  // in-memory token in the Go process matches the new config.
+  if (userChanged) {
+    try {
+      const existing = await fetchHealthAtPort(active.port);
+      if (existing?.status === "running") {
+        console.log(
+          "[daemon] user switched — restarting daemon with new credentials",
+        );
+        void restartDaemon();
+      }
+    } catch (err) {
+      console.warn("[daemon] restart-on-user-switch failed:", err);
+    }
+  }
 }
 
 async function loadPrefs(): Promise<DaemonPrefs> {
@@ -391,9 +478,13 @@ async function savePrefs(prefs: DaemonPrefs): Promise<void> {
 async function clearToken(): Promise<void> {
   const active = await ensureActiveProfile();
   const config = await readProfileConfig(active.name);
-  if (!("token" in config)) return;
-  delete config.token;
-  await writeProfileConfig(active.name, config);
+  if ("token" in config) {
+    delete config.token;
+    await writeProfileConfig(active.name, config);
+  }
+  // Always drop the sidecar so a subsequent syncToken from any user is
+  // treated as a fresh mint, not a reuse of a stale cached PAT.
+  await removeProfileUserId(active.name);
 }
 
 interface WatchedWorkspace {
@@ -521,7 +612,9 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
           resolve({ success: false, error: err.message });
           return;
         }
-        currentState = "running";
+        // Stay in "starting" until pollOnce confirms /health — the CLI
+        // returning 0 only means the supervisor was spawned, not that the
+        // daemon process is already listening.
         pollOnce();
         resolve({ success: true });
       },
@@ -594,10 +687,40 @@ function stopPolling(): void {
   }
 }
 
+const LOG_TAIL_INITIAL_WINDOW_BYTES = 32 * 1024;
+const LOG_TAIL_INITIAL_LINES = 200;
+const LOG_TAIL_POLL_MS = 500;
+
+async function readLogRange(
+  path: string,
+  startAt: number,
+  length: number,
+): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, startAt);
+    return buffer.subarray(0, bytesRead).toString("utf-8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function sendLines(win: BrowserWindow, text: string): void {
+  const lines = text.split("\n").filter((line) => line.length > 0);
+  for (const line of lines) {
+    win.webContents.send("daemon:log-line", line);
+  }
+}
+
+// Cross-platform tail -f replacement: read the tail of the file once, then
+// poll its stat with fs.watchFile and forward any new bytes since the last
+// known offset. watchFile works on macOS, Linux, and Windows; spawn("tail")
+// would silently fail on Windows.
 function startLogTail(win: BrowserWindow, retryCount = 0): void {
   stopLogTail();
 
-  ensureActiveProfile().then((active) => {
+  void ensureActiveProfile().then(async (active) => {
     const logPath = profileLogPath(active.name);
     if (!existsSync(logPath)) {
       if (retryCount < LOG_TAIL_MAX_RETRIES) {
@@ -606,23 +729,55 @@ function startLogTail(win: BrowserWindow, retryCount = 0): void {
       return;
     }
 
-    logTailProcess = spawn("tail", ["-n", "200", "-f", logPath]);
-    logTailProcess.stdout?.on("data", (chunk: Buffer) => {
-      const lines = chunk.toString("utf-8").split("\n").filter(Boolean);
-      for (const line of lines) {
-        win.webContents.send("daemon:log-line", line);
+    let position = 0;
+    try {
+      const initialStats = await stat(logPath);
+      const windowBytes = Math.min(
+        initialStats.size,
+        LOG_TAIL_INITIAL_WINDOW_BYTES,
+      );
+      const startAt = initialStats.size - windowBytes;
+      if (windowBytes > 0) {
+        const text = await readLogRange(logPath, startAt, windowBytes);
+        const lines = text
+          .split("\n")
+          .filter((line) => line.length > 0)
+          .slice(-LOG_TAIL_INITIAL_LINES);
+        for (const line of lines) {
+          win.webContents.send("daemon:log-line", line);
+        }
       }
-    });
-    logTailProcess.on("error", () => {
-      // Ignore tail errors
-    });
+      position = initialStats.size;
+    } catch (err) {
+      console.warn("[daemon] log tail initial read failed:", err);
+      return;
+    }
+
+    const listener: StatsListener = (curr) => {
+      const target = getMainWindow();
+      if (!target) return;
+      // File rotated/truncated — restart from the new beginning.
+      if (curr.size < position) position = 0;
+      if (curr.size === position) return;
+      const from = position;
+      const length = curr.size - from;
+      position = curr.size;
+      readLogRange(logPath, from, length)
+        .then((text) => sendLines(target, text))
+        .catch((err) => {
+          console.warn("[daemon] log tail read failed:", err);
+        });
+    };
+
+    watchFile(logPath, { interval: LOG_TAIL_POLL_MS }, listener);
+    logTailWatcher = { path: logPath, listener };
   });
 }
 
 function stopLogTail(): void {
-  if (logTailProcess) {
-    logTailProcess.kill();
-    logTailProcess = null;
+  if (logTailWatcher) {
+    unwatchFile(logTailWatcher.path, logTailWatcher.listener);
+    logTailWatcher = null;
   }
 }
 
@@ -644,8 +799,9 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
   ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
   ipcMain.handle("daemon:get-status", () => fetchHealth());
-  ipcMain.handle("daemon:sync-token", (_event, token: string) =>
-    syncToken(token),
+  ipcMain.handle(
+    "daemon:sync-token",
+    (_event, token: string, userId: string) => syncToken(token, userId),
   );
   ipcMain.handle("daemon:clear-token", () => clearToken());
   ipcMain.handle("daemon:list-watched", () => listWatchedWorkspaces());

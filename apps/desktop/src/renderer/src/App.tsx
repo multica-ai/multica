@@ -39,8 +39,8 @@ function AppContent() {
   useEffect(() => {
     return window.desktopAPI.onAuthToken(async (token) => {
       try {
-        await useAuthStore.getState().loginWithToken(token);
-        await window.daemonAPI.syncToken(token);
+        const loggedIn = await useAuthStore.getState().loginWithToken(token);
+        await window.daemonAPI.syncToken(token, loggedIn.id);
         const wsList = await api.listWorkspaces();
         const lastWsId = localStorage.getItem("multica_workspace_id");
         useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWsId);
@@ -55,9 +55,10 @@ function AppContent() {
     if (!user) return;
     const token = localStorage.getItem("multica_token");
     if (!token) return;
+    const userId = user.id;
     (async () => {
       try {
-        await window.daemonAPI.syncToken(token);
+        await window.daemonAPI.syncToken(token, userId);
         await window.daemonAPI.autoStart();
       } catch (err) {
         console.error("Failed to sync daemon on login", err);
@@ -129,12 +130,28 @@ const DAEMON_TARGET_API_URL =
   import.meta.env.VITE_API_URL ||
   "http://localhost:8080";
 
+// On logout, clear any cached PAT and stop the daemon so that a subsequent
+// login as a different user never inherits the previous user's credentials.
+async function handleDaemonLogout() {
+  try {
+    await window.daemonAPI.clearToken();
+  } catch {
+    // Best-effort — clearing is followed by stop which also hardens state.
+  }
+  try {
+    await window.daemonAPI.stop();
+  } catch {
+    // Daemon may already be stopped.
+  }
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <CoreProvider
         apiBaseUrl={remoteProxy ? "" : (import.meta.env.VITE_API_URL || "http://localhost:8080")}
         wsUrl={remoteProxy ? "ws://localhost:5173/ws" : (import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws")}
+        onLogout={handleDaemonLogout}
       >
         <AppContent />
       </CoreProvider>
