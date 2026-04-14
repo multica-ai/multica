@@ -168,14 +168,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		key = "users/" + userID + "/" + filename
 	}
 
-	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
-	if err != nil {
-		slog.Error("file upload failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "upload failed")
-		return
-	}
-
-	// If workspace context is available, create an attachment record.
+	// If workspace context is available, validate ownership before uploading.
 	if workspaceID != "" {
 		uploaderType, uploaderID := h.resolveActor(r, userID, workspaceID)
 
@@ -185,12 +178,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			UploaderType: uploaderType,
 			UploaderID:   parseUUID(uploaderID),
 			Filename:     header.Filename,
-			Url:          link,
 			ContentType:  contentType,
 			SizeBytes:    int64(len(data)),
 		}
 
-		// Optional issue_id / comment_id from form fields — validate ownership.
 		if issueID := r.FormValue("issue_id"); issueID != "" {
 			issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          parseUUID(issueID),
@@ -211,18 +202,36 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.CommentID = comment.ID
 		}
 
+		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
+		if err != nil {
+			slog.Error("file upload failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "upload failed")
+			return
+		}
+		params.Url = link
+
 		att, err := h.Queries.CreateAttachment(r.Context(), params)
 		if err != nil {
 			slog.Error("failed to create attachment record", "error", err)
-			// S3 upload succeeded but DB record failed — still return the link
-			// so the file is usable. Log the error for investigation.
 		} else {
 			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
 			return
 		}
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"filename": header.Filename,
+			"link":     link,
+		})
+		return
 	}
 
-	// Fallback response (no workspace context, e.g. avatar upload)
+	// No workspace context (e.g. avatar upload) — upload directly.
+	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
+	if err != nil {
+		slog.Error("file upload failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "upload failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"filename": header.Filename,
 		"link":     link,
