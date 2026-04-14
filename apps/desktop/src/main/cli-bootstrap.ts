@@ -1,6 +1,7 @@
 import { app } from "electron";
 import { execFile } from "child_process";
-import { createWriteStream, existsSync } from "fs";
+import { createHash } from "crypto";
+import { createReadStream, createWriteStream, existsSync } from "fs";
 import { chmod, mkdir, rename, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { pipeline } from "stream/promises";
@@ -61,6 +62,52 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
   await pipeline(nodeStream, createWriteStream(dest));
 }
 
+// Fetch goreleaser's published checksums.txt and parse it into a
+// filename → sha256 lookup. Format is `<hex>  <filename>` per line.
+async function fetchChecksums(): Promise<Map<string, string>> {
+  const url = `${GITHUB_LATEST_BASE}/checksums.txt`;
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) {
+    throw new Error(
+      `checksums.txt fetch failed: ${res.status} ${res.statusText}`,
+    );
+  }
+  const text = await res.text();
+  const map = new Map<string, string>();
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^([a-f0-9]{64})\s+\*?(\S+)$/i);
+    if (match) map.set(match[2], match[1].toLowerCase());
+  }
+  return map;
+}
+
+async function sha256OfFile(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(path), hash);
+  return hash.digest("hex");
+}
+
+async function verifyChecksum(
+  archivePath: string,
+  assetName: string,
+): Promise<void> {
+  const checksums = await fetchChecksums();
+  const expected = checksums.get(assetName);
+  if (!expected) {
+    throw new Error(
+      `no checksum for ${assetName} in checksums.txt — refusing to install unverified binary`,
+    );
+  }
+  const actual = await sha256OfFile(archivePath);
+  if (actual.toLowerCase() !== expected) {
+    throw new Error(
+      `checksum mismatch for ${assetName}: expected ${expected}, got ${actual}`,
+    );
+  }
+}
+
 async function extractArchive(archive: string, dest: string): Promise<void> {
   await mkdir(dest, { recursive: true });
   // Modern OSes all ship a `tar` that auto-detects tar.gz and zip:
@@ -81,6 +128,9 @@ async function installFresh(): Promise<string> {
     const archivePath = join(workDir, assetName);
     console.log(`[cli-bootstrap] downloading ${url}`);
     await downloadToFile(url, archivePath);
+
+    console.log(`[cli-bootstrap] verifying ${assetName} against checksums.txt`);
+    await verifyChecksum(archivePath, assetName);
 
     console.log(`[cli-bootstrap] extracting ${assetName}`);
     await extractArchive(archivePath, workDir);
