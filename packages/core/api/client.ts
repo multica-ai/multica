@@ -226,14 +226,16 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.open_only) search.set("open_only", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/issues?${search}`);
   }
 
-  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
+  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
@@ -265,8 +267,11 @@ export class ApiClient {
     });
   }
 
-  async listChildIssues(id: string): Promise<{ issues: Issue[] }> {
-    return this.fetch(`/api/issues/${id}/children`);
+  async listChildIssues(id: string, params?: { include_archived?: boolean }): Promise<{ issues: Issue[] }> {
+    const search = new URLSearchParams();
+    if (params?.include_archived) search.set("include_archived", "true");
+    const qs = search.toString();
+    return this.fetch(`/api/issues/${id}/children${qs ? `?${qs}` : ""}`);
   }
 
   async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
@@ -275,6 +280,17 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  async archiveIssue(id: string, params?: { force?: boolean }): Promise<Issue> {
+    const search = new URLSearchParams();
+    if (params?.force) search.set("force", "true");
+    const qs = search.toString();
+    return this.fetch(`/api/issues/${id}/archive${qs ? `?${qs}` : ""}`, { method: "POST" });
+  }
+
+  async restoreIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/restore`, { method: "POST" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {

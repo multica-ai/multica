@@ -1,7 +1,8 @@
 -- name: ListIssues :many
 SELECT id, workspace_id, title, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id,
+       archived_at, archived_by
 FROM issue
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
@@ -10,6 +11,7 @@ WHERE workspace_id = $1
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
 ORDER BY position ASC, created_at DESC
 LIMIT $2 OFFSET $3;
 
@@ -50,6 +52,25 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: ArchiveIssue :one
+UPDATE issue SET
+    archived_at = now(),
+    archived_by = $2,
+    updated_at = now()
+WHERE id = $1
+  AND archived_at IS NULL
+  AND (status IN ('done', 'cancelled') OR sqlc.arg('force')::boolean)
+RETURNING *;
+
+-- name: RestoreIssue :one
+UPDATE issue SET
+    archived_at = NULL,
+    archived_by = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND archived_at IS NOT NULL
+RETURNING *;
+
 -- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
@@ -63,7 +84,8 @@ DELETE FROM issue WHERE id = $1;
 -- name: ListOpenIssues :many
 SELECT id, workspace_id, title, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id,
+       archived_at, archived_by
 FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
@@ -72,6 +94,7 @@ WHERE workspace_id = $1
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
 ORDER BY position ASC, created_at DESC;
 
 -- name: CountIssues :one
@@ -82,11 +105,13 @@ WHERE workspace_id = $1
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'));
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL);
 
 -- name: ListChildIssues :many
 SELECT * FROM issue
 WHERE parent_issue_id = $1
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
 ORDER BY position ASC, created_at DESC;
 
 -- name: CountCreatedIssueAssignees :many
@@ -110,6 +135,7 @@ SELECT parent_issue_id,
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
+  AND archived_at IS NULL
 GROUP BY parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).

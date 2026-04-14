@@ -39,6 +39,7 @@ export interface ListIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   open_only?: boolean;
+  include_archived?: boolean;
 }
 
 export interface ListIssuesResponse {

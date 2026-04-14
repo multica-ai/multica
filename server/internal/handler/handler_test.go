@@ -252,6 +252,239 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestIssueArchiveRestore(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE 'archive test %'`, testWorkspaceID); err != nil {
+		t.Fatalf("cleanup archive test issues: %v", err)
+	}
+
+	var todoID string
+	err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, 'archive test todo issue', 'todo', 'none', 'member', $2, 90001, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&todoID)
+	if err != nil {
+		t.Fatalf("create todo issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE 'archive test %'`, testWorkspaceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+todoID+"/archive", nil)
+	req = withURLParam(req, "id", todoID)
+	testHandler.ArchiveIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("ArchiveIssue(todo): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var doneID string
+	err = testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, 'archive test done issue', 'done', 'none', 'member', $2, 90002, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&doneID)
+	if err != nil {
+		t.Fatalf("create done issue: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+doneID+"/archive", nil)
+	req = withURLParam(req, "id", doneID)
+	testHandler.ArchiveIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ArchiveIssue(done): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var archived IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&archived); err != nil {
+		t.Fatalf("decode archived issue: %v", err)
+	}
+	if archived.ArchivedAt == nil || archived.ArchivedBy == nil {
+		t.Fatalf("ArchiveIssue(done): expected archive metadata, got archived_at=%v archived_by=%v", archived.ArchivedAt, archived.ArchivedBy)
+	}
+	if archived.Status != "done" {
+		t.Fatalf("ArchiveIssue(done): status = %q, want done", archived.Status)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+doneID, nil)
+	req = withURLParam(req, "id", doneID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue(archived): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&status=done&limit=1000", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues(default): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if issueListContainsID(t, w.Body.Bytes(), doneID) {
+		t.Fatal("ListIssues(default): archived issue should be hidden")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&status=done&include_archived=true&limit=1000", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues(include_archived): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !issueListContainsID(t, w.Body.Bytes(), doneID) {
+		t.Fatal("ListIssues(include_archived): archived issue should be included")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+doneID+"/restore", nil)
+	req = withURLParam(req, "id", doneID)
+	testHandler.RestoreIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RestoreIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var restored IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&restored); err != nil {
+		t.Fatalf("decode restored issue: %v", err)
+	}
+	if restored.ArchivedAt != nil || restored.ArchivedBy != nil {
+		t.Fatalf("RestoreIssue: expected archive metadata cleared, got archived_at=%v archived_by=%v", restored.ArchivedAt, restored.ArchivedBy)
+	}
+	if restored.Status != "done" {
+		t.Fatalf("RestoreIssue: status = %q, want done", restored.Status)
+	}
+}
+
+func TestListChildIssuesHidesArchivedByDefault(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE 'archive child test %'`, testWorkspaceID); err != nil {
+		t.Fatalf("cleanup child archive test issues: %v", err)
+	}
+
+	var parentID, archivedChildID, visibleChildID string
+	err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, 'archive child test parent issue', 'todo', 'none', 'member', $2, 90101, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&parentID)
+	if err != nil {
+		t.Fatalf("create parent issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE 'archive child test %'`, testWorkspaceID)
+	})
+
+	err = testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, parent_issue_id, number, position)
+		VALUES ($1, 'archive child test archived child issue', 'done', 'none', 'member', $2, $3, 90102, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, parentID).Scan(&archivedChildID)
+	if err != nil {
+		t.Fatalf("create archived child issue: %v", err)
+	}
+
+	err = testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, parent_issue_id, number, position)
+		VALUES ($1, 'archive child test visible child issue', 'todo', 'none', 'member', $2, $3, 90103, 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID, parentID).Scan(&visibleChildID)
+	if err != nil {
+		t.Fatalf("create visible child issue: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+archivedChildID+"/archive", nil)
+	req = withURLParam(req, "id", archivedChildID)
+	testHandler.ArchiveIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ArchiveIssue(child): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+parentID+"/children", nil)
+	req = withURLParam(req, "id", parentID)
+	testHandler.ListChildIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChildIssues(default): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if issueListContainsID(t, w.Body.Bytes(), archivedChildID) {
+		t.Fatal("ListChildIssues(default): archived child should be hidden")
+	}
+	if !issueListContainsID(t, w.Body.Bytes(), visibleChildID) {
+		t.Fatal("ListChildIssues(default): visible child should still be included")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+parentID+"/children?include_archived=true", nil)
+	req = withURLParam(req, "id", parentID)
+	testHandler.ListChildIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChildIssues(include_archived): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !issueListContainsID(t, w.Body.Bytes(), archivedChildID) {
+		t.Fatal("ListChildIssues(include_archived): archived child should be included")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+archivedChildID, nil)
+	req = withURLParam(req, "id", archivedChildID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue(archived child): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/child-progress", nil)
+	testHandler.ChildIssueProgress(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ChildIssueProgress: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	progress := childProgressByParentID(t, w.Body.Bytes())
+	entry, ok := progress[parentID]
+	if !ok {
+		t.Fatal("ChildIssueProgress: expected parent progress entry")
+	}
+	if entry.Total != 1 || entry.Done != 0 {
+		t.Fatalf("ChildIssueProgress: got total=%d done=%d, want total=1 done=0", entry.Total, entry.Done)
+	}
+}
+
+func issueListContainsID(t *testing.T, body []byte, id string) bool {
+	t.Helper()
+	var resp struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode issue list: %v", err)
+	}
+	for _, issue := range resp.Issues {
+		if issue.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+type childProgressEntry struct {
+	ParentIssueID string `json:"parent_issue_id"`
+	Total         int64  `json:"total"`
+	Done          int64  `json:"done"`
+}
+
+func childProgressByParentID(t *testing.T, body []byte) map[string]childProgressEntry {
+	t.Helper()
+	var resp struct {
+		Progress []childProgressEntry `json:"progress"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode child progress: %v", err)
+	}
+	progress := make(map[string]childProgressEntry, len(resp.Progress))
+	for _, entry := range resp.Progress {
+		progress[entry.ParentIssueID] = entry
+	}
+	return progress
+}
+
 // TestCreateIssueDefaultStatusIsTodo verifies that issues created without an
 // explicit status default to "todo" so the daemon picks them up immediately.
 // Before this fix the default was "backlog", which daemons ignore.

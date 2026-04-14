@@ -213,6 +213,54 @@ export function useDeleteIssue() {
   });
 }
 
+export function useArchiveIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) =>
+      api.archiveIssue(id, { force }),
+    onSuccess: (archivedIssue) => {
+      qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
+        if (!old) return old;
+        const prev = old.issues.find((i) => i.id === archivedIssue.id);
+        return {
+          ...old,
+          issues: old.issues.filter((i) => i.id !== archivedIssue.id),
+          total: prev ? old.total - 1 : old.total,
+          doneTotal: (old.doneTotal ?? 0) - (prev?.status === "done" ? 1 : 0),
+        };
+      });
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, archivedIssue.id), archivedIssue);
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      if (archivedIssue.parent_issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.children(wsId, archivedIssue.parent_issue_id) });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
+    },
+  });
+}
+
+export function useRestoreIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.restoreIssue(id),
+    onSuccess: (restoredIssue) => {
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, restoredIssue.id), restoredIssue);
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      if (restoredIssue.parent_issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.children(wsId, restoredIssue.parent_issue_id) });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
+    },
+  });
+}
+
 export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
