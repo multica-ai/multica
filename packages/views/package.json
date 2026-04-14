@@ -40,11 +40,11 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@floating-ui/dom": "^1.7.6",
-    "@floating-ui/react-dom": "^2.1.8",
+
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
-
+    "@tiptap/extension-bubble-menu": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",
     "@tiptap/extension-image": "^3.22.1",

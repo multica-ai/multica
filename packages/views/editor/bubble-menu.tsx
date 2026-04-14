@@ -3,25 +3,19 @@
 /**
  * EditorBubbleMenu — floating formatting toolbar for text selection.
  *
- * Positioned with @floating-ui/react-dom (useFloating + autoUpdate) and
- * portaled to document.body via createPortal. This escapes ALL overflow
- * containers in the ancestor chain (Card overflow:hidden, scrollable
- * containers, etc.) while autoUpdate monitors every ancestor scroll
- * container to keep the menu anchored to the selection.
- *
- * Previously used Tiptap's <BubbleMenu> component, but that plugin:
- * - only supports a single scrollTarget (misses nested scroll)
- * - shows the element before computing position (flash on first show)
- * - uses position:absolute which gets clipped by overflow:hidden
+ * Uses Tiptap's native <BubbleMenu> component which has battle-tested
+ * focus management (preventHide flag, relatedTarget checks, mousedown
+ * capture). We only add scroll-container visibility detection on top,
+ * because the plugin's hide middleware can't detect nested scroll
+ * container clipping (virtual element has no contextElement).
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { createPortal } from "react-dom";
-import { useFloating, offset, flip, shift, autoUpdate } from "@floating-ui/react-dom";
-import { getOverflowAncestors } from "@floating-ui/dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { BubbleMenu } from "@tiptap/react/menus";
 import type { Editor } from "@tiptap/core";
-import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
+import type { EditorState } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -31,11 +25,10 @@ import {
   TooltipProvider,
 } from "@multica/ui/components/ui/tooltip";
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@multica/ui/components/ui/dropdown-menu";
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@multica/ui/components/ui/popover";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -58,28 +51,47 @@ import {
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// Visibility logic
+// Helpers
 // ---------------------------------------------------------------------------
 
-function shouldShowBubbleMenu(editor: Editor): boolean {
+function shouldShowBubbleMenu({
+  editor,
+  view,
+  state,
+  from,
+  to,
+}: {
+  editor: Editor;
+  view: EditorView;
+  state: EditorState;
+  oldState?: EditorState;
+  from: number;
+  to: number;
+}) {
   if (!editor.isEditable) return false;
-  // Don't check hasFocus() here — it's unreliable during transaction events.
-  // Focus loss is handled separately by the debounced blur handler.
-  const { state } = editor;
-  const { selection } = state;
-  if (selection.empty) return false;
-  const { from, to } = selection;
-  if (!state.doc.textBetween(from, to).length) return false;
-  if (selection instanceof NodeSelection) return false;
+  if (state.selection.empty) return false;
+  if (!state.doc.textBetween(from, to).trim().length) return false;
+  if (state.selection instanceof NodeSelection) return false;
+  if (!view.hasFocus()) return false;
   const $from = state.doc.resolve(from);
   if ($from.parent.type.name === "codeBlock") return false;
   return true;
 }
 
-/** Detect macOS for keyboard shortcut labels */
 const isMac =
   typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 const mod = isMac ? "\u2318" : "Ctrl";
+
+/** Walk up from `el` to find the nearest ancestor with overflow: auto/scroll. */
+function getScrollParent(el: HTMLElement): HTMLElement | Window {
+  let parent = el.parentElement;
+  while (parent) {
+    const style = getComputedStyle(parent);
+    if (/(auto|scroll)/.test(style.overflow + style.overflowY)) return parent;
+    parent = parent.parentElement;
+  }
+  return window;
+}
 
 // ---------------------------------------------------------------------------
 // Mark Toggle Button
@@ -138,6 +150,16 @@ const DANGEROUS_PROTOCOL_RE = /^(javascript|data|vbscript):/i;
 const HAS_PROTOCOL_RE = /^[a-z][a-z0-9+.-]*:\/?\/?/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Normalise a user-entered URL: add protocol, detect mailto, block XSS.
+ *
+ * Uses a blocklist (not allowlist) for protocols — only `javascript:`,
+ * `data:`, and `vbscript:` are blocked. All other protocols pass through
+ * because they can't execute code in the browser and are legitimate
+ * deep-link targets in a team tool (slack://, vscode://, figma://).
+ * Tiptap's `isAllowedUri` in the `setLink` command provides a second
+ * safety layer.
+ */
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return "";
@@ -174,12 +196,7 @@ function LinkEditBar({
     if (!href) {
       editor.chain().focus().extendMarkRange("link").unsetLink().run();
     } else {
-      editor
-        .chain()
-        .focus()
-        .extendMarkRange("link")
-        .setLink({ href })
-        .run();
+      editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
     }
     onClose();
   }, [editor, url, onClose]);
@@ -190,10 +207,7 @@ function LinkEditBar({
   }, [editor, onClose]);
 
   return (
-    <div
-      className="bubble-menu-link-edit"
-      onMouseDown={(e) => e.preventDefault()}
-    >
+    <div className="bubble-menu-link-edit" onMouseDown={(e) => e.preventDefault()}>
       <Input
         ref={inputRef}
         value={url}
@@ -202,44 +216,19 @@ function LinkEditBar({
         aria-label="URL"
         className="h-7 flex-1 text-xs"
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            apply();
-          }
-          if (e.key === "Escape") {
-            e.preventDefault();
-            onClose();
-            editor.commands.focus();
-          }
+          if (e.key === "Enter") { e.preventDefault(); apply(); }
+          if (e.key === "Escape") { e.preventDefault(); onClose(); editor.commands.focus(); }
         }}
       />
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        onClick={apply}
-        onMouseDown={(e) => e.preventDefault()}
-      >
+      <Button size="icon-xs" variant="ghost" onClick={apply} onMouseDown={(e) => e.preventDefault()}>
         <Check className="size-3.5" />
       </Button>
       {existingHref && (
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={remove}
-          onMouseDown={(e) => e.preventDefault()}
-        >
+        <Button size="icon-xs" variant="ghost" onClick={remove} onMouseDown={(e) => e.preventDefault()}>
           <Unlink className="size-3.5" />
         </Button>
       )}
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        onClick={() => {
-          onClose();
-          editor.commands.focus();
-        }}
-        onMouseDown={(e) => e.preventDefault()}
-      >
+      <Button size="icon-xs" variant="ghost" onClick={() => { onClose(); editor.commands.focus(); }} onMouseDown={(e) => e.preventDefault()}>
         <X className="size-3.5" />
       </Button>
     </div>
@@ -250,16 +239,9 @@ function LinkEditBar({
 // Heading Dropdown
 // ---------------------------------------------------------------------------
 
-function HeadingDropdown({
-  editor,
-  onOpenChange,
-}: {
-  editor: Editor;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const activeLevel = [1, 2, 3].find((l) =>
-    editor.isActive("heading", { level: l }),
-  );
+function HeadingDropdown({ editor, onOpenChange }: { editor: Editor; onOpenChange: (open: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const activeLevel = [1, 2, 3].find((l) => editor.isActive("heading", { level: l }));
   const label = activeLevel ? `H${activeLevel}` : "Text";
   const items = [
     { label: "Normal Text", icon: Type, active: !activeLevel, action: () => editor.chain().focus().setParagraph().run() },
@@ -268,25 +250,45 @@ function HeadingDropdown({
     { label: "Heading 3", icon: Heading3, active: activeLevel === 3, action: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
   ];
 
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    onOpenChange(next);
+  }, [onOpenChange]);
+
   return (
-    <DropdownMenu onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger
+    <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
         className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted"
         onMouseDown={(e) => e.preventDefault()}
       >
         {label}
         <ChevronDown className="size-3" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="bottom" sideOffset={8} align="start" className="w-auto">
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        sideOffset={8}
+        align="start"
+        className="w-auto min-w-32 p-1"
+        initialFocus={false}
+        finalFocus={false}
+      >
         {items.map((item) => (
-          <DropdownMenuItem key={item.label} onClick={item.action} className="gap-2 text-xs">
+          <button
+            key={item.label}
+            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              item.action();
+              handleOpenChange(false);
+            }}
+          >
             <item.icon className="size-3.5" />
             {item.label}
             {item.active && <Check className="ml-auto size-3.5" />}
-          </DropdownMenuItem>
+          </button>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -294,123 +296,116 @@ function HeadingDropdown({
 // List Dropdown
 // ---------------------------------------------------------------------------
 
-function ListDropdown({
-  editor,
-  onOpenChange,
-}: {
-  editor: Editor;
-  onOpenChange: (open: boolean) => void;
-}) {
+function ListDropdown({ editor, onOpenChange }: { editor: Editor; onOpenChange: (open: boolean) => void }) {
+  const [open, setOpen] = useState(false);
   const isBullet = editor.isActive("bulletList");
   const isOrdered = editor.isActive("orderedList");
 
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    onOpenChange(next);
+  }, [onOpenChange]);
+
   return (
-    <DropdownMenu onOpenChange={onOpenChange}>
+    <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
-        <TooltipTrigger
-          render={
-            <DropdownMenuTrigger
-              className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted"
-              aria-pressed={isBullet || isOrdered}
-              onMouseDown={(e) => e.preventDefault()}
-            />
-          }
-        >
+        <TooltipTrigger render={
+          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered} onMouseDown={(e) => e.preventDefault()} />
+        }>
           <List className="size-3.5" />
           <ChevronDown className="size-3" />
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={8}>List</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent side="bottom" sideOffset={8} align="start" className="w-auto">
-        <DropdownMenuItem onClick={() => editor.chain().focus().toggleBulletList().run()} className="gap-2 text-xs">
-          <List className="size-3.5" />
-          Bullet List
+      <PopoverContent
+        side="bottom"
+        sideOffset={8}
+        align="start"
+        className="w-auto min-w-32 p-1"
+        initialFocus={false}
+        finalFocus={false}
+      >
+        <button
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            editor.chain().focus().toggleBulletList().run();
+            handleOpenChange(false);
+          }}
+        >
+          <List className="size-3.5" /> Bullet List
           {isBullet && <Check className="ml-auto size-3.5" />}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => editor.chain().focus().toggleOrderedList().run()} className="gap-2 text-xs">
-          <ListOrdered className="size-3.5" />
-          Ordered List
+        </button>
+        <button
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            editor.chain().focus().toggleOrderedList().run();
+            handleOpenChange(false);
+          }}
+        >
+          <ListOrdered className="size-3.5" /> Ordered List
           {isOrdered && <Check className="ml-auto size-3.5" />}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </button>
+      </PopoverContent>
+    </Popover>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main Bubble Menu — useFloating + portal to body
+// Main Bubble Menu — native Tiptap <BubbleMenu>
 // ---------------------------------------------------------------------------
 
 function EditorBubbleMenu({ editor }: { editor: Editor }) {
-  const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"toolbar" | "link-edit">("toolbar");
+  const [scrollTarget, setScrollTarget] = useState<HTMLElement | Window>(window);
 
-  // Virtual reference that tracks the text selection.
-  // contextElement tells autoUpdate where to find scroll ancestors.
-  const virtualRef = useMemo(
-    () => ({
-      getBoundingClientRect: () => {
-        const { from, to } = editor.state.selection;
-        return posToDOMRect(editor.view, from, to);
-      },
-      contextElement: editor.view.dom,
-    }),
-    [editor],
-  );
-
-  const { refs, floatingStyles, isPositioned, update } = useFloating({
-    strategy: "fixed",
-    placement: "top",
-    open: visible,
-    middleware: [offset(8), flip(), shift({ padding: 8 })],
-    elements: { reference: virtualRef },
-    whileElementsMounted: autoUpdate,
-  });
-
-  // Show/hide based on selection state — no blur/focus handling.
+  // Find the real scroll container once on mount
   useEffect(() => {
-    const onTransaction = () => {
-      const show = shouldShowBubbleMenu(editor);
-      setVisible(show);
-      // Must call update() manually — autoUpdate can't detect virtual
-      // reference movement (it's not a real DOM element).
-      if (show) update();
-    };
-    editor.on("transaction", onTransaction);
-    return () => { editor.off("transaction", onTransaction); };
-  }, [editor, update]);
+    setScrollTarget(getScrollParent(editor.view.dom));
+  }, [editor]);
 
-  // Close on outside click (mousedown not in editor and not in menu)
+  // Hide when the selection scrolls outside the scroll container's
+  // visible area. The plugin's hide middleware can't detect this because
+  // its virtual reference element has no contextElement — Floating UI
+  // only checks viewport bounds. We use `display` (not managed by the
+  // plugin) as an additive visibility layer.
+  const scrollHiddenRef = useRef(false);
+  const [, forceRender] = useState(0);
   useEffect(() => {
-    if (!visible) return;
-    const handle = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (editor.view.dom.contains(target)) return;
-      if (target.closest(".bubble-menu") || target.closest(".bubble-menu-link-edit")) return;
-      setVisible(false);
-    };
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [visible, editor]);
+    if (scrollTarget === window) return;
+    const el = scrollTarget as HTMLElement;
 
-  // Close on any ancestor scroll or window resize
-  useEffect(() => {
-    if (!visible) return;
-    const close = () => {
-      setVisible(false);
+    const onScroll = () => {
+      if (editor.state.selection.empty) {
+        if (scrollHiddenRef.current) {
+          scrollHiddenRef.current = false;
+          forceRender((n) => n + 1);
+        }
+        return;
+      }
+      const coords = editor.view.coordsAtPos(editor.state.selection.from);
+      const rect = el.getBoundingClientRect();
+      const visible = coords.top >= rect.top && coords.top <= rect.bottom;
+      if (scrollHiddenRef.current !== !visible) {
+        scrollHiddenRef.current = !visible;
+        forceRender((n) => n + 1);
+      }
     };
-    const ancestors = getOverflowAncestors(editor.view.dom);
-    ancestors.forEach((el) => el.addEventListener("scroll", close, { passive: true }));
-    window.addEventListener("resize", close);
-    return () => {
-      ancestors.forEach((el) => el.removeEventListener("scroll", close));
-      window.removeEventListener("resize", close);
-    };
-  }, [visible, editor]);
 
-  // Reset mode on selection change
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [editor, scrollTarget]);
+
+  // Reset scroll-hidden and mode when selection changes
   useEffect(() => {
-    const handler = () => setMode("toolbar");
+    const handler = () => {
+      setMode("toolbar");
+      if (scrollHiddenRef.current) {
+        scrollHiddenRef.current = false;
+        forceRender((n) => n + 1);
+      }
+    };
     editor.on("selectionUpdate", handler);
     return () => { editor.off("selectionUpdate", handler); };
   }, [editor]);
@@ -421,27 +416,27 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
     [editor],
   );
 
-  const openLinkEdit = useCallback(() => setMode("link-edit"), []);
-  const closeLinkEdit = useCallback(() => {
-    setMode("toolbar");
-    editor.commands.focus();
-  }, [editor]);
-
-  return createPortal(
-    <div
-      ref={refs.setFloating}
+  return (
+    <BubbleMenu
+      editor={editor}
+      shouldShow={shouldShowBubbleMenu}
+      updateDelay={0}
       style={{
-        ...floatingStyles,
         zIndex: 50,
-        // display:none when hidden — no residual animations from children.
-        // Also hide until Floating UI has computed position (isPositioned)
-        // to avoid a flash at top:0 left:0.
-        display: visible && isPositioned ? undefined : "none",
+        display: scrollHiddenRef.current ? "none" : undefined,
       }}
-      onMouseDown={(e) => e.preventDefault()}
+      options={{
+        strategy: "fixed",
+        placement: "top",
+        offset: 8,
+        flip: true,
+        shift: { padding: 8 },
+        hide: true,
+        scrollTarget,
+      }}
     >
       {mode === "link-edit" ? (
-        <LinkEditBar editor={editor} onClose={closeLinkEdit} />
+        <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
@@ -449,40 +444,22 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
             <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${mod}+I`} />
             <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${mod}+Shift+S`} />
             <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${mod}+E`} />
-
             <Separator orientation="vertical" className="mx-0.5 h-5" />
-
             <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Toggle
-                    size="sm"
-                    pressed={editor.isActive("link")}
-                    onPressedChange={openLinkEdit}
-                    onMouseDown={(e) => e.preventDefault()}
-                  />
-                }
-              >
+              <TooltipTrigger render={
+                <Toggle size="sm" pressed={editor.isActive("link")} onPressedChange={() => setMode("link-edit")} onMouseDown={(e) => e.preventDefault()} />
+              }>
                 <Link2 className="size-3.5" />
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={8}>Link</TooltipContent>
             </Tooltip>
-
             <Separator orientation="vertical" className="mx-0.5 h-5" />
-
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} />
             <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} />
             <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Toggle
-                    size="sm"
-                    pressed={editor.isActive("blockquote")}
-                    onPressedChange={() => editor.chain().focus().toggleBlockquote().run()}
-                    onMouseDown={(e) => e.preventDefault()}
-                  />
-                }
-              >
+              <TooltipTrigger render={
+                <Toggle size="sm" pressed={editor.isActive("blockquote")} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />
+              }>
                 <Quote className="size-3.5" />
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={8}>Quote</TooltipContent>
@@ -490,8 +467,7 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
           </div>
         </TooltipProvider>
       )}
-    </div>,
-    document.body,
+    </BubbleMenu>
   );
 }
 

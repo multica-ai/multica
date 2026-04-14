@@ -489,9 +489,8 @@
   min-width: 300px;
 }
 
-/* Link preview card — portaled to body with position: fixed to escape
- * overflow:hidden containers (Card component, scrollable editors, etc.). */
-.link-preview-card {
+/* Link hover card — shows URL + actions on link hover */
+.link-hover-card {
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -505,3 +504,5 @@
   max-width: min(360px, calc(100vw - 2rem));
   white-space: nowrap;
 }
+
+

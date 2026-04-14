@@ -589,9 +589,6 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
-      '@floating-ui/react-dom':
-        specifier: ^2.1.8
-        version: 2.1.8(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -604,6 +601,9 @@ importers:
       '@tiptap/core':
         specifier: ^3.22.1
         version: 3.22.1(@tiptap/pm@3.22.1)
+      '@tiptap/extension-bubble-menu':
+        specifier: ^3.22.1
+        version: 3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))(@tiptap/pm@3.22.1)
       '@tiptap/extension-code-block-lowlight':
         specifier: ^3.22.1
         version: 3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))(@tiptap/extension-code-block@3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))(@tiptap/pm@3.22.1))(@tiptap/pm@3.22.1)(highlight.js@11.11.1)(lowlight@3.3.0)
@@ -8500,7 +8500,6 @@ snapshots:
       '@floating-ui/dom': 1.7.6
       '@tiptap/core': 3.22.1(@tiptap/pm@3.22.1)
       '@tiptap/pm': 3.22.1
-    optional: true
 
   '@tiptap/extension-bullet-list@3.22.1(@tiptap/extension-list@3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))(@tiptap/pm@3.22.1))':
     dependencies:
