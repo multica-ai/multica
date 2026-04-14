@@ -14,6 +14,7 @@ import (
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
+// For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
 	content := buildMetaSkillContent(provider, ctx)
 
@@ -22,6 +23,8 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
 	case "codex", "opencode", "openclaw":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
+	case "gemini":
+		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
 	default:
 		// Unknown provider — skip config injection, prompt-only mode.
 		return nil
@@ -36,8 +39,22 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 
-	// Inject agent identity instructions before workflow commands.
-	if ctx.AgentInstructions != "" {
+	// Always emit agent identity so the agent knows who it is, even when
+	// dispatched via @mention on an issue assigned to a different agent.
+	if ctx.AgentName != "" || ctx.AgentID != "" {
+		b.WriteString("## Agent Identity\n\n")
+		if ctx.AgentName != "" {
+			fmt.Fprintf(&b, "**You are: %s**", ctx.AgentName)
+			if ctx.AgentID != "" {
+				fmt.Fprintf(&b, " (ID: `%s`)", ctx.AgentID)
+			}
+			b.WriteString("\n\n")
+		}
+		if ctx.AgentInstructions != "" {
+			b.WriteString(ctx.AgentInstructions)
+			b.WriteString("\n\n")
+		}
+	} else if ctx.AgentInstructions != "" {
 		b.WriteString("## Agent Identity\n\n")
 		b.WriteString(ctx.AgentInstructions)
 		b.WriteString("\n\n")
@@ -125,6 +142,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "codex", "opencode", "openclaw":
 			// Codex, OpenCode, and OpenClaw discover skills natively from their respective paths — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+		case "gemini":
+			// Gemini reads GEMINI.md directly; point it at the fallback skills dir.
+			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}

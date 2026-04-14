@@ -70,7 +70,7 @@ selfhost:
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup --local"; \
+		echo "  multica setup self-host"; \
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \

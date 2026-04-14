@@ -8,12 +8,16 @@ import { DashboardGuard } from "./dashboard-guard";
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  /** Sibling of SidebarInset (e.g. SearchCommand, ChatWindow) */
+  /** Rendered inside SidebarInset (e.g. ChatWindow, ChatFab — absolute-positioned overlays) */
   extra?: ReactNode;
   /** Rendered inside sidebar header as a search trigger */
   searchSlot?: ReactNode;
   /** Loading indicator */
   loadingIndicator?: ReactNode;
+  /** Path to redirect when user is not authenticated */
+  loginPath?: string;
+  /** Path to redirect when user has no workspace */
+  onboardingPath?: string;
 }
 
 export function DashboardLayout({
@@ -21,10 +25,13 @@ export function DashboardLayout({
   extra,
   searchSlot,
   loadingIndicator,
+  loginPath,
+  onboardingPath,
 }: DashboardLayoutProps) {
   return (
     <DashboardGuard
-      loginPath="/"
+      loginPath={loginPath}
+      onboardingPath={onboardingPath}
       loadingFallback={
         <div className="flex h-svh items-center justify-center">
           {loadingIndicator}
@@ -33,14 +40,14 @@ export function DashboardLayout({
     >
       <SidebarProvider className="h-svh">
         <AppSidebar searchSlot={searchSlot} />
-        <SidebarInset className="overflow-hidden">
+        <SidebarInset className="relative overflow-hidden">
           <div className="flex h-10 shrink-0 items-center border-b px-2 md:hidden">
             <SidebarTrigger />
           </div>
           {children}
           <ModalRegistry />
+          {extra}
         </SidebarInset>
-        {extra}
       </SidebarProvider>
     </DashboardGuard>
   );

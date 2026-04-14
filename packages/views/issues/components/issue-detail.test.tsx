@@ -94,7 +94,10 @@ vi.mock("../../editor", () => ({
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
-  ContentEditor: forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+  ContentEditor: forwardRef(function MockContentEditor(
+    { defaultValue, onUpdate, placeholder }: any,
+    ref: any,
+  ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -116,7 +119,10 @@ vi.mock("../../editor", () => ({
       />
     );
   }),
-  TitleEditor: forwardRef(({ defaultValue, placeholder, onBlur, onChange }: any, ref: any) => {
+  TitleEditor: forwardRef(function MockTitleEditor(
+    { defaultValue, placeholder, onBlur, onChange }: any,
+    ref: any,
+  ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({

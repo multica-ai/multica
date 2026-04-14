@@ -37,8 +37,10 @@ RUN pnpm install --frozen-lockfile --offline
 # Set build-time env: tells Next.js rewrites to proxy API calls to the backend service
 ARG REMOTE_API_URL=http://backend:8080
 ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ARG NEXT_PUBLIC_WS_URL
 ENV REMOTE_API_URL=$REMOTE_API_URL
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV STANDALONE=true
 
 # Build the web app (standalone output for minimal runtime)

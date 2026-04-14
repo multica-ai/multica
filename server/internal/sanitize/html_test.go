@@ -80,6 +80,52 @@ func TestHTML(t *testing.T) {
 			input: `<div data-type="fileCard" data-href="http://example.com/file.pdf" data-filename="file.pdf"></div>`,
 			want:  `<div data-type="fileCard" data-href="http://example.com/file.pdf" data-filename="file.pdf"></div>`,
 		},
+		// Code block preservation — entities must NOT be escaped inside code.
+		{
+			name:  "fenced code block preserves ampersands",
+			input: "```\na && b\n```",
+			want:  "```\na && b\n```",
+		},
+		{
+			name:  "fenced code block preserves angle brackets",
+			input: "```html\n<div class=\"x\">hello</div>\n```",
+			want:  "```html\n<div class=\"x\">hello</div>\n```",
+		},
+		{
+			name:  "inline code preserves ampersands",
+			input: "run `a && b` in shell",
+			want:  "run `a && b` in shell",
+		},
+		{
+			name:  "inline code preserves angle brackets",
+			input: "use `x < y && y > z`",
+			want:  "use `x < y && y > z`",
+		},
+		{
+			name:  "double backtick inline code preserved",
+			input: "use ``a && b`` here",
+			want:  "use ``a && b`` here",
+		},
+		{
+			name:  "script in fenced code block preserved",
+			input: "```\n<script>alert(1)</script>\n```",
+			want:  "```\n<script>alert(1)</script>\n```",
+		},
+		{
+			name:  "script outside code block still stripped",
+			input: "hello <script>alert(1)</script> world",
+			want:  "hello  world",
+		},
+		{
+			name:  "mixed code and non-code",
+			input: "text `a && b` more <script>x</script> end",
+			want:  "text `a && b` more  end",
+		},
+		{
+			name:  "tilde fenced code block preserves content",
+			input: "~~~\na && b\n~~~",
+			want:  "~~~\na && b\n~~~",
+		},
 	}
 
 	for _, tt := range tests {

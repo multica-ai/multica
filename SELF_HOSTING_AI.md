@@ -8,15 +8,17 @@ This document is designed for AI agents to execute. Follow these steps exactly t
 - Homebrew installed (for CLI)
 - At least one AI agent CLI on PATH: `claude` or `codex`
 
-## One-Command Install
+## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --local
+# Install CLI + provision self-host server
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+
+# Configure CLI for localhost, authenticate, and start daemon
+multica setup self-host
 ```
 
-This installs everything: clones the repo, starts Docker services, and installs the CLI.
-
-Wait for the output `✓ Multica is installed and running!` before proceeding.
+Wait for the server output `✓ Multica server is running and CLI is ready!` before running `multica setup self-host`.
 
 **Expected result:**
 - Frontend at http://localhost:3000
@@ -30,10 +32,10 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 make selfhost
 brew install multica-ai/tap/multica
-multica setup --local
+multica setup self-host
 ```
 
-The `multica setup --local` command will:
+The `multica setup self-host` command will:
 1. Configure CLI to connect to localhost:8080 / localhost:3000
 2. Open a browser for login — use verification code `888888` with any email
 3. Discover workspaces automatically
@@ -64,7 +66,7 @@ If the default ports (8080/3000) are in use:
 
 1. Edit `.env` and change `PORT` and `FRONTEND_PORT`
 2. Run `make selfhost`
-3. Run `multica setup --local --port <PORT> --frontend-port <FRONTEND_PORT>`
+3. Run `multica setup self-host --port <PORT> --frontend-port <FRONTEND_PORT>`
 
 ## Troubleshooting
 

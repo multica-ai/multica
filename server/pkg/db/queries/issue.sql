@@ -103,4 +103,13 @@ WHERE workspace_id = $1
   AND assignee_id IS NOT NULL
 GROUP BY assignee_type, assignee_id;
 
+-- name: ChildIssueProgress :many
+SELECT parent_issue_id,
+       COUNT(*)::bigint AS total,
+       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+FROM issue
+WHERE workspace_id = $1
+  AND parent_issue_id IS NOT NULL
+GROUP BY parent_issue_id;
+
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).

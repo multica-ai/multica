@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+
+function createWrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+}
 
 const { mockSendCode, mockVerifyCode, mockHydrateWorkspace } = vi.hoisted(
   () => ({
@@ -66,7 +75,7 @@ describe("LoginPage", () => {
   });
 
   it("renders login form with email input and continue button", () => {
-    render(<LoginPage />);
+    render(<LoginPage />, { wrapper: createWrapper() });
 
     expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
     expect(screen.getByText("Enter your email to get a login code")).toBeInTheDocument();
@@ -78,7 +87,7 @@ describe("LoginPage", () => {
 
   it("does not call sendCode when email is empty", async () => {
     const user = userEvent.setup();
-    render(<LoginPage />);
+    render(<LoginPage />, { wrapper: createWrapper() });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(mockSendCode).not.toHaveBeenCalled();
@@ -87,7 +96,7 @@ describe("LoginPage", () => {
   it("calls sendCode with email on submit", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
-    render(<LoginPage />);
+    render(<LoginPage />, { wrapper: createWrapper() });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -100,7 +109,7 @@ describe("LoginPage", () => {
   it("shows 'Sending code...' while submitting", async () => {
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
     const user = userEvent.setup();
-    render(<LoginPage />);
+    render(<LoginPage />, { wrapper: createWrapper() });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -113,7 +122,7 @@ describe("LoginPage", () => {
   it("shows verification code step after sending code", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
-    render(<LoginPage />);
+    render(<LoginPage />, { wrapper: createWrapper() });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -126,7 +135,7 @@ describe("LoginPage", () => {
   it("shows error when sendCode fails", async () => {
     mockSendCode.mockRejectedValueOnce(new Error("Network error"));
     const user = userEvent.setup();
-    render(<LoginPage />);
+    render(<LoginPage />, { wrapper: createWrapper() });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));

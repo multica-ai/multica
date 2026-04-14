@@ -66,6 +66,21 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 
+Agent-specific overrides:
+
+| Variable | Description |
+|----------|-------------|
+| `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
+| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
+| `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
+| `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
+| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
+
 ## Database Setup
 
 Multica requires PostgreSQL 17 with the pgvector extension.
@@ -202,6 +217,26 @@ REMOTE_API_URL=https://api.example.com
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
+
+## LAN / Non-localhost Access
+
+By default, Multica works on `localhost`. If you access it from another machine on the LAN (e.g. `http://192.168.1.100:3000`), you need to tell the backend to accept that origin:
+
+```bash
+# .env — replace with your server's LAN IP
+FRONTEND_ORIGIN=http://192.168.1.100:3000
+CORS_ALLOWED_ORIGINS=http://192.168.1.100:3000
+```
+
+Then rebuild:
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d --build
+```
+
+The frontend automatically derives the WebSocket URL from the page address, so real-time features (chat streaming, live issue updates, notifications) work over LAN without extra configuration.
+
+> **Note:** If you need to override the WebSocket URL explicitly (e.g. when using a separate backend domain), set `NEXT_PUBLIC_WS_URL` in `.env` and rebuild the frontend image.
 
 ## Health Check
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
+import { createSafeId } from "@multica/core/utils";
 import type { DataRouter } from "react-router-dom";
 import { createTabRouter } from "../routes";
 
@@ -69,7 +70,7 @@ export function resolveRouteIcon(pathname: string): string {
 const DEFAULT_PATH = "/issues";
 
 function createId(): string {
-  return crypto.randomUUID();
+  return createSafeId();
 }
 
 function makeTab(path: string, title: string, icon: string): Tab {

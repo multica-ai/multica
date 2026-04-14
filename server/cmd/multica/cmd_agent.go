@@ -179,13 +179,12 @@ func resolveServerURL(cmd *cobra.Command) string {
 	}
 	profile := resolveProfile(cmd)
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return "https://api.multica.ai"
-	}
-	if cfg.ServerURL != "" {
+	if err == nil && cfg.ServerURL != "" {
 		return normalizeAPIBaseURL(cfg.ServerURL)
 	}
-	return "https://api.multica.ai"
+	fmt.Fprintln(os.Stderr, "No server configured. Run 'multica setup' first.")
+	os.Exit(1)
+	return "" // unreachable
 }
 
 func normalizeAPIBaseURL(raw string) string {

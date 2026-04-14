@@ -15,6 +15,7 @@ import (
 )
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
+var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
 // Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
@@ -145,6 +146,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
 	if req.Name == "" || req.Slug == "" {
 		writeError(w, http.StatusBadRequest, "name and slug are required")
+		return
+	}
+	if !workspaceSlugPattern.MatchString(req.Slug) {
+		writeError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, and hyphens")
 		return
 	}
 

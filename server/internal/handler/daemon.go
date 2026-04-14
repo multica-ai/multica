@@ -217,6 +217,26 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
 			return
 		}
+
+		// Migrate agents from old offline runtimes on the same machine to the
+		// newly registered runtime. Scoped by daemon_id prefix so that only
+		// old profile-suffixed runtimes (e.g. "hostname-staging") from this
+		// machine are affected — runtimes from other machines are untouched.
+		if ownerID.Valid {
+			migrated, err := h.Queries.MigrateAgentsToRuntime(r.Context(), db.MigrateAgentsToRuntimeParams{
+				NewRuntimeID:   registered.ID,
+				WorkspaceID:    parseUUID(req.WorkspaceID),
+				Provider:       provider,
+				OwnerID:        ownerID,
+				DaemonIDPrefix: strToText(req.DaemonID),
+			})
+			if err != nil {
+				slog.Warn("failed to migrate agents to new runtime", "runtime_id", uuidToString(registered.ID), "error", err)
+			} else if migrated > 0 {
+				slog.Info("migrated agents to new runtime", "runtime_id", uuidToString(registered.ID), "provider", provider, "migrated_count", migrated)
+			}
+		}
+
 		resp = append(resp, runtimeToResponse(registered))
 	}
 
@@ -379,6 +399,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos
 				}
+			}
+		}
+
+		// Fetch the triggering comment content so the daemon can embed it
+		// directly in the agent prompt (prevents the agent from ignoring comments
+		// when stale output files exist in a reused workdir).
+		if task.TriggerCommentID.Valid {
+			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
+				resp.TriggerCommentContent = comment.Content
 			}
 		}
 
@@ -824,6 +853,70 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ListTaskMessagesByUser returns task messages for a task.
+// Used by the frontend under regular user auth (not daemon auth).
+// Verifies the task belongs to the caller's workspace.
+func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// Verify the task belongs to the caller's workspace.
+	wsID := h.resolveTaskWorkspaceID(r, task)
+	if wsID == "" || wsID != middleware.WorkspaceIDFromContext(r.Context()) {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	var (
+		messages []db.TaskMessage
+		queryErr error
+	)
+	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+		sinceSeq, parseErr := strconv.Atoi(sinceStr)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid since parameter")
+			return
+		}
+		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
+			TaskID: parseUUID(taskID),
+			Seq:    int32(sinceSeq),
+		})
+	} else {
+		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
+	}
+	if queryErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list task messages")
+		return
+	}
+
+	issueID := uuidToString(task.IssueID)
+
+	resp := make([]protocol.TaskMessagePayload, len(messages))
+	for i, m := range messages {
+		var input map[string]any
+		if m.Input != nil {
+			json.Unmarshal(m.Input, &input)
+		}
+		resp[i] = protocol.TaskMessagePayload{
+			TaskID:  taskID,
+			IssueID: issueID,
+			Seq:     int(m.Seq),
+			Type:    m.Type,
+			Tool:    m.Tool.String,
+			Content: m.Content.String,
+			Input:   input,
+			Output:  m.Output.String,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
@@ -840,5 +933,19 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"total_cache_read_tokens":  row.TotalCacheReadTokens,
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
 		"task_count":               row.TaskCount,
+	})
+}
+
+// GetIssueGCCheck returns minimal issue info needed by the daemon GC loop.
+func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "issueId")
+	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     issue.Status,
+		"updated_at": issue.UpdatedAt.Time,
 	})
 }

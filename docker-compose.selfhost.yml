@@ -62,6 +62,7 @@ services:
       args:
         REMOTE_API_URL: http://backend:8080
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
     depends_on:
       - backend
     ports:

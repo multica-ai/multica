@@ -48,3 +48,5 @@ _features/
 *.dmg
 *.app
 server/server
+data/
+.kilo

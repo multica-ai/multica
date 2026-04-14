@@ -52,6 +52,7 @@ import type {
   ReorderPinsRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
+import { createRequestId } from "../utils";
 
 export interface ApiClientOptions {
   logger?: Logger;
@@ -61,6 +62,18 @@ export interface ApiClientOptions {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+
+  constructor(message: string, status: number, statusText: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.statusText = statusText;
+  }
 }
 
 export class ApiClient {
@@ -76,6 +89,10 @@ export class ApiClient {
     this.logger = options?.logger ?? noopLogger;
   }
 
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   setToken(token: string | null) {
     this.token = token;
   }
@@ -84,10 +101,20 @@ export class ApiClient {
     this.workspaceId = id;
   }
 
+  private readCsrfToken(): string | null {
+    if (typeof document === "undefined") return null;
+    const match = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("multica_csrf="));
+    return match ? match.split("=")[1] ?? null : null;
+  }
+
   private authHeaders(): Record<string, string> {
     const headers: Record<string, string> = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    const csrf = this.readCsrfToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
     return headers;
   }
 
@@ -108,7 +135,7 @@ export class ApiClient {
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
@@ -132,7 +159,7 @@ export class ApiClient {
       const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status, res.statusText);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
@@ -165,6 +192,14 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
+  }
+
+  async logout(): Promise<void> {
+    await this.fetch("/auth/logout", { method: "POST" });
+  }
+
+  async issueCliToken(): Promise<{ token: string }> {
+    return this.fetch("/api/cli-token", { method: "POST" });
   }
 
   async getMe(): Promise<User> {
@@ -232,6 +267,10 @@ export class ApiClient {
 
   async listChildIssues(id: string): Promise<{ issues: Issue[] }> {
     return this.fetch(`/api/issues/${id}/children`);
+  }
+
+  async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
+    return this.fetch("/api/issues/child-progress");
   }
 
   async deleteIssue(id: string): Promise<void> {
@@ -432,7 +471,7 @@ export class ApiClient {
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
-    return this.fetch(`/api/daemon/tasks/${taskId}/messages`);
+    return this.fetch(`/api/tasks/${taskId}/messages`);
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
@@ -610,7 +649,7 @@ export class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    const rid = crypto.randomUUID().slice(0, 8);
+    const rid = createRequestId();
     const start = Date.now();
     this.logger.info("→ POST /api/upload-file", { rid });
 

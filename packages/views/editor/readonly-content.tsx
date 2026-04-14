@@ -86,7 +86,7 @@ function urlTransform(url: string): string {
 // ---------------------------------------------------------------------------
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { openInNewTab } = useNavigation();
+  const { push, openInNewTab } = useNavigation();
   const path = `/issues/${issueId}`;
   return (
     <span
@@ -94,11 +94,13 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (openInNewTab) {
-          openInNewTab(path, label);
-        } else {
-          window.open(path, "_blank", "noopener,noreferrer");
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
         }
+        push(path);
       }}
     >
       <IssueMentionCard issueId={issueId} fallbackLabel={label} />

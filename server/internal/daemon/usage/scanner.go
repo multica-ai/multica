@@ -25,8 +25,9 @@ func NewScanner(logger *slog.Logger) *Scanner {
 	return &Scanner{logger: logger}
 }
 
-// Scan reads local JSONL log files for both Claude Code and Codex CLI,
-// and returns aggregated usage records keyed by (date, provider, model).
+// Scan reads local log files for all supported agent runtimes (Claude Code,
+// Codex, OpenCode, OpenClaw, Hermes) and returns aggregated usage records
+// keyed by (date, provider, model).
 func (s *Scanner) Scan() []Record {
 	var records []Record
 
@@ -35,6 +36,15 @@ func (s *Scanner) Scan() []Record {
 
 	codexRecords := s.scanCodex()
 	records = append(records, codexRecords...)
+
+	openCodeRecords := s.scanOpenCode()
+	records = append(records, openCodeRecords...)
+
+	openClawRecords := s.scanOpenClaw()
+	records = append(records, openClawRecords...)
+
+	hermesRecords := s.scanHermes()
+	records = append(records, hermesRecords...)
 
 	return records
 }

@@ -102,6 +102,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.heartbeatLoop(ctx)
 	go d.usageScanLoop(ctx)
+	go d.gcLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx)
 }
@@ -178,11 +179,14 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 		}
 		d.mu.Unlock()
 
-		// Sync workspace repos to local cache.
+		// Sync workspace repos to local cache in the background so heartbeat
+		// and poll loops are not blocked by slow git clone/fetch operations.
 		if d.repoCache != nil && len(resp.Repos) > 0 {
-			if err := d.repoCache.Sync(ws.ID, repoDataToInfo(resp.Repos)); err != nil {
-				d.logger.Warn("repo cache sync failed", "workspace_id", ws.ID, "error", err)
-			}
+			go func(wsID string, repos []RepoData) {
+				if err := d.repoCache.Sync(wsID, repoDataToInfo(repos)); err != nil {
+					d.logger.Warn("repo cache sync failed", "workspace_id", wsID, "error", err)
+				}
+			}(ws.ID, resp.Repos)
 		}
 
 		d.logger.Info("watching workspace", "workspace_id", ws.ID, "name", ws.Name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
@@ -407,11 +411,13 @@ func (d *Daemon) reloadWorkspaces(ctx context.Context) {
 			}
 			d.mu.Unlock()
 
-			// Sync workspace repos to local cache.
+			// Sync workspace repos to local cache in the background.
 			if d.repoCache != nil && len(resp.Repos) > 0 {
-				if err := d.repoCache.Sync(id, repoDataToInfo(resp.Repos)); err != nil {
-					d.logger.Warn("repo cache sync failed", "workspace_id", id, "error", err)
-				}
+				go func(wsID string, repos []RepoData) {
+					if err := d.repoCache.Sync(wsID, repoDataToInfo(repos)); err != nil {
+						d.logger.Warn("repo cache sync failed", "workspace_id", wsID, "error", err)
+					}
+				}(id, resp.Repos)
 			}
 
 			d.logger.Info("now watching workspace", "workspace_id", id, "name", name)
@@ -870,6 +876,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			}
 		}
 	}
+
+	// Write GC metadata after the task finishes so the periodic GC loop
+	// can look up the issue later. Written last so that a mid-task crash
+	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
+	if result.EnvRoot != "" {
+		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID); err != nil {
+			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+		}
+	}
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
@@ -879,9 +894,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	}
 
 	agentName := "agent"
+	var agentID string
 	var skills []SkillData
 	var instructions string
 	if task.Agent != nil {
+		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
@@ -893,6 +910,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:           task.IssueID,
 		TriggerCommentID:  task.TriggerCommentID,
+		AgentID:           agentID,
 		AgentName:         agentName,
 		AgentInstructions: instructions,
 		AgentSkills:       convertSkillsForEnv(skills),
@@ -976,17 +994,90 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	taskStart := time.Now()
 
-	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{
+	execOpts := agent.ExecOptions{
 		Cwd:             env.WorkDir,
 		Model:           entry.Model,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
-	})
+	}
+
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err
 	}
 
-	// Drain message channel — forward to server for live output + log locally.
+	// Fallback: if session resume failed before establishing a session, retry
+	// with a fresh session. We check SessionID == "" to distinguish a resume
+	// failure (no session established) from a failure during actual execution.
+	if result.Status == "failed" && task.PriorSessionID != "" && result.SessionID == "" {
+		firstUsage := result.Usage
+		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
+		execOpts.ResumeSessionID = ""
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		if retryErr != nil {
+			taskLog.Error("fresh session also failed to start", "error", retryErr)
+		} else {
+			result = retryResult
+			result.Usage = mergeUsage(firstUsage, result.Usage)
+			tools = retryTools
+		}
+	}
+
+	elapsed := time.Since(taskStart).Round(time.Second)
+	taskLog.Info("agent finished",
+		"status", result.Status,
+		"duration", elapsed.String(),
+		"tools", tools,
+	)
+
+	// Convert agent usage map to task usage entries.
+	var usageEntries []TaskUsageEntry
+	for model, u := range result.Usage {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+			continue
+		}
+		usageEntries = append(usageEntries, TaskUsageEntry{
+			Provider:         provider,
+			Model:            model,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+		})
+	}
+
+	switch result.Status {
+	case "completed":
+		if result.Output == "" {
+			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
+		}
+		return TaskResult{
+			Status:    "completed",
+			Comment:   result.Output,
+			SessionID: result.SessionID,
+			WorkDir:   env.WorkDir,
+			EnvRoot:   env.RootDir,
+			Usage:     usageEntries,
+		}, nil
+	case "timeout":
+		return TaskResult{}, fmt.Errorf("%s timed out after %s", provider, d.cfg.AgentTimeout)
+	default:
+		errMsg := result.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("%s execution %s", provider, result.Status)
+		}
+		return TaskResult{Status: "blocked", Comment: errMsg, EnvRoot: env.RootDir, Usage: usageEntries}, nil
+	}
+}
+
+// executeAndDrain runs a backend, drains its message stream (forwarding to the
+// server), and waits for the final result.
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+	session, err := backend.Execute(ctx, prompt, opts)
+	if err != nil {
+		return agent.Result{}, 0, err
+	}
+
 	var toolCount atomic.Int32
 	go func() {
 		var seq atomic.Int32
@@ -994,11 +1085,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		var pendingText strings.Builder
 		var pendingThinking strings.Builder
 		var batch []TaskMessageData
-		callIDToTool := map[string]string{} // track callID → tool name for tool_result
+		callIDToTool := map[string]string{}
 
 		flush := func() {
 			mu.Lock()
-			// Flush any accumulated thinking as a single message.
 			if pendingThinking.Len() > 0 {
 				s := seq.Add(1)
 				batch = append(batch, TaskMessageData{
@@ -1008,7 +1098,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 				})
 				pendingThinking.Reset()
 			}
-			// Flush any accumulated text as a single message.
 			if pendingText.Len() > 0 {
 				s := seq.Add(1)
 				batch = append(batch, TaskMessageData{
@@ -1024,14 +1113,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 			if len(toSend) > 0 {
 				sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := d.client.ReportTaskMessages(sendCtx, task.ID, toSend); err != nil {
+				if err := d.client.ReportTaskMessages(sendCtx, taskID, toSend); err != nil {
 					taskLog.Debug("failed to report task messages", "error", err)
 				}
 				cancel()
 			}
 		}
 
-		// Periodically flush accumulated text/thinking messages.
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -1072,7 +1160,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 				if len(output) > 8192 {
 					output = output[:8192]
 				}
-				// Resolve tool name from callID if not set directly.
 				toolName := msg.Tool
 				if toolName == "" && msg.CallID != "" {
 					mu.Lock()
@@ -1114,54 +1201,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 
 		close(done)
-		flush() // Final flush after channel closes.
+		flush()
 	}()
 
 	result := <-session.Result
-	elapsed := time.Since(taskStart).Round(time.Second)
-	taskLog.Info("agent finished",
-		"status", result.Status,
-		"duration", elapsed.String(),
-		"tools", toolCount.Load(),
-	)
+	return result, toolCount.Load(), nil
+}
 
-	// Convert agent usage map to task usage entries.
-	var usageEntries []TaskUsageEntry
-	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			continue
-		}
-		usageEntries = append(usageEntries, TaskUsageEntry{
-			Provider:         provider,
-			Model:            model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-		})
+func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
+	if len(a) == 0 {
+		return b
 	}
-
-	switch result.Status {
-	case "completed":
-		if result.Output == "" {
-			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
-		}
-		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			Usage:     usageEntries,
-		}, nil
-	case "timeout":
-		return TaskResult{}, fmt.Errorf("%s timed out after %s", provider, d.cfg.AgentTimeout)
-	default:
-		errMsg := result.Error
-		if errMsg == "" {
-			errMsg = fmt.Sprintf("%s execution %s", provider, result.Status)
-		}
-		return TaskResult{Status: "blocked", Comment: errMsg, Usage: usageEntries}, nil
+	if len(b) == 0 {
+		return a
 	}
+	merged := make(map[string]agent.TokenUsage, len(a)+len(b))
+	for model, u := range a {
+		merged[model] = u
+	}
+	for model, u := range b {
+		existing := merged[model]
+		existing.InputTokens += u.InputTokens
+		existing.OutputTokens += u.OutputTokens
+		existing.CacheReadTokens += u.CacheReadTokens
+		existing.CacheWriteTokens += u.CacheWriteTokens
+		merged[model] = existing
+	}
+	return merged
 }
 
 // repoDataToInfo converts daemon RepoData to repocache RepoInfo.

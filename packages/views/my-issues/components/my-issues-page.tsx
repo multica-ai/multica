@@ -20,7 +20,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { registerViewStoreForWorkspaceSync } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { myIssueListOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue, useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { MyIssuesHeader } from "./my-issues-header";
@@ -88,21 +88,7 @@ export function MyIssuesPage() {
     [myIssues, statusFilters, priorityFilters],
   );
 
-  const childProgressMap = useMemo(() => {
-    const map = new Map<string, { done: number; total: number }>();
-    for (const issue of myIssues) {
-      if (!issue.parent_issue_id) continue;
-      const entry = map.get(issue.parent_issue_id);
-      const isDone = issue.status === "done" || issue.status === "cancelled";
-      if (entry) {
-        entry.total++;
-        if (isDone) entry.done++;
-      } else {
-        map.set(issue.parent_issue_id, { done: isDone ? 1 : 0, total: 1 });
-      }
-    }
-    return map;
-  }, [myIssues]);
+  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)

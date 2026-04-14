@@ -13,6 +13,15 @@ const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
+const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
+const mockSetQueryData = vi.hoisted(() => vi.fn());
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query",
+  );
+  return { ...actual, useQueryClient: () => ({ setQueryData: mockSetQueryData }) };
+});
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
@@ -50,6 +59,7 @@ vi.mock("@multica/core/api", () => ({
     verifyCode: mockApiVerifyCode,
     setToken: mockApiSetToken,
     getMe: mockApiGetMe,
+    issueCliToken: mockApiIssueCliToken,
   },
 }));
 
@@ -80,7 +90,8 @@ describe("LoginPage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    // Default: no existing session
+    // Default: no existing session (getMe rejects when no auth)
+    mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
     // Reset window.location for tests that change it
     Object.defineProperty(window, "location", {
@@ -293,7 +304,7 @@ describe("LoginPage", () => {
       ).toBeInTheDocument();
     });
 
-    // After transitioning to code step, cooldown is 10s
+    // After transitioning to code step, cooldown is 60s
     const resendBtn = screen.getByRole("button", { name: /resend in/i });
     expect(resendBtn).toBeDisabled();
   });
@@ -329,9 +340,9 @@ describe("LoginPage", () => {
     // sendCode was called once for the initial send
     expect(mockSendCode).toHaveBeenCalledTimes(1);
 
-    // Advance past the 10s cooldown one second at a time so React can
+    // Advance past the 60s cooldown one second at a time so React can
     // process each setCooldown state update between ticks.
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 61; i++) {
       await act(async () => {
         vi.advanceTimersByTime(1_000);
       });
@@ -377,11 +388,14 @@ describe("LoginPage", () => {
 
   it("shows cli_confirm step when existing session + cliCallback", async () => {
     localStorage.setItem("multica_token", "existing-jwt");
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "user@example.com",
-      name: "Test User",
-    });
+    // Cookie attempt fails first, then localStorage fallback succeeds
+    mockApiGetMe
+      .mockRejectedValueOnce(new Error("no cookie"))
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
 
     render(
       <LoginPage
@@ -406,11 +420,14 @@ describe("LoginPage", () => {
 
   it("CLI authorize button redirects to callback URL", async () => {
     localStorage.setItem("multica_token", "existing-jwt");
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "user@example.com",
-      name: "Test User",
-    });
+    // Cookie attempt fails, localStorage fallback succeeds
+    mockApiGetMe
+      .mockRejectedValueOnce(new Error("no cookie"))
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
     const onTokenObtained = vi.fn();
 
     render(
@@ -438,11 +455,14 @@ describe("LoginPage", () => {
 
   it("'Use a different account' returns to email step", async () => {
     localStorage.setItem("multica_token", "existing-jwt");
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "user@example.com",
-      name: "Test User",
-    });
+    // Cookie attempt fails, localStorage fallback succeeds
+    mockApiGetMe
+      .mockRejectedValueOnce(new Error("no cookie"))
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
 
     render(
       <LoginPage
@@ -465,6 +485,65 @@ describe("LoginPage", () => {
     expect(
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // CLI callback — cookie-based session (no localStorage token)
+  // -------------------------------------------------------------------------
+
+  it("detects cookie-based session and shows cli_confirm when no localStorage token", async () => {
+    // No localStorage token — getMe succeeds via HttpOnly cookie
+    mockApiGetMe.mockResolvedValueOnce({
+      id: "u-1",
+      email: "cookie@example.com",
+      name: "Cookie User",
+    });
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/cookie@example.com/)).toBeInTheDocument();
+  });
+
+  it("CLI authorize with cookie session calls issueCliToken and redirects", async () => {
+    // No localStorage token — getMe succeeds via cookie
+    mockApiGetMe.mockResolvedValueOnce({
+      id: "u-1",
+      email: "cookie@example.com",
+      name: "Cookie User",
+    });
+    mockApiIssueCliToken.mockResolvedValueOnce({ token: "fresh-jwt" });
+    const onTokenObtained = vi.fn();
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        onTokenObtained={onTokenObtained}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^authorize$/i }));
+
+    await waitFor(() => {
+      expect(mockApiIssueCliToken).toHaveBeenCalled();
+      expect(onTokenObtained).toHaveBeenCalled();
+      expect(window.location.href).toContain(
+        "http://localhost:9876/callback?token=fresh-jwt&state=abc",
+      );
+    });
   });
 
   // -------------------------------------------------------------------------

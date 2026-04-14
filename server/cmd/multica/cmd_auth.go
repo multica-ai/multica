@@ -25,14 +25,6 @@ var authCmd = &cobra.Command{
 	Short: "Authenticate multica with Multica",
 }
 
-var authLoginCmd = &cobra.Command{
-	Use:    "login",
-	Short:  "Authenticate with Multica",
-	Long:   "Authenticate with Multica without auto-configuring workspaces. Use 'multica login' for the guided setup flow.",
-	Hidden: true,
-	RunE:   runAuthLogin,
-}
-
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current authentication status",
@@ -46,8 +38,6 @@ var authLogoutCmd = &cobra.Command{
 }
 
 func init() {
-	authLoginCmd.Flags().Bool("token", false, "Authenticate by pasting a personal access token")
-	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
 }
@@ -72,7 +62,9 @@ func resolveAppURL(cmd *cobra.Command) string {
 	if err == nil && cfg.AppURL != "" {
 		return strings.TrimRight(cfg.AppURL, "/")
 	}
-	return "https://multica.ai"
+	fmt.Fprintln(os.Stderr, "No app URL configured. Run 'multica setup' first.")
+	os.Exit(1)
+	return "" // unreachable
 }
 
 func openBrowser(url string) error {

@@ -8,6 +8,8 @@ export interface CoreProviderProps {
   wsUrl?: string;
   /** Storage adapter. Default: SSR-safe localStorage wrapper. */
   storage?: StorageAdapter;
+  /** Use HttpOnly cookies for auth instead of localStorage tokens. Default: false. */
+  cookieAuth?: boolean;
   /** Called after successful login (e.g. set cookie for Next.js middleware). */
   onLogin?: () => void;
   /** Called after logout (e.g. clear cookie). */

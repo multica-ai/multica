@@ -53,7 +53,7 @@ function IssueMention({
 }) {
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
-  const { openInNewTab } = useNavigation();
+  const { push, openInNewTab } = useNavigation();
   const issue = issues.find((i) => i.id === issueId);
 
   const issuePath = `/issues/${issueId}`;
@@ -61,11 +61,13 @@ function IssueMention({
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (openInNewTab) {
-      openInNewTab(issuePath, tabTitle);
-    } else {
-      window.open(issuePath, "_blank", "noopener,noreferrer");
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      if (openInNewTab) {
+        openInNewTab(issuePath, tabTitle);
+      }
+      return;
     }
+    push(issuePath);
   };
 
   const cardClass =
