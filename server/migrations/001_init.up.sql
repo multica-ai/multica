@@ -68,9 +68,7 @@ CREATE TABLE issue (
     position FLOAT NOT NULL DEFAULT 0,
     due_date TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    archived_at TIMESTAMPTZ,
-    archived_by UUID REFERENCES "user"(id)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Issue labels
