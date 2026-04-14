@@ -14,11 +14,8 @@ import (
 )
 
 // APIClient is a REST client for the Multica server API.
-// Used by ctrl subcommands (agent, runtime, status, etc.).
-//
-// TODO: Add Authorization header support. Agent routes (/api/agents/...)
-// require JWT auth via middleware.Auth, but this client currently sends
-// no auth token. CLI agent commands will fail with 401 until this is added.
+// Used by ctrl subcommands (agent, runtime, status, etc.). Requests
+// automatically include auth and execution context headers when configured.
 type APIClient struct {
 	BaseURL     string
 	WorkspaceID string
