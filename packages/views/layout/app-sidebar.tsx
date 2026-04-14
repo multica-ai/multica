@@ -29,6 +29,7 @@ import {
   FolderKanban,
   Ellipsis,
   PinOff,
+  Eye,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -77,6 +78,7 @@ const workspaceNav = [
   { href: "/issues", label: "Issues", icon: ListTodo },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/viewer", label: "Viewer", icon: Eye },
 ];
 
 const configureNav = [
