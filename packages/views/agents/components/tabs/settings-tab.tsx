@@ -72,6 +72,7 @@ export function SettingsTab({
       toast.error("Name is required");
       return;
     }
+
     setSaving(true);
     try {
       await onSave({

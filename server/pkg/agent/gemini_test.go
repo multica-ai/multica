@@ -11,7 +11,7 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 	expected := []string{
 		"-p", "write a haiku",
 		"--yolo",
-		"-o", "text",
+		"-o", "stream-json",
 	}
 
 	if len(args) != len(expected) {

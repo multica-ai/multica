@@ -40,7 +40,7 @@ import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { EditorBubbleMenu } from "./bubble-menu";
-import { EditorLinkPreview } from "./link-preview";
+import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -147,16 +147,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             const href = link?.getAttribute("href");
             if (!href || href.startsWith("mention://")) return false;
 
-            if (editable) {
-              // Edit mode: don't open link on click. ProseMirror's
-              // mousedown/mouseup cycle (already completed by the time
-              // this click handler runs) places the cursor on the link.
-              // LinkBubbleMenu detects cursor-on-link and shows the
-              // preview card with Open / Copy / Edit actions.
-              return false;
-            }
-
-            // Readonly mode: open immediately.
+            // Open the link. Internal paths use multica:navigate
+            // (Electron hash-router safe), external open in new tab.
             event.preventDefault();
             if (href.startsWith("/")) {
               window.dispatchEvent(
@@ -223,6 +215,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     }));
 
+    // Link hover card — disabled when BubbleMenu is active (has selection)
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    const hoverDisabled = !editor?.state.selection.empty;
+    const hover = useLinkHover(wrapperRef, hoverDisabled);
+
     const handleContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
       if (!editable || !editor) return;
 
@@ -238,16 +235,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     return (
       <div
+        ref={wrapperRef}
         className="relative flex min-h-full flex-col"
         onMouseDown={handleContainerMouseDown}
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {editable && (
-          <>
-            <EditorBubbleMenu editor={editor} />
-            <EditorLinkPreview editor={editor} />
-          </>
-        )}
+        {editable && <EditorBubbleMenu editor={editor} />}
+        <LinkHoverCard {...hover} />
       </div>
     );
   },

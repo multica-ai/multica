@@ -819,6 +819,75 @@ func TestOpenclawUsageFinalResultAlternativeFields(t *testing.T) {
 	close(ch)
 }
 
+func TestOpenclawProcessOutputMultilineJSON(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "Pretty printed response"}},
+		Meta: openclawMeta{
+			DurationMs: 4764,
+			AgentMeta: map[string]any{
+				"sessionId": "test-session",
+				"usage": map[string]any{
+					"input":  float64(100),
+					"output": float64(34),
+				},
+			},
+		},
+	}
+	// Marshal with indentation to simulate openclaw's pretty-printed output.
+	data, _ := json.MarshalIndent(result, "", "  ")
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.output != "Pretty printed response" {
+		t.Errorf("output: got %q, want %q", res.output, "Pretty printed response")
+	}
+	if res.sessionID != "test-session" {
+		t.Errorf("sessionID: got %q, want %q", res.sessionID, "test-session")
+	}
+
+	close(ch)
+	var msgs []Message
+	for m := range ch {
+		msgs = append(msgs, m)
+	}
+	if len(msgs) != 1 || msgs[0].Content != "Pretty printed response" {
+		t.Errorf("expected 1 text message with content, got %d msgs", len(msgs))
+	}
+}
+
+func TestOpenclawProcessOutputMultilineJSONWithLeadingLogs(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "Answer after logs"}},
+		Meta:     openclawMeta{DurationMs: 100},
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	input := "some startup log\nanother log line\n" + string(data)
+
+	res := b.processOutput(strings.NewReader(input), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.output != "Answer after logs" {
+		t.Errorf("output: got %q, want %q", res.output, "Answer after logs")
+	}
+
+	close(ch)
+}
+
 // ── openclawInt64 tests ──
 
 func TestOpenclawInt64Float(t *testing.T) {

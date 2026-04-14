@@ -21,7 +21,7 @@
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useQuery } from "@tanstack/react-query";
-import { issueListOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useNavigation } from "../../navigation";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -54,7 +54,14 @@ function IssueMention({
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const { push, openInNewTab } = useNavigation();
-  const issue = issues.find((i) => i.id === issueId);
+  const listIssue = issues.find((i) => i.id === issueId);
+
+  const { data: detailIssue } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    enabled: !listIssue,
+  });
+
+  const issue = listIssue ?? detailIssue;
 
   const issuePath = `/issues/${issueId}`;
   const tabTitle = issue ? `${issue.identifier}: ${issue.title}` : undefined;

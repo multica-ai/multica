@@ -162,6 +162,7 @@ func init() {
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
+	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
@@ -443,6 +444,14 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
+	}
+	if cmd.Flags().Changed("parent") {
+		v, _ := cmd.Flags().GetString("parent")
+		if v == "" {
+			body["parent_issue_id"] = nil
+		} else {
+			body["parent_issue_id"] = v
+		}
 	}
 
 	if len(body) == 0 {

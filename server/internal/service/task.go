@@ -147,6 +147,13 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.CancelAgentTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, err := s.Queries.GetAgentTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("cancel task: %w", err)
+		}
+		return &existing, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cancel task: %w", err)
 	}

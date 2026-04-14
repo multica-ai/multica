@@ -380,15 +380,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build response with fresh agent data (name + skills).
+	// Build response with fresh agent data (name + skills + custom_env).
 	resp := taskToResponse(*task)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		var customEnv map[string]string
+		if agent.CustomEnv != nil {
+			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
+				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
+			}
+		}
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
 			Instructions: agent.Instructions,
 			Skills:       skills,
+			CustomEnv:    customEnv,
 		}
 	}
 

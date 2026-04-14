@@ -278,6 +278,32 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.33",
+        date: "2026-04-14",
+        title: "Gemini CLI 与 Agent 环境变量",
+        changes: [],
+        features: [
+          "Google Gemini CLI 作为新的 Agent 运行时，支持实时日志流",
+          "Agent 自定义环境变量（router/proxy 模式），新增专用设置标签页",
+          "Issue 右键菜单新增「设置父 Issue」和「添加子 Issue」",
+          "CLI `--parent` 更新父 Issue，`--content-stdin` 管道输入评论内容",
+          "子 Issue 自动继承父级项目",
+        ],
+        improvements: [
+          "编辑器气泡菜单和链接预览重写",
+          "OpenClaw 后端 P0+P1 优化（多行 JSON、增量解析）",
+          "自部署 WebSocket URL 自动适配局域网访问",
+        ],
+        fixes: [
+          "S3 上传路径按工作区隔离（安全）",
+          "订阅和上传新增工作区成员身份校验（安全）",
+          "Issue 状态改为已取消时自动终止进行中的任务",
+          "Agent 进程 stdout 挂起导致任务卡住",
+          "Daemon 触发提示现在嵌入实际的触发评论内容",
+          "登录和仪表盘跳转稳定性改进",
+        ],
+      },
+      {
         version: "0.1.28",
         date: "2026-04-13",
         title: "Windows 支持、认证与引导",

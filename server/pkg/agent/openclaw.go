@@ -254,8 +254,25 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 
 	// If we got no events at all, fall back to raw output.
 	if !gotEvents {
+		// OpenClaw may output pretty-printed (multi-line) JSON. No single line
+		// would parse, so try parsing the accumulated output as a whole.
+		// Log lines may precede the JSON, so find the first '{' at line start.
 		trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
 		if trimmed != "" {
+			if result, ok := tryParseOpenclawResult(trimmed); ok {
+				return b.buildOpenclawEventResult(result, ch, &output)
+			}
+			// Log lines may precede the JSON blob. Find the first line that
+			// starts with '{' and try parsing from there.
+			for i, line := range rawLines {
+				if len(line) > 0 && line[0] == '{' {
+					candidate := strings.TrimSpace(strings.Join(rawLines[i:], "\n"))
+					if result, ok := tryParseOpenclawResult(candidate); ok {
+						return b.buildOpenclawEventResult(result, ch, &output)
+					}
+					break
+				}
+			}
 			return openclawEventResult{status: "completed", output: trimmed}
 		}
 		return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}

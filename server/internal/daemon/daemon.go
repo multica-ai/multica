@@ -983,6 +983,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
+	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
+	// Bedrock). These are set per-agent via the agent settings UI.
+	// Critical internal variables are blocklisted to prevent accidental or
+	// malicious override of daemon-set values.
+	if task.Agent != nil {
+		for k, v := range task.Agent.CustomEnv {
+			if isBlockedEnvKey(k) {
+				d.logger.Warn("custom_env: blocked key skipped", "key", k)
+				continue
+			}
+			agentEnv[k] = v
+		}
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -1324,4 +1338,19 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		}
 	}
 	return result
+}
+
+// isBlockedEnvKey returns true if the key must not be overridden by user-
+// configured custom_env. This prevents accidental or malicious override of
+// daemon-internal variables and critical system paths.
+func isBlockedEnvKey(key string) bool {
+	upper := strings.ToUpper(key)
+	if strings.HasPrefix(upper, "MULTICA_") {
+		return true
+	}
+	switch upper {
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME":
+		return true
+	}
+	return false
 }
