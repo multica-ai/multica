@@ -37,7 +37,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	b.WriteString("You are a coding agent in the Multica platform. Your primary assigned issue context is injected into `.agent_context/issue_context.md`; use the `multica` CLI for follow-up platform reads and explicit requested writes when it is available.\n\n")
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
@@ -61,7 +61,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Available Commands\n\n")
-	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
+	b.WriteString("**Always use `--output json` for CLI read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
 	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X] --output json` — List issues in workspace\n")
@@ -75,6 +75,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n\n")
 
 	b.WriteString("### Write\n")
+	b.WriteString("Completion comments and status transitions are handled by the Multica daemon after your run finishes; do not call write commands just to mark this run complete.\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--assignee X] [--parent <issue-id>] [--status X]` — Create a new issue\n")
 	b.WriteString("- `multica issue assign <id> --to <name>` — Assign an issue to a member or agent by name (use --unassign to remove assignee)\n")
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
@@ -114,23 +115,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+		b.WriteString("1. Read `.agent_context/issue_context.md` to understand the issue context injected before launch\n")
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the latest conversation if the CLI is available\n", ctx.IssueID)
 		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
 		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
-		fmt.Fprintf(&b, "4. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
-		b.WriteString("5. If the comment requests code changes or further work, do the work first, then reply with your results\n")
-		b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		b.WriteString("4. If the comment requests code changes or further work, do the work first\n")
+		b.WriteString("5. Put your response and any blocked reason in your final output; the daemon will post it back to the issue\n\n")
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
-		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-		b.WriteString("3. Read comments for additional context or human instructions\n")
-		b.WriteString("4. Follow your Skills and Agent Identity to determine how to complete this task.\n")
-		b.WriteString("   If no relevant skill applies, the default workflow is: understand the task → do the work → post a comment with results → update issue status.\n")
-		fmt.Fprintf(&b, "5. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "6. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		b.WriteString("The daemon is responsible for completion writeback after your run finishes.\n\n")
+		b.WriteString("1. Read `.agent_context/issue_context.md` to understand your task. It contains injected issue details and is available even if the CLI cannot reach the local API.\n")
+		b.WriteString("2. If the CLI is available, read comments for additional context or human instructions\n")
+		b.WriteString("3. Follow your Skills and Agent Identity to determine how to complete this task.\n")
+		b.WriteString("   If no relevant skill applies, the default workflow is: understand the task → do the work → report the outcome.\n")
+		b.WriteString("4. Put the completed outcome, PR URL if any, or blocked reason in your final output. Do not call `multica issue status` or `multica issue comment` just to complete the run.\n\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {
@@ -168,15 +166,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("This downloads the file to the current directory and prints the local path. Use `-o <dir>` to save elsewhere.\n")
 	b.WriteString("After downloading, you can read the file directly (e.g. view an image, read a document).\n\n")
 
-	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
-	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
+	b.WriteString("## Important: Platform Access\n\n")
+	b.WriteString("Use `.agent_context/issue_context.md` as your primary assigned issue context. ")
+	b.WriteString("For additional Multica platform resources — including latest comments, attachments, images, and files — use the `multica` CLI when it is available. ")
 	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
 	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
-	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
-	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
+	b.WriteString("If you need to perform an operation that is not covered by existing injected context or a working `multica` command, ")
+	b.WriteString("do NOT attempt to work around it. State the missing functionality in your final output.\n\n")
 
 	b.WriteString("## Output\n\n")
-	b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
+	b.WriteString("Keep your final output concise and natural — state the outcome, not the process. The daemon will post it as the completion comment.\n")
 	b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
 	b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
 

@@ -23,19 +23,34 @@ type RepoData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID             string     `json:"id"`
-	AgentID        string     `json:"agent_id"`
-	RuntimeID      string     `json:"runtime_id"`
-	IssueID        string     `json:"issue_id"`
-	WorkspaceID    string     `json:"workspace_id"`
-	Agent          *AgentData `json:"agent,omitempty"`
-	Repos          []RepoData `json:"repos,omitempty"`
-	PriorSessionID   string     `json:"prior_session_id,omitempty"`    // Claude session ID from a previous task on this issue
-	PriorWorkDir     string     `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on this issue
+	ID                    string     `json:"id"`
+	AgentID               string     `json:"agent_id"`
+	RuntimeID             string     `json:"runtime_id"`
+	IssueID               string     `json:"issue_id"`
+	WorkspaceID           string     `json:"workspace_id"`
+	Issue                 *IssueData `json:"issue,omitempty"`
+	Agent                 *AgentData `json:"agent,omitempty"`
+	Repos                 []RepoData `json:"repos,omitempty"`
+	PriorSessionID        string     `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
+	PriorWorkDir          string     `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
 	TriggerCommentID      string     `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string     `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string     `json:"chat_message,omitempty"`            // user message content for chat tasks
+}
+
+// IssueData holds issue details returned by the claim endpoint.
+type IssueData struct {
+	ID            string  `json:"id"`
+	Identifier    string  `json:"identifier"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description,omitempty"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type,omitempty"`
+	AssigneeID    *string `json:"assignee_id,omitempty"`
+	ParentIssueID *string `json:"parent_issue_id,omitempty"`
+	ProjectID     *string `json:"project_id,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.
@@ -74,6 +89,7 @@ type TaskResult struct {
 	Status     string           `json:"status"`
 	Comment    string           `json:"comment"`
 	BranchName string           `json:"branch_name,omitempty"`
+	PRURL      string           `json:"pr_url,omitempty"`
 	EnvType    string           `json:"env_type,omitempty"`
 	SessionID  string           `json:"session_id,omitempty"` // Claude session ID for future resumption
 	WorkDir    string           `json:"work_dir,omitempty"`   // working directory used during execution

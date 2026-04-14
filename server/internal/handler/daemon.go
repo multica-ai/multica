@@ -390,16 +390,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include workspace ID and repos so the daemon can set up worktrees.
+	// Include issue context, workspace ID, and repos so the daemon can prepare
+	// sandbox-safe task context without requiring the agent to call back into
+	// the local Multica API from inside its own sandbox.
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+			issuePrefix := ""
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				issuePrefix = ws.IssuePrefix
+				if ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
 				}
 			}
+			issueResp := issueToResponse(issue, issuePrefix)
+			resp.Issue = &issueResp
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -541,10 +549,11 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	PRURL      string `json:"pr_url"`
+	Output     string `json:"output"`
+	BranchName string `json:"branch_name"` // branch detected by the daemon, when available
+	SessionID  string `json:"session_id"`  // Claude session ID for future resumption
+	WorkDir    string `json:"work_dir"`    // working directory used during execution
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +570,12 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, _ := json.Marshal(req)
+	result, _ := json.Marshal(protocol.TaskCompletedPayload{
+		TaskID:     taskID,
+		PRURL:      req.PRURL,
+		Output:     req.Output,
+		BranchName: req.BranchName,
+	})
 	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir)
 	if err != nil {
 		slog.Warn("complete task failed", "task_id", taskID, "error", err)

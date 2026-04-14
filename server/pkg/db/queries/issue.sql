@@ -57,6 +57,13 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateIssueStatusIfCurrent :one
+UPDATE issue SET
+    status = sqlc.arg(next_status),
+    updated_at = now()
+WHERE id = $1 AND status = sqlc.arg(expected_status)
+RETURNING *;
+
 -- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1;
 

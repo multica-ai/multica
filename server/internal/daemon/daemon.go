@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +18,20 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/usage"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
+
+const (
+	branchDetectionMaxCandidates = 16
+	branchDetectionTimeout       = 500 * time.Millisecond
+)
+
+var readBranchDirEntries = func(name string, n int) ([]os.DirEntry, error) {
+	dir, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	return dir.ReadDir(n)
+}
 
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
@@ -869,7 +884,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.PRURL, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error())); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
@@ -909,6 +924,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:           task.IssueID,
+		Issue:             convertIssueForEnv(task.Issue),
 		TriggerCommentID:  task.TriggerCommentID,
 		AgentID:           agentID,
 		AgentName:         agentName,
@@ -1052,12 +1068,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
 		}
 		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:     "completed",
+			Comment:    result.Output,
+			BranchName: detectBranchName(env.WorkDir),
+			SessionID:  result.SessionID,
+			WorkDir:    env.WorkDir,
+			EnvRoot:    env.RootDir,
+			Usage:      usageEntries,
 		}, nil
 	case "timeout":
 		return TaskResult{}, fmt.Errorf("%s timed out after %s", provider, d.cfg.AgentTimeout)
@@ -1230,6 +1247,36 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 	return merged
 }
 
+func detectBranchName(workDir string) string {
+	if workDir == "" {
+		return ""
+	}
+	candidates := []string{workDir}
+	if entries, err := readBranchDirEntries(workDir, branchDetectionMaxCandidates-1); err == nil || len(entries) > 0 {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				candidates = append(candidates, filepath.Join(workDir, entry.Name()))
+				if len(candidates) >= branchDetectionMaxCandidates {
+					break
+				}
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		ctx, cancel := context.WithTimeout(context.Background(), branchDetectionTimeout)
+		cmd := exec.CommandContext(ctx, "git", "-C", candidate, "branch", "--show-current")
+		out, err := cmd.Output()
+		cancel()
+		if err != nil {
+			continue
+		}
+		if branch := strings.TrimSpace(string(out)); branch != "" {
+			return branch
+		}
+	}
+	return ""
+}
+
 // repoDataToInfo converts daemon RepoData to repocache RepoInfo.
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
@@ -1267,6 +1314,35 @@ func truncateLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+func convertIssueForEnv(issue *IssueData) *execenv.IssueContextForEnv {
+	if issue == nil {
+		return nil
+	}
+	ctx := &execenv.IssueContextForEnv{
+		ID:         issue.ID,
+		Identifier: issue.Identifier,
+		Title:      issue.Title,
+		Status:     issue.Status,
+		Priority:   issue.Priority,
+	}
+	if issue.Description != nil {
+		ctx.Description = *issue.Description
+	}
+	if issue.AssigneeType != nil {
+		ctx.AssigneeType = *issue.AssigneeType
+	}
+	if issue.AssigneeID != nil {
+		ctx.AssigneeID = *issue.AssigneeID
+	}
+	if issue.ParentIssueID != nil {
+		ctx.ParentIssueID = *issue.ParentIssueID
+	}
+	if issue.ProjectID != nil {
+		ctx.ProjectID = *issue.ProjectID
+	}
+	return ctx
 }
 
 func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
