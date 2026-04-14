@@ -3,7 +3,7 @@ import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
-import type { Workspace, MemberWithUser } from "./workspace";
+import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
 
 // WebSocket event types (matching Go server protocol/events.go)
@@ -53,7 +53,11 @@ export type WSEventType =
   | "project:updated"
   | "project:deleted"
   | "pin:created"
-  | "pin:deleted";
+  | "pin:deleted"
+  | "invitation:created"
+  | "invitation:accepted"
+  | "invitation:declined"
+  | "invitation:revoked";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -258,4 +262,24 @@ export interface ProjectUpdatedPayload {
 
 export interface ProjectDeletedPayload {
   project_id: string;
+}
+
+export interface InvitationCreatedPayload {
+  invitation: Invitation;
+  workspace_name?: string;
+}
+
+export interface InvitationAcceptedPayload {
+  invitation_id: string;
+  member: MemberWithUser;
+}
+
+export interface InvitationDeclinedPayload {
+  invitation_id: string;
+  invitee_email: string;
+}
+
+export interface InvitationRevokedPayload {
+  invitation_id: string;
+  invitee_email: string;
 }

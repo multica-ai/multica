@@ -374,3 +374,16 @@ type Workspace struct {
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 }
+
+type WorkspaceInvitation struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	InviterID     pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail  string             `json:"invitee_email"`
+	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
+	Role          string             `json:"role"`
+	Status        string             `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}

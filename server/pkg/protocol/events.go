@@ -72,6 +72,12 @@ const (
 	EventPinCreated = "pin:created"
 	EventPinDeleted = "pin:deleted"
 
+	// Invitation events
+	EventInvitationCreated  = "invitation:created"
+	EventInvitationAccepted = "invitation:accepted"
+	EventInvitationDeclined = "invitation:declined"
+	EventInvitationRevoked  = "invitation:revoked"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

@@ -23,6 +23,8 @@ func registerListeners(bus *events.Bus, hub *realtime.Hub) {
 		protocol.EventInboxArchived:      true,
 		protocol.EventInboxBatchRead:     true,
 		protocol.EventInboxBatchArchived: true,
+		protocol.EventInvitationCreated:  true,
+		protocol.EventInvitationRevoked:  true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -66,6 +68,43 @@ func registerListeners(bus *events.Bus, hub *realtime.Hub) {
 			sendToRecipient(hub, e, recipientID)
 		})
 	}
+
+	// invitation:created — send to the invitee so they see the invitation in real time.
+	bus.Subscribe(protocol.EventInvitationCreated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		inv, ok := payload["invitation"].(handler.InvitationResponse)
+		if !ok {
+			// Fallback for map encoding.
+			if invMap, ok := payload["invitation"].(map[string]any); ok {
+				if uid, _ := invMap["invitee_user_id"].(*string); uid != nil && *uid != "" {
+					data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID})
+					if err != nil {
+						return
+					}
+					hub.SendToUser(*uid, data)
+				}
+			}
+			return
+		}
+		if inv.InviteeUserID != nil && *inv.InviteeUserID != "" {
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID})
+			if err != nil {
+				return
+			}
+			hub.SendToUser(*inv.InviteeUserID, data)
+		}
+	})
+
+	// invitation:revoked — notify the invitee that their invitation was cancelled.
+	bus.Subscribe(protocol.EventInvitationRevoked, func(e events.Event) {
+		// This event is workspace-scoped; invitee may not be a member yet so we
+		// broadcast to workspace (admins see updates) via SubscribeAll.
+		// If the invitee is a registered user we could also send directly, but
+		// the simpler approach is to let the frontend poll/refetch on focus.
+	})
 
 	// member:added — also send to the invited user so they discover the new workspace.
 	// Pass excludeWorkspace so clients already in the target room (reached via

@@ -166,22 +166,29 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
+					r.Get("/invitations", h.ListWorkspaceInvitations)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
-					r.Post("/members", h.CreateMember)
+					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
 					})
+					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 			})
 		})
+
+		// User-scoped invitation routes (no workspace context required)
+		r.Get("/api/invitations", h.ListMyInvitations)
+		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
+		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
 
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)

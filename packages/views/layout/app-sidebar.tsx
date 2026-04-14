@@ -58,8 +58,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
@@ -164,6 +164,21 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const workspace = useWorkspaceStore((s) => s.workspace);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
+  const { data: myInvitations = [] } = useQuery(myInvitationListOptions());
+  const queryClient2 = useQueryClient();
+  const acceptInvitationMut = useMutation({
+    mutationFn: (id: string) => api.acceptInvitation(id),
+    onSuccess: () => {
+      queryClient2.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+      queryClient2.invalidateQueries({ queryKey: workspaceKeys.list() });
+    },
+  });
+  const declineInvitationMut = useMutation({
+    mutationFn: (id: string) => api.declineInvitation(id),
+    onSuccess: () => {
+      queryClient2.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+    },
+  });
 
   const wsId = workspace?.id;
   const { data: inboxItems = [] } = useQuery({
@@ -287,6 +302,44 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       Create workspace
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
+                  {myInvitations.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel className="text-xs text-muted-foreground">
+                          Pending invitations
+                        </DropdownMenuLabel>
+                        {myInvitations.map((inv) => (
+                          <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5">
+                            <WorkspaceAvatar name={inv.workspace_name ?? "W"} size="sm" />
+                            <span className="flex-1 truncate text-sm">{inv.workspace_name ?? "Workspace"}</span>
+                            <button
+                              type="button"
+                              className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                              disabled={acceptInvitationMut.isPending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                acceptInvitationMut.mutate(inv.id);
+                              }}
+                            >
+                              Join
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                              disabled={declineInvitationMut.isPending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                declineInvitationMut.mutate(inv.id);
+                              }}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        ))}
+                      </DropdownMenuGroup>
+                    </>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
