@@ -108,6 +108,14 @@ SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      -- Parent-issue blocking (via subquery to avoid LEFT JOIN + FOR UPDATE conflict)
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          JOIN issue parent ON i.parent_issue_id = parent.id
+          WHERE i.id = atq.issue_id
+            AND parent.status NOT IN ('done', 'cancelled')
+      )
+      -- Per-(issue, agent) serialization
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -124,11 +132,12 @@ WHERE id = (
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id
 `
 
-// Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
-// a task is only claimable when no other task for the same issue AND same agent is
-// already dispatched or running. This allows different agents to work on the same
-// issue in parallel while preventing a single agent from running duplicate tasks.
+// Claims the next queued task for an agent, enforcing:
+// 1. Per-(issue, agent) serialization: no duplicate dispatched/running tasks.
+// 2. Parent-issue blocking: child issues wait until parent is done/cancelled.
 // Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+// Note: parent check uses NOT EXISTS instead of LEFT JOIN because
+// FOR UPDATE SKIP LOCKED cannot be applied to the nullable side of an outer join.
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue
@@ -747,11 +756,21 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 }
 
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id FROM agent_task_queue
-WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
-ORDER BY priority DESC, created_at ASC
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id FROM agent_task_queue atq
+LEFT JOIN issue i ON atq.issue_id = i.id
+LEFT JOIN issue parent ON i.parent_issue_id = parent.id
+WHERE atq.runtime_id = $1
+  AND atq.status IN ('queued', 'dispatched')
+  AND (
+    atq.issue_id IS NULL
+    OR i.parent_issue_id IS NULL
+    OR parent.status IN ('done', 'cancelled')
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC
 `
 
+// Lists pending tasks for a runtime, excluding tasks whose issue has an
+// incomplete parent issue (enforces parent->child scheduling order).
 func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listPendingTasksByRuntime, runtimeID)
 	if err != nil {

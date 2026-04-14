@@ -76,16 +76,25 @@ SELECT * FROM agent_task_queue
 WHERE id = $1;
 
 -- name: ClaimAgentTask :one
--- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
--- a task is only claimable when no other task for the same issue AND same agent is
--- already dispatched or running. This allows different agents to work on the same
--- issue in parallel while preventing a single agent from running duplicate tasks.
+-- Claims the next queued task for an agent, enforcing:
+-- 1. Per-(issue, agent) serialization: no duplicate dispatched/running tasks.
+-- 2. Parent-issue blocking: child issues wait until parent is done/cancelled.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+-- Note: parent check uses NOT EXISTS instead of LEFT JOIN because
+-- FOR UPDATE SKIP LOCKED cannot be applied to the nullable side of an outer join.
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      -- Parent-issue blocking (via subquery to avoid LEFT JOIN + FOR UPDATE conflict)
+      AND NOT EXISTS (
+          SELECT 1 FROM issue i
+          JOIN issue parent ON i.parent_issue_id = parent.id
+          WHERE i.id = atq.issue_id
+            AND parent.status NOT IN ('done', 'cancelled')
+      )
+      -- Per-(issue, agent) serialization
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -167,9 +176,19 @@ SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
 
 -- name: ListPendingTasksByRuntime :many
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
-ORDER BY priority DESC, created_at ASC;
+-- Lists pending tasks for a runtime, excluding tasks whose issue has an
+-- incomplete parent issue (enforces parent->child scheduling order).
+SELECT atq.* FROM agent_task_queue atq
+LEFT JOIN issue i ON atq.issue_id = i.id
+LEFT JOIN issue parent ON i.parent_issue_id = parent.id
+WHERE atq.runtime_id = $1
+  AND atq.status IN ('queued', 'dispatched')
+  AND (
+    atq.issue_id IS NULL
+    OR i.parent_issue_id IS NULL
+    OR parent.status IN ('done', 'cancelled')
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: ListActiveTasksByIssue :many
 SELECT * FROM agent_task_queue
