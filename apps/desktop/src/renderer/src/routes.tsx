@@ -17,6 +17,8 @@ import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
+import { OnboardingWizard } from "@multica/views/onboarding";
+import { useNavigation } from "@multica/views/navigation";
 import { Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 
@@ -48,6 +50,11 @@ function PageShell() {
       <Outlet />
     </>
   );
+}
+
+function OnboardingRoute() {
+  const nav = useNavigation();
+  return <OnboardingWizard onComplete={() => nav.push("/issues")} />;
 }
 
 /** Route definitions shared by all tabs (no layout wrapper). */
@@ -85,6 +92,11 @@ export const appRoutes: RouteObject[] = [
       { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
       { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
       { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+      {
+        path: "onboarding",
+        element: <OnboardingRoute />,
+        handle: { title: "Get Started" },
+      },
       {
         path: "settings",
         element: (
