@@ -310,6 +310,18 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// Schedules (cron-driven issue creation)
+			r.Route("/api/schedules", func(r chi.Router) {
+				r.Get("/", h.ListSchedules)
+				r.Post("/", h.CreateSchedule)
+				r.Route("/{scheduleId}", func(r chi.Router) {
+					r.Get("/", h.GetSchedule)
+					r.Patch("/", h.UpdateSchedule)
+					r.Delete("/", h.DeleteSchedule)
+					r.Post("/run", h.RunScheduleNow)
+				})
+			})
+
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
 
