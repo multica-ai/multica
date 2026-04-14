@@ -4,7 +4,6 @@ import {
   Square,
   RotateCw,
   Server,
-  ScrollText,
   Activity,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -57,9 +56,22 @@ export function DaemonRuntimeCard() {
   const isRunning = status.state === "running";
   const isStopped = status.state === "stopped" || status.state === "cli_not_found";
 
+  const stopPropagation = (e: React.MouseEvent) => e.stopPropagation();
+
   return (
     <>
-      <div className="border-b px-4 py-3">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setPanelOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setPanelOpen(true);
+          }
+        }}
+        className="border-b px-4 py-3 cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/40"
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="flex size-8 items-center justify-center rounded-lg bg-muted">
@@ -86,7 +98,10 @@ export function DaemonRuntimeCard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div
+            className="flex items-center gap-1.5 shrink-0"
+            onClick={stopPropagation}
+          >
             {isStopped && (
               <Button
                 size="sm"
@@ -104,14 +119,6 @@ export function DaemonRuntimeCard() {
             )}
             {isRunning && (
               <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setPanelOpen(true)}
-                >
-                  <ScrollText className="size-3.5 mr-1.5" />
-                  Logs
-                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
