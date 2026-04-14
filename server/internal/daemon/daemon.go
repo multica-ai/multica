@@ -22,6 +22,7 @@ import (
 type workspaceState struct {
 	workspaceID string
 	runtimeIDs  []string
+	repos       []RepoData // workspace repo list (refreshed from server; used for checkout branch hints)
 }
 
 // Daemon is the local agent runtime that polls for and executes tasks.
@@ -173,7 +174,7 @@ func (d *Daemon) loadWatchedWorkspaces(ctx context.Context) error {
 			d.logger.Info("registered runtime", "workspace_id", ws.ID, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
 		d.mu.Lock()
-		d.workspaces[ws.ID] = &workspaceState{workspaceID: ws.ID, runtimeIDs: runtimeIDs}
+		d.workspaces[ws.ID] = &workspaceState{workspaceID: ws.ID, runtimeIDs: runtimeIDs, repos: resp.Repos}
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
 		}
@@ -339,12 +340,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) {
 	workspaces, err := d.client.ListWorkspaces(apiCtx)
 	if err != nil {
 		d.logger.Debug("workspace sync: failed to list workspaces", "error", err)
+		d.refreshWorkspaceRepos(apiCtx)
 		return
 	}
 
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		d.logger.Warn("workspace sync: failed to load config", "error", err)
+		d.refreshWorkspaceRepos(apiCtx)
 		return
 	}
 
@@ -356,15 +359,77 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) {
 		}
 	}
 
-	if added == 0 {
-		return
+	if added > 0 {
+		if err := cli.SaveCLIConfigForProfile(cfg, d.cfg.Profile); err != nil {
+			d.logger.Warn("workspace sync: failed to save config", "error", err)
+		} else {
+			d.logger.Info("workspace sync: added new workspace(s) to config", "count", added)
+		}
 	}
 
-	if err := cli.SaveCLIConfigForProfile(cfg, d.cfg.Profile); err != nil {
-		d.logger.Warn("workspace sync: failed to save config", "error", err)
+	d.refreshWorkspaceRepos(apiCtx)
+}
+
+// refreshWorkspaceRepos loads each watched workspace from the API so repo metadata
+// (including optional branch hints) stays current without restarting the daemon.
+func (d *Daemon) refreshWorkspaceRepos(ctx context.Context) {
+	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
+	if err != nil {
 		return
 	}
-	d.logger.Info("workspace sync: added new workspace(s) to config", "count", added)
+	for _, w := range cfg.WatchedWorkspaces {
+		detail, err := d.client.GetWorkspace(ctx, w.ID)
+		if err != nil {
+			d.logger.Debug("workspace repo refresh failed", "workspace_id", w.ID, "error", err)
+			continue
+		}
+		repos := detail.Repos
+		if repos == nil {
+			repos = []RepoData{}
+		}
+		d.mu.Lock()
+		if state, ok := d.workspaces[w.ID]; ok {
+			state.repos = repos
+		}
+		d.mu.Unlock()
+		if d.repoCache != nil && len(repos) > 0 {
+			wsID := w.ID
+			reposCopy := append([]RepoData(nil), repos...)
+			go func() {
+				if err := d.repoCache.Sync(wsID, repoDataToInfo(reposCopy)); err != nil {
+					d.logger.Warn("repo cache sync failed", "workspace_id", wsID, "error", err)
+				}
+			}()
+		}
+	}
+}
+
+// resolveCheckoutBranch picks the remote-tracking branch name for worktree creation.
+// Explicit bodyBranch wins; otherwise the workspace repo list is matched by URL key.
+func (d *Daemon) resolveCheckoutBranch(workspaceID, repoURL, bodyBranch string) string {
+	if s := strings.TrimSpace(bodyBranch); s != "" {
+		return s
+	}
+	if strings.TrimSpace(workspaceID) == "" {
+		return ""
+	}
+	d.mu.Lock()
+	var repos []RepoData
+	if ws, ok := d.workspaces[workspaceID]; ok {
+		repos = ws.repos
+	}
+	d.mu.Unlock()
+	return branchFromWorkspaceRepos(repos, repoURL)
+}
+
+func branchFromWorkspaceRepos(repos []RepoData, checkoutURL string) string {
+	key := repocache.BareDirName(checkoutURL)
+	for _, r := range repos {
+		if repocache.BareDirName(r.URL) == key {
+			return strings.TrimSpace(r.Branch)
+		}
+	}
+	return ""
 }
 
 // reloadWorkspaces reconciles the active workspace set with the config file.
@@ -405,7 +470,7 @@ func (d *Daemon) reloadWorkspaces(ctx context.Context) {
 				runtimeIDs[i] = rt.ID
 			}
 			d.mu.Lock()
-			d.workspaces[id] = &workspaceState{workspaceID: id, runtimeIDs: runtimeIDs}
+			d.workspaces[id] = &workspaceState{workspaceID: id, runtimeIDs: runtimeIDs, repos: resp.Repos}
 			for _, rt := range resp.Runtimes {
 				d.runtimeIndex[rt.ID] = rt
 			}
@@ -1245,7 +1310,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Branch: r.Branch}
 	}
 	return result
 }

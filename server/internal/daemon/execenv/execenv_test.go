@@ -126,7 +126,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend", Description: "Go backend"},
+			{URL: "https://github.com/org/backend", Description: "Go backend", Branch: "develop"},
 			{URL: "https://github.com/org/frontend", Description: "React frontend"},
 		},
 	}
@@ -168,6 +168,9 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"multica repo checkout",
+		"| URL | Description | Base branch |",
+		"`develop`",
+		"— (remote default)",
 		"https://github.com/org/backend",
 		"Go backend",
 		"https://github.com/org/frontend",
@@ -612,6 +615,8 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"multica repo checkout",
+		"| URL | Description | Base branch |",
+		"— (remote default)",
 		"https://github.com/org/backend",
 		"Go backend",
 	} {

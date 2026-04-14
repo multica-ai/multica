@@ -18,6 +18,7 @@ type Runtime struct {
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description"`
+	Branch      string `json:"branch,omitempty"`
 }
 
 // Task represents a claimed task from the server.

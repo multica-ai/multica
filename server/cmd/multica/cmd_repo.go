@@ -20,13 +20,17 @@ var repoCmd = &cobra.Command{
 var repoCheckoutCmd = &cobra.Command{
 	Use:   "checkout <url>",
 	Short: "Check out a repository into the working directory",
-	Long:  "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.",
+	Long:  "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand. " +
+		"Use --branch to base the worktree on a specific remote branch; when omitted, the workspace default or the remote's default branch is used.",
 	Args:  exactArgs(1),
 	RunE:  runRepoCheckout,
 }
 
+var repoCheckoutBranch string
+
 func init() {
 	repoCmd.AddCommand(repoCheckoutCmd)
+	repoCheckoutCmd.Flags().StringVar(&repoCheckoutBranch, "branch", "", "optional remote branch to use as the worktree base (default: workspace setting or remote default)")
 }
 
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
@@ -48,11 +52,12 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	reqBody := map[string]string{
-		"url":          repoURL,
-		"workspace_id": workspaceID,
-		"workdir":      workDir,
-		"agent_name":   agentName,
-		"task_id":      taskID,
+		"url":            repoURL,
+		"workspace_id":   workspaceID,
+		"workdir":        workDir,
+		"agent_name":     agentName,
+		"task_id":        taskID,
+		"branch":         repoCheckoutBranch,
 	}
 
 	data, err := json.Marshal(reqBody)

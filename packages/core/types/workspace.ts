@@ -3,6 +3,8 @@ export type MemberRole = "owner" | "admin" | "member";
 export interface WorkspaceRepo {
   url: string;
   description: string;
+  /** Optional remote branch to base agent checkouts on (default: repository default branch). */
+  branch?: string;
 }
 
 export interface Workspace {

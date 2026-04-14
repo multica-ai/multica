@@ -16,6 +16,7 @@ import (
 type RepoContextForEnv struct {
 	URL         string // remote URL
 	Description string // human-readable description
+	Branch      string // optional remote branch name for checkouts
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.

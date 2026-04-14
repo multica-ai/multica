@@ -198,6 +198,21 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	return workspaces, nil
 }
 
+// WorkspaceDetail is the subset of GET /api/workspaces/:id needed by the daemon.
+type WorkspaceDetail struct {
+	ID    string     `json:"id"`
+	Repos []RepoData `json:"repos"`
+}
+
+// GetWorkspace fetches a workspace including its repo list (branch hints, etc.).
+func (c *Client) GetWorkspace(ctx context.Context, workspaceID string) (*WorkspaceDetail, error) {
+	var detail WorkspaceDetail
+	if err := c.getJSON(ctx, "/api/workspaces/"+workspaceID, &detail); err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}
+
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
 type IssueGCStatus struct {
 	Status    string    `json:"status"`

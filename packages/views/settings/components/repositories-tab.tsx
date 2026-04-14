@@ -46,7 +46,7 @@ export function RepositoriesTab() {
   };
 
   const handleAddRepo = () => {
-    setRepos([...repos, { url: "", description: "" }]);
+    setRepos([...repos, { url: "", description: "", branch: "" }]);
   };
 
   const handleRemoveRepo = (index: number) => {
@@ -67,7 +67,8 @@ export function RepositoriesTab() {
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              GitHub repositories associated with this workspace. Agents use these to clone and work on code.
+              GitHub repositories associated with this workspace. Agents use these to clone and work on code. Optionally set a
+              branch to base checkouts on (otherwise the repository default branch is used).
             </p>
 
             {repos.map((repo, index) => (
@@ -87,6 +88,14 @@ export function RepositoriesTab() {
                     onChange={(e) => handleRepoChange(index, "description", e.target.value)}
                     disabled={!canManageWorkspace}
                     placeholder="Description (e.g. Go backend + Next.js frontend)"
+                    className="text-sm"
+                  />
+                  <Input
+                    type="text"
+                    value={repo.branch ?? ""}
+                    onChange={(e) => handleRepoChange(index, "branch", e.target.value)}
+                    disabled={!canManageWorkspace}
+                    placeholder="Branch (optional, e.g. develop)"
                     className="text-sm"
                   />
                 </div>

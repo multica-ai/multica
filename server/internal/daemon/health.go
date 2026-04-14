@@ -47,6 +47,9 @@ type repoCheckoutRequest struct {
 	WorkDir     string `json:"workdir"`
 	AgentName   string `json:"agent_name"`
 	TaskID      string `json:"task_id"`
+	// Branch is optional; when empty, the daemon uses the workspace repo setting
+	// or the remote default branch.
+	Branch string `json:"branch,omitempty"`
 }
 
 // serveHealth runs the health HTTP server on the given listener.
@@ -109,12 +112,14 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
+		branch := d.resolveCheckoutBranch(req.WorkspaceID, req.URL, req.Branch)
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
 			WorkspaceID: req.WorkspaceID,
 			RepoURL:     req.URL,
 			WorkDir:     req.WorkDir,
 			AgentName:   req.AgentName,
 			TaskID:      req.TaskID,
+			Branch:      branch,
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)

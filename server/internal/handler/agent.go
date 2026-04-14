@@ -70,6 +70,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description"`
+	Branch      string `json:"branch,omitempty"`
 }
 
 type AgentTaskResponse struct {

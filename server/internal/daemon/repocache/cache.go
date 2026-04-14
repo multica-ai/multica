@@ -117,6 +117,13 @@ func (c *Cache) Fetch(barePath string) error {
 	return gitFetch(barePath)
 }
 
+// BareDirName returns the cache subdirectory name derived from a repo URL
+// (same value used by Lookup and Sync). Two URLs that map to the same bare
+// clone share this key.
+func BareDirName(url string) string {
+	return bareDirName(url)
+}
+
 // bareDirName derives a directory name from a repo URL.
 // e.g. "https://github.com/org/my-repo.git" → "my-repo.git"
 func bareDirName(url string) string {
@@ -261,6 +268,55 @@ func setFetchRefspec(barePath, refspec string) error {
 	return nil
 }
 
+// resolveCheckoutBaseRef picks the git ref used as the startpoint for a new
+// agent worktree. If branch is empty, uses getRemoteDefaultBranch. Otherwise
+// resolves refs/remotes/origin/<name> or another known layout after fetch.
+func resolveCheckoutBaseRef(barePath, branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		ref := getRemoteDefaultBranch(barePath)
+		if ref == "" {
+			return "", fmt.Errorf("cannot resolve default branch: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", barePath)
+		}
+		return ref, nil
+	}
+	for _, candidate := range branchResolveCandidates(branch) {
+		if err := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate).Run(); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("branch %q not found in local cache after fetch — ensure it exists on the remote", strings.TrimSpace(branch))
+}
+
+// branchResolveCandidates builds ref names to try for a user-provided branch
+// shorthand (e.g. "main", "origin/main", "feature/foo").
+func branchResolveCandidates(branch string) []string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return nil
+	}
+	if strings.HasPrefix(branch, "refs/") {
+		return []string{branch}
+	}
+	short := strings.TrimPrefix(branch, "origin/")
+	short = strings.TrimPrefix(short, "heads/")
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	add("refs/remotes/origin/" + short)
+	if strings.Contains(branch, "/") && branch != short {
+		add("refs/remotes/origin/" + strings.TrimPrefix(branch, "origin/"))
+	}
+	add("refs/heads/" + short)
+	return out
+}
+
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
 	WorkspaceID string // workspace that owns the repo
@@ -268,6 +324,9 @@ type WorktreeParams struct {
 	WorkDir     string // parent directory for the worktree (e.g. task workdir)
 	AgentName   string // for branch naming
 	TaskID      string // for branch naming uniqueness
+	// Branch is an optional remote branch name (e.g. "develop"). Empty means
+	// the remote's default branch (same as previous behavior).
+	Branch string
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -307,15 +366,9 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		)
 	}
 
-	// Determine the default branch to base the worktree on. getRemoteDefaultBranch
-	// walks origin/HEAD → origin/main, origin/master → bare-HEAD hint into
-	// origin/<same> → single-entry scan of origin/* → bare HEAD (only if
-	// origin/* is empty). Reaching "" here means the cache is in a state we
-	// refuse to guess from (no origin/HEAD, no main/master, bare HEAD doesn't
-	// match any origin/* entry, and origin/* has multiple candidates).
-	baseRef := getRemoteDefaultBranch(barePath)
-	if baseRef == "" {
-		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
+	baseRef, err := resolveCheckoutBaseRef(barePath, params.Branch)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
