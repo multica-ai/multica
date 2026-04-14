@@ -1,15 +1,11 @@
 "use client";
 
 /**
- * Link preview system — floating card for link inspection.
+ * Link preview for ReadonlyContent (react-markdown).
  *
- * Two entry points, same UI:
- * - EditorLinkPreview: editable ContentEditor (cursor on link)
- * - ReadonlyLinkWrapper: ReadonlyContent (click on link)
- *
- * Both use @floating-ui/react-dom (useFloating + autoUpdate) portaled
- * to document.body. This escapes ALL overflow:hidden ancestors while
- * autoUpdate keeps the card anchored across any ancestor scroll.
+ * Shows a floating card (Copy + Open) when clicking a link in readonly
+ * content. Uses @floating-ui/react-dom portaled to body to escape
+ * overflow:hidden containers.
  */
 
 import {
@@ -20,12 +16,11 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useFloating, offset, flip, shift, autoUpdate } from "@floating-ui/react-dom";
+import { useFloating, offset, flip, shift } from "@floating-ui/react-dom";
 import { getOverflowAncestors } from "@floating-ui/dom";
 import { ExternalLink, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Editor } from "@tiptap/core";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,28 +83,13 @@ function LinkPreviewCard({
 
   return (
     <div className="link-preview-card" onMouseDown={onMouseDown}>
-      <span
-        className="min-w-0 flex-1 truncate text-xs text-muted-foreground px-1"
-        title={href}
-      >
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground px-1" title={href}>
         {truncateUrl(href)}
       </span>
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        className="text-muted-foreground"
-        onClick={handleCopy}
-        title="Copy link"
-      >
+      <Button size="icon-xs" variant="ghost" className="text-muted-foreground" onClick={handleCopy} title="Copy link">
         <Copy className="size-3.5" />
       </Button>
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        className="text-muted-foreground"
-        onClick={handleOpen}
-        title="Open link"
-      >
+      <Button size="icon-xs" variant="ghost" className="text-muted-foreground" onClick={handleOpen} title="Open link">
         <ExternalLink className="size-3.5" />
       </Button>
     </div>
@@ -128,111 +108,17 @@ function useCloseOnOutsideClick(active: boolean, close: () => void) {
       close();
     };
     const t = setTimeout(() => document.addEventListener("mousedown", handle), 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", handle);
-    };
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handle); };
   }, [active, close]);
 }
 
 function useCloseOnEscape(active: boolean, close: () => void) {
   useEffect(() => {
     if (!active) return;
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
+    const handle = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", handle);
     return () => document.removeEventListener("keydown", handle);
   }, [active, close]);
-}
-
-// ---------------------------------------------------------------------------
-// EditorLinkPreview — for editable ContentEditor
-// ---------------------------------------------------------------------------
-
-function EditorLinkPreview({ editor }: { editor: Editor }) {
-  const [visible, setVisible] = useState(false);
-  const [href, setHref] = useState("");
-
-  const close = useCallback(() => setVisible(false), []);
-
-  const virtualRef = useRef({
-    getBoundingClientRect: () => new DOMRect(),
-    contextElement: editor.view.dom,
-  });
-
-  const { refs, floatingStyles, isPositioned, update } = useFloating({
-    strategy: "fixed",
-    placement: "bottom",
-    open: visible,
-    middleware: [offset(4), flip(), shift({ padding: 8 })],
-    elements: { reference: virtualRef.current },
-    whileElementsMounted: autoUpdate,
-  });
-
-  useEffect(() => {
-    const check = () => {
-      if (!editor.isEditable) {
-        setVisible(false);
-        return;
-      }
-      if (!editor.state.selection.empty || !editor.isActive("link")) {
-        setVisible(false);
-        return;
-      }
-      const linkHref = (editor.getAttributes("link").href as string) || "";
-      if (!linkHref) {
-        setVisible(false);
-        return;
-      }
-
-      const coords = editor.view.coordsAtPos(editor.state.selection.from);
-      virtualRef.current = {
-        getBoundingClientRect: () =>
-          new DOMRect(coords.left, coords.top, 0, coords.bottom - coords.top),
-        contextElement: editor.view.dom,
-      };
-
-      setHref(linkHref);
-      setVisible(true);
-      update();
-    };
-
-    editor.on("selectionUpdate", check);
-    return () => { editor.off("selectionUpdate", check); };
-  }, [editor, update]);
-
-  // Close on any ancestor scroll or window resize
-  useEffect(() => {
-    if (!visible) return;
-    const close = () => {
-      setVisible(false);
-    };
-    const ancestors = getOverflowAncestors(editor.view.dom);
-    ancestors.forEach((el) => el.addEventListener("scroll", close, { passive: true }));
-    window.addEventListener("resize", close);
-    return () => {
-      ancestors.forEach((el) => el.removeEventListener("scroll", close));
-      window.removeEventListener("resize", close);
-    };
-  }, [visible, editor]);
-
-  useCloseOnOutsideClick(visible, close);
-  useCloseOnEscape(visible, close);
-
-  return createPortal(
-    <div
-      ref={refs.setFloating}
-      style={{
-        ...floatingStyles,
-        zIndex: 50,
-        display: visible && isPositioned ? undefined : "none",
-      }}
-    >
-      <LinkPreviewCard href={href} onMouseDown={(e) => e.preventDefault()} />
-    </div>,
-    document.body,
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -274,9 +160,7 @@ function ReadonlyLinkWrapper({
     const hide = () => setOpen(false);
     const ancestors = getOverflowAncestors(anchorRef.current);
     ancestors.forEach((el) => el.addEventListener("scroll", hide, { passive: true }));
-    return () => {
-      ancestors.forEach((el) => el.removeEventListener("scroll", hide));
-    };
+    return () => { ancestors.forEach((el) => el.removeEventListener("scroll", hide)); };
   }, [open]);
 
   useCloseOnOutsideClick(open, close);
@@ -284,13 +168,7 @@ function ReadonlyLinkWrapper({
 
   return (
     <>
-      <a
-        ref={anchorRef}
-        href={href}
-        onClick={toggle}
-        role="button"
-        aria-expanded={open}
-      >
+      <a ref={anchorRef} href={href} onClick={toggle} role="button" aria-expanded={open}>
         {children}
       </a>
       {open &&
@@ -304,4 +182,4 @@ function ReadonlyLinkWrapper({
   );
 }
 
-export { EditorLinkPreview, ReadonlyLinkWrapper, openLink };
+export { ReadonlyLinkWrapper, openLink };
