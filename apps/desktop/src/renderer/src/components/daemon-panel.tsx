@@ -181,21 +181,22 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
         side="right"
         className="flex flex-col sm:max-w-md"
         showCloseButton={false}
+        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <SheetHeader>
+        <SheetHeader className="flex-row items-center justify-between gap-2 pr-3">
           <SheetTitle className="flex items-center gap-2">
             <Server className="size-4" />
             Local Daemon
           </SheetTitle>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            aria-label="Close"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <X className="size-4" />
+          </button>
         </SheetHeader>
-        <button
-          type="button"
-          onClick={() => onOpenChange(false)}
-          aria-label="Close"
-          className="absolute top-3 right-3 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <X className="size-4" />
-        </button>
 
         <div className="flex-1 min-h-0 flex flex-col gap-4 px-4">
           <div className="shrink-0 space-y-4">
