@@ -5,6 +5,7 @@ import {
   RotateCw,
   Server,
   ChevronDown,
+  X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@multica/core/workspace";
@@ -176,15 +177,28 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex flex-col sm:max-w-md">
+      <SheetContent
+        side="right"
+        className="flex flex-col sm:max-w-md"
+        showCloseButton={false}
+      >
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Server className="size-4" />
             Local Daemon
           </SheetTitle>
         </SheetHeader>
+        <button
+          type="button"
+          onClick={() => onOpenChange(false)}
+          aria-label="Close"
+          className="absolute top-3 right-3 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-4" />
+        </button>
 
-        <div className="flex-1 overflow-y-auto px-4 space-y-4">
+        <div className="flex-1 min-h-0 flex flex-col gap-4 px-4">
+          <div className="shrink-0 space-y-4">
           {/* Status info */}
           <div className="rounded-lg border p-3 space-y-0.5">
             <InfoRow
@@ -293,7 +307,7 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
           {status.state === "running" && allWorkspaces && allWorkspaces.length > 0 && (
             <div className="space-y-2">
               <h3 className="text-sm font-medium">Watched Workspaces</h3>
-              <div className="rounded-lg border divide-y">
+              <div className="rounded-lg border divide-y max-h-48 overflow-y-auto">
                 {allWorkspaces.map((ws) => {
                   const checked = watchedIds.has(ws.id);
                   const disabled = togglingId === ws.id;
@@ -321,10 +335,11 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
               </div>
             </div>
           )}
+          </div>
 
-          {/* Logs */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
+          {/* Logs — fills remaining vertical space down to the sheet bottom */}
+          <div className="flex-1 min-h-0 flex flex-col gap-2 pb-4">
+            <div className="flex items-center justify-between shrink-0">
               <h3 className="text-sm font-medium">Logs</h3>
               {!autoScroll && (
                 <Button
@@ -341,7 +356,7 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
             <div
               ref={logContainerRef}
               onScroll={handleLogScroll}
-              className="h-64 overflow-y-auto rounded-lg border bg-muted/30 p-2 font-mono text-xs leading-relaxed"
+              className="flex-1 min-h-0 overflow-y-auto rounded-lg border bg-muted/30 p-2 font-mono text-xs leading-relaxed"
             >
               {logs.length === 0 ? (
                 <p className="text-muted-foreground/50 text-center py-8">
