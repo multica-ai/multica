@@ -1122,6 +1122,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Cancel active tasks when the issue is cancelled by a user.
+	// This is distinct from agent-managed status transitions — cancellation
+	// is a user-initiated terminal action that should stop execution.
+	if statusChanged && issue.Status == "cancelled" {
+		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1409,6 +1416,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 			}
+		}
+
+		// Cancel active tasks when the issue is cancelled by a user.
+		if statusChanged && issue.Status == "cancelled" {
+			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		}
 
 		updated++
