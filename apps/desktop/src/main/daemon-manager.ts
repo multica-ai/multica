@@ -485,6 +485,14 @@ function profileArgs(active: ActiveProfile): string[] {
   return active.name ? ["--profile", active.name] : [];
 }
 
+// Env passed to every CLI child so the daemon process knows it was spawned
+// by the Desktop app. The server uses this to mark runtimes as managed and
+// hide CLI self-update UI.
+const DESKTOP_SPAWN_ENV = {
+  ...process.env,
+  MULTICA_LAUNCHED_BY: "desktop",
+};
+
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
   if (!bin) return { success: false, error: "multica CLI is not installed" };
@@ -502,17 +510,22 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   const args = ["daemon", "start", ...profileArgs(active)];
 
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout: 20_000 }, (err) => {
-      if (err) {
-        currentState = "stopped";
-        sendStatus({ state: "stopped" });
-        resolve({ success: false, error: err.message });
-        return;
-      }
-      currentState = "running";
-      pollOnce();
-      resolve({ success: true });
-    });
+    execFile(
+      bin,
+      args,
+      { timeout: 20_000, env: DESKTOP_SPAWN_ENV },
+      (err) => {
+        if (err) {
+          currentState = "stopped";
+          sendStatus({ state: "stopped" });
+          resolve({ success: false, error: err.message });
+          return;
+        }
+        currentState = "running";
+        pollOnce();
+        resolve({ success: true });
+      },
+    );
   });
 }
 

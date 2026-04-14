@@ -39,9 +39,22 @@ function getCliVersion(metadata: Record<string, unknown>): string | null {
   return null;
 }
 
+function getLaunchedBy(metadata: Record<string, unknown>): string | null {
+  if (
+    metadata &&
+    typeof metadata.launched_by === "string" &&
+    metadata.launched_by
+  ) {
+    return metadata.launched_by;
+  }
+  return null;
+}
+
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
+  const launchedBy =
+    runtime.runtime_mode === "local" ? getLaunchedBy(runtime.metadata) : null;
 
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
@@ -146,6 +159,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               runtimeId={runtime.id}
               currentVersion={cliVersion}
               isOnline={runtime.status === "online"}
+              launchedBy={launchedBy}
             />
           </div>
         )}
