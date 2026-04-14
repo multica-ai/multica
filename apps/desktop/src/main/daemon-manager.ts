@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
 
 const HEALTH_PORT = 19514;
 const HEALTH_URL = `http://127.0.0.1:${HEALTH_PORT}/health`;
@@ -11,28 +12,17 @@ const POLL_INTERVAL_MS = 5_000;
 const CONFIG_PATH = join(homedir(), ".multica", "config.json");
 const LOG_PATH = join(homedir(), ".multica", "daemon.log");
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
-
-interface DaemonPrefs {
-  autoStart: boolean;
-  autoStop: boolean;
-}
+const LOG_TAIL_RETRY_MS = 2_000;
+const LOG_TAIL_MAX_RETRIES = 5;
 
 const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
-
-export interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
-  pid?: number;
-  uptime?: string;
-  daemonId?: string;
-  deviceName?: string;
-  agents?: string[];
-  workspaceCount?: number;
-}
 
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 let logTailProcess: ChildProcess | null = null;
 let currentState: DaemonStatus["state"] = "stopped";
 let getMainWindow: () => BrowserWindow | null = () => null;
+let operationInProgress = false;
+let cachedCliBinary: string | null | undefined = undefined;
 
 function sendStatus(status: DaemonStatus): void {
   const win = getMainWindow();
@@ -68,6 +58,8 @@ async function fetchHealth(): Promise<DaemonStatus> {
 }
 
 function findCliBinary(): string | null {
+  if (cachedCliBinary !== undefined) return cachedCliBinary;
+
   const candidates =
     process.platform === "win32"
       ? ["multica.exe"]
@@ -77,15 +69,18 @@ function findCliBinary(): string | null {
     const paths = (process.env["PATH"] ?? "").split(
       process.platform === "win32" ? ";" : ":",
     );
-    // Also check common Homebrew locations
     if (process.platform === "darwin") {
       paths.push("/opt/homebrew/bin", "/usr/local/bin");
     }
     for (const dir of paths) {
       const full = join(dir, name);
-      if (existsSync(full)) return full;
+      if (existsSync(full)) {
+        cachedCliBinary = full;
+        return full;
+      }
     }
   }
+  cachedCliBinary = null;
   return null;
 }
 
@@ -128,6 +123,18 @@ async function clearToken(): Promise<void> {
     await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
   } catch {
     // Ignore — file doesn't exist
+  }
+}
+
+async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
+  if (operationInProgress) {
+    return { success: false, error: "Another daemon operation is in progress" };
+  }
+  operationInProgress = true;
+  try {
+    return await fn();
+  } finally {
+    operationInProgress = false;
   }
 }
 
@@ -201,9 +208,15 @@ function stopPolling(): void {
   }
 }
 
-function startLogTail(win: BrowserWindow): void {
+function startLogTail(win: BrowserWindow, retryCount = 0): void {
   stopLogTail();
-  if (!existsSync(LOG_PATH)) return;
+
+  if (!existsSync(LOG_PATH)) {
+    if (retryCount < LOG_TAIL_MAX_RETRIES) {
+      setTimeout(() => startLogTail(win, retryCount + 1), LOG_TAIL_RETRY_MS);
+    }
+    return;
+  }
 
   logTailProcess = spawn("tail", ["-n", "200", "-f", LOG_PATH]);
   logTailProcess.stdout?.on("data", (chunk: Buffer) => {
@@ -229,9 +242,9 @@ export function setupDaemonManager(
 ): void {
   getMainWindow = windowGetter;
 
-  ipcMain.handle("daemon:start", () => startDaemon());
-  ipcMain.handle("daemon:stop", () => stopDaemon());
-  ipcMain.handle("daemon:restart", () => restartDaemon());
+  ipcMain.handle("daemon:start", () => withGuard(() => startDaemon()));
+  ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
+  ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
   ipcMain.handle("daemon:get-status", () => fetchHealth());
   ipcMain.handle("daemon:sync-token", (_event, token: string) =>
     syncToken(token),
@@ -268,19 +281,23 @@ export function setupDaemonManager(
 
   startPolling();
 
-  app.on("before-quit", async () => {
+  let isQuitting = false;
+  app.on("before-quit", (event) => {
+    if (isQuitting) return;
     stopPolling();
     stopLogTail();
-    const prefs = await loadPrefs();
-    if (prefs.autoStop) {
-      const bin = findCliBinary();
-      if (bin) {
+
+    loadPrefs().then(async (prefs) => {
+      if (prefs.autoStop) {
+        isQuitting = true;
+        event.preventDefault();
         try {
           await stopDaemon();
         } catch {
           // Best-effort stop on quit
         }
+        app.quit();
       }
-    }
+    });
   });
 }

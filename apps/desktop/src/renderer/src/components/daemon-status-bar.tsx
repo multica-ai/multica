@@ -2,27 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import { Activity, Play, Server } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { toast } from "sonner";
 import { DaemonPanel } from "./daemon-panel";
-
-type DaemonState = "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
-
-interface DaemonStatusInfo {
-  state: DaemonState;
-  agents?: string[];
-  uptime?: string;
-}
-
-function formatUptime(uptime?: string): string {
-  if (!uptime) return "";
-  const match = uptime.match(/(?:(\d+)h)?(\d+)m/);
-  if (!match) return uptime;
-  const h = match[1] ? `${match[1]}h ` : "";
-  const m = match[2] ? `${match[2]}m` : "";
-  return `${h}${m}`.trim();
-}
+import type { DaemonStatus } from "../../../shared/daemon-types";
+import { DAEMON_STATE_COLORS, DAEMON_STATE_LABELS, formatUptime } from "../../../shared/daemon-types";
 
 export function DaemonStatusBar() {
-  const [status, setStatus] = useState<DaemonStatusInfo>({ state: "stopped" });
+  const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [panelOpen, setPanelOpen] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -40,26 +26,13 @@ export function DaemonStatusBar() {
       e.stopPropagation();
       setStarting(true);
       const result = await window.daemonAPI.start();
-      if (!result.success) setStarting(false);
+      if (!result.success) {
+        setStarting(false);
+        toast.error("Failed to start daemon", { description: result.error });
+      }
     },
     [],
   );
-
-  const stateColor: Record<DaemonState, string> = {
-    running: "bg-emerald-500",
-    stopped: "bg-muted-foreground/40",
-    starting: "bg-amber-500 animate-pulse",
-    stopping: "bg-amber-500 animate-pulse",
-    cli_not_found: "bg-muted-foreground/20",
-  };
-
-  const stateLabel: Record<DaemonState, string> = {
-    running: "Running",
-    stopped: "Stopped",
-    starting: "Starting…",
-    stopping: "Stopping…",
-    cli_not_found: "CLI Not Found",
-  };
 
   const agentCount = status.agents?.length ?? 0;
   const uptime = formatUptime(status.uptime);
@@ -84,9 +57,9 @@ export function DaemonStatusBar() {
           <Server className="size-4 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <span className={cn("size-1.5 shrink-0 rounded-full", stateColor[status.state])} />
+              <span className={cn("size-1.5 shrink-0 rounded-full", DAEMON_STATE_COLORS[status.state])} />
               <span className="truncate text-sm font-medium leading-tight text-sidebar-foreground">
-                {stateLabel[status.state]}
+                {DAEMON_STATE_LABELS[status.state]}
               </span>
             </div>
             {subtitle && (

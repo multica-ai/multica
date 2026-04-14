@@ -8,29 +8,20 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { toast } from "sonner";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@multica/ui/components/ui/sheet";
-
-type DaemonState = "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
-
-interface DaemonStatusInfo {
-  state: DaemonState;
-  pid?: number;
-  uptime?: string;
-  daemonId?: string;
-  deviceName?: string;
-  agents?: string[];
-  workspaceCount?: number;
-}
+import type { DaemonStatus, DaemonState } from "../../../shared/daemon-types";
+import { DAEMON_STATE_COLORS, DAEMON_STATE_LABELS } from "../../../shared/daemon-types";
 
 interface DaemonPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  status: DaemonStatusInfo;
+  status: DaemonStatus;
 }
 
 const LOG_LEVEL_COLORS: Record<string, string> = {
@@ -57,20 +48,19 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function StatusDot({ state }: { state: DaemonState }) {
-  const colors: Record<DaemonState, string> = {
-    running: "bg-emerald-500",
-    stopped: "bg-muted-foreground/40",
-    starting: "bg-amber-500 animate-pulse",
-    stopping: "bg-amber-500 animate-pulse",
-    cli_not_found: "bg-muted-foreground/20",
-  };
-  return <span className={cn("inline-block size-2 rounded-full", colors[state])} />;
+  return <span className={cn("inline-block size-2 rounded-full", DAEMON_STATE_COLORS[state])} />;
+}
+
+interface LogEntry {
+  id: number;
+  line: string;
 }
 
 const MAX_LOG_LINES = 500;
+let logIdCounter = 0;
 
 export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [autoScroll, setAutoScroll] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -81,7 +71,7 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
     window.daemonAPI.startLogStream();
     const unsub = window.daemonAPI.onLogLine((line) => {
       setLogs((prev) => {
-        const next = [...prev, line];
+        const next = [...prev, { id: ++logIdCounter, line }];
         return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
       });
     });
@@ -114,29 +104,30 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
 
   const handleStart = useCallback(async () => {
     setActionLoading(true);
-    await window.daemonAPI.start();
+    const result = await window.daemonAPI.start();
     setActionLoading(false);
+    if (!result.success) {
+      toast.error("Failed to start daemon", { description: result.error });
+    }
   }, []);
 
   const handleStop = useCallback(async () => {
     setActionLoading(true);
-    await window.daemonAPI.stop();
+    const result = await window.daemonAPI.stop();
     setActionLoading(false);
+    if (!result.success) {
+      toast.error("Failed to stop daemon", { description: result.error });
+    }
   }, []);
 
   const handleRestart = useCallback(async () => {
     setActionLoading(true);
-    await window.daemonAPI.restart();
+    const result = await window.daemonAPI.restart();
     setActionLoading(false);
+    if (!result.success) {
+      toast.error("Failed to restart daemon", { description: result.error });
+    }
   }, []);
-
-  const stateLabel: Record<DaemonState, string> = {
-    running: "Running",
-    stopped: "Stopped",
-    starting: "Starting…",
-    stopping: "Stopping…",
-    cli_not_found: "CLI Not Found",
-  };
 
   const isTransitioning = status.state === "starting" || status.state === "stopping";
 
@@ -158,7 +149,7 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
               value={
                 <span className="flex items-center gap-1.5">
                   <StatusDot state={status.state} />
-                  {stateLabel[status.state]}
+                  {DAEMON_STATE_LABELS[status.state]}
                 </span>
               }
             />
@@ -247,11 +238,11 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
                     : "Start the daemon to see logs"}
                 </p>
               ) : (
-                logs.map((line, i) => {
-                  const { className } = colorizeLogLine(line);
+                logs.map((entry) => {
+                  const { className } = colorizeLogLine(entry.line);
                   return (
-                    <div key={i} className={cn("whitespace-pre-wrap break-all", className)}>
-                      {line}
+                    <div key={entry.id} className={cn("whitespace-pre-wrap break-all", className)}>
+                      {entry.line}
                     </div>
                   );
                 })
