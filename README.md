@@ -20,8 +20,6 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
 
-<a href="https://trendshift.io/repositories/24695" target="_blank"><img src="https://trendshift.io/api/badge/repositories/24695" alt="multica-ai/multica | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-
 [Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
 
 **English | [简体中文](README.zh-CN.md)**
@@ -186,3 +184,13 @@ make dev
 `make dev` auto-detects your environment (main checkout or worktree), creates the env file, installs dependencies, sets up the database, runs migrations, and starts all services.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=multica-ai%2Fmultica&type=date&legend=bottom-right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+  </picture>
+</a>

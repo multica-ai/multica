@@ -20,8 +20,6 @@
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
 
-<a href="https://trendshift.io/repositories/24695" target="_blank"><img src="https://trendshift.io/api/badge/repositories/24695" alt="multica-ai/multica | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-
 [官网](https://multica.ai) · [云服务](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [自部署指南](SELF_HOSTING.md) · [参与贡献](CONTRIBUTING.md)
 
 **[English](README.md) | 简体中文**
@@ -174,3 +172,13 @@ make start
 ## 开源协议
 
 [Apache 2.0](LICENSE)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=multica-ai%2Fmultica&type=date&legend=bottom-right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+  </picture>
+</a>
