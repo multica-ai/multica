@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useWorkspaceStore } from "@multica/core/workspace";
@@ -22,7 +23,19 @@ const workspaceTabs = [
   { value: "members", label: "Members", icon: Users },
 ];
 
-export function SettingsPage() {
+export interface ExtraSettingsTab {
+  value: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  content: React.ReactNode;
+}
+
+interface SettingsPageProps {
+  /** Additional tabs injected by platform (e.g. desktop daemon settings) */
+  extraAccountTabs?: ExtraSettingsTab[];
+}
+
+export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
 
   return (
@@ -36,6 +49,12 @@ export function SettingsPage() {
             My Account
           </span>
           {accountTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </TabsTrigger>
+          ))}
+          {extraAccountTabs?.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               <tab.icon className="h-4 w-4" />
               {tab.label}
@@ -64,6 +83,9 @@ export function SettingsPage() {
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          {extraAccountTabs?.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
+          ))}
         </div>
       </div>
     </Tabs>

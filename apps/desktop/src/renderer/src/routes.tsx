@@ -13,9 +13,12 @@ import { ProjectsPage } from "@multica/views/projects/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
+import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
+import { Server } from "lucide-react";
+import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 
 /**
  * Sets document.title from the deepest matched route's handle.title.
@@ -76,7 +79,7 @@ export const appRoutes: RouteObject[] = [
       },
       {
         path: "runtimes",
-        element: <RuntimesPage />,
+        element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
         handle: { title: "Runtimes" },
       },
       { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
@@ -84,7 +87,18 @@ export const appRoutes: RouteObject[] = [
       { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
       {
         path: "settings",
-        element: <SettingsPage />,
+        element: (
+          <SettingsPage
+            extraAccountTabs={[
+              {
+                value: "daemon",
+                label: "Daemon",
+                icon: Server,
+                content: <DaemonSettingsTab />,
+              },
+            ]}
+          />
+        ),
         handle: { title: "Settings" },
       },
     ],

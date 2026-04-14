@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { Server } from "lucide-react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,7 +20,12 @@ import { RuntimeDetail } from "./runtime-detail";
 
 type RuntimeFilter = "mine" | "all";
 
-export default function RuntimesPage() {
+interface RuntimesPageProps {
+  /** Desktop-only slot rendered above the runtime list (e.g. local daemon card) */
+  topSlot?: React.ReactNode;
+}
+
+export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -86,12 +91,14 @@ export default function RuntimesPage() {
   }
 
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
+    <div className="flex flex-1 min-h-0 flex-col">
+      {topSlot}
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="flex-1 min-h-0"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
+      >
       <ResizablePanel
         id="list"
         defaultSize={280}
@@ -124,5 +131,6 @@ export default function RuntimesPage() {
         )}
       </ResizablePanel>
     </ResizablePanelGroup>
+    </div>
   );
 }

@@ -45,6 +45,12 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:clear-token"),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
+  getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>
+    ipcRenderer.invoke("daemon:get-prefs"),
+  setPrefs: (prefs: Partial<{ autoStart: boolean; autoStop: boolean }>): Promise<{ autoStart: boolean; autoStop: boolean }> =>
+    ipcRenderer.invoke("daemon:set-prefs", prefs),
+  autoStart: (): Promise<void> =>
+    ipcRenderer.invoke("daemon:auto-start"),
   startLogStream: () => ipcRenderer.send("daemon:start-log-stream"),
   stopLogStream: () => ipcRenderer.send("daemon:stop-log-stream"),
   onLogLine: (callback: (line: string) => void) => {

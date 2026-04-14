@@ -17,6 +17,11 @@ interface DaemonStatus {
   workspaceCount?: number;
 }
 
+interface DaemonPrefs {
+  autoStart: boolean;
+  autoStop: boolean;
+}
+
 interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
@@ -26,6 +31,9 @@ interface DaemonAPI {
   syncToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
   isCliInstalled: () => Promise<boolean>;
+  getPrefs: () => Promise<DaemonPrefs>;
+  setPrefs: (prefs: Partial<DaemonPrefs>) => Promise<DaemonPrefs>;
+  autoStart: () => Promise<void>;
   startLogStream: () => void;
   stopLogStream: () => void;
   onLogLine: (callback: (line: string) => void) => () => void;

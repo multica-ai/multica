@@ -29,11 +29,15 @@ function AppContent() {
     });
   }, []);
 
-  // Sync existing token to CLI config on startup so daemon can authenticate
+  // Sync existing token to CLI config on startup and auto-start daemon
   useEffect(() => {
     if (!user) return;
     const token = localStorage.getItem("multica_token");
-    if (token) window.daemonAPI.syncToken(token);
+    if (token) {
+      window.daemonAPI.syncToken(token).then(() => {
+        window.daemonAPI.autoStart();
+      });
+    }
   }, [user]);
 
   if (isLoading) {

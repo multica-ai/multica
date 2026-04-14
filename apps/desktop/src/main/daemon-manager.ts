@@ -10,6 +10,14 @@ const HEALTH_URL = `http://127.0.0.1:${HEALTH_PORT}/health`;
 const POLL_INTERVAL_MS = 5_000;
 const CONFIG_PATH = join(homedir(), ".multica", "config.json");
 const LOG_PATH = join(homedir(), ".multica", "daemon.log");
+const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
+
+interface DaemonPrefs {
+  autoStart: boolean;
+  autoStop: boolean;
+}
+
+const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 
 export interface DaemonStatus {
   state: "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
@@ -94,6 +102,22 @@ async function syncToken(token: string): Promise<void> {
   }
   config.token = token;
   await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+}
+
+async function loadPrefs(): Promise<DaemonPrefs> {
+  try {
+    const raw = await readFile(PREFS_PATH, "utf-8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_PREFS, ...parsed };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+async function savePrefs(prefs: DaemonPrefs): Promise<void> {
+  const dir = join(homedir(), ".multica");
+  await mkdir(dir, { recursive: true });
+  await writeFile(PREFS_PATH, JSON.stringify(prefs, null, 2), "utf-8");
 }
 
 async function clearToken(): Promise<void> {
@@ -214,6 +238,24 @@ export function setupDaemonManager(
   );
   ipcMain.handle("daemon:clear-token", () => clearToken());
   ipcMain.handle("daemon:is-cli-installed", () => findCliBinary() !== null);
+  ipcMain.handle("daemon:get-prefs", () => loadPrefs());
+  ipcMain.handle(
+    "daemon:set-prefs",
+    (_event, prefs: Partial<DaemonPrefs>) =>
+      loadPrefs().then((cur) => {
+        const merged = { ...cur, ...prefs };
+        return savePrefs(merged).then(() => merged);
+      }),
+  );
+  ipcMain.handle("daemon:auto-start", async () => {
+    const prefs = await loadPrefs();
+    if (!prefs.autoStart) return;
+    const bin = findCliBinary();
+    if (!bin) return;
+    const health = await fetchHealth();
+    if (health.state === "running") return;
+    await startDaemon();
+  });
 
   ipcMain.on("daemon:start-log-stream", () => {
     const win = getMainWindow();
@@ -226,8 +268,19 @@ export function setupDaemonManager(
 
   startPolling();
 
-  app.on("before-quit", () => {
+  app.on("before-quit", async () => {
     stopPolling();
     stopLogTail();
+    const prefs = await loadPrefs();
+    if (prefs.autoStop) {
+      const bin = findCliBinary();
+      if (bin) {
+        try {
+          await stopDaemon();
+        } catch {
+          // Best-effort stop on quit
+        }
+      }
+    }
   });
 }
