@@ -14,6 +14,14 @@ import (
 	"time"
 )
 
+// gitEnv returns an environment for git subprocesses that contact remotes.
+// It passes the full daemon environment so credential helpers (e.g. gh) can
+// locate their config, and disables TTY prompting so auth failures produce
+// clear errors instead of blocking on a non-existent terminal.
+func gitEnv() []string {
+	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+}
+
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
 	URL         string
@@ -157,6 +165,7 @@ const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 
 func gitCloneBare(url, dest string) error {
 	cmd := exec.Command("git", "clone", "--bare", url, dest)
+	cmd.Env = gitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Clean up partial clone.
 		os.RemoveAll(dest)
@@ -195,7 +204,9 @@ func gitFetch(barePath string) error {
 	// getRemoteDefaultBranch, but the modern-cache default-branch-change
 	// path (the only path that can't be recovered any other way) relies
 	// on this call.
-	_ = exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto").Run()
+	cmd := exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto")
+	cmd.Env = gitEnv()
+	_ = cmd.Run()
 	return nil
 }
 
@@ -203,6 +214,7 @@ func gitFetch(barePath string) error {
 // gitFetch, which migrates legacy caches first.
 func runGitFetch(barePath string) error {
 	cmd := exec.Command("git", "-C", barePath, "fetch", "origin")
+	cmd.Env = gitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -235,7 +247,9 @@ func ensureRemoteTrackingLayout(barePath string) error {
 	}
 	// Set refs/remotes/origin/HEAD so getRemoteDefaultBranch can read it.
 	// Non-fatal: if this fails we fall back to origin/main, origin/master.
-	_ = exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto").Run()
+	cmd := exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto")
+	cmd.Env = gitEnv()
+	_ = cmd.Run()
 	return nil
 }
 
