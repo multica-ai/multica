@@ -20,6 +20,8 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
 
+<a href="https://trendshift.io/repositories/24695" target="_blank"><img src="https://trendshift.io/api/badge/repositories/24695" alt="multica-ai/multica | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
 [Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
 
 **English | [简体中文](README.zh-CN.md)**
