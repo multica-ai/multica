@@ -168,9 +168,18 @@ export function useUpdateIssue() {
     onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Invalidate old parent's children cache
       if (ctx?.parentId) {
         qc.invalidateQueries({
           queryKey: issueKeys.children(wsId, ctx.parentId),
+        });
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
+      // Invalidate new parent's children cache when parent_issue_id changed
+      const newParentId = vars.parent_issue_id;
+      if (newParentId && newParentId !== ctx?.parentId) {
+        qc.invalidateQueries({
+          queryKey: issueKeys.children(wsId, newParentId),
         });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
