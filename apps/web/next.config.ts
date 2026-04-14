@@ -45,6 +45,10 @@ const nextConfig: NextConfig = {
         source: "/auth/:path*",
         destination: `${remoteApiUrl}/auth/:path*`,
       },
+      {
+        source: "/uploads/:path*",
+        destination: `${remoteApiUrl}/uploads/:path*`,
+      },
     ];
   },
 };
