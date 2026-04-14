@@ -34,6 +34,10 @@ function initCore(
     onUnauthorized: () => {
       storage.removeItem("multica_token");
       storage.removeItem("multica_workspace_id");
+      // Clear auth state so DashboardGuard redirects to login.
+      // `authStore` is always initialized before any API call can fire.
+      authStore?.setState({ user: null });
+      onLogout?.();
     },
   });
   setApiInstance(api);
