@@ -848,7 +848,7 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 
-	headers := []string{"ID", "IDENTIFIER", "TITLE", "STATUS", "MATCH"}
+	headers := []string{"ID", "TITLE", "STATUS", "MATCH"}
 	rows := make([][]string, 0, len(issuesRaw))
 	for _, raw := range issuesRaw {
 		issue, ok := raw.(map[string]any)
@@ -865,7 +865,6 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 		}
 		rows = append(rows, []string{
 			issueDisplayID(issue),
-			strVal(issue, "identifier"),
 			strVal(issue, "title"),
 			strVal(issue, "status"),
 			matchInfo,
