@@ -19,6 +19,7 @@ function AppContent() {
     return window.desktopAPI.onAuthToken(async (token) => {
       try {
         await useAuthStore.getState().loginWithToken(token);
+        await window.daemonAPI.syncToken(token);
         const wsList = await api.listWorkspaces();
         const lastWsId = localStorage.getItem("multica_workspace_id");
         useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWsId);
@@ -27,6 +28,13 @@ function AppContent() {
       }
     });
   }, []);
+
+  // Sync existing token to CLI config on startup so daemon can authenticate
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("multica_token");
+    if (token) window.daemonAPI.syncToken(token);
+  }, [user]);
 
   if (isLoading) {
     return (

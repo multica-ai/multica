@@ -15,6 +15,45 @@ const desktopAPI = {
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
 };
 
+interface DaemonStatus {
+  state: "running" | "stopped" | "starting" | "stopping" | "cli_not_found";
+  pid?: number;
+  uptime?: string;
+  daemonId?: string;
+  deviceName?: string;
+  agents?: string[];
+  workspaceCount?: number;
+}
+
+const daemonAPI = {
+  start: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:start"),
+  stop: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:stop"),
+  restart: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:restart"),
+  getStatus: (): Promise<DaemonStatus> =>
+    ipcRenderer.invoke("daemon:get-status"),
+  onStatusChange: (callback: (status: DaemonStatus) => void) => {
+    const handler = (_: unknown, status: DaemonStatus) => callback(status);
+    ipcRenderer.on("daemon:status", handler);
+    return () => ipcRenderer.removeListener("daemon:status", handler);
+  },
+  syncToken: (token: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:sync-token", token),
+  clearToken: (): Promise<void> =>
+    ipcRenderer.invoke("daemon:clear-token"),
+  isCliInstalled: (): Promise<boolean> =>
+    ipcRenderer.invoke("daemon:is-cli-installed"),
+  startLogStream: () => ipcRenderer.send("daemon:start-log-stream"),
+  stopLogStream: () => ipcRenderer.send("daemon:stop-log-stream"),
+  onLogLine: (callback: (line: string) => void) => {
+    const handler = (_: unknown, line: string) => callback(line);
+    ipcRenderer.on("daemon:log-line", handler);
+    return () => ipcRenderer.removeListener("daemon:log-line", handler);
+  },
+};
+
 const updaterAPI = {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
@@ -38,12 +77,15 @@ const updaterAPI = {
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
+  contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.desktopAPI = desktopAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }

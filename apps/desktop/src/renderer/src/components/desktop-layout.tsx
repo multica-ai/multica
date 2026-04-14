@@ -12,6 +12,7 @@ import { DesktopNavigationProvider } from "@/platform/navigation";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
+import { DaemonStatusBar } from "./daemon-status-bar";
 
 function SidebarTopBar() {
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
@@ -75,7 +76,7 @@ export function DesktopShell() {
       >
         <div className="flex h-screen">
           <SidebarProvider className="flex-1">
-            <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />
+            <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} bottomSlot={<DaemonStatusBar />} />
             {/* Right side: header + content container */}
             <div className="flex flex-1 min-w-0 flex-col">
               {/* Tab bar + drag region */}
