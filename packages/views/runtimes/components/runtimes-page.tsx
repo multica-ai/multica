@@ -99,38 +99,38 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
         defaultLayout={defaultLayout}
         onLayoutChanged={onLayoutChanged}
       >
-      <ResizablePanel
-        id="list"
-        defaultSize={280}
-        minSize={240}
-        maxSize={400}
-        groupResizeBehavior="preserve-pixel-size"
-      >
-        <RuntimeList
-          runtimes={runtimes}
-          selectedId={effectiveSelectedId}
-          onSelect={setSelectedId}
-          filter={filter}
-          onFilterChange={setFilter}
-          ownerFilter={ownerFilter}
-          onOwnerFilterChange={setOwnerFilter}
-          updatableIds={updatableIds}
-        />
-      </ResizablePanel>
+        <ResizablePanel
+          id="list"
+          defaultSize={280}
+          minSize={240}
+          maxSize={400}
+          groupResizeBehavior="preserve-pixel-size"
+        >
+          <RuntimeList
+            runtimes={runtimes}
+            selectedId={effectiveSelectedId}
+            onSelect={setSelectedId}
+            filter={filter}
+            onFilterChange={setFilter}
+            ownerFilter={ownerFilter}
+            onOwnerFilterChange={setOwnerFilter}
+            updatableIds={updatableIds}
+          />
+        </ResizablePanel>
 
-      <ResizableHandle />
+        <ResizableHandle />
 
-      <ResizablePanel id="detail" minSize="50%">
-        {selected ? (
-          <RuntimeDetail key={selected.id} runtime={selected} />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Server className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select a runtime to view details</p>
-          </div>
-        )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
+        <ResizablePanel id="detail" minSize="50%">
+          {selected ? (
+            <RuntimeDetail key={selected.id} runtime={selected} />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+              <Server className="h-10 w-10 text-muted-foreground/30" />
+              <p className="mt-3 text-sm">Select a runtime to view details</p>
+            </div>
+          )}
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }

@@ -29,9 +29,9 @@ interface DaemonPanelProps {
 }
 
 const LOG_LEVEL_COLORS: Record<string, string> = {
-  INFO: "text-blue-400",
-  WARN: "text-amber-400",
-  ERROR: "text-red-400",
+  INFO: "text-info",
+  WARN: "text-warning",
+  ERROR: "text-destructive",
   DEBUG: "text-muted-foreground",
 };
 
@@ -252,7 +252,7 @@ export function DaemonPanel({ open, onOpenChange, status }: DaemonPanelProps) {
           ) : status.state === "cli_not_found" ? (
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 space-y-2">
               <p className="text-sm">
-                Couldn't download the local runtime. Check your network
+                Couldn&apos;t download the local runtime. Check your network
                 connection and try again.
               </p>
               <Button

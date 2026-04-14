@@ -1,11 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-
-interface DaemonPrefs {
-  autoStart: boolean;
-  autoStop: boolean;
-}
+import type { DaemonPrefs } from "../../../shared/daemon-types";
 
 function SettingRow({
   label,
