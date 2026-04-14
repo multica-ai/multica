@@ -124,7 +124,8 @@ func TestLocalStorage_KeyFromURL(t *testing.T) {
 		expected string
 	}{
 		{"local URL format", "/uploads/abc123.png", "abc123.png"},
-		{"local URL with subdir", "/uploads/2024/01/image.jpg", "image.jpg"},
+		{"local URL with subdir", "/uploads/2024/01/image.jpg", "2024/01/image.jpg"},
+		{"local URL with workspace prefix", "/uploads/workspaces/ws-123/abc.png", "workspaces/ws-123/abc.png"},
 		{"just filename", "abc123.png", "abc123.png"},
 		{"full path", "/some/path/to/file.pdf", "file.pdf"},
 	}
@@ -155,7 +156,7 @@ func TestLocalStorage_KeyFromURL_WithBaseURL(t *testing.T) {
 		expected string
 	}{
 		{"full URL format", "http://localhost:8080/uploads/abc123.png", "abc123.png"},
-		{"full URL with subdir", "http://localhost:8080/uploads/2024/01/image.jpg", "image.jpg"},
+		{"full URL with subdir", "http://localhost:8080/uploads/2024/01/image.jpg", "2024/01/image.jpg"},
 		{"local URL format still works", "/uploads/abc123.png", "abc123.png"},
 	}
 
