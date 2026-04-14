@@ -242,6 +242,12 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
+      '@fontsource/instrument-serif':
+        specifier: 5.2.5
+        version: 5.2.5
+      '@fontsource/noto-serif-sc':
+        specifier: 5.2.5
+        version: 5.2.5
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1302,6 +1308,12 @@ packages:
 
   '@fontsource/geist-sans@5.2.5':
     resolution: {integrity: sha512-anllOHyJbElRs9fV15TeDRqAeb1IKm4bSknPl6ZMoyPTx1BBy7logudcUwpNjmQLkzn4Q0JGQLRCUKJYoyST6A==}
+
+  '@fontsource/instrument-serif@5.2.5':
+    resolution: {integrity: sha512-ojamX86Kqj+LPHCXdoiY/OWbiJ76L3Ie5WczdtlTZ/xRG+MBE7/+nLQaRSuIivF5YWf1XXQ0MWxZzcp6GlEFYA==}
+
+  '@fontsource/noto-serif-sc@5.2.5':
+    resolution: {integrity: sha512-YJZyDJahealMD9RwAR6HZb0ZXysGyZJa1Tyump8dvS5/RYdMFTyLW/+TXDJ3uAQ7loWB2XG6E2GuiJclPOrF5A==}
 
   '@formatjs/intl-localematcher@0.6.2':
     resolution: {integrity: sha512-XOMO2Hupl0wdd172Y06h6kLpBz6Dv+J4okPLl4LPtzbr8f66WbIoy4ev98EBuZ6ZK4h5ydTN6XneT4QVpD7cdA==}
@@ -7491,6 +7503,10 @@ snapshots:
   '@fontsource/geist-mono@5.2.7': {}
 
   '@fontsource/geist-sans@5.2.5': {}
+
+  '@fontsource/instrument-serif@5.2.5': {}
+
+  '@fontsource/noto-serif-sc@5.2.5': {}
 
   '@formatjs/intl-localematcher@0.6.2':
     dependencies:

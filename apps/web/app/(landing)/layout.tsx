@@ -1,18 +1,26 @@
+import { createRequire } from "node:module";
 import { cookies, headers } from "next/headers";
-import { Instrument_Serif, Noto_Serif_SC } from "next/font/google";
+import localFont from "next/font/local";
 import { LocaleProvider } from "@/features/landing/i18n";
 import type { Locale } from "@/features/landing/i18n";
 
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
+// Bundled font files (no Google Fonts fetch at build time — required for offline / restricted Docker builds).
+const require = createRequire(import.meta.url);
+
+const instrumentSerif = localFont({
+  src: require.resolve(
+    "@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2",
+  ),
   variable: "--font-serif",
+  display: "swap",
 });
 
-const notoSerifSC = Noto_Serif_SC({
-  subsets: ["latin"],
-  weight: "400",
+const notoSerifSC = localFont({
+  src: require.resolve(
+    "@fontsource/noto-serif-sc/files/noto-serif-sc-latin-400-normal.woff2",
+  ),
   variable: "--font-serif-zh",
+  display: "swap",
 });
 
 const jsonLd = {
