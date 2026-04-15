@@ -11,6 +11,16 @@ import {
   DialogContent,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
@@ -74,6 +84,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     (data?.project_id as string) || undefined,
   );
   const [isExpanded, setIsExpanded] = useState(false);
+  const [backlogHintIssueId, setBacklogHintIssueId] = useState<string | null>(null);
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
@@ -115,7 +126,15 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         project_id: projectId,
       });
       clearDraft();
-      onClose();
+      // Show backlog hint dialog instead of closing immediately.
+      if (
+        status === "backlog" && assigneeType === "agent" && assigneeId &&
+        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
+      ) {
+        setBacklogHintIssueId(issue.id);
+      } else {
+        onClose();
+      }
       toast.custom((t) => (
         <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
           <div className="flex items-center gap-2 mb-2">
@@ -140,27 +159,6 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           </button>
         </div>
       ), { duration: 5000 });
-      // Hint when creating a backlog issue with an agent assignee.
-      if (
-        status === "backlog" && assigneeType === "agent" && assigneeId &&
-        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
-      ) {
-        toast("Agent won't start in Backlog", {
-          description: "Move the issue to Todo to trigger execution.",
-          action: {
-            label: "Move to Todo",
-            onClick: () => updateIssueMutation.mutate(
-              { id: issue.id, status: "todo" },
-              { onError: () => toast.error("Failed to update status") },
-            ),
-          },
-          cancel: {
-            label: "Don't show again",
-            onClick: () => localStorage.setItem("multica:backlog-agent-hint-dismissed", "true"),
-          },
-          duration: 8000,
-        });
-      }
     } catch {
       toast.error("Failed to create issue");
     } finally {
@@ -309,6 +307,46 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           </Button>
         </div>
       </DialogContent>
+
+      {/* Backlog agent hint dialog */}
+      <AlertDialog open={!!backlogHintIssueId} onOpenChange={(v) => { if (!v) { setBacklogHintIssueId(null); onClose(); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Agent won&apos;t start in Backlog</AlertDialogTitle>
+            <AlertDialogDescription>
+              Issues in Backlog are parked — the agent won&apos;t start until the issue is moved to an active status like Todo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+                setBacklogHintIssueId(null);
+                onClose();
+              }}
+            >
+              Don&apos;t show again
+            </AlertDialogCancel>
+            <AlertDialogCancel onClick={() => { setBacklogHintIssueId(null); onClose(); }}>
+              Keep in Backlog
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (backlogHintIssueId) {
+                  updateIssueMutation.mutate(
+                    { id: backlogHintIssueId, status: "todo" },
+                    { onError: () => toast.error("Failed to update status") },
+                  );
+                }
+                setBacklogHintIssueId(null);
+                onClose();
+              }}
+            >
+              Move to Todo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

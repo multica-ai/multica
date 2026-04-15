@@ -344,6 +344,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [sidebarOpen, setSidebarOpen] = useState(defaultSidebarOpen);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [backlogHintOpen, setBacklogHintOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -452,21 +453,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         issue.status === "backlog" &&
         localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
       ) {
-        toast("Agent won't start in Backlog", {
-          description: "Move the issue to Todo to trigger execution.",
-          action: {
-            label: "Move to Todo",
-            onClick: () => updateIssueMutation.mutate(
-              { id, status: "todo" },
-              { onError: () => toast.error("Failed to update status") },
-            ),
-          },
-          cancel: {
-            label: "Don't show again",
-            onClick: () => localStorage.setItem("multica:backlog-agent-hint-dismissed", "true"),
-          },
-          duration: 8000,
-        });
+        setBacklogHintOpen(true);
       }
     },
     [issue, id, updateIssueMutation],
@@ -881,6 +868,34 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     className="bg-destructive text-white hover:bg-destructive/90"
                   >
                     {deleting ? "Deleting..." : "Delete"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Backlog agent hint dialog */}
+            <AlertDialog open={backlogHintOpen} onOpenChange={setBacklogHintOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Agent won&apos;t start in Backlog</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Issues in Backlog are parked — the agent won&apos;t start until the issue is moved to an active status like Todo.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel
+                    onClick={() => localStorage.setItem("multica:backlog-agent-hint-dismissed", "true")}
+                  >
+                    Don&apos;t show again
+                  </AlertDialogCancel>
+                  <AlertDialogCancel>Keep in Backlog</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => updateIssueMutation.mutate(
+                      { id, status: "todo" },
+                      { onError: () => toast.error("Failed to update status") },
+                    )}
+                  >
+                    Move to Todo
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
