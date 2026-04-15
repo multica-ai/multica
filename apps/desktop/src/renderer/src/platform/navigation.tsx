@@ -7,6 +7,11 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
 
+// Public web app URL — injected at build time via .env.production. Falls
+// back to the production host for dev builds so "Copy link" yields a URL
+// that actually points somewhere a teammate can open.
+const APP_URL = import.meta.env.VITE_APP_URL || "https://multica.ai";
+
 /**
  * Root-level navigation provider for components outside the per-tab RouterProviders
  * (sidebar, search dialog, modals, etc.).
@@ -64,7 +69,7 @@ export function DesktopNavigationProvider({
         const tabId = store.openTab(path, title ?? path, icon);
         store.setActiveTab(tabId);
       },
-      getShareableUrl: (path: string) => `https://www.multica.ai${path}`,
+      getShareableUrl: (path: string) => `${APP_URL}${path}`,
     }),
     [pathname],
   );
@@ -107,7 +112,7 @@ export function TabNavigationProvider({
         const newTabId = store.openTab(path, title ?? path, icon);
         store.setActiveTab(newTabId);
       },
-      getShareableUrl: (path: string) => `https://www.multica.ai${path}`,
+      getShareableUrl: (path: string) => `${APP_URL}${path}`,
     }),
     [router, location],
   );
