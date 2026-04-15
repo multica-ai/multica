@@ -39,8 +39,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
-import { EditorLinkPreview } from "./link-preview";
+import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,10 @@ interface ContentEditorProps {
   onSubmit?: () => void;
   onBlur?: () => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  /** Show the floating formatting toolbar on text selection. Defaults true. */
+  showBubbleMenu?: boolean;
+  /** When true, bare Enter submits (chat-style). Mod-Enter always submits. */
+  submitOnEnter?: boolean;
 }
 
 interface ContentEditorRef {
@@ -96,6 +101,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onSubmit,
       onBlur,
       onUploadFile,
+      showBubbleMenu = true,
+      submitOnEnter = false,
     },
     ref,
   ) {
@@ -116,6 +123,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const editor = useEditor({
       immediatelyRender: false,
+      // Note: in v3.22.1 the default is already false/undefined (same behavior).
+      // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
+      shouldRerenderOnTransaction: false,
       editable,
       content: defaultValue ? preprocessMarkdown(defaultValue) : "",
       contentType: defaultValue ? "markdown" : undefined,
@@ -125,6 +135,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         queryClient,
         onSubmitRef,
         onUploadFileRef,
+        submitOnEnter,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
@@ -145,26 +156,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
             const link = target.closest("a");
             const href = link?.getAttribute("href");
-            if (!href || href.startsWith("mention://")) return false;
+            if (!href || isMentionHref(href)) return false;
 
-            if (editable) {
-              // Edit mode: don't open link on click. ProseMirror's
-              // mousedown/mouseup cycle (already completed by the time
-              // this click handler runs) places the cursor on the link.
-              // LinkBubbleMenu detects cursor-on-link and shows the
-              // preview card with Open / Copy / Edit actions.
-              return false;
-            }
-
-            // Readonly mode: open immediately.
             event.preventDefault();
-            if (href.startsWith("/")) {
-              window.dispatchEvent(
-                new CustomEvent("multica:navigate", { detail: { path: href } }),
-              );
-            } else {
-              window.open(href, "_blank", "noopener,noreferrer");
-            }
+            openLink(href);
             return true;
           },
         },
@@ -223,6 +218,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     }));
 
+    // Link hover card — disabled when BubbleMenu is active (has selection)
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    const hoverDisabled = !editor?.state.selection.empty;
+    const hover = useLinkHover(wrapperRef, hoverDisabled);
+
     const handleContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
       if (!editable || !editor) return;
 
@@ -238,16 +238,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     return (
       <div
+        ref={wrapperRef}
         className="relative flex min-h-full flex-col"
         onMouseDown={handleContainerMouseDown}
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {editable && (
-          <>
-            <EditorBubbleMenu editor={editor} />
-            <EditorLinkPreview editor={editor} />
-          </>
-        )}
+        {editable && showBubbleMenu && <EditorBubbleMenu editor={editor} />}
+        <LinkHoverCard {...hover} />
       </div>
     );
   },

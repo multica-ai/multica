@@ -93,13 +93,6 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 		return err
 	}
 
-	var added int
-	for _, ws := range workspaces {
-		if cfg.AddWatchedWorkspace(ws.ID, ws.Name) {
-			added++
-		}
-	}
-
 	// Set default workspace if not set.
 	if cfg.WorkspaceID == "" {
 		cfg.WorkspaceID = workspaces[0].ID
@@ -109,13 +102,9 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 		return err
 	}
 
-	if added > 0 {
-		fmt.Fprintf(os.Stderr, "\nWatching %d workspace(s):\n", len(workspaces))
-		for _, ws := range workspaces {
-			fmt.Fprintf(os.Stderr, "  • %s (%s)\n", ws.Name, ws.ID)
-		}
-	} else {
-		fmt.Fprintf(os.Stderr, "\nAll %d workspace(s) already watched.\n", len(workspaces))
+	fmt.Fprintf(os.Stderr, "\nFound %d workspace(s):\n", len(workspaces))
+	for _, ws := range workspaces {
+		fmt.Fprintf(os.Stderr, "  • %s (%s)\n", ws.Name, ws.ID)
 	}
 
 	return nil

@@ -153,6 +153,26 @@ func (q *Queries) HasAgentCommentedSince(ctx context.Context, arg HasAgentCommen
 	return commented, err
 }
 
+const hasAgentRepliedInThread = `-- name: HasAgentRepliedInThread :one
+SELECT count(*) > 0 AS has_replied FROM comment
+WHERE parent_id = $1 AND author_type = 'agent' AND author_id = $2
+`
+
+type HasAgentRepliedInThreadParams struct {
+	ParentID pgtype.UUID `json:"parent_id"`
+	AgentID  pgtype.UUID `json:"agent_id"`
+}
+
+// Returns true if the given agent has posted a reply in the thread rooted at
+// the specified parent comment. Used to detect agent participation in a
+// member-started thread so that follow-up member replies still trigger the agent.
+func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepliedInThreadParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAgentRepliedInThread, arg.ParentID, arg.AgentID)
+	var has_replied bool
+	err := row.Scan(&has_replied)
+	return has_replied, err
+}
+
 const listComments = `-- name: ListComments :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
 WHERE issue_id = $1 AND workspace_id = $2

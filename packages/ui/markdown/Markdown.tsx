@@ -3,8 +3,10 @@ import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markd
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
+import { FileText, Download } from 'lucide-react'
 import { cn } from '@multica/ui/lib/utils'
 import { CodeBlock, InlineCode } from './CodeBlock'
+import { preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
 
@@ -48,6 +50,11 @@ export interface MarkdownProps {
    * When not provided, mentions render as a simple styled span.
    */
   renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  /**
+   * CDN hostname for file card detection (e.g. "multica-static.copilothub.ai").
+   * When provided, enables file card preprocessing and rendering.
+   */
+  cdnDomain?: string
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -60,6 +67,12 @@ const sanitizeSchema = {
   },
   attributes: {
     ...defaultSchema.attributes,
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      'dataType',
+      'dataHref',
+      'dataFilename',
+    ],
     code: [
       ...(defaultSchema.attributes?.code ?? []),
       ['className', /^language-/],
@@ -93,9 +106,37 @@ function createComponents(
   mode: RenderMode,
   onUrlClick?: (url: string) => void,
   onFileClick?: (path: string) => void,
-  renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  renderMention?: (props: { type: string; id: string }) => React.ReactNode,
 ): Partial<Components> {
   const baseComponents: Partial<Components> = {
+    // FileCard: intercept <div data-type="fileCard"> from preprocessFileCards
+    div: ({ node, children, ...props }) => {
+      const dataType = node?.properties?.dataType as string | undefined
+      if (dataType === 'fileCard') {
+        const rawHref = (node?.properties?.dataHref as string) || ''
+        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
+        const href = /^https?:\/\//i.test(rawHref) ? rawHref : ''
+        const filename = (node?.properties?.dataFilename as string) || ''
+        return (
+          <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm">{filename}</p>
+            </div>
+            {href && (
+              <button
+                type="button"
+                className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={() => window.open(href, '_blank', 'noopener,noreferrer')}
+              >
+                <Download className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )
+      }
+      return <div {...props}>{children}</div>
+    },
     // Images: render uploaded images with constrained sizing
     img: ({ src, alt }) => (
       <img
@@ -115,7 +156,11 @@ function createComponents(
           const id = mentionMatch[2]
 
           if (renderMention) {
-            return <>{renderMention({ type, id })}</>
+            // Let the custom renderer opt out for types it doesn't handle
+            // by returning null/undefined — we then fall through to the
+            // default styled span so nothing ever disappears silently.
+            const rendered = renderMention({ type, id })
+            if (rendered) return <>{rendered}</>
           }
 
           // Fallback: render as a simple styled span
@@ -333,17 +378,23 @@ export function Markdown({
   className,
   onUrlClick,
   onFileClick,
-  renderMention
+  renderMention,
+  cdnDomain
 }: MarkdownProps): React.JSX.Element {
   const components = React.useMemo(
     () => createComponents(mode, onUrlClick, onFileClick, renderMention),
     [mode, onUrlClick, onFileClick, renderMention]
   )
 
-  // Preprocess: convert mention shortcodes and raw URLs/file paths to markdown links
+  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
   const processedContent = React.useMemo(
-    () => preprocessLinks(preprocessMentionShortcodes(children)),
-    [children]
+    () => {
+      let result = preprocessMentionShortcodes(children)
+      result = preprocessLinks(result)
+      result = preprocessFileCards(result, cdnDomain ?? '')
+      return result
+    },
+    [children, cdnDomain]
   )
 
   return (

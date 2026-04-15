@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, FileText, Trash2 } from "lucide-react";
+import { Plus, FileText, Trash2, Info } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import {
   Dialog,
@@ -65,7 +65,7 @@ export function SkillsTab({
         <div>
           <h3 className="text-sm font-semibold">Skills</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Reusable skills assigned to this agent. Manage skills on the Skills page.
+            Workspace skills assigned to this agent.
           </p>
         </div>
         <Button
@@ -79,12 +79,19 @@ export function SkillsTab({
         </Button>
       </div>
 
+      <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
+        <Info className="h-3.5 w-3.5 shrink-0 text-info mt-0.5" />
+        <p className="text-xs text-muted-foreground">
+          Local runtime skills (from your CLI&apos;s skills directory) are always available automatically — no need to add them here.
+        </p>
+      </div>
+
       {agent.skills.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Add skills from the workspace to this agent.
+            Add workspace skills to share team knowledge with this agent. Local skills are already used automatically.
           </p>
           {availableSkills.length > 0 && (
             <Button

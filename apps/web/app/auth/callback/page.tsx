@@ -39,8 +39,11 @@ function CallbackContent() {
       return;
     }
 
-    const state = searchParams.get("state");
-    const isDesktop = state === "platform:desktop";
+    const state = searchParams.get("state") || "";
+    const stateParts = state.split(",");
+    const isDesktop = stateParts.includes("platform:desktop");
+    const nextPart = stateParts.find((p) => p.startsWith("next:"));
+    const nextUrl = nextPart ? nextPart.slice(5) : null; // strip "next:" prefix
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
@@ -63,7 +66,9 @@ function CallbackContent() {
           qc.setQueryData(workspaceKeys.list(), wsList);
           const lastWsId = localStorage.getItem("multica_workspace_id");
           const ws = await hydrateWorkspace(wsList, lastWsId);
-          router.push(ws ? "/issues" : "/onboarding");
+          // Honor the ?next= redirect if present (e.g. /invite/{id})
+          const defaultDest = ws ? "/issues" : "/onboarding";
+          router.push(nextUrl || defaultDest);
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

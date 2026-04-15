@@ -78,13 +78,22 @@ interface UpdateSectionProps {
   runtimeId: string;
   currentVersion: string | null;
   isOnline: boolean;
+  /**
+   * Non-null when the daemon process was spawned by a managed launcher
+   * (e.g. "desktop" for the Electron app). In that case the CLI binary
+   * is shipped and upgraded by the launcher itself, so in-app self-update
+   * is disabled — upgrading would be clobbered on the next launch anyway.
+   */
+  launchedBy?: string | null;
 }
 
 export function UpdateSection({
   runtimeId,
   currentVersion,
   isOnline,
+  launchedBy,
 }: UpdateSectionProps) {
+  const isManaged = launchedBy === "desktop";
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
   const [error, setError] = useState("");
@@ -165,33 +174,44 @@ export function UpdateSection({
           {currentVersion ?? "unknown"}
         </span>
 
-        {!hasUpdate && currentVersion && latestVersion && !status && (
-          <span className="inline-flex items-center gap-1 text-xs text-success">
-            <Check className="h-3 w-3" />
-            Latest
-          </span>
-        )}
-
-        {hasUpdate && !status && (
-          <>
-            <span className="text-xs text-muted-foreground">→</span>
-            <span className="text-xs font-mono text-info">
-              {latestVersion}
-            </span>
-            <span className="text-xs text-muted-foreground">available</span>
-          </>
-        )}
-
-        {hasUpdate && isOnline && !status && (
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={handleUpdate}
-            disabled={updating}
+        {isManaged ? (
+          <span
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            title="The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI."
           >
-            <ArrowUpCircle className="h-3 w-3" />
-            Update
-          </Button>
+            Managed by Desktop
+          </span>
+        ) : (
+          <>
+            {!hasUpdate && currentVersion && latestVersion && !status && (
+              <span className="inline-flex items-center gap-1 text-xs text-success">
+                <Check className="h-3 w-3" />
+                Latest
+              </span>
+            )}
+
+            {hasUpdate && !status && (
+              <>
+                <span className="text-xs text-muted-foreground">→</span>
+                <span className="text-xs font-mono text-info">
+                  {latestVersion}
+                </span>
+                <span className="text-xs text-muted-foreground">available</span>
+              </>
+            )}
+
+            {hasUpdate && isOnline && !status && (
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={handleUpdate}
+                disabled={updating}
+              >
+                <ArrowUpCircle className="h-3 w-3" />
+                Update
+              </Button>
+            )}
+          </>
         )}
 
         {config && Icon && (

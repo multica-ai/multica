@@ -268,13 +268,30 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// canManageSkill checks whether the current user can update or delete a skill.
+// The skill creator or workspace owner/admin can manage any skill.
+func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill db.Skill) bool {
+	wsID := uuidToString(skill.WorkspaceID)
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "skill not found", "owner", "admin", "member")
+	if !ok {
+		return false
+	}
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isSkillCreator := skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == requestUserID(r)
+	if !isAdmin && !isSkillCreator {
+		writeError(w, http.StatusForbidden, "only the skill creator can manage this skill")
+		return false
+	}
+	return true
+}
+
 func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	skill, ok := h.loadSkillForUser(w, r, id)
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if !h.canManageSkill(w, r, skill) {
 		return
 	}
 
@@ -376,7 +393,7 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if !h.canManageSkill(w, r, skill) {
 		return
 	}
 
@@ -913,7 +930,7 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if !h.canManageSkill(w, r, skill) {
 		return
 	}
 
@@ -947,7 +964,7 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(skill.WorkspaceID), "skill not found", "owner", "admin"); !ok {
+	if !h.canManageSkill(w, r, skill) {
 		return
 	}
 

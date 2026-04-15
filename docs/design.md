@@ -69,9 +69,11 @@
 
 | 角色 | 字体 | 用途 |
 |------|------|------|
-| 正文/UI | Geist Sans (`--font-sans`) | 所有界面文字的默认字体 |
+| 正文/UI | Inter (`--font-sans`) | 所有界面文字的默认字体；CJK 字符自动 fallback 到系统字体（PingFang SC / Microsoft YaHei / Noto Sans CJK SC） |
 | 代码/数据 | Geist Mono (`--font-mono`) | 代码块、ID、时间戳、等宽数据 |
 | 标题 | `--font-heading`（= `--font-sans`） | 页面标题、区块标题 |
+
+字体栈在 `apps/web/app/layout.tsx` 和 `apps/desktop/src/renderer/src/globals.css` 两处声明，修改时需同步。
 
 ### 3.2 字号纪律
 
@@ -98,7 +100,7 @@
 | `font-normal` (400) | 正文、描述、大部分文字 |
 | `font-medium` (500) | 标签、按钮、导航项、标题、选中状态 |
 
-**禁止** `font-bold` / `font-semibold`——它们在 Geist 字体下显得突兀，破坏界面的"轻"感。如果需要更强的强调，用更大的字号或 `foreground` 色值，而不是加粗。
+**禁止** `font-bold` / `font-semibold`——任务管理工具追求信息密度和"轻"感，加粗会破坏层次节奏。如果需要更强的强调，用更大的字号或 `foreground` 色值，而不是加粗。
 
 ---
 

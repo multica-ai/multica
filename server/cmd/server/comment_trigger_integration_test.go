@@ -241,6 +241,20 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		}
 	})
 
+	t.Run("reply to member thread after agent replied triggers agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Member starts a thread (top-level comment).
+		threadID := postComment(t, issueID, "Please fix this bug", nil)
+		clearTasks(t, issueID)
+		// Agent replies in the thread.
+		postCommentAsAgent(t, issueID, "Working on it, found the root cause.", agentID, strPtr(threadID))
+		// Member follows up in the same thread without @mentioning the agent.
+		postComment(t, issueID, "Great, please also check the edge case", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (agent participated in thread), got %d", n)
+		}
+	})
+
 	t.Run("reply to member thread mentioning assignee triggers agent", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread.

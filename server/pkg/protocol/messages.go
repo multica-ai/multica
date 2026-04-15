@@ -74,6 +74,12 @@ type ChatDonePayload struct {
 	Content       string `json:"content"`
 }
 
+// ChatSessionReadPayload is broadcast when the creator marks a session as read.
+// Fires to other devices so their unread counts stay in sync.
+type ChatSessionReadPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+}
+
 // HeartbeatPayload is sent periodically from daemon to server.
 type HeartbeatPayload struct {
 	DaemonID     string `json:"daemon_id"`

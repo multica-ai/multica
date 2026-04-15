@@ -115,6 +115,21 @@ Create an issue from the board (or via `multica issue create`), then assign it t
 
 ---
 
+## Multica vs Paperclip
+
+| | Multica | Paperclip |
+|---|---------|-----------|
+| **Focus** | Team AI agent collaboration platform | Solo AI agent company simulator |
+| **User model** | Multi-user teams with roles & permissions | Single board operator |
+| **Agent interaction** | Issues + Chat conversations | Issues + Heartbeat |
+| **Deployment** | Cloud-first | Local-first |
+| **Management depth** | Lightweight (Issues / Projects / Labels) | Heavy governance (Org chart / Approvals / Budgets) |
+| **Extensibility** | Skills system | Skills + Plugin system |
+
+**TL;DR — Multica is built for teams that want to collaborate with AI agents on real projects together.**
+
+---
+
 ## CLI
 
 The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
@@ -169,3 +184,13 @@ make dev
 `make dev` auto-detects your environment (main checkout or worktree), creates the env file, installs dependencies, sets up the database, runs migrations, and starts all services.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=multica-ai%2Fmultica&type=date&legend=bottom-right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=multica-ai/multica&type=date&legend=top-left" />
+  </picture>
+</a>

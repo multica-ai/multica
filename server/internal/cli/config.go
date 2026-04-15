@@ -10,41 +10,12 @@ import (
 
 const defaultCLIConfigPath = ".multica/config.json"
 
-// WatchedWorkspace represents a workspace the daemon should monitor for tasks.
-type WatchedWorkspace struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
-}
-
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
-	ServerURL          string             `json:"server_url,omitempty"`
-	AppURL             string             `json:"app_url,omitempty"`
-	WorkspaceID        string             `json:"workspace_id,omitempty"`
-	Token              string             `json:"token,omitempty"`
-	WatchedWorkspaces  []WatchedWorkspace `json:"watched_workspaces,omitempty"`
-}
-
-// AddWatchedWorkspace adds a workspace to the watch list. Returns true if added.
-func (c *CLIConfig) AddWatchedWorkspace(id, name string) bool {
-	for _, w := range c.WatchedWorkspaces {
-		if w.ID == id {
-			return false
-		}
-	}
-	c.WatchedWorkspaces = append(c.WatchedWorkspaces, WatchedWorkspace{ID: id, Name: name})
-	return true
-}
-
-// RemoveWatchedWorkspace removes a workspace from the watch list. Returns true if found.
-func (c *CLIConfig) RemoveWatchedWorkspace(id string) bool {
-	for i, w := range c.WatchedWorkspaces {
-		if w.ID == id {
-			c.WatchedWorkspaces = append(c.WatchedWorkspaces[:i], c.WatchedWorkspaces[i+1:]...)
-			return true
-		}
-	}
-	return false
+	ServerURL   string `json:"server_url,omitempty"`
+	AppURL      string `json:"app_url,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	Token       string `json:"token,omitempty"`
 }
 
 // CLIConfigPath returns the default path for the CLI config file.

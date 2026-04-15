@@ -84,10 +84,16 @@ func TestPostJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("workspace header", func(t *testing.T) {
+	t.Run("workspace and agent context headers", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-abc" {
 				t.Errorf("expected X-Workspace-ID ws-abc, got %s", ws)
+			}
+			if agent := r.Header.Get("X-Agent-ID"); agent != "agent-123" {
+				t.Errorf("expected X-Agent-ID agent-123, got %s", agent)
+			}
+			if task := r.Header.Get("X-Task-ID"); task != "task-456" {
+				t.Errorf("expected X-Task-ID task-456, got %s", task)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(respBody{ID: "456"})
@@ -95,6 +101,8 @@ func TestPostJSON(t *testing.T) {
 		defer srv.Close()
 
 		client := NewAPIClient(srv.URL, "ws-abc", "test-token")
+		client.AgentID = "agent-123"
+		client.TaskID = "task-456"
 		var out respBody
 		err := client.PostJSON(context.Background(), "/test", reqBody{}, &out)
 		if err != nil {

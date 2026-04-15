@@ -4,15 +4,16 @@
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "dev:remote": "electron-vite dev --mode remote",
-    "build": "electron-vite build",
+    "bundle-cli": "node scripts/bundle-cli.mjs",
+    "dev": "pnpm run bundle-cli && electron-vite dev",
+    "build": "pnpm run bundle-cli && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "preview": "electron-vite preview",
-    "package": "electron-builder",
+    "package": "node scripts/package.mjs",
     "lint": "eslint .",
+    "test": "vitest run",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -22,12 +23,13 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@fontsource-variable/inter": "^5.2.5",
     "@fontsource/geist-mono": "^5.2.7",
-    "@fontsource/geist-sans": "^5.2.5",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "electron-updater": "^6.8.3",
+    "fix-path": "^5.0.0",
     "react-router-dom": "^7.6.0",
     "shadcn": "^4.1.0",
     "sonner": "^2.0.7",
@@ -37,6 +39,8 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@multica/tsconfig": "workspace:*",
     "@tailwindcss/vite": "^4",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -44,9 +48,11 @@
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
+    "jsdom": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwindcss": "^4",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

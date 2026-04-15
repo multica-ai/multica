@@ -14,6 +14,8 @@ const WORKSPACE_SCOPED_KEYS = [
   "multica_my_issues_view",
   "multica:chat:selectedAgentId",
   "multica:chat:activeSessionId",
+  "multica:chat:drafts",
+  "multica:chat:expanded",
 ];
 
 /** Remove all workspace-scoped storage entries for the given workspace. */

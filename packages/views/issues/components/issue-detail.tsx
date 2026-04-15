@@ -367,12 +367,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
-      recordVisit({
-        id: issue.id,
-        identifier: issue.identifier,
-        title: issue.title,
-        status: issue.status,
-      });
+      recordVisit(issue.id);
     }
   }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

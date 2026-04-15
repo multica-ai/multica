@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Cloud, ChevronDown, Globe, Lock, Loader2 } from "lucide-react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import { ActorAvatar } from "../../common/actor-avatar";
 import type {
   AgentVisibility,
   RuntimeDevice,
+  MemberWithUser,
   CreateAgentRequest,
 } from "@multica/core/types";
 import {
@@ -26,29 +28,55 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
 
+type RuntimeFilter = "mine" | "all";
+
 export function CreateAgentDialog({
   runtimes,
   runtimesLoading,
+  members,
+  currentUserId,
   onClose,
   onCreate,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
+  members: MemberWithUser[];
+  currentUserId: string | null;
   onClose: () => void;
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimes[0]?.id ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
+
+  const getOwnerMember = (ownerId: string | null) => {
+    if (!ownerId) return null;
+    return members.find((m) => m.user_id === ownerId) ?? null;
+  };
+
+  const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
+
+  const filteredRuntimes = useMemo(() => {
+    const filtered = runtimeFilter === "mine" && currentUserId
+      ? runtimes.filter((r) => r.owner_id === currentUserId)
+      : runtimes;
+    return [...filtered].sort((a, b) => {
+      if (a.owner_id === currentUserId && b.owner_id !== currentUserId) return -1;
+      if (a.owner_id !== currentUserId && b.owner_id === currentUserId) return 1;
+      return 0;
+    });
+  }, [runtimes, runtimeFilter, currentUserId]);
+
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(filteredRuntimes[0]?.id ?? "");
 
   useEffect(() => {
-    if (!selectedRuntimeId && runtimes[0]) {
-      setSelectedRuntimeId(runtimes[0].id);
+    if (!selectedRuntimeId && filteredRuntimes[0]) {
+      setSelectedRuntimeId(filteredRuntimes[0].id);
     }
-  }, [runtimes, selectedRuntimeId]);
+  }, [filteredRuntimes, selectedRuntimeId]);
 
   const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
 
@@ -141,7 +169,35 @@ export function CreateAgentDialog({
           </div>
 
           <div className="min-w-0">
-            <Label className="text-xs text-muted-foreground">Runtime</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Runtime</Label>
+              {hasOtherRuntimes && (
+                <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => { setRuntimeFilter("mine"); setSelectedRuntimeId(""); }}
+                    className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                      runtimeFilter === "mine"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Mine
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRuntimeFilter("all"); setSelectedRuntimeId(""); }}
+                    className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                      runtimeFilter === "all"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    All
+                  </button>
+                </div>
+              )}
+            </div>
             <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
               <PopoverTrigger
                 disabled={runtimes.length === 0 && !runtimesLoading}
@@ -166,42 +222,56 @@ export function CreateAgentDialog({
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {selectedRuntime?.device_info ?? "Register a runtime before creating an agent"}
+                    {selectedRuntime
+                      ? (getOwnerMember(selectedRuntime.owner_id)?.name ?? selectedRuntime.device_info)
+                      : "Register a runtime before creating an agent"}
                   </div>
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
               </PopoverTrigger>
               <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-60 overflow-y-auto">
-                {runtimes.map((device) => (
-                  <button
-                    key={device.id}
-                    onClick={() => {
-                      setSelectedRuntimeId(device.id);
-                      setRuntimeOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                      device.id === selectedRuntimeId ? "bg-accent" : "hover:bg-accent/50"
-                    }`}
-                  >
-                    <ProviderLogo provider={device.provider} className="h-4 w-4 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-medium">{device.name}</span>
-                        {device.runtime_mode === "cloud" && (
-                          <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                            Cloud
-                          </span>
-                        )}
-                      </div>
-                      <div className="truncate text-xs text-muted-foreground">{device.device_info}</div>
-                    </div>
-                    <span
-                      className={`h-2 w-2 shrink-0 rounded-full ${
-                        device.status === "online" ? "bg-success" : "bg-muted-foreground/40"
+                {filteredRuntimes.map((device) => {
+                  const ownerMember = getOwnerMember(device.owner_id);
+                  return (
+                    <button
+                      key={device.id}
+                      onClick={() => {
+                        setSelectedRuntimeId(device.id);
+                        setRuntimeOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                        device.id === selectedRuntimeId ? "bg-accent" : "hover:bg-accent/50"
                       }`}
-                    />
-                  </button>
-                ))}
+                    >
+                      <ProviderLogo provider={device.provider} className="h-4 w-4 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium">{device.name}</span>
+                          {device.runtime_mode === "cloud" && (
+                            <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
+                              Cloud
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          {ownerMember ? (
+                            <>
+                              <ActorAvatar actorType="member" actorId={ownerMember.user_id} size={14} />
+                              <span className="truncate">{ownerMember.name}</span>
+                            </>
+                          ) : (
+                            <span className="truncate">{device.device_info}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${
+                          device.status === "online" ? "bg-success" : "bg-muted-foreground/40"
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
               </PopoverContent>
             </Popover>
           </div>

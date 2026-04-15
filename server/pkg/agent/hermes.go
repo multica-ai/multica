@@ -34,7 +34,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	cmd := exec.CommandContext(runCtx, execPath, "acp")
+	hermesArgs := append([]string{"acp"}, opts.CustomArgs...)
+	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
+	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", hermesArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

@@ -138,6 +138,7 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
+	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -236,6 +237,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 		params.Set("assignee_id", aID)
 	}
+	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
+		params.Set("offset", fmt.Sprintf("%d", v))
+	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		params.Set("project_id", v)
 	}
@@ -254,7 +258,18 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, issuesRaw)
+		total, _ := result["total"].(float64)
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		hasMore := offset+len(issuesRaw) < int(total)
+		wrapped := map[string]any{
+			"issues":   issuesRaw,
+			"total":    int(total),
+			"limit":    limit,
+			"offset":   offset,
+			"has_more": hasMore,
+		}
+		return cli.PrintJSON(os.Stdout, wrapped)
 	}
 
 	headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE"}

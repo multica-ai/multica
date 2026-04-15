@@ -57,6 +57,17 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: CreateIssueWithOrigin :one
+INSERT INTO issue (
+    workspace_id, title, description, status, priority,
+    assignee_type, assignee_id, creator_type, creator_id,
+    parent_issue_id, position, due_date, number, project_id,
+    origin_type, origin_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    sqlc.narg('origin_type'), sqlc.narg('origin_id')
+) RETURNING *;
+
 -- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1;
 

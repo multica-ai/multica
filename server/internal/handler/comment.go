@@ -262,7 +262,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// assignee — the user is continuing a member-to-member conversation.
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-		!h.isReplyToMemberThread(parentComment, comment.Content, issue) {
+		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
 		// Resolve thread root: if the comment is a reply, agent should reply
 		// to the thread root (matching frontend behavior where all replies
 		// in a thread share the same top-level parent).
@@ -325,7 +325,9 @@ func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.I
 // in the reply, still triggers on_comment as expected.
 // If the parent (thread root) itself @mentions the assignee, the thread is
 // considered a conversation with the agent, so replies are allowed to trigger.
-func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issue db.Issue) bool {
+// If the assigned agent has already replied in the thread, the member is
+// conversing with the agent, so replies are allowed to trigger.
+func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment, content string, issue db.Issue) bool {
 	if parent == nil {
 		return false // Not a reply — normal top-level comment
 	}
@@ -333,7 +335,8 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 		return false // Thread started by an agent — allow trigger
 	}
 	// Thread was started by a member. Suppress on_comment unless the reply
-	// or the parent explicitly @mentions the assignee agent.
+	// or the parent explicitly @mentions the assignee agent, or the agent
+	// has already participated in this thread.
 	if !issue.AssigneeID.Valid {
 		return true // No assignee to mention
 	}
@@ -351,7 +354,18 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 			return false // Assignee mentioned in thread root — allow trigger
 		}
 	}
-	return true // Reply to member thread without mentioning agent — suppress
+	// Check if the assigned agent has already replied in this thread —
+	// if so, the member is continuing a conversation with the agent.
+	if h.Queries != nil {
+		hasReplied, err := h.Queries.HasAgentRepliedInThread(ctx, db.HasAgentRepliedInThreadParams{
+			ParentID: parent.ID,
+			AgentID:  issue.AssigneeID,
+		})
+		if err == nil && hasReplied {
+			return false // Agent participated in thread — allow trigger
+		}
+	}
+	return true // Reply to member thread without agent participation — suppress
 }
 
 // enqueueMentionedAgentTasks parses @agent mentions from comment content and

@@ -7,7 +7,7 @@ description: Multica — the open-source managed agents platform. Turn coding ag
 
 Multica turns coding agents into real teammates. Assign issues to an agent like you'd assign to a colleague — they'll pick up the work, write code, report blockers, and update statuses autonomously.
 
-No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. Think of it as open-source infrastructure for managed agents — vendor-neutral, self-hosted, and designed for human + AI teams. Works with **Claude Code**, **Codex**, **OpenClaw**, and **OpenCode**.
+No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. Think of it as open-source infrastructure for managed agents — vendor-neutral, self-hosted, and designed for human + AI teams. Works with **Claude Code**, **Codex**, **Gemini CLI**, **OpenClaw**, **OpenCode**, and **Hermes**.
 
 ## Features
 
@@ -24,7 +24,7 @@ No more copy-pasting prompts. No more babysitting runs. Your agents show up on t
 | Frontend | Next.js 16 (App Router) |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 with pgvector |
-| Agent Runtime | Local daemon executing Claude Code, Codex, OpenClaw, or OpenCode |
+| Agent Runtime | Local daemon executing Claude Code, Codex, Gemini CLI, OpenClaw, OpenCode, or Hermes |
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
@@ -35,7 +35,7 @@ No more copy-pasting prompts. No more babysitting runs. Your agents show up on t
                      ┌──────┴───────┐
                      │ Agent Daemon │  (runs on your machine)
                      │Claude/Codex/ │
-                     │OpenClaw/Code │
+                     │Gemini/Hermes │
                      └──────────────┘
 ```
 

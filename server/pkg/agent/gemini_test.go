@@ -1,13 +1,14 @@
 package agent
 
 import (
+	"log/slog"
 	"testing"
 )
 
 func TestBuildGeminiArgsBaseline(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("write a haiku", ExecOptions{})
+	args := buildGeminiArgs("write a haiku", ExecOptions{}, slog.Default())
 	expected := []string{
 		"-p", "write a haiku",
 		"--yolo",
@@ -27,7 +28,7 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 func TestBuildGeminiArgsWithModel(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-2.5-pro"})
+	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-2.5-pro"}, slog.Default())
 
 	var foundModel bool
 	for i, a := range args {
@@ -47,7 +48,7 @@ func TestBuildGeminiArgsWithModel(t *testing.T) {
 func TestBuildGeminiArgsWithResume(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{ResumeSessionID: "3"})
+	args := buildGeminiArgs("hi", ExecOptions{ResumeSessionID: "3"}, slog.Default())
 
 	var foundResume bool
 	for i, a := range args {
@@ -67,7 +68,7 @@ func TestBuildGeminiArgsWithResume(t *testing.T) {
 func TestBuildGeminiArgsOmitsModelWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{})
+	args := buildGeminiArgs("hi", ExecOptions{}, slog.Default())
 	for _, a := range args {
 		if a == "-m" {
 			t.Fatalf("expected no -m flag when Model is empty, got args=%v", args)
@@ -75,5 +76,35 @@ func TestBuildGeminiArgsOmitsModelWhenEmpty(t *testing.T) {
 		if a == "-r" {
 			t.Fatalf("expected no -r flag when ResumeSessionID is empty, got args=%v", args)
 		}
+	}
+}
+
+func TestBuildGeminiArgsPassesThroughCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	args := buildGeminiArgs("hi", ExecOptions{
+		CustomArgs: []string{"--sandbox"},
+	}, slog.Default())
+
+	if args[len(args)-1] != "--sandbox" {
+		t.Fatalf("expected --sandbox at end of args, got %v", args)
+	}
+}
+
+func TestBuildGeminiArgsFiltersBlockedCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	args := buildGeminiArgs("hi", ExecOptions{
+		CustomArgs: []string{"-o", "text", "--sandbox"},
+	}, slog.Default())
+
+	// -o text should be filtered, --sandbox should pass through
+	for i, a := range args {
+		if a == "-o" && i+1 < len(args) && args[i+1] == "text" {
+			t.Fatalf("blocked -o text should have been filtered: %v", args)
+		}
+	}
+	if args[len(args)-1] != "--sandbox" {
+		t.Fatalf("expected --sandbox to pass through, got %v", args)
 	}
 }

@@ -136,6 +136,19 @@ export function OpenClawLogo({ className }: { className?: string }) {
   );
 }
 
+export function GeminiCliLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      fill="currentColor"
+    >
+      <path d="M12 0C12 0 12 8 8 12C12 12 12 12 12 24C12 24 12 16 16 12C12 12 12 12 12 0Z" />
+    </svg>
+  );
+}
+
 export function OpenCodeLogo({ className }: { className?: string }) {
   return (
     <svg

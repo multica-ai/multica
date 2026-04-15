@@ -9,4 +9,5 @@ type Storage interface {
 	Delete(ctx context.Context, key string)
 	DeleteKeys(ctx context.Context, keys []string)
 	KeyFromURL(rawURL string) string
+	CdnDomain() string
 }

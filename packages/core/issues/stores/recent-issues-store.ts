@@ -2,7 +2,6 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus } from "../../types";
 import {
   createWorkspaceAwareStorage,
   registerForWorkspaceRehydration,
@@ -13,25 +12,22 @@ const MAX_RECENT_ISSUES = 20;
 
 export interface RecentIssueEntry {
   id: string;
-  identifier: string;
-  title: string;
-  status: IssueStatus;
   visitedAt: number;
 }
 
 interface RecentIssuesState {
   items: RecentIssueEntry[];
-  recordVisit: (entry: Omit<RecentIssueEntry, "visitedAt">) => void;
+  recordVisit: (id: string) => void;
 }
 
 export const useRecentIssuesStore = create<RecentIssuesState>()(
   persist(
     (set) => ({
       items: [],
-      recordVisit: (entry) =>
+      recordVisit: (id) =>
         set((state) => {
-          const filtered = state.items.filter((i) => i.id !== entry.id);
-          const updated: RecentIssueEntry = { ...entry, visitedAt: Date.now() };
+          const filtered = state.items.filter((i) => i.id !== id);
+          const updated: RecentIssueEntry = { id, visitedAt: Date.now() };
           return {
             items: [updated, ...filtered].slice(0, MAX_RECENT_ISSUES),
           };

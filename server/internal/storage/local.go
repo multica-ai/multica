@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,17 @@ func NewLocalStorageFromEnv() *LocalStorage {
 		uploadDir: uploadDir,
 		baseURL:   baseURL,
 	}
+}
+
+func (s *LocalStorage) CdnDomain() string {
+	if s.baseURL == "" {
+		return ""
+	}
+	u, err := url.Parse(s.baseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 func (s *LocalStorage) KeyFromURL(rawURL string) string {

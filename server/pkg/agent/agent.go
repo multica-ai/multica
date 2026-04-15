@@ -25,7 +25,8 @@ type ExecOptions struct {
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration
-	ResumeSessionID string // if non-empty, resume a previous agent session
+	ResumeSessionID string   // if non-empty, resume a previous agent session
+	CustomArgs      []string // additional CLI arguments appended to the agent command
 }
 
 // Session represents a running agent execution.

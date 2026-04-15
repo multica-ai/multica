@@ -79,6 +79,10 @@ func NewS3StorageFromEnv() *S3Storage {
 	}
 }
 
+func (s *S3Storage) CdnDomain() string {
+	return s.cdnDomain
+}
+
 // storageClass returns the appropriate S3 storage class.
 // Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
 func (s *S3Storage) storageClass() types.StorageClass {

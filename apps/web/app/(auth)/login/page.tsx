@@ -37,6 +37,15 @@ function LoginPageContent() {
     router.push(ws ? nextUrl : "/onboarding");
   };
 
+  // Build Google OAuth state: encode platform + next URL so the callback
+  // can redirect to the right place after login.
+  const googleState = [
+    platform === "desktop" ? "platform:desktop" : "",
+    nextUrl !== "/issues" ? `next:${nextUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join(",") || undefined;
+
   return (
     <LoginPage
       onSuccess={handleSuccess}
@@ -45,7 +54,7 @@ function LoginPageContent() {
           ? {
               clientId: googleClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
-              state: platform === "desktop" ? "platform:desktop" : undefined,
+              state: googleState,
             }
           : undefined
       }

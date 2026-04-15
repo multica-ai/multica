@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { Server } from "lucide-react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,7 +20,12 @@ import { RuntimeDetail } from "./runtime-detail";
 
 type RuntimeFilter = "mine" | "all";
 
-export default function RuntimesPage() {
+interface RuntimesPageProps {
+  /** Desktop-only slot rendered above the runtime list (e.g. local daemon card) */
+  topSlot?: React.ReactNode;
+}
+
+export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -86,43 +91,46 @@ export default function RuntimesPage() {
   }
 
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel
-        id="list"
-        defaultSize={280}
-        minSize={240}
-        maxSize={400}
-        groupResizeBehavior="preserve-pixel-size"
+    <div className="flex flex-1 min-h-0 flex-col">
+      {topSlot}
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="flex-1 min-h-0"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
       >
-        <RuntimeList
-          runtimes={runtimes}
-          selectedId={effectiveSelectedId}
-          onSelect={setSelectedId}
-          filter={filter}
-          onFilterChange={setFilter}
-          ownerFilter={ownerFilter}
-          onOwnerFilterChange={setOwnerFilter}
-          updatableIds={updatableIds}
-        />
-      </ResizablePanel>
+        <ResizablePanel
+          id="list"
+          defaultSize={280}
+          minSize={240}
+          maxSize={400}
+          groupResizeBehavior="preserve-pixel-size"
+        >
+          <RuntimeList
+            runtimes={runtimes}
+            selectedId={effectiveSelectedId}
+            onSelect={setSelectedId}
+            filter={filter}
+            onFilterChange={setFilter}
+            ownerFilter={ownerFilter}
+            onOwnerFilterChange={setOwnerFilter}
+            updatableIds={updatableIds}
+          />
+        </ResizablePanel>
 
-      <ResizableHandle />
+        <ResizableHandle />
 
-      <ResizablePanel id="detail" minSize="50%">
-        {selected ? (
-          <RuntimeDetail key={selected.id} runtime={selected} />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Server className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select a runtime to view details</p>
-          </div>
-        )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
+        <ResizablePanel id="detail" minSize="50%">
+          {selected ? (
+            <RuntimeDetail key={selected.id} runtime={selected} />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+              <Server className="h-10 w-10 text-muted-foreground/30" />
+              <p className="mt-3 text-sm">Select a runtime to view details</p>
+            </div>
+          )}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
   );
 }

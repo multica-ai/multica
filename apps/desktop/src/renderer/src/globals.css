@@ -6,11 +6,27 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Geist font: define CSS variables that tokens.css @theme inline references.
-   Web app gets these from next/font/google; desktop must set them explicitly. */
+/* Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
+   Web app uses the same stack via next/font/google in apps/web/app/layout.tsx —
+   keep the CJK fallback tail in sync across both files. The Inter primary family
+   differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
+   fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
+   Both resolve to Inter glyphs, so rendering is identical in practice.
+   Currently covers English + Simplified Chinese. When ja/ko i18n lands, extend
+   the tail with Hiragino Kaku Gothic ProN / Yu Gothic / Apple SD Gothic Neo / Malgun Gothic.
+   Per-character fallback: Latin chars render with Inter, Chinese chars with
+   PingFang SC (macOS) / Microsoft YaHei (Windows) / Noto Sans CJK SC (Linux).
+
+   Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
+   non-aligned with a mono grid (Chinese is proportional), so listing CJK fonts
+   would falsely signal alignment guarantees. Browser default fallback handles
+   the rare mixed case correctly. */
 :root {
-  --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+               sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+               monospace;
 }
 
 @source "../../../../../packages/ui/**/*.tsx";

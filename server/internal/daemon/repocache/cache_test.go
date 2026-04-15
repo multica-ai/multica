@@ -13,6 +13,39 @@ func testLogger() *slog.Logger {
 	return slog.Default()
 }
 
+func TestGitEnv(t *testing.T) {
+	t.Parallel()
+	env := gitEnv()
+
+	// Must contain GIT_TERMINAL_PROMPT=0.
+	found := false
+	for _, entry := range env {
+		if entry == "GIT_TERMINAL_PROMPT=0" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gitEnv() must include GIT_TERMINAL_PROMPT=0")
+	}
+
+	// Must contain HOME from the current environment.
+	home := os.Getenv("HOME")
+	if home == "" {
+		t.Skip("HOME not set in test environment")
+	}
+	foundHome := false
+	for _, entry := range env {
+		if entry == "HOME="+home {
+			foundHome = true
+			break
+		}
+	}
+	if !foundHome {
+		t.Error("gitEnv() must include HOME from os.Environ()")
+	}
+}
+
 func TestBareDirName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

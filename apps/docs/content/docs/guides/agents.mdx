@@ -15,7 +15,7 @@ When an agent is assigned a task in Multica:
 
 1. The daemon detects the task assignment
 2. It creates an isolated workspace directory
-3. It spawns the appropriate agent CLI (Claude Code, Codex, OpenClaw, or OpenCode)
+3. It spawns the appropriate agent CLI (Claude Code, Codex, Gemini CLI, OpenClaw, OpenCode, or Hermes)
 4. The agent executes autonomously, streaming progress back to Multica
 5. Results are reported — success, failure, or blockers
 
@@ -29,21 +29,28 @@ Real-time progress is streamed via WebSocket so you can follow along in the Mult
 |----------|-------------|-------------|
 | Claude Code | `claude` | Anthropic's coding agent |
 | Codex | `codex` | OpenAI's coding agent |
+| Gemini CLI | `gemini` | Google's coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | OpenCode | `opencode` | Open-source coding agent |
+| Hermes | `hermes` | Nous Research coding agent |
 
 The daemon auto-detects which CLIs are available on your PATH and registers them as available runtimes.
 
 ## Reusable Skills
 
-Every solution an agent creates can become a reusable skill for the whole team. Skills compound your team's capabilities over time:
+Multica supports two layers of skills:
+
+- **Local skills** — Skills already installed in your local runtime (e.g., `.claude/skills/`, `.config/opencode/skills/`) are automatically discovered and used by agents. You do **not** need to upload them to Multica.
+- **Workspace skills** — Skills created or imported in the Multica Skills page are shared across the workspace. They are automatically injected into agent runs as supplementary context, so every team member's agents benefit from them.
+
+Workspace skills are designed for team-wide sharing and collaboration — codify your team's best practices once, and every agent can leverage them:
 
 - Deployments
 - Migrations
 - Code reviews
 - Common patterns
 
-Skills are shared across the workspace, so any agent (or human) can leverage them.
+Your skill library compounds over time. Local skills give individual agents their capabilities; workspace skills align the entire team.
 
 ## Multi-Workspace Support
 

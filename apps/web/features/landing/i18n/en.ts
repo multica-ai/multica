@@ -278,6 +278,32 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.1.33",
+        date: "2026-04-14",
+        title: "Gemini CLI & Agent Env Vars",
+        changes: [],
+        features: [
+          "Google Gemini CLI as a new agent runtime with live log streaming",
+          "Custom environment variables for agents (router/proxy mode) with dedicated settings tab",
+          "\"Set parent issue\" and \"Add sub-issue\" actions in issue context menu",
+          "CLI `--parent` flag for issue update and `--content-stdin` for piping comment content",
+          "Sub-issues inherit parent project automatically",
+        ],
+        improvements: [
+          "Editor bubble menu and link preview rewritten for reliability",
+          "OpenClaw backend P0+P1 improvements (multi-line JSON, incremental parsing)",
+          "Self-hosted WebSocket URL auto-derived for LAN access",
+        ],
+        fixes: [
+          "S3 upload keys scoped by workspace (security)",
+          "Workspace membership validation for subscriptions and uploads (security)",
+          "Active tasks auto-cancelled when issue status changes to cancelled",
+          "Agent task stall when process hangs on stdout",
+          "Daemon trigger prompt now embeds the actual triggering comment content",
+          "Login and dashboard redirect stability improvements",
+        ],
+      },
+      {
         version: "0.1.28",
         date: "2026-04-13",
         title: "Windows Support, Auth & Onboarding",

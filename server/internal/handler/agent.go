@@ -14,24 +14,27 @@ import (
 )
 
 type AgentResponse struct {
-	ID                 string          `json:"id"`
-	WorkspaceID        string          `json:"workspace_id"`
-	RuntimeID          string          `json:"runtime_id"`
-	Name               string          `json:"name"`
-	Description        string          `json:"description"`
-	Instructions       string          `json:"instructions"`
-	AvatarURL          *string         `json:"avatar_url"`
-	RuntimeMode        string          `json:"runtime_mode"`
-	RuntimeConfig      any             `json:"runtime_config"`
-	Visibility         string          `json:"visibility"`
-	Status             string          `json:"status"`
-	MaxConcurrentTasks int32           `json:"max_concurrent_tasks"`
-	OwnerID            *string         `json:"owner_id"`
-	Skills             []SkillResponse `json:"skills"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
-	ArchivedAt         *string         `json:"archived_at"`
-	ArchivedBy         *string         `json:"archived_by"`
+	ID                 string            `json:"id"`
+	WorkspaceID        string            `json:"workspace_id"`
+	RuntimeID          string            `json:"runtime_id"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Instructions       string            `json:"instructions"`
+	AvatarURL          *string           `json:"avatar_url"`
+	RuntimeMode        string            `json:"runtime_mode"`
+	RuntimeConfig      any               `json:"runtime_config"`
+	CustomEnv          map[string]string `json:"custom_env"`
+	CustomArgs         []string          `json:"custom_args"`
+	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
+	Visibility         string            `json:"visibility"`
+	Status             string            `json:"status"`
+	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	OwnerID            *string           `json:"owner_id"`
+	Skills             []SkillResponse   `json:"skills"`
+	CreatedAt          string            `json:"created_at"`
+	UpdatedAt          string            `json:"updated_at"`
+	ArchivedAt         *string           `json:"archived_at"`
+	ArchivedBy         *string           `json:"archived_by"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -41,6 +44,26 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 	if rc == nil {
 		rc = map[string]any{}
+	}
+
+	var customEnv map[string]string
+	if a.CustomEnv != nil {
+		if err := json.Unmarshal(a.CustomEnv, &customEnv); err != nil {
+			slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(a.ID), "error", err)
+		}
+	}
+	if customEnv == nil {
+		customEnv = map[string]string{}
+	}
+
+	var customArgs []string
+	if a.CustomArgs != nil {
+		if err := json.Unmarshal(a.CustomArgs, &customArgs); err != nil {
+			slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(a.ID), "error", err)
+		}
+	}
+	if customArgs == nil {
+		customArgs = []string{}
 	}
 
 	return AgentResponse{
@@ -53,6 +76,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		AvatarURL:          textToPtr(a.AvatarUrl),
 		RuntimeMode:        a.RuntimeMode,
 		RuntimeConfig:      rc,
+		CustomEnv:          customEnv,
+		CustomArgs:         customArgs,
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
@@ -103,6 +128,8 @@ type TaskAgentData struct {
 	Name         string                   `json:"name"`
 	Instructions string                   `json:"instructions"`
 	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs   []string                 `json:"custom_args,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -129,9 +156,11 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
+	userID := requestUserID(r)
 
 	var agents []db.Agent
 	var err error
@@ -168,6 +197,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
+		// Redact custom_env for users who are not the agent owner or workspace owner/admin.
+		if !canViewAgentEnv(a, userID, member.Role) {
+			redactEnv(&resp)
+		}
 		visible = append(visible, resp)
 	}
 
@@ -192,18 +225,29 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 			resp.Skills[i] = skillToResponse(s)
 		}
 	}
+
+	// Redact custom_env for users who are not the agent owner or workspace owner/admin.
+	userID := requestUserID(r)
+	if member, ok := ctxMember(r.Context()); ok {
+		if !canViewAgentEnv(agent, userID, member.Role) {
+			redactEnv(&resp)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
 type CreateAgentRequest struct {
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
-	Instructions       string  `json:"instructions"`
-	AvatarURL          *string `json:"avatar_url"`
-	RuntimeID          string  `json:"runtime_id"`
-	RuntimeConfig      any     `json:"runtime_config"`
-	Visibility         string  `json:"visibility"`
-	MaxConcurrentTasks int32   `json:"max_concurrent_tasks"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Instructions       string            `json:"instructions"`
+	AvatarURL          *string           `json:"avatar_url"`
+	RuntimeID          string            `json:"runtime_id"`
+	RuntimeConfig      any               `json:"runtime_config"`
+	CustomEnv          map[string]string `json:"custom_env"`
+	CustomArgs         []string          `json:"custom_args"`
+	Visibility         string            `json:"visibility"`
+	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 }
 
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -249,6 +293,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		rc = []byte("{}")
 	}
 
+	ce, _ := json.Marshal(req.CustomEnv)
+	if req.CustomEnv == nil {
+		ce = []byte("{}")
+	}
+
+	ca, _ := json.Marshal(req.CustomArgs)
+	if req.CustomArgs == nil {
+		ca = []byte("[]")
+	}
+
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
@@ -261,6 +315,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            parseUUID(ownerID),
+		CustomEnv:          ce,
+		CustomArgs:         ca,
 	})
 	if err != nil {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -283,15 +339,39 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 
 type UpdateAgentRequest struct {
-	Name               *string `json:"name"`
-	Description        *string `json:"description"`
-	Instructions       *string `json:"instructions"`
-	AvatarURL          *string `json:"avatar_url"`
-	RuntimeID          *string `json:"runtime_id"`
-	RuntimeConfig      any     `json:"runtime_config"`
-	Visibility         *string `json:"visibility"`
-	Status             *string `json:"status"`
-	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
+	Name               *string            `json:"name"`
+	Description        *string            `json:"description"`
+	Instructions       *string            `json:"instructions"`
+	AvatarURL          *string            `json:"avatar_url"`
+	RuntimeID          *string            `json:"runtime_id"`
+	RuntimeConfig      any                `json:"runtime_config"`
+	CustomEnv          *map[string]string `json:"custom_env"`
+	CustomArgs         *[]string          `json:"custom_args"`
+	Visibility         *string            `json:"visibility"`
+	Status             *string            `json:"status"`
+	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
+}
+
+// canViewAgentEnv checks whether the requesting user is allowed to see the
+// agent's custom environment variables. Only the agent owner or workspace
+// owner/admin may view them; for everyone else the field is redacted.
+func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
+	if roleAllowed(memberRole, "owner", "admin") {
+		return true
+	}
+	return uuidToString(agent.OwnerID) == userID
+}
+
+// redactEnv masks custom_env values in the response when the caller is not
+// authorised to view them. Keys are preserved so members can see which
+// variables are configured; values are replaced with "****".
+func redactEnv(resp *AgentResponse) {
+	masked := make(map[string]string, len(resp.CustomEnv))
+	for k := range resp.CustomEnv {
+		masked[k] = "****"
+	}
+	resp.CustomEnv = masked
+	resp.CustomEnvRedacted = true
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -346,6 +426,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.RuntimeConfig != nil {
 		rc, _ := json.Marshal(req.RuntimeConfig)
 		params.RuntimeConfig = rc
+	}
+	if req.CustomEnv != nil {
+		ce, _ := json.Marshal(*req.CustomEnv)
+		params.CustomEnv = ce
+	}
+	if req.CustomArgs != nil {
+		ca, _ := json.Marshal(*req.CustomArgs)
+		params.CustomArgs = ca
 	}
 	if req.RuntimeID != nil {
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{

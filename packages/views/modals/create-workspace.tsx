@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useNavigation } from "../navigation";
+import { useImmersiveMode } from "../platform";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
@@ -24,6 +25,11 @@ import {
 } from "../workspace/slug";
 
 export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
+  // This modal is full-screen, so it covers the app titlebar. On macOS desktop
+  // we hide the traffic lights for its lifetime so the Back button in the top-
+  // left corner isn't stolen by the native controls' hit-test. No-op elsewhere.
+  useImmersiveMode();
+
   const router = useNavigation();
   const createWorkspace = useCreateWorkspace();
   const [name, setName] = useState("");
@@ -83,13 +89,24 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
       }}
     >
       <DialogContent
+        finalFocus={false}
         showCloseButton={false}
         className="inset-0 flex h-full w-full max-w-none sm:max-w-none translate-0 flex-col items-center justify-center rounded-none bg-background ring-0 shadow-none"
       >
+        {/* Top drag region — restores window-drag ability that the full-screen
+            modal would otherwise swallow. Transparent; web browsers ignore the
+            -webkit-app-region property, so this is safe cross-platform. */}
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-10"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        />
+
         <Button
           variant="ghost"
           size="sm"
-          className="absolute top-6 left-6 text-muted-foreground"
+          className="absolute top-12 left-12 text-muted-foreground"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           onClick={onClose}
         >
           <ArrowLeft className="h-4 w-4" />

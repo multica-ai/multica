@@ -12,10 +12,17 @@ build
 bin
 dist-electron
 *.tsbuildinfo
+# ...except electron-builder's source resources dir, which holds tracked
+# config files (entitlements, icons) — not build output.
+!apps/desktop/build/
+!apps/desktop/build/**
 
 # env
 .env*
 !.env.example
+# Desktop production config is public (backend URL, etc.) — track it so
+# `pnpm package` produces a release-ready build without extra setup.
+!apps/desktop/.env.production
 
 # test coverage
 coverage

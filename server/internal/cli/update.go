@@ -2,6 +2,8 @@ package cli
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -104,15 +106,20 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("resolve symlink: %w", err)
 	}
 
-	// Build download URL: multica_{os}_{arch}.tar.gz
+	// Build download URL: multica_{os}_{arch}.{tar.gz|zip}
+	// GoReleaser produces .zip for Windows and .tar.gz for everything else.
 	tag := targetVersion
 	if !strings.HasPrefix(tag, "v") {
 		tag = "v" + tag
 	}
-	assetName := fmt.Sprintf("multica_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	ext := "tar.gz"
+	if runtime.GOOS == "windows" {
+		ext = "zip"
+	}
+	assetName := fmt.Sprintf("multica_%s_%s.%s", runtime.GOOS, runtime.GOARCH, ext)
 	downloadURL := fmt.Sprintf("https://github.com/multica-ai/multica/releases/download/%s/%s", tag, assetName)
 
-	// Download the tarball.
+	// Download the archive.
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
@@ -124,8 +131,17 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, downloadURL)
 	}
 
-	// Extract the "multica" binary from the tarball.
-	binaryData, err := extractBinaryFromTarGz(resp.Body, "multica")
+	// Extract the binary from the archive.
+	binaryName := "multica"
+	if runtime.GOOS == "windows" {
+		binaryName = "multica.exe"
+	}
+	var binaryData []byte
+	if runtime.GOOS == "windows" {
+		binaryData, err = extractBinaryFromZip(resp.Body, binaryName)
+	} else {
+		binaryData, err = extractBinaryFromTarGz(resp.Body, binaryName)
+	}
 	if err != nil {
 		return "", fmt.Errorf("extract binary: %w", err)
 	}
@@ -192,5 +208,37 @@ func extractBinaryFromTarGz(r io.Reader, name string) ([]byte, error) {
 			return data, nil
 		}
 	}
+}
+
+// extractBinaryFromZip reads a .zip stream and returns the contents of the
+// named file entry. The zip format requires random access, so the full archive
+// is buffered in memory.
+func extractBinaryFromZip(r io.Reader, name string) ([]byte, error) {
+	buf, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read zip data: %w", err)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
+	if err != nil {
+		return nil, fmt.Errorf("zip reader: %w", err)
+	}
+
+	for _, f := range zr.File {
+		if filepath.Base(f.Name) == name && !f.FileInfo().IsDir() {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open zip entry: %w", err)
+			}
+			defer rc.Close()
+
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return nil, fmt.Errorf("read binary: %w", err)
+			}
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("binary %q not found in archive", name)
 }
 

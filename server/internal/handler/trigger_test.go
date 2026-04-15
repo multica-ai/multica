@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -205,7 +206,7 @@ func TestIsReplyToMemberThread(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := h.isReplyToMemberThread(tt.parent, tt.content, issue)
+			got := h.isReplyToMemberThread(context.Background(), tt.parent, tt.content, issue)
 			if got != tt.want {
 				t.Errorf("isReplyToMemberThread() = %v, want %v", got, tt.want)
 			}
@@ -233,7 +234,7 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 	//   !commentMentionsOthersButNotAssignee && !isReplyToMemberThread
 	shouldTrigger := func(parent *db.Comment, content string) bool {
 		return !h.commentMentionsOthersButNotAssignee(content, issue) &&
-			!h.isReplyToMemberThread(parent, content, issue)
+			!h.isReplyToMemberThread(context.Background(), parent, content, issue)
 	}
 
 	tests := []struct {

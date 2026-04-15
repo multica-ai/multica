@@ -3,6 +3,17 @@ description: Suggest a new feature or improvement.
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment type
+      description: Are you using the hosted version or a self-hosted instance?
+      options:
+        - multica.ai (hosted)
+        - Self-hosted
+    validations:
+      required: true
+
   - type: textarea
     id: description
     attributes:

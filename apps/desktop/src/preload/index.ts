@@ -13,6 +13,60 @@ const desktopAPI = {
   },
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
+  /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
+  setImmersiveMode: (immersive: boolean) =>
+    ipcRenderer.invoke("window:setImmersive", immersive),
+};
+
+interface DaemonStatus {
+  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  pid?: number;
+  uptime?: string;
+  daemonId?: string;
+  deviceName?: string;
+  agents?: string[];
+  workspaceCount?: number;
+  profile?: string;
+  serverUrl?: string;
+}
+
+const daemonAPI = {
+  start: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:start"),
+  stop: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:stop"),
+  restart: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:restart"),
+  getStatus: (): Promise<DaemonStatus> =>
+    ipcRenderer.invoke("daemon:get-status"),
+  onStatusChange: (callback: (status: DaemonStatus) => void) => {
+    const handler = (_: unknown, status: DaemonStatus) => callback(status);
+    ipcRenderer.on("daemon:status", handler);
+    return () => ipcRenderer.removeListener("daemon:status", handler);
+  },
+  setTargetApiUrl: (url: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:set-target-api-url", url),
+  syncToken: (token: string, userId: string): Promise<void> =>
+    ipcRenderer.invoke("daemon:sync-token", token, userId),
+  clearToken: (): Promise<void> =>
+    ipcRenderer.invoke("daemon:clear-token"),
+  isCliInstalled: (): Promise<boolean> =>
+    ipcRenderer.invoke("daemon:is-cli-installed"),
+  getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>
+    ipcRenderer.invoke("daemon:get-prefs"),
+  setPrefs: (prefs: Partial<{ autoStart: boolean; autoStop: boolean }>): Promise<{ autoStart: boolean; autoStop: boolean }> =>
+    ipcRenderer.invoke("daemon:set-prefs", prefs),
+  autoStart: (): Promise<void> =>
+    ipcRenderer.invoke("daemon:auto-start"),
+  retryInstall: (): Promise<void> =>
+    ipcRenderer.invoke("daemon:retry-install"),
+  startLogStream: () => ipcRenderer.send("daemon:start-log-stream"),
+  stopLogStream: () => ipcRenderer.send("daemon:stop-log-stream"),
+  onLogLine: (callback: (line: string) => void) => {
+    const handler = (_: unknown, line: string) => callback(line);
+    ipcRenderer.on("daemon:log-line", handler);
+    return () => ipcRenderer.removeListener("daemon:log-line", handler);
+  },
 };
 
 const updaterAPI = {
@@ -38,12 +92,15 @@ const updaterAPI = {
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
+  contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.desktopAPI = desktopAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }

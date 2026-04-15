@@ -25,6 +25,24 @@
   animation: entrance-spin 0.6s ease-out forwards;
 }
 
+/* Chat FAB: gentle color + border tint while a chat task is running.
+ * Keeps the ring at the same thickness — only hue shifts towards brand
+ * at half-cycle, no outer glow. */
+@keyframes chat-impulse {
+  0%, 100% {
+    color: var(--muted-foreground);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
+  }
+  50% {
+    color: var(--brand);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--brand) 40%, transparent);
+  }
+}
+
+.animate-chat-impulse {
+  animation: chat-impulse 1.6s ease-in-out infinite;
+}
+
 /* Sidebar: open triggers (dropdown/popover) get active background */
 [data-sidebar="menu-button"][data-popup-open] {
   background-color: var(--sidebar-accent);
@@ -55,5 +73,9 @@
   }
   html {
     @apply font-sans;
+    /* Auto-insert 1/4em space between CJK ideographs and Latin letters/numerals.
+     * Native CSS text-autospace (Chrome 119+, Electron recent versions).
+     * Progressive enhancement: browsers that don't support it simply ignore the rule. */
+    text-autospace: ideograph-alpha ideograph-numeric;
   }
 }

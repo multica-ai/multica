@@ -147,6 +147,13 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.CancelAgentTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, err := s.Queries.GetAgentTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("cancel task: %w", err)
+		}
+		return &existing, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cancel task: %w", err)
 	}
@@ -300,6 +307,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				TaskID:        task.ID,
 			}); err != nil {
 				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
+			} else {
+				// Event-driven unread: stamp unread_since on the first unread
+				// assistant message. No-op if the session already has unread.
+				// If the user is actively viewing the session, the frontend's
+				// auto-mark-read effect will clear this within a tick.
+				if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
+					slog.Warn("failed to set unread_since", "chat_session_id", util.UUIDToString(task.ChatSessionID), "error", err)
+				}
 			}
 		}
 		s.Queries.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
@@ -502,6 +517,7 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 
 // resolveTaskWorkspaceID determines the workspace ID for a task.
 // For issue tasks, it comes from the issue. For chat tasks, from the chat session.
+// For autopilot tasks, from the autopilot via its run.
 func (s *TaskService) resolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
 	if task.IssueID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
@@ -511,6 +527,13 @@ func (s *TaskService) resolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if task.ChatSessionID.Valid {
 		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
 			return util.UUIDToString(cs.WorkspaceID)
+		}
+	}
+	if task.AutopilotRunID.Valid {
+		if run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID); err == nil {
+			if ap, err := s.Queries.GetAutopilot(ctx, run.AutopilotID); err == nil {
+				return util.UUIDToString(ap.WorkspaceID)
+			}
 		}
 	}
 	return ""

@@ -135,17 +135,11 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Start daemon only if we have workspaces to watch.
-	if hasWatchedWorkspaces(resolveProfile(cmd)) {
-		fmt.Fprintln(os.Stderr, "\nStarting daemon...")
-		if err := runDaemonBackground(cmd); err != nil {
-			return fmt.Errorf("start daemon: %w", err)
-		}
-		fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
-	} else {
-		fmt.Fprintln(os.Stderr, "\n⚠ Setup incomplete: no workspaces configured.")
-		fmt.Fprintln(os.Stderr, "Create a workspace at the web dashboard, then run 'multica login' and 'multica daemon start'.")
+	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
+	if err := runDaemonBackground(cmd); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
 	}
+	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
 	return nil
 }
@@ -200,28 +194,13 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Start daemon only if we have workspaces to watch.
-	if hasWatchedWorkspaces(resolveProfile(cmd)) {
-		fmt.Fprintln(os.Stderr, "\nStarting daemon...")
-		if err := runDaemonBackground(cmd); err != nil {
-			return fmt.Errorf("start daemon: %w", err)
-		}
-		fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
-	} else {
-		fmt.Fprintln(os.Stderr, "\n⚠ Setup incomplete: no workspaces configured.")
-		fmt.Fprintln(os.Stderr, "Create a workspace at the web dashboard, then run 'multica login' and 'multica daemon start'.")
+	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
+	if err := runDaemonBackground(cmd); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
 	}
+	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
 	return nil
-}
-
-// hasWatchedWorkspaces returns true if the CLI config has at least one watched workspace.
-func hasWatchedWorkspaces(profile string) bool {
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return false
-	}
-	return len(cfg.WatchedWorkspaces) > 0
 }
 
 // probeServer checks whether a Multica backend is reachable at the given URL.

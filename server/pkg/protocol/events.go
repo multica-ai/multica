@@ -59,8 +59,9 @@ const (
 	EventSkillDeleted = "skill:deleted"
 
 	// Chat events
-	EventChatMessage = "chat:message"
-	EventChatDone    = "chat:done"
+	EventChatMessage     = "chat:message"
+	EventChatDone        = "chat:done"
+	EventChatSessionRead = "chat:session_read"
 
 	// Project events
 	EventProjectCreated = "project:created"
@@ -70,6 +71,19 @@ const (
 	// Pin events
 	EventPinCreated = "pin:created"
 	EventPinDeleted = "pin:deleted"
+
+	// Invitation events
+	EventInvitationCreated  = "invitation:created"
+	EventInvitationAccepted = "invitation:accepted"
+	EventInvitationDeclined = "invitation:declined"
+	EventInvitationRevoked  = "invitation:revoked"
+
+	// Autopilot events
+	EventAutopilotCreated  = "autopilot:created"
+	EventAutopilotUpdated  = "autopilot:updated"
+	EventAutopilotDeleted  = "autopilot:deleted"
+	EventAutopilotRunStart = "autopilot:run_start"
+	EventAutopilotRunDone  = "autopilot:run_done"
 
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"

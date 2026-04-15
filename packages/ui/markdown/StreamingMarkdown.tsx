@@ -9,6 +9,7 @@ export interface StreamingMarkdownProps {
   onUrlClick?: (url: string) => void
   onFileClick?: (path: string) => void
   renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  cdnDomain?: string
 }
 
 interface Block {
@@ -136,7 +137,8 @@ const MemoizedBlock = React.memo(
     className,
     onUrlClick,
     onFileClick,
-    renderMention
+    renderMention,
+    cdnDomain
   }: {
     content: string
     mode: RenderMode
@@ -144,9 +146,10 @@ const MemoizedBlock = React.memo(
     onUrlClick?: (url: string) => void
     onFileClick?: (path: string) => void
     renderMention?: (props: { type: string; id: string }) => React.ReactNode
+    cdnDomain?: string
   }) {
     return (
-      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention}>
+      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention} cdnDomain={cdnDomain}>
         {content}
       </Markdown>
     )
@@ -181,7 +184,8 @@ export function StreamingMarkdown({
   className,
   onUrlClick,
   onFileClick,
-  renderMention
+  renderMention,
+  cdnDomain
 }: StreamingMarkdownProps): React.JSX.Element {
   // Split into blocks - memoized to avoid recomputation
   // Must be called unconditionally to satisfy Rules of Hooks
@@ -193,7 +197,7 @@ export function StreamingMarkdown({
   // Not streaming - use simple Markdown (no block splitting needed)
   if (!isStreaming) {
     return (
-      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention}>
+      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention} cdnDomain={cdnDomain}>
         {content}
       </Markdown>
     )
@@ -222,6 +226,7 @@ export function StreamingMarkdown({
             onUrlClick={onUrlClick}
             onFileClick={onFileClick}
             renderMention={renderMention}
+            cdnDomain={cdnDomain}
           />
         )
       })}

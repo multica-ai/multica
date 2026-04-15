@@ -10,14 +10,15 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { allChatSessionsOptions } from "@multica/core/chat/queries";
 import { useChatStore } from "@multica/core/chat";
+import { createLogger } from "@multica/core/logger";
 import type { ChatSession, Agent } from "@multica/core/types";
+
+const logger = createLogger("chat.ui");
 
 export function ChatSessionHistory() {
   const wsId = useWorkspaceId();
   const setShowHistory = useChatStore((s) => s.setShowHistory);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
-  const clearTimeline = useChatStore((s) => s.clearTimeline);
-  const setPendingTask = useChatStore((s) => s.setPendingTask);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
 
   const { data: sessions = [] } = useQuery(allChatSessionsOptions(wsId));
@@ -26,9 +27,15 @@ export function ChatSessionHistory() {
   const agentMap = new Map(agents.map((a) => [a.id, a]));
 
   const handleSelectSession = (session: ChatSession) => {
+    logger.info("selectSession", {
+      from: activeSessionId,
+      to: session.id,
+      agentId: session.agent_id,
+      status: session.status,
+    });
+    // Changing activeSessionId flips the query keys for messages +
+    // pending-task; no manual clear needed.
     setActiveSession(session.id);
-    clearTimeline();
-    setPendingTask(null);
     setShowHistory(false);
   };
 

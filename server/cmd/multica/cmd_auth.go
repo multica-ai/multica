@@ -99,13 +99,16 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	appURL := resolveAppURL(cmd)
 
 	// Determine the callback host from the configured app URL.
-	// For self-hosted setups where the browser is on a different machine,
-	// we need to use the server's reachable hostname instead of localhost.
+	// For self-hosted setups where the browser is on a different machine
+	// (e.g. Multica running on a LAN server), use the server's private IP
+	// so the browser can reach the CLI's local HTTP server.
+	// For production (public hostnames like multica.ai), keep localhost —
+	// the browser and CLI are on the same machine.
 	callbackHost := "localhost"
 	bindAddr := "127.0.0.1"
 	if parsed, err := url.Parse(appURL); err == nil {
 		h := parsed.Hostname()
-		if h != "" && h != "localhost" && h != "127.0.0.1" {
+		if ip := net.ParseIP(h); ip != nil && ip.IsPrivate() {
 			callbackHost = h
 			bindAddr = "0.0.0.0"
 		}
@@ -215,7 +218,6 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
-	cfg.WatchedWorkspaces = nil
 	cfg.Token = patResp.Token
 	cfg.ServerURL = serverURL
 	cfg.AppURL = appURL
@@ -258,7 +260,6 @@ func runAuthLoginToken(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
-	cfg.WatchedWorkspaces = nil
 	cfg.Token = token
 	cfg.ServerURL = serverURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {

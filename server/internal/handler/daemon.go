@@ -120,6 +120,7 @@ type DaemonRegisterRequest struct {
 	DaemonID    string `json:"daemon_id"`
 	DeviceName  string `json:"device_name"`
 	CLIVersion  string `json:"cli_version"` // multica CLI version
+	LaunchedBy  string `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes    []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -267,6 +268,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		metadata, _ := json.Marshal(map[string]any{
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
+			"launched_by": req.LaunchedBy,
 		})
 
 		registered, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
@@ -458,15 +460,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build response with fresh agent data (name + skills).
+	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		var customEnv map[string]string
+		if agent.CustomEnv != nil {
+			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
+				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
+			}
+		}
+		var customArgs []string
+		if agent.CustomArgs != nil {
+			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
+				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
+			}
+		}
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
 			Instructions: agent.Instructions,
 			Skills:       skills,
+			CustomEnv:    customEnv,
+			CustomArgs:   customArgs,
 		}
 	}
 

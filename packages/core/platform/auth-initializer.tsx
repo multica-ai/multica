@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getApi } from "../api";
 import { useAuthStore } from "../auth";
 import { useWorkspaceStore } from "../workspace";
+import { configStore } from "../config";
 import { workspaceKeys } from "../workspace/queries";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
@@ -30,6 +31,11 @@ export function AuthInitializer({
   useEffect(() => {
     const api = getApi();
     const wsId = storage.getItem("multica_workspace_id");
+
+    // Fetch app config (CDN domain, etc.) in the background — non-blocking.
+    api.getConfig().then((cfg) => {
+      if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
+    }).catch(() => { /* config is optional — legacy file card matching degrades gracefully */ });
 
     if (cookieAuth) {
       // Cookie mode: the HttpOnly cookie is sent automatically by the browser.

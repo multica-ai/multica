@@ -96,9 +96,9 @@ function CreateSkillDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Skill</DialogTitle>
+          <DialogTitle>Add Workspace Skill</DialogTitle>
           <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh.
+            Create a new skill or import from ClawHub / Skills.sh. Workspace skills are shared with your team and automatically injected into agent runs.
           </DialogDescription>
         </DialogHeader>
 
@@ -744,9 +744,9 @@ export default function SkillsPage() {
           {skills.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Sparkles className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
-              <p className="mt-1 text-xs text-muted-foreground text-center">
-                Skills define reusable instructions for agents.
+              <p className="mt-3 text-sm text-muted-foreground">No workspace skills yet</p>
+              <p className="mt-1 text-xs text-muted-foreground text-center max-w-[280px]">
+                Workspace skills are shared across your team and injected into agent runs. Skills already installed in your local runtime are used automatically.
               </p>
               <Button
                 onClick={() => setShowCreate(true)}
@@ -788,6 +788,9 @@ export default function SkillsPage() {
             <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
               <Sparkles className="h-10 w-10 text-muted-foreground/30" />
               <p className="mt-3 text-sm">Select a skill to view details</p>
+              <p className="mt-1 text-xs text-center max-w-[260px]">
+                Workspace skills supplement your local skills and are shared across the team.
+              </p>
               <Button
                 onClick={() => setShowCreate(true)}
                 size="xs"

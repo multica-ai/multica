@@ -45,3 +45,19 @@ export interface MemberWithUser {
   email: string;
   avatar_url: string | null;
 }
+
+export interface Invitation {
+  id: string;
+  workspace_id: string;
+  inviter_id: string;
+  invitee_email: string;
+  invitee_user_id: string | null;
+  role: MemberRole;
+  status: "pending" | "accepted" | "declined" | "expired";
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  inviter_name?: string;
+  inviter_email?: string;
+  workspace_name?: string;
+}

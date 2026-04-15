@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createPersistStorage } from "../platform/persist-storage";
 import { defaultStorage } from "../platform/storage";
 
-const EXCLUDED_PREFIXES = ["/login", "/pair/"];
+const EXCLUDED_PREFIXES = ["/login", "/pair/", "/invite/"];
 
 interface NavigationState {
   lastPath: string;

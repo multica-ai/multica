@@ -149,6 +149,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
+        finalFocus={false}
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",

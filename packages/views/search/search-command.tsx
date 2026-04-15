@@ -17,9 +17,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
+import { useQuery } from "@tanstack/react-query";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { issueListOptions } from "@multica/core/issues/queries";
+import { useWorkspaceId } from "@multica/core";
 import { StatusIcon } from "../issues/components";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
@@ -97,7 +100,18 @@ export function SearchCommand() {
   const { push } = useNavigation();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
-  const recentIssues = useRecentIssuesStore((s) => s.items);
+  const recentItems = useRecentIssuesStore((s) => s.items);
+  const wsId = useWorkspaceId();
+  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+
+  const recentIssues = useMemo(() => {
+    const issueMap = new Map(allIssues.map((i) => [i.id, i]));
+    return recentItems.flatMap((item) => {
+      const issue = issueMap.get(item.id);
+      return issue ? [issue] : [];
+    });
+  }, [recentItems, allIssues]);
+
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults>({ issues: [], projects: [] });
   const [isLoading, setIsLoading] = useState(false);

@@ -2,7 +2,7 @@
 
 import { AppLink } from "../../navigation";
 import { useQuery } from "@tanstack/react-query";
-import { issueListOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { StatusIcon } from "./status-icon";
 
@@ -15,7 +15,16 @@ interface IssueMentionCardProps {
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
-  const issue = issues.find((i) => i.id === issueId);
+  const listIssue = issues.find((i) => i.id === issueId);
+
+  // Fetch individual issue when not found in the list (e.g. done issues beyond
+  // the first page). Only fires when listIssue is undefined.
+  const { data: detailIssue } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    enabled: !listIssue,
+  });
+
+  const issue = listIssue ?? detailIssue;
 
   if (!issue) {
     return (

@@ -1,9 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import {
-  Cloud,
-  Monitor,
   Loader2,
   Save,
   Globe,
@@ -11,7 +9,7 @@ import {
   Camera,
   ChevronDown,
 } from "lucide-react";
-import type { Agent, AgentVisibility, RuntimeDevice } from "@multica/core/types";
+import type { Agent, AgentVisibility, RuntimeDevice, MemberWithUser } from "@multica/core/types";
 import {
   Popover,
   PopoverTrigger,
@@ -24,14 +22,21 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { ProviderLogo } from "../../../runtimes/components/provider-logo";
+
+type RuntimeFilter = "mine" | "all";
 
 export function SettingsTab({
   agent,
   runtimes,
+  members,
+  currentUserId,
   onSave,
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
+  members: MemberWithUser[];
+  currentUserId: string | null;
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
   const [name, setName] = useState(agent.name);
@@ -40,11 +45,31 @@ export function SettingsTab({
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const getOwnerMember = (ownerId: string | null) => {
+    if (!ownerId) return null;
+    return members.find((m) => m.user_id === ownerId) ?? null;
+  };
+
+  const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
+
+  const filteredRuntimes = useMemo(() => {
+    const filtered = runtimeFilter === "mine" && currentUserId
+      ? runtimes.filter((r) => r.owner_id === currentUserId)
+      : runtimes;
+    return [...filtered].sort((a, b) => {
+      if (a.owner_id === currentUserId && b.owner_id !== currentUserId) return -1;
+      if (a.owner_id !== currentUserId && b.owner_id === currentUserId) return 1;
+      return 0;
+    });
+  }, [runtimes, runtimeFilter, currentUserId]);
+
   const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
+  const selectedOwnerMember = selectedRuntime ? getOwnerMember(selectedRuntime.owner_id) : null;
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -72,6 +97,7 @@ export function SettingsTab({
       toast.error("Name is required");
       return;
     }
+
     setSaving(true);
     try {
       await onSave({
@@ -190,16 +216,44 @@ export function SettingsTab({
       </div>
 
       <div>
-        <Label className="text-xs text-muted-foreground">Runtime</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Runtime</Label>
+          {hasOtherRuntimes && (
+            <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+              <button
+                type="button"
+                onClick={() => setRuntimeFilter("mine")}
+                className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                  runtimeFilter === "mine"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Mine
+              </button>
+              <button
+                type="button"
+                onClick={() => setRuntimeFilter("all")}
+                className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                  runtimeFilter === "all"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                All
+              </button>
+            </div>
+          )}
+        </div>
         <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
           <PopoverTrigger
             disabled={runtimes.length === 0}
             className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
           >
-            {selectedRuntime?.runtime_mode === "cloud" ? (
-              <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {selectedRuntime ? (
+              <ProviderLogo provider={selectedRuntime.provider} className="h-4 w-4 shrink-0" />
             ) : (
-              <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <ProviderLogo provider="" className="h-4 w-4 shrink-0" />
             )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -213,46 +267,56 @@ export function SettingsTab({
                 )}
               </div>
               <div className="truncate text-xs text-muted-foreground">
-                {selectedRuntime?.device_info ?? "Select a runtime"}
+                {selectedRuntime ? (
+                  selectedOwnerMember ? selectedOwnerMember.name : selectedRuntime.device_info
+                ) : "Select a runtime"}
               </div>
             </div>
             <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-60 overflow-y-auto">
-            {runtimes.map((device) => (
-              <button
-                key={device.id}
-                onClick={() => {
-                  setSelectedRuntimeId(device.id);
-                  setRuntimeOpen(false);
-                }}
-                className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                  device.id === selectedRuntimeId ? "bg-accent" : "hover:bg-accent/50"
-                }`}
-              >
-                {device.runtime_mode === "cloud" ? (
-                  <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-medium">{device.name}</span>
-                    {device.runtime_mode === "cloud" && (
-                      <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                        Cloud
-                      </span>
-                    )}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">{device.device_info}</div>
-                </div>
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
-                    device.status === "online" ? "bg-success" : "bg-muted-foreground/40"
+            {filteredRuntimes.map((device) => {
+              const ownerMember = getOwnerMember(device.owner_id);
+              return (
+                <button
+                  key={device.id}
+                  onClick={() => {
+                    setSelectedRuntimeId(device.id);
+                    setRuntimeOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                    device.id === selectedRuntimeId ? "bg-accent" : "hover:bg-accent/50"
                   }`}
-                />
-              </button>
-            ))}
+                >
+                  <ProviderLogo provider={device.provider} className="h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium">{device.name}</span>
+                      {device.runtime_mode === "cloud" && (
+                        <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
+                          Cloud
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                      {ownerMember ? (
+                        <>
+                          <ActorAvatar actorType="member" actorId={ownerMember.user_id} size={14} />
+                          <span className="truncate">{ownerMember.name}</span>
+                        </>
+                      ) : (
+                        <span className="truncate">{device.device_info}</span>
+                      )}
+                    </div>
+                  </div>
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      device.status === "online" ? "bg-success" : "bg-muted-foreground/40"
+                    }`}
+                  />
+                </button>
+              );
+            })}
           </PopoverContent>
         </Popover>
       </div>

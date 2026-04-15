@@ -36,6 +36,9 @@ vi.mock("@tiptap/react", () => ({
           size: 0,
         },
       },
+      selection: {
+        empty: true,
+      },
     },
   }),
   EditorContent: ({ className }: { className?: string }) => (

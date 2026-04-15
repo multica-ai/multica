@@ -80,6 +80,21 @@ func checkOrigin(r *http.Request) bool {
 	return false
 }
 
+const (
+	// writeWait is the time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// pongWait is the time allowed to read the next pong message from the peer.
+	// Connections that miss a pong within this window are considered dead and
+	// are closed, freeing goroutines and channel memory.
+	pongWait = 60 * time.Second
+
+	// pingPeriod is how often the server sends a ping to keep the connection
+	// alive through intermediate proxies and load balancers. Must be less than
+	// pongWait so that a missing pong is detected before the next ping is due.
+	pingPeriod = (pongWait * 9) / 10
+)
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: checkOrigin,
 }
@@ -408,6 +423,15 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
+	// Require a pong within pongWait of each ping. The deadline is refreshed
+	// every time a pong frame arrives, so a healthy connection stays open
+	// indefinitely. A dead connection (no pong) is detected within pongWait.
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	for {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
@@ -422,12 +446,30 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	defer c.conn.Close()
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
 
-	for message := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			slog.Warn("websocket write error", "error", err)
-			return
+	for {
+		select {
+		case message, ok := <-c.send:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				// Hub closed the channel (slow-client eviction or shutdown).
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				slog.Warn("websocket write error", "error", err, "user_id", c.userID, "workspace_id", c.workspaceID)
+				return
+			}
+		case <-ticker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }

@@ -19,10 +19,16 @@ mac:
   target:
     - dmg
     - zip
-  artifactName: ${name}-${version}-${arch}.${ext}
-  notarize: false
+  # Hardcoded name avoids the `@multica/desktop-*` subdirectory that
+  # `${name}` produces for scoped package names.
+  artifactName: multica-desktop-${version}-${arch}.${ext}
+  # Notarize via notarytool. Requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
+  # + APPLE_TEAM_ID env vars at package time. Non-mac contributors are
+  # unaffected because `pnpm package` already requires the Developer ID
+  # signing cert — notarization is a strict superset.
+  notarize: true
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: multica-desktop-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage

@@ -59,6 +59,8 @@ function getOnboardingIssues(): OnboardingIssueDef[] {
       description: [
         "Skills are reusable instructions that make agents better at recurring tasks — deployments, code reviews, migrations, etc.",
         "",
+        "**Note:** Skills already installed in your local runtime (e.g., `.claude/skills/`) are automatically available to agents — no need to re-upload them. Workspace skills here are for sharing knowledge across your team.",
+        "",
         "**Steps:**",
         "1. Go to **Skills** in the sidebar",
         "2. Click **New Skill**",
