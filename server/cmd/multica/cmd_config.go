@@ -56,23 +56,19 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	key, value := args[0], args[1]
 
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return err
-	}
-
-	switch key {
-	case "server_url":
-		cfg.ServerURL = value
-	case "app_url":
-		cfg.AppURL = value
-	case "workspace_id":
-		cfg.WorkspaceID = value
-	default:
-		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id)", key)
-	}
-
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.UpdateCLIConfigForProfile(profile, func(cfg *cli.CLIConfig) error {
+		switch key {
+		case "server_url":
+			cfg.ServerURL = value
+		case "app_url":
+			cfg.AppURL = value
+		case "workspace_id":
+			cfg.WorkspaceID = value
+		default:
+			return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id)", key)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 

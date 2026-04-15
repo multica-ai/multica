@@ -99,6 +99,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
+	go d.skillSyncLoop(ctx)
 
 	go d.heartbeatLoop(ctx)
 	go d.usageScanLoop(ctx)
@@ -326,6 +327,69 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	}
 }
 
+func (d *Daemon) skillSyncLoop(ctx context.Context) {
+	d.syncWorkspaceSkills(ctx)
+
+	ticker := time.NewTicker(d.cfg.SkillSyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.syncWorkspaceSkills(ctx)
+		}
+	}
+}
+
+func (d *Daemon) syncWorkspaceSkills(ctx context.Context) {
+	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
+	if err != nil {
+		d.logger.Warn("skill sync: failed to load config", "error", err)
+		return
+	}
+
+	for _, ws := range cfg.WatchedWorkspaces {
+		if ws.SkillSync == nil || !ws.SkillSync.Enabled || strings.TrimSpace(ws.SkillSync.Dir) == "" {
+			continue
+		}
+
+		skills, err := ScanLocalSkills(ws.SkillSync.Dir)
+		if err != nil {
+			d.logger.Warn("skill sync: scan failed", "workspace_id", ws.ID, "dir", ws.SkillSync.Dir, "error", err)
+			if statusErr := cli.UpdateWorkspaceSkillSyncStatus(d.cfg.Profile, ws.ID, time.Time{}, err); statusErr != nil {
+				d.logger.Warn("skill sync: failed to persist status", "workspace_id", ws.ID, "error", statusErr)
+			}
+			continue
+		}
+
+		syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err = ReconcileWorkspaceSkills(syncCtx, d.client, WorkspaceSkillSyncRequest{
+			WorkspaceID:   ws.ID,
+			SyncDir:       ws.SkillSync.Dir,
+			DaemonID:      d.cfg.DaemonID,
+			Profile:       d.cfg.Profile,
+			DeleteManaged: ws.SkillSync.DeleteManaged,
+			LocalSkills:   skills,
+		})
+		cancel()
+		if err != nil {
+			d.logger.Warn("skill sync: reconcile failed", "workspace_id", ws.ID, "dir", ws.SkillSync.Dir, "error", err)
+			if statusErr := cli.UpdateWorkspaceSkillSyncStatus(d.cfg.Profile, ws.ID, time.Time{}, err); statusErr != nil {
+				d.logger.Warn("skill sync: failed to persist status", "workspace_id", ws.ID, "error", statusErr)
+			}
+			continue
+		}
+
+		if statusErr := cli.UpdateWorkspaceSkillSyncStatus(d.cfg.Profile, ws.ID, time.Now(), nil); statusErr != nil {
+			d.logger.Warn("skill sync: failed to persist status", "workspace_id", ws.ID, "error", statusErr)
+		}
+
+		d.logger.Debug("skill sync: completed", "workspace_id", ws.ID, "dir", ws.SkillSync.Dir, "skills", len(skills))
+	}
+}
+
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and adds
 // any missing ones to the CLI config's watched list.
 func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) {
@@ -338,26 +402,21 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) {
 		return
 	}
 
-	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
-	if err != nil {
-		d.logger.Warn("workspace sync: failed to load config", "error", err)
-		return
-	}
-
 	var added int
-	for _, ws := range workspaces {
-		if cfg.AddWatchedWorkspace(ws.ID, ws.Name) {
-			added++
-			d.logger.Info("workspace sync: discovered new workspace", "workspace_id", ws.ID, "name", ws.Name)
+	err = cli.UpdateCLIConfigForProfile(d.cfg.Profile, func(cfg *cli.CLIConfig) error {
+		for _, ws := range workspaces {
+			if cfg.AddWatchedWorkspace(ws.ID, ws.Name) {
+				added++
+				d.logger.Info("workspace sync: discovered new workspace", "workspace_id", ws.ID, "name", ws.Name)
+			}
 		}
-	}
-
-	if added == 0 {
+		return nil
+	})
+	if err != nil {
+		d.logger.Warn("workspace sync: failed to save config", "error", err)
 		return
 	}
-
-	if err := cli.SaveCLIConfigForProfile(cfg, d.cfg.Profile); err != nil {
-		d.logger.Warn("workspace sync: failed to save config", "error", err)
+	if added == 0 {
 		return
 	}
 	d.logger.Info("workspace sync: added new workspace(s) to config", "count", added)
@@ -794,8 +853,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		return
 	}
 
-	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
-
 	// Create a cancellable context so we can interrupt the running agent
 	// when the server-side task status changes to 'cancelled'.
 	runCtx, runCancel := context.WithCancel(ctx)
@@ -821,7 +878,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	}()
 
-	result, err := d.runTask(runCtx, task, provider, taskLog)
+	result, err := d.runTaskWithRetry(runCtx, task, provider, taskLog)
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -1144,7 +1201,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	switch result.Status {
 	case "completed":
 		if result.Output == "" {
-			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
+			return TaskResult{}, emptyOutputError(provider, result.Error)
 		}
 		return TaskResult{
 			Status:    "completed",
@@ -1162,6 +1219,49 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 		return TaskResult{Status: "blocked", Comment: errMsg, Usage: usageEntries}, nil
 	}
+}
+
+func (d *Daemon) runTaskWithRetry(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
+	maxAttempts := 1
+	if provider == "codex" {
+		maxAttempts += d.cfg.CodexRetryAttempts
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		summary := fmt.Sprintf("Launching %s", provider)
+		if attempt > 1 {
+			summary = fmt.Sprintf("Retrying %s after transient upstream failure (%d/%d)", provider, attempt, maxAttempts)
+		}
+		_ = d.client.ReportProgress(ctx, task.ID, summary, 1, 2)
+
+		result, err := d.runTask(ctx, task, provider, taskLog)
+		if !shouldRetryCodexTask(provider, err, attempt, maxAttempts) {
+			return result, err
+		}
+
+		delay := codexRetryDelay(d.cfg.CodexRetryBackoff, d.cfg.CodexRetryJitter, attempt)
+		taskLog.Warn("transient codex upstream failure; retrying",
+			"attempt", attempt+1,
+			"max_attempts", maxAttempts,
+			"backoff", delay,
+			"jitter_cap", d.cfg.CodexRetryJitter,
+			"error", err,
+		)
+		if delay > 0 {
+			if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+				return TaskResult{}, sleepErr
+			}
+		}
+	}
+
+	return TaskResult{}, fmt.Errorf("unreachable retry state for provider %q", provider)
+}
+
+func emptyOutputError(provider, agentError string) error {
+	if strings.TrimSpace(agentError) != "" {
+		return fmt.Errorf("%s", agentError)
+	}
+	return fmt.Errorf("%s returned empty output", provider)
 }
 
 // repoDataToInfo converts daemon RepoData to repocache RepoInfo.

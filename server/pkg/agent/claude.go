@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -418,22 +417,4 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}
 	return strings.TrimSpace(string(data)), nil
-}
-
-// logWriter adapts a *slog.Logger to an io.Writer for capturing stderr.
-type logWriter struct {
-	logger *slog.Logger
-	prefix string
-}
-
-func newLogWriter(logger *slog.Logger, prefix string) *logWriter {
-	return &logWriter{logger: logger, prefix: prefix}
-}
-
-func (w *logWriter) Write(p []byte) (int, error) {
-	text := strings.TrimSpace(string(p))
-	if text != "" {
-		w.logger.Debug(w.prefix + text)
-	}
-	return len(p), nil
 }

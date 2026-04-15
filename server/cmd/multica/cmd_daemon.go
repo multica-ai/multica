@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -59,6 +58,7 @@ func init() {
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
+	f.Duration("skill-sync-interval", 0, "Skill sync interval (env: MULTICA_DAEMON_SKILL_SYNC_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
@@ -156,7 +156,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setBackgroundProcessAttrs(child)
 
 	if err := child.Start(); err != nil {
 		logFile.Close()
@@ -212,6 +212,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		args = append(args, "--heartbeat-interval", d.String())
 	}
+	if d, _ := cmd.Flags().GetDuration("skill-sync-interval"); d > 0 {
+		args = append(args, "--skill-sync-interval", d.String())
+	}
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		args = append(args, "--agent-timeout", d.String())
 	}
@@ -253,6 +256,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		overrides.HeartbeatInterval = d
 	}
+	if d, _ := cmd.Flags().GetDuration("skill-sync-interval"); d > 0 {
+		overrides.SkillSyncInterval = d
+	}
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		overrides.AgentTimeout = d
 	}
@@ -266,7 +272,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	cfg.CLIVersion = version
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), daemonNotifySignals()...)
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
@@ -298,7 +304,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		setBackgroundProcessAttrs(child)
 
 		if err := child.Start(); err != nil {
 			logFile.Close()
@@ -347,7 +353,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("find process %d: %w", int(pid), err)
 	}
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	if err := process.Signal(daemonShutdownSignal()); err != nil {
 		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
 	}
 

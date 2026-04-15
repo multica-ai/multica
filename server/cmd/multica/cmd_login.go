@@ -64,24 +64,18 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	}
 
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return err
-	}
-
 	var added int
-	for _, ws := range workspaces {
-		if cfg.AddWatchedWorkspace(ws.ID, ws.Name) {
-			added++
+	if err := cli.UpdateCLIConfigForProfile(profile, func(cfg *cli.CLIConfig) error {
+		for _, ws := range workspaces {
+			if cfg.AddWatchedWorkspace(ws.ID, ws.Name) {
+				added++
+			}
 		}
-	}
-
-	// Set default workspace if not set.
-	if cfg.WorkspaceID == "" {
-		cfg.WorkspaceID = workspaces[0].ID
-	}
-
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		if cfg.WorkspaceID == "" {
+			cfg.WorkspaceID = workspaces[0].ID
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 

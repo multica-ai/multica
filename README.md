@@ -95,6 +95,8 @@ The daemon auto-detects available agent CLIs (`claude`, `codex`, `openclaw`, `op
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference, daemon configuration, and advanced usage.
 
+If you keep reusable skills in a local directory such as `D:\xiaotian-skills`, see [Skills Auto-Sync](docs/skills-auto-sync.md) for automatic workspace skill syncing, status fields, force-sync commands, and V1 limits.
+
 ## Quickstart
 
 Once you have the CLI installed (or signed up for [Multica Cloud](https://multica.ai)), follow these steps to assign your first task to an agent:

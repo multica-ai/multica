@@ -208,13 +208,14 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// Save to config. Reset workspace data on every login — the user or
 	// server may have changed, so stale workspaces must not persist.
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	cfg.WorkspaceID = ""
-	cfg.WatchedWorkspaces = nil
-	cfg.Token = patResp.Token
-	cfg.ServerURL = serverURL
-	cfg.AppURL = appURL
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.UpdateCLIConfigForProfile(profile, func(cfg *cli.CLIConfig) error {
+		cfg.WorkspaceID = ""
+		cfg.WatchedWorkspaces = nil
+		cfg.Token = patResp.Token
+		cfg.ServerURL = serverURL
+		cfg.AppURL = appURL
+		return nil
+	}); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -251,12 +252,13 @@ func runAuthLoginToken(cmd *cobra.Command) error {
 	}
 
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	cfg.WorkspaceID = ""
-	cfg.WatchedWorkspaces = nil
-	cfg.Token = token
-	cfg.ServerURL = serverURL
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.UpdateCLIConfigForProfile(profile, func(cfg *cli.CLIConfig) error {
+		cfg.WorkspaceID = ""
+		cfg.WatchedWorkspaces = nil
+		cfg.Token = token
+		cfg.ServerURL = serverURL
+		return nil
+	}); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -343,8 +345,10 @@ func runAuthLogout(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	cfg.Token = ""
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.UpdateCLIConfigForProfile(profile, func(cfg *cli.CLIConfig) error {
+		cfg.Token = ""
+		return nil
+	}); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 

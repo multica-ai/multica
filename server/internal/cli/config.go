@@ -6,23 +6,43 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 )
 
 const defaultCLIConfigPath = ".multica/config.json"
 
+var cliConfigMu sync.Mutex
+
+const (
+	cliConfigLockTimeout    = 2 * time.Minute
+	cliConfigLockRetryDelay = 50 * time.Millisecond
+	cliConfigLockStaleAfter = 10 * time.Minute
+)
+
 // WatchedWorkspace represents a workspace the daemon should monitor for tasks.
 type WatchedWorkspace struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
+	ID        string              `json:"id"`
+	Name      string              `json:"name,omitempty"`
+	SkillSync *WorkspaceSkillSync `json:"skill_sync,omitempty"`
+}
+
+// WorkspaceSkillSync stores the persistent state for workspace skill syncing.
+type WorkspaceSkillSync struct {
+	Dir           string `json:"dir"`
+	Enabled       bool   `json:"enabled"`
+	DeleteManaged bool   `json:"delete_managed,omitempty"`
+	LastSyncAt    string `json:"last_sync_at,omitempty"`
+	LastSyncError string `json:"last_sync_error,omitempty"`
 }
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
-	ServerURL          string             `json:"server_url,omitempty"`
-	AppURL             string             `json:"app_url,omitempty"`
-	WorkspaceID        string             `json:"workspace_id,omitempty"`
-	Token              string             `json:"token,omitempty"`
-	WatchedWorkspaces  []WatchedWorkspace `json:"watched_workspaces,omitempty"`
+	ServerURL         string             `json:"server_url,omitempty"`
+	AppURL            string             `json:"app_url,omitempty"`
+	WorkspaceID       string             `json:"workspace_id,omitempty"`
+	Token             string             `json:"token,omitempty"`
+	WatchedWorkspaces []WatchedWorkspace `json:"watched_workspaces,omitempty"`
 }
 
 // AddWatchedWorkspace adds a workspace to the watch list. Returns true if added.
@@ -148,4 +168,102 @@ func SaveCLIConfigForProfile(cfg CLIConfig, profile string) error {
 		return fmt.Errorf("rename config file: %w", err)
 	}
 	return nil
+}
+
+// UpdateCLIConfigForProfile serializes in-process config mutations by taking a
+// process-local lock plus a cross-process lock file around load-modify-save of
+// the full CLI config file.
+func UpdateCLIConfigForProfile(profile string, mutate func(*CLIConfig) error) error {
+	cliConfigMu.Lock()
+	defer cliConfigMu.Unlock()
+
+	unlock, err := LockCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	cfg, err := LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	if err := mutate(&cfg); err != nil {
+		return err
+	}
+	return SaveCLIConfigForProfile(cfg, profile)
+}
+
+// UpdateWorkspaceSkillSyncStatus updates the persisted sync status for one watched workspace.
+// On success, it records last_sync_at and clears last_sync_error.
+// On failure, it records last_sync_error and preserves the existing last_sync_at.
+func UpdateWorkspaceSkillSyncStatus(profile, workspaceID string, syncedAt time.Time, syncErr error) error {
+	return UpdateCLIConfigForProfile(profile, func(cfg *CLIConfig) error {
+		for i := range cfg.WatchedWorkspaces {
+			if cfg.WatchedWorkspaces[i].ID != workspaceID {
+				continue
+			}
+
+			if cfg.WatchedWorkspaces[i].SkillSync == nil {
+				cfg.WatchedWorkspaces[i].SkillSync = &WorkspaceSkillSync{}
+			}
+
+			if syncErr != nil {
+				cfg.WatchedWorkspaces[i].SkillSync.LastSyncError = syncErr.Error()
+			} else {
+				cfg.WatchedWorkspaces[i].SkillSync.LastSyncAt = syncedAt.UTC().Format(time.RFC3339)
+				cfg.WatchedWorkspaces[i].SkillSync.LastSyncError = ""
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("workspace %s is not being watched", workspaceID)
+	})
+}
+
+// LockCLIConfigForProfile acquires the cross-process lock used to serialize CLI
+// config mutation cycles for the given profile.
+func LockCLIConfigForProfile(profile string) (func(), error) {
+	lockPath, err := cliConfigLockPathForProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create CLI config lock directory: %w", err)
+	}
+
+	deadline := time.Now().Add(cliConfigLockTimeout)
+	for {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = fmt.Fprintf(file, "pid=%d time=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
+			_ = file.Close()
+			return func() {
+				_ = os.Remove(lockPath)
+			}, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create CLI config lock file: %w", err)
+		}
+
+		info, statErr := os.Stat(lockPath)
+		if statErr == nil && time.Since(info.ModTime()) > cliConfigLockStaleAfter {
+			if removeErr := os.Remove(lockPath); removeErr == nil || errors.Is(removeErr, os.ErrNotExist) {
+				continue
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for CLI config lock")
+		}
+		time.Sleep(cliConfigLockRetryDelay)
+	}
+}
+
+func cliConfigLockPathForProfile(profile string) (string, error) {
+	path, err := CLIConfigPathForProfile(profile)
+	if err != nil {
+		return "", err
+	}
+	return path + ".lock", nil
 }

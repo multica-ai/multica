@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const workspaceHeader = "X-Workspace-ID"
+
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
 type requestError struct {
 	Method     string
@@ -41,6 +43,43 @@ type Client struct {
 	baseURL string
 	token   string
 	client  *http.Client
+}
+
+// WorkspaceSkillFile represents a skill file payload returned by the workspace skill API.
+type WorkspaceSkillFile struct {
+	ID      string `json:"id,omitempty"`
+	SkillID string `json:"skill_id,omitempty"`
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// WorkspaceSkill represents a workspace skill returned by the server API.
+type WorkspaceSkill struct {
+	ID          string               `json:"id"`
+	WorkspaceID string               `json:"workspace_id,omitempty"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Content     string               `json:"content"`
+	Config      any                  `json:"config"`
+	Files       []WorkspaceSkillFile `json:"files,omitempty"`
+}
+
+// CreateWorkspaceSkillRequest is the request body for creating a workspace skill.
+type CreateWorkspaceSkillRequest struct {
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Content     string               `json:"content"`
+	Config      any                  `json:"config,omitempty"`
+	Files       []WorkspaceSkillFile `json:"files,omitempty"`
+}
+
+// UpdateWorkspaceSkillRequest is the request body for updating a workspace skill.
+type UpdateWorkspaceSkillRequest struct {
+	Name        *string              `json:"name,omitempty"`
+	Description *string              `json:"description,omitempty"`
+	Content     *string              `json:"content,omitempty"`
+	Config      any                  `json:"config,omitempty"`
+	Files       []WorkspaceSkillFile `json:"files,omitempty"`
 }
 
 // NewClient creates a new daemon API client.
@@ -218,7 +257,59 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 	return &resp, nil
 }
 
+func (c *Client) ListWorkspaceSkills(ctx context.Context, workspaceID string) ([]WorkspaceSkill, error) {
+	var skills []WorkspaceSkill
+	if err := c.getJSONWithHeaders(ctx, "/api/skills", map[string]string{
+		workspaceHeader: workspaceID,
+	}, &skills); err != nil {
+		return nil, err
+	}
+	return skills, nil
+}
+
+func (c *Client) CreateWorkspaceSkill(ctx context.Context, workspaceID string, req CreateWorkspaceSkillRequest) (*WorkspaceSkill, error) {
+	var skill WorkspaceSkill
+	if err := c.postJSONWithHeaders(ctx, "/api/skills", map[string]string{
+		workspaceHeader: workspaceID,
+	}, req, &skill); err != nil {
+		return nil, err
+	}
+	return &skill, nil
+}
+
+func (c *Client) UpdateWorkspaceSkill(ctx context.Context, workspaceID, skillID string, req UpdateWorkspaceSkillRequest) (*WorkspaceSkill, error) {
+	var skill WorkspaceSkill
+	if err := c.putJSONWithHeaders(ctx, fmt.Sprintf("/api/skills/%s", skillID), map[string]string{
+		workspaceHeader: workspaceID,
+	}, req, &skill); err != nil {
+		return nil, err
+	}
+	return &skill, nil
+}
+
+func (c *Client) DeleteWorkspaceSkill(ctx context.Context, workspaceID, skillID string) error {
+	return c.deleteWithHeaders(ctx, fmt.Sprintf("/api/skills/%s", skillID), map[string]string{
+		workspaceHeader: workspaceID,
+	})
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	return c.postJSONWithHeaders(ctx, path, nil, reqBody, respBody)
+}
+
+func (c *Client) postJSONWithHeaders(ctx context.Context, path string, headers map[string]string, reqBody any, respBody any) error {
+	return c.doJSON(ctx, http.MethodPost, path, headers, reqBody, respBody)
+}
+
+func (c *Client) putJSONWithHeaders(ctx context.Context, path string, headers map[string]string, reqBody any, respBody any) error {
+	return c.doJSON(ctx, http.MethodPut, path, headers, reqBody, respBody)
+}
+
+func (c *Client) deleteWithHeaders(ctx context.Context, path string, headers map[string]string) error {
+	return c.doJSON(ctx, http.MethodDelete, path, headers, nil, nil)
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, headers map[string]string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -228,13 +319,18 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 		body = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 
 	resp, err := c.client.Do(req)
@@ -245,7 +341,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		return &requestError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
 	if respBody == nil {
 		io.Copy(io.Discard, resp.Body)
@@ -255,27 +351,9 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return err
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	return c.getJSONWithHeaders(ctx, path, nil, respBody)
+}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
-	}
-	if respBody == nil {
-		io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(respBody)
+func (c *Client) getJSONWithHeaders(ctx context.Context, path string, headers map[string]string, respBody any) error {
+	return c.doJSON(ctx, http.MethodGet, path, headers, nil, respBody)
 }

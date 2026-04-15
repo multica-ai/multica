@@ -15,9 +15,13 @@ const (
 	DefaultPollInterval          = 3 * time.Second
 	DefaultHeartbeatInterval     = 15 * time.Second
 	DefaultAgentTimeout          = 2 * time.Hour
+	DefaultCodexRetryAttempts    = 2
+	DefaultCodexRetryBackoff     = 5 * time.Second
+	DefaultCodexRetryJitter      = 1500 * time.Millisecond
 	DefaultRuntimeName           = "Local Agent"
 	DefaultConfigReloadInterval  = 5 * time.Second
 	DefaultWorkspaceSyncInterval = 30 * time.Second
+	DefaultSkillSyncInterval     = 30 * time.Second
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 )
@@ -37,7 +41,11 @@ type Config struct {
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
+	SkillSyncInterval  time.Duration
 	AgentTimeout       time.Duration
+	CodexRetryAttempts int
+	CodexRetryBackoff  time.Duration
+	CodexRetryJitter   time.Duration
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -47,7 +55,11 @@ type Overrides struct {
 	WorkspacesRoot     string
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
+	SkillSyncInterval  time.Duration
 	AgentTimeout       time.Duration
+	CodexRetryAttempts int
+	CodexRetryBackoff  time.Duration
+	CodexRetryJitter   time.Duration
 	MaxConcurrentTasks int
 	DaemonID           string
 	DeviceName         string
@@ -133,12 +145,44 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		heartbeatInterval = overrides.HeartbeatInterval
 	}
 
+	skillSyncInterval, err := durationFromEnv("MULTICA_DAEMON_SKILL_SYNC_INTERVAL", DefaultSkillSyncInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.SkillSyncInterval > 0 {
+		skillSyncInterval = overrides.SkillSyncInterval
+	}
+
 	agentTimeout, err := durationFromEnv("MULTICA_AGENT_TIMEOUT", DefaultAgentTimeout)
 	if err != nil {
 		return Config{}, err
 	}
 	if overrides.AgentTimeout > 0 {
 		agentTimeout = overrides.AgentTimeout
+	}
+
+	codexRetryAttempts, err := intFromEnv("MULTICA_CODEX_RETRY_ATTEMPTS", DefaultCodexRetryAttempts)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.CodexRetryAttempts > 0 {
+		codexRetryAttempts = overrides.CodexRetryAttempts
+	}
+
+	codexRetryBackoff, err := durationFromEnv("MULTICA_CODEX_RETRY_BACKOFF", DefaultCodexRetryBackoff)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.CodexRetryBackoff > 0 {
+		codexRetryBackoff = overrides.CodexRetryBackoff
+	}
+
+	codexRetryJitter, err := durationFromEnv("MULTICA_CODEX_RETRY_JITTER", DefaultCodexRetryJitter)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.CodexRetryJitter > 0 {
+		codexRetryJitter = overrides.CodexRetryJitter
 	}
 
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
@@ -216,7 +260,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		MaxConcurrentTasks: maxConcurrentTasks,
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
+		SkillSyncInterval:  skillSyncInterval,
 		AgentTimeout:       agentTimeout,
+		CodexRetryAttempts: codexRetryAttempts,
+		CodexRetryBackoff:  codexRetryBackoff,
+		CodexRetryJitter:   codexRetryJitter,
 	}, nil
 }
 
