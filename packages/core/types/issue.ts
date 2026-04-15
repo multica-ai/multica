@@ -20,6 +20,18 @@ export interface IssueReaction {
   created_at: string;
 }
 
+export interface AcceptanceCriterion {
+  id: string;
+  description: string;
+  completed: boolean;
+}
+
+export interface ContextRef {
+  type: "issue" | "file" | "url";
+  ref: string;
+  title: string;
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -35,6 +47,9 @@ export interface Issue {
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;
+  acceptance_criteria: AcceptanceCriterion[];
+  context_refs: ContextRef[];
+  scope: string[];
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];

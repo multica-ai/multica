@@ -428,6 +428,14 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
+  async discoverAgentCommands(id: string): Promise<{ commands: { command: string; label: string; prompt: string }[]; provider: string }> {
+    return this.fetch(`/api/agents/${id}/discover-commands`, { method: "POST" });
+  }
+
+  async discoverRuntimeCommands(runtimeId: string): Promise<{ commands: { command: string; label: string; prompt: string }[]; provider: string }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/discover-commands`, { method: "POST" });
+  }
+
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     const wsId = params?.workspace_id ?? this.workspaceId;
@@ -737,8 +745,26 @@ export class ApiClient {
     });
   }
 
+  async updateChatSessionTitle(id: string, title: string): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ title }),
+    });
+  }
+
   async archiveChatSession(id: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
+  }
+
+  async listIssueChatSessions(issueId: string): Promise<ChatSession[]> {
+    return this.fetch(`/api/issues/${issueId}/chat/sessions`);
+  }
+
+  async createIssueChatSession(issueId: string, data: { agent_id: string; title?: string }): Promise<ChatSession> {
+    return this.fetch(`/api/issues/${issueId}/chat/sessions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {

@@ -20,6 +20,7 @@ import {
   Trash2,
   UserMinus,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -85,6 +86,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
+import { IssueChatTab } from "./issue-chat-tab";
 import { ProgressRing } from "./progress-ring";
 
 function shortDate(date: string | null): string {
@@ -345,6 +348,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [agentContextOpen, setAgentContextOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -1082,12 +1086,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
           <div className="my-8 border-t" />
 
-          {/* Activity / Comments */}
-          <div>
+          {/* Activity / Agent Chat */}
+          <Tabs defaultValue="activity">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">Activity</h2>
-              </div>
+              <TabsList variant="line">
+                <TabsTrigger value="activity">Activity</TabsTrigger>
+                <TabsTrigger value="agent-chat">Agent Chat</TabsTrigger>
+              </TabsList>
               <div className="flex items-center gap-2">
                 {subscribersLoading ? (
                   <div className="flex items-center gap-1">
@@ -1179,6 +1184,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </div>
             </div>
 
+            <TabsContent value="activity">
             {/* Agent live output — sticky inside the Activity section so it
                 stays pinned while scrolling through TaskRunHistory + comments. */}
             <AgentLiveCard issueId={id} />
@@ -1322,7 +1328,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <div className="mt-4">
               <CommentInput issueId={id} onSubmit={submitComment} />
             </div>
-          </div>
+            </TabsContent>
+
+            <TabsContent value="agent-chat">
+              <IssueChatTab issueId={id} />
+            </TabsContent>
+          </Tabs>
         </div>
         </div>
       </div>
@@ -1395,6 +1406,134 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   onUpdate={handleUpdateField}
                 />
               </PropRow>
+            </div>}
+          </div>
+
+          {/* Agent Context section */}
+          <div>
+            <button
+              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2`}
+              onClick={() => setAgentContextOpen(!agentContextOpen)}
+            >
+              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${agentContextOpen ? "rotate-90" : ""}`} />
+              Agent Context
+            </button>
+
+            {agentContextOpen && <div className="space-y-3 pl-2">
+              {/* Acceptance Criteria */}
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Acceptance Criteria</div>
+                {issue.acceptance_criteria.map((ac) => (
+                  <label key={ac.id} className="flex items-center gap-2 text-xs py-0.5 group">
+                    <input
+                      type="checkbox"
+                      checked={ac.completed}
+                      className="rounded border-muted-foreground/30"
+                      onChange={() => {
+                        const updated = issue.acceptance_criteria.map((item) =>
+                          item.id === ac.id ? { ...item, completed: !item.completed } : item
+                        );
+                        handleUpdateField({ acceptance_criteria: updated });
+                      }}
+                    />
+                    <span className={ac.completed ? "line-through text-muted-foreground" : ""}>{ac.description}</span>
+                    <button
+                      className="ml-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                      onClick={() => {
+                        const updated = issue.acceptance_criteria.filter((item) => item.id !== ac.id);
+                        handleUpdateField({ acceptance_criteria: updated });
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </label>
+                ))}
+                <form
+                  className="mt-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const input = e.currentTarget.querySelector("input") as HTMLInputElement;
+                    const val = input.value.trim();
+                    if (!val) return;
+                    const newAC = { id: crypto.randomUUID().slice(0, 8), description: val, completed: false };
+                    handleUpdateField({ acceptance_criteria: [...issue.acceptance_criteria, newAC] });
+                    input.value = "";
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="w-full text-xs bg-transparent border-b border-transparent focus:border-border outline-none py-0.5 placeholder:text-muted-foreground/50"
+                    placeholder="+ Add criteria"
+                  />
+                </form>
+              </div>
+
+              {/* Scope */}
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Scope</div>
+                <textarea
+                  className="w-full text-xs font-mono bg-muted/30 rounded px-2 py-1 resize-none border border-transparent focus:border-border outline-none"
+                  placeholder={"One pattern per line\ne.g. src/api/**"}
+                  rows={2}
+                  defaultValue={issue.scope.join("\n")}
+                  onBlur={(e) => {
+                    const patterns = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                    const current = issue.scope;
+                    if (JSON.stringify(patterns) !== JSON.stringify(current)) {
+                      handleUpdateField({ scope: patterns });
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Context References */}
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Context References</div>
+                {issue.context_refs.map((ref, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs py-0.5 group">
+                    <span className="text-muted-foreground shrink-0">{ref.type}:</span>
+                    <span className="truncate">{ref.title || ref.ref}</span>
+                    <button
+                      className="ml-auto opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                      onClick={() => {
+                        const updated = issue.context_refs.filter((_, idx) => idx !== i);
+                        handleUpdateField({ context_refs: updated });
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                <form
+                  className="mt-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const input = e.currentTarget.querySelector("input") as HTMLInputElement;
+                    const v = input.value.trim();
+                    if (!v) return;
+                    let newRef: { type: "issue" | "file" | "url"; ref: string; title: string };
+                    if (v.startsWith("http")) {
+                      newRef = { type: "url", ref: v, title: v };
+                    } else if (v.includes("/") || v.includes(".")) {
+                      newRef = { type: "file", ref: v, title: v };
+                    } else {
+                      newRef = { type: "issue", ref: v, title: v };
+                    }
+                    // Deduplicate
+                    const exists = issue.context_refs.some((r) => r.type === newRef.type && r.ref === newRef.ref);
+                    if (!exists) {
+                      handleUpdateField({ context_refs: [...issue.context_refs, newRef] });
+                    }
+                    input.value = "";
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="w-full text-xs bg-transparent border-b border-transparent focus:border-border outline-none py-0.5 placeholder:text-muted-foreground/50"
+                    placeholder="+ Issue ID, file path, or URL"
+                  />
+                </form>
+              </div>
             </div>}
           </div>
 
