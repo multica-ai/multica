@@ -104,7 +104,6 @@ func TestCursorHandleAssistantText(t *testing.T) {
 	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
 	var output strings.Builder
-	usage := make(map[string]TokenUsage)
 
 	evt := &cursorStreamEvent{
 		Type: "assistant",
@@ -120,7 +119,7 @@ func TestCursorHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleCursorAssistant(evt, ch, &output, usage)
+	b.handleCursorAssistant(evt, ch, &output)
 
 	if output.String() != "Hello from Cursor" {
 		t.Fatalf("expected output 'Hello from Cursor', got %q", output.String())
@@ -134,14 +133,6 @@ func TestCursorHandleAssistantText(t *testing.T) {
 	default:
 		t.Fatal("expected message on channel")
 	}
-
-	u, ok := usage["composer-1.5"]
-	if !ok {
-		t.Fatal("expected usage for composer-1.5")
-	}
-	if u.InputTokens != 100 || u.OutputTokens != 50 {
-		t.Fatalf("unexpected usage: %+v", u)
-	}
 }
 
 func TestCursorHandleAssistantToolUse(t *testing.T) {
@@ -150,7 +141,6 @@ func TestCursorHandleAssistantToolUse(t *testing.T) {
 	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
 	var output strings.Builder
-	usage := make(map[string]TokenUsage)
 
 	evt := &cursorStreamEvent{
 		Type: "assistant",
@@ -166,7 +156,7 @@ func TestCursorHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleCursorAssistant(evt, ch, &output, usage)
+	b.handleCursorAssistant(evt, ch, &output)
 
 	select {
 	case m := <-ch:
@@ -202,29 +192,6 @@ func TestCursorErrorText(t *testing.T) {
 	}
 }
 
-func TestIsCursorUnknownSessionError(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		stdout string
-		stderr string
-		want   bool
-	}{
-		{"unknown session abc123", "", true},
-		{"", "could not resume session", true},
-		{"session xyz not found", "", true},
-		{"everything is fine", "", false},
-		{"", "", false},
-	}
-
-	for _, tc := range tests {
-		got := isCursorUnknownSessionError(tc.stdout, tc.stderr)
-		if got != tc.want {
-			t.Errorf("isCursorUnknownSessionError(%q, %q) = %v, want %v", tc.stdout, tc.stderr, got, tc.want)
-		}
-	}
-}
-
 func TestCursorAccumulateResultUsage(t *testing.T) {
 	t.Parallel()
 
@@ -246,6 +213,38 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 	if u.InputTokens != 200 || u.OutputTokens != 100 || u.CacheReadTokens != 50 {
 		t.Fatalf("unexpected usage: %+v", u)
 	}
+}
+
+func TestCursorUsageOnlyFromResult(t *testing.T) {
+	t.Parallel()
+
+	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	var output strings.Builder
+
+	evt := &cursorStreamEvent{
+		Type: "assistant",
+		Message: mustMarshal(t, cursorAssistantMessage{
+			Model: "gpt-5",
+			Content: []cursorContentBlock{
+				{Type: "text", Text: "hello"},
+			},
+			Usage: &cursorUsage{
+				InputTokens:  999,
+				OutputTokens: 888,
+			},
+		}),
+	}
+
+	b.handleCursorAssistant(evt, ch, &output)
+
+	if output.String() != "hello" {
+		t.Fatalf("expected 'hello', got %q", output.String())
+	}
+
+	// handleCursorAssistant should NOT have accumulated usage anywhere —
+	// usage is only taken from result events to avoid double-counting.
+	// (no usage map to check; this test documents the intent)
 }
 
 func TestCursorStepFinishParsing(t *testing.T) {

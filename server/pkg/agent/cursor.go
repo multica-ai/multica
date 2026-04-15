@@ -75,7 +75,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
-		usage := make(map[string]TokenUsage)
+		// resultUsage holds authoritative usage from "result" events (session totals).
+		// We only use this for the final Result to avoid double-counting with
+		// per-message usage reported in "assistant" or "step_finish" events.
+		resultUsage := make(map[string]TokenUsage)
+		hasResultUsage := false
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -109,7 +113,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 
 			case "assistant":
-				b.handleCursorAssistant(&evt, msgCh, &output, usage)
+				b.handleCursorAssistant(&evt, msgCh, &output)
 
 			case "tool_use":
 				var params map[string]any
@@ -138,7 +142,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.ResultText != "" && output.Len() == 0 {
 					output.WriteString(evt.ResultText)
 				}
-				b.accumulateResultUsage(usage, &evt)
+				b.accumulateResultUsage(resultUsage, &evt)
+				if evt.Usage != nil {
+					hasResultUsage = true
+				}
 
 			case "error":
 				errMsg := cursorErrorText(&evt)
@@ -148,7 +155,6 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				trySend(msgCh, Message{Type: MessageError, Content: errMsg})
 
 			case "text":
-				// Compatibility with older stream-json shapes.
 				if evt.Part != nil {
 					var part cursorTextPart
 					_ = json.Unmarshal(evt.Part, &part)
@@ -159,18 +165,18 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 
 			case "step_finish":
-				if evt.Part != nil {
+				if evt.Part != nil && !hasResultUsage {
 					var part cursorStepFinishPart
 					_ = json.Unmarshal(evt.Part, &part)
 					model := evt.Model
 					if model == "" {
 						model = "cursor"
 					}
-					u := usage[model]
+					u := resultUsage[model]
 					u.InputTokens += int64(part.Tokens.Input)
 					u.OutputTokens += int64(part.Tokens.Output)
 					u.CacheReadTokens += int64(part.Tokens.Cache.Read)
-					usage[model] = u
+					resultUsage[model] = u
 				}
 			}
 		}
@@ -197,14 +203,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionID,
-			Usage:      usage,
+			Usage:      resultUsage,
 		}
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- Message, output *strings.Builder) {
 	if evt.Message == nil {
 		return
 	}
@@ -214,13 +220,9 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 		return
 	}
 
-	if content.Usage != nil && content.Model != "" {
-		u := usage[content.Model]
-		u.InputTokens += content.Usage.InputTokens
-		u.OutputTokens += content.Usage.OutputTokens
-		u.CacheReadTokens += content.Usage.CacheReadInputTokens
-		usage[content.Model] = u
-	}
+	// Note: per-message usage in assistant events is intentionally ignored.
+	// Token usage is taken exclusively from "result" events (session totals)
+	// to avoid double-counting.
 
 	for _, block := range content.Content {
 		switch block.Type {
@@ -368,17 +370,6 @@ func cursorErrorText(evt *cursorStreamEvent) string {
 	}
 	return ""
 }
-
-// isCursorUnknownSessionError detects session-not-found errors so the
-// caller can retry without --resume.
-func isCursorUnknownSessionError(stdout, stderr string) bool {
-	haystack := stdout + "\n" + stderr
-	return cursorSessionErrorRe.MatchString(haystack)
-}
-
-var cursorSessionErrorRe = regexp.MustCompile(
-	`(?i)(unknown\s+(session|chat)|session\s+.*\s+not\s+found|chat\s+.*\s+not\s+found|resume\s+.*\s+not\s+found|could\s+not\s+resume)`,
-)
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
