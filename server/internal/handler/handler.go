@@ -31,6 +31,12 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+type Config struct {
+	AllowSignup         bool
+	AllowedEmails       []string
+	AllowedEmailDomains []string
+}
+
 type Handler struct {
 	Queries          *db.Queries
 	DB               dbExecutor
@@ -44,9 +50,10 @@ type Handler struct {
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
+	cfg              Config
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, cfg Config) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
@@ -66,6 +73,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:      NewUpdateStore(),
 		Storage:          store,
 		CFSigner:         cfSigner,
+		cfg:              cfg,
 	}
 }
 
