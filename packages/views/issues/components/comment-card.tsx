@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Download, Eye, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -36,6 +36,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
+import { Markdown } from "@multica/ui/markdown";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,10 +93,36 @@ function DeleteCommentDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Diff viewer helper — colorizes unified diff lines
+// ---------------------------------------------------------------------------
+
+function DiffView({ content }: { content: string }) {
+  return (
+    <pre className="overflow-x-auto text-xs font-mono leading-relaxed">
+      {content.split("\n").map((line, i) => {
+        let color = "";
+        if (line.startsWith("+") && !line.startsWith("+++")) color = "text-green-600 dark:text-green-400";
+        else if (line.startsWith("-") && !line.startsWith("---")) color = "text-red-600 dark:text-red-400";
+        else if (line.startsWith("@@")) color = "text-blue-600 dark:text-blue-400";
+        else if (line.startsWith("diff ") || line.startsWith("index ")) color = "text-muted-foreground font-semibold";
+        return (
+          <div key={i} className={cn(color)}>
+            {line}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [fetchedContent, setFetchedContent] = useState<Record<string, string>>({});
+
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content
   const standalone = content
@@ -103,25 +130,97 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
     : attachments;
   if (!standalone.length) return null;
 
+  const isPreviewable = (a: Attachment) => {
+    const ext = a.filename.split(".").pop()?.toLowerCase();
+    return (
+      a.content_type.startsWith("image/") ||
+      ext === "md" || ext === "txt" ||
+      ext === "patch" || ext === "diff"
+    );
+  };
+
+  const isDiff = (a: Attachment) => {
+    const ext = a.filename.split(".").pop()?.toLowerCase();
+    return ext === "patch" || ext === "diff";
+  };
+
+  const isMarkdown = (a: Attachment) => {
+    const ext = a.filename.split(".").pop()?.toLowerCase();
+    return ext === "md" || ext === "txt";
+  };
+
+  const isImage = (a: Attachment) => a.content_type.startsWith("image/");
+
+  const togglePreview = async (a: Attachment) => {
+    if (expandedId === a.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(a.id);
+    if (!fetchedContent[a.id] && !isImage(a)) {
+      try {
+        const res = await fetch(a.download_url);
+        const text = await res.text();
+        setFetchedContent((prev) => ({ ...prev, [a.id]: text }));
+      } catch {
+        setFetchedContent((prev) => ({ ...prev, [a.id]: "Failed to load content" }));
+      }
+    }
+  };
+
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {standalone.map((a) => (
-        <div
-          key={a.id}
-          className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        >
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{a.filename}</p>
+        <div key={a.id}>
+          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              {isPreviewable(a) ? (
+                <button
+                  type="button"
+                  className="truncate text-sm text-primary hover:underline cursor-pointer bg-transparent border-none p-0"
+                  onClick={() => togglePreview(a)}
+                >
+                  {a.filename}
+                </button>
+              ) : (
+                <p className="truncate text-sm">{a.filename}</p>
+              )}
+            </div>
+            {isPreviewable(a) && (
+              <button
+                type="button"
+                className={cn(
+                  "shrink-0 rounded-md p-1 transition-colors hover:bg-secondary hover:text-foreground",
+                  expandedId === a.id ? "text-primary" : "text-muted-foreground"
+                )}
+                onClick={() => togglePreview(a)}
+              >
+                <Eye className="size-3.5" />
+              </button>
+            )}
+            {a.download_url && (
+              <button
+                type="button"
+                className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
+              >
+                <Download className="size-3.5" />
+              </button>
+            )}
           </div>
-          {a.download_url && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
+          {expandedId === a.id && (
+            <div className="mt-1 rounded-md border border-border bg-muted/30 p-3 text-sm">
+              {isImage(a) ? (
+                <img src={a.url} alt={a.filename} className="max-w-full h-auto rounded" loading="lazy" />
+              ) : isDiff(a) && fetchedContent[a.id] ? (
+                <DiffView content={fetchedContent[a.id]!} />
+              ) : isMarkdown(a) && fetchedContent[a.id] ? (
+                <Markdown mode="full">{fetchedContent[a.id]!}</Markdown>
+              ) : (
+                <p className="text-muted-foreground">Loading...</p>
+              )}
+            </div>
           )}
         </div>
       ))}

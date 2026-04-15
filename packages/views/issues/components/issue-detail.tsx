@@ -14,6 +14,7 @@ import {
   Link2,
   MoreHorizontal,
   PanelRight,
+  Paperclip,
   Pin,
   PinOff,
   Plus,
@@ -69,7 +70,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -388,6 +389,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
+
+  // Attachments
+  const { data: attachments } = useQuery(issueAttachmentsOptions(id));
 
   // Pinned state
   const { data: pinnedItems = [] } = useQuery({
@@ -1470,6 +1474,38 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <PropRow label="Runs">
                   <span className="text-muted-foreground">{usage.task_count}</span>
                 </PropRow>
+              </div>
+            </div>
+          )}
+
+          {/* Attachments */}
+          {attachments && attachments.length > 0 && (
+            <div>
+              <div className="text-xs font-medium mb-2 flex items-center gap-1">
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                Attachments
+                <span className="text-muted-foreground ml-auto">{attachments.length}</span>
+              </div>
+              <div className="space-y-1 pl-2">
+                {attachments.map((a) => (
+                  <a
+                    key={a.id}
+                    href={a.download_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
+                  >
+                    <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate group-hover:text-foreground">{a.filename}</span>
+                    <span className="ml-auto shrink-0 text-muted-foreground">
+                      {a.size_bytes < 1024
+                        ? `${a.size_bytes} B`
+                        : a.size_bytes < 1048576
+                          ? `${(a.size_bytes / 1024).toFixed(1)} KB`
+                          : `${(a.size_bytes / 1048576).toFixed(1)} MB`}
+                    </span>
+                  </a>
+                ))}
               </div>
             </div>
           )}
