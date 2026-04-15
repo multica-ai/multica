@@ -12,7 +12,7 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar, DashboardGuard } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
-import { OnboardingWizard } from "@multica/views/onboarding";
+import { StepWorkspace } from "@multica/views/onboarding";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { DesktopNavigationProvider } from "@/platform/navigation";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -96,8 +96,8 @@ export function DesktopShell() {
       <OnboardingGate
         hasWorkspace={!!workspace}
         onboarding={(onComplete) => (
-          <div className="h-screen overflow-auto">
-            <OnboardingWizard onComplete={onComplete} />
+          <div className="flex min-h-screen items-center justify-center overflow-auto bg-background px-6 py-12">
+            <StepWorkspace onNext={onComplete} />
           </div>
         )}
       >
