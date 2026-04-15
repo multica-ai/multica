@@ -93,6 +93,20 @@ function PiLogo({ className }: { className: string }) {
   );
 }
 
+// Cursor — official brand 3D cube logo
+function CursorLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="600 300 400 400" fill="none" className={className}>
+      <path d="M799.5 501.5L600.5 386V617L799.5 501.5Z" fill="#19191A" />
+      <path d="M799.5 501.5L1000 617V386L799.5 501.5Z" fill="#2D2D2F" />
+      <path d="M600.5 386L799.5 271L1000 386L799.5 501.5L600.5 386Z" fill="#404043" />
+      <path d="M799.5 501.5L600.5 617L799.5 732L799.5 501.5Z" fill="#19191A" />
+      <path d="M799.5 501.5L1000 617L799.5 732V501.5Z" fill="#2D2D2F" />
+      <path d="M799.5 501.5L799.5 732L600.5 617L799.5 501.5Z" fill="#19191A" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -113,6 +127,8 @@ export function ProviderLogo({
       return <HermesLogo className={className} />;
     case "pi":
       return <PiLogo className={className} />;
+    case "cursor":
+      return <CursorLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
