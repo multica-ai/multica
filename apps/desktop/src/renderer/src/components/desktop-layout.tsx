@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
@@ -16,6 +16,7 @@ import { OnboardingWizard } from "@multica/views/onboarding";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { DesktopNavigationProvider } from "@/platform/navigation";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { OnboardingGate } from "./onboarding-gate";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 
@@ -89,55 +90,44 @@ export function DesktopShell() {
   useActiveTitleSync();
 
   const workspace = useWorkspaceStore((s) => s.workspace);
-  // Freeze the "needs onboarding" decision at first mount so that creating
-  // a workspace mid-wizard (step 0) doesn't unmount the wizard and dump
-  // the user into the main shell before they finish the later steps.
-  // DesktopShell is only mounted after AppContent's bootstrapping finishes,
-  // so `!workspace` at first render is a reliable empty-state signal.
-  const initialNeedsOnboarding = useRef<boolean | null>(null);
-  if (initialNeedsOnboarding.current === null) {
-    initialNeedsOnboarding.current = !workspace;
-  }
-  const [onboardingDone, setOnboardingDone] = useState(false);
-
-  if (initialNeedsOnboarding.current && !onboardingDone) {
-    return (
-      <DesktopNavigationProvider>
-        <div className="h-screen overflow-auto">
-          <OnboardingWizard onComplete={() => setOnboardingDone(true)} />
-        </div>
-      </DesktopNavigationProvider>
-    );
-  }
 
   return (
     <DesktopNavigationProvider>
-      <DashboardGuard
-        loginPath="/login"
-        loadingFallback={
-          <div className="flex h-screen items-center justify-center">
-            <MulticaIcon className="size-6 animate-pulse" />
+      <OnboardingGate
+        hasWorkspace={!!workspace}
+        onboarding={(onComplete) => (
+          <div className="h-screen overflow-auto">
+            <OnboardingWizard onComplete={onComplete} />
           </div>
-        }
+        )}
       >
-        <div className="flex h-screen">
-          <SidebarProvider className="flex-1">
-            <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />
-            {/* Right side: header + content container */}
-            <div className="flex flex-1 min-w-0 flex-col">
-              <MainTopBar />
-              {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
-              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
-                <TabContent />
-                <ChatWindow />
-                <ChatFab />
-              </div>
+        <DashboardGuard
+          loginPath="/login"
+          loadingFallback={
+            <div className="flex h-screen items-center justify-center">
+              <MulticaIcon className="size-6 animate-pulse" />
             </div>
-          </SidebarProvider>
-        </div>
-        <ModalRegistry />
-        <SearchCommand />
-      </DashboardGuard>
+          }
+        >
+          <div className="flex h-screen">
+            <SidebarProvider className="flex-1">
+              <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />
+              {/* Right side: header + content container */}
+              <div className="flex flex-1 min-w-0 flex-col">
+                <MainTopBar />
+                {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
+                <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
+                  <TabContent />
+                  <ChatWindow />
+                  <ChatFab />
+                </div>
+              </div>
+            </SidebarProvider>
+          </div>
+          <ModalRegistry />
+          <SearchCommand />
+        </DashboardGuard>
+      </OnboardingGate>
     </DesktopNavigationProvider>
   );
 }
