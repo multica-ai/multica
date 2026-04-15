@@ -6,11 +6,28 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
+
+func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
+	t.Helper()
+	data, err := json.Marshal(repos)
+	if err != nil {
+		t.Fatalf("marshal repos: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID); err != nil {
+		t.Fatalf("update workspace repos: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
+			t.Fatalf("reset workspace repos: %v", err)
+		}
+	})
+}
 
 // newDaemonTokenRequest creates an HTTP request with daemon token context set
 // (simulating DaemonAuth middleware for mdt_ tokens).
@@ -51,6 +68,9 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	runtimes, ok := resp["runtimes"].([]any)
 	if !ok || len(runtimes) == 0 {
 		t.Fatalf("DaemonRegister: expected runtimes in response, got %v", resp)
+	}
+	if _, ok := resp["repos_version"].(string); !ok {
+		t.Fatalf("DaemonRegister: expected repos_version in response, got %v", resp)
 	}
 
 	// Clean up: deregister the runtime.
@@ -178,5 +198,109 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	testHandler.GetTaskStatus(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetTaskStatus with correct workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": "git@example.com:team/api.git", "description": "API"},
+		{"url": "  git@example.com:team/web.git  ", "description": " Web "},
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+
+	testHandler.GetDaemonWorkspaceRepos(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetDaemonWorkspaceRepos: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		WorkspaceID  string              `json:"workspace_id"`
+		Repos        []map[string]string `json:"repos"`
+		ReposVersion string              `json:"repos_version"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.WorkspaceID != testWorkspaceID {
+		t.Fatalf("expected workspace_id %s, got %s", testWorkspaceID, resp.WorkspaceID)
+	}
+	if len(resp.Repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(resp.Repos))
+	}
+	if resp.Repos[1]["url"] != "git@example.com:team/web.git" {
+		t.Fatalf("expected trimmed repo URL, got %q", resp.Repos[1]["url"])
+	}
+	if resp.ReposVersion == "" {
+		t.Fatal("expected repos_version to be set")
+	}
+}
+
+func TestGetDaemonWorkspaceRepos_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, "00000000-0000-0000-0000-000000000000", "test-daemon-mdt")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+
+	testHandler.GetDaemonWorkspaceRepos(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GetDaemonWorkspaceRepos with mismatched workspace: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": "git@example.com:team/api.git", "description": "API"},
+		{"url": "git@example.com:team/web.git", "description": "Web"},
+	})
+
+	getReposVersion := func() string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
+		req = withURLParam(req, "workspaceId", testWorkspaceID)
+		testHandler.GetDaemonWorkspaceRepos(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetDaemonWorkspaceRepos: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			ReposVersion string `json:"repos_version"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp.ReposVersion
+	}
+
+	version1 := getReposVersion()
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID); err != nil {
+		t.Fatalf("update workspace repos: %v", err)
+	}
+	version2 := getReposVersion()
+	if version1 != version2 {
+		t.Fatalf("expected repos_version to ignore order/description changes, got %s vs %s", version1, version2)
+	}
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID); err != nil {
+		t.Fatalf("update workspace repos: %v", err)
+	}
+	version3 := getReposVersion()
+	if strings.EqualFold(version2, version3) {
+		t.Fatalf("expected repos_version to change when URL set changes, got %s", version3)
 	}
 }

@@ -221,13 +221,28 @@ func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 
 // RegisterResponse holds the server's response to a daemon registration.
 type RegisterResponse struct {
-	Runtimes []Runtime  `json:"runtimes"`
-	Repos    []RepoData `json:"repos"`
+	Runtimes     []Runtime  `json:"runtimes"`
+	Repos        []RepoData `json:"repos"`
+	ReposVersion string     `json:"repos_version"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {
 	var resp RegisterResponse
 	if err := c.postJSON(ctx, "/api/daemon/register", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+type WorkspaceReposResponse struct {
+	WorkspaceID  string     `json:"workspace_id"`
+	Repos        []RepoData `json:"repos"`
+	ReposVersion string     `json:"repos_version"`
+}
+
+func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {
+	var resp WorkspaceReposResponse
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repos", workspaceID), &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

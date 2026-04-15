@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -123,6 +126,70 @@ type DaemonRegisterRequest struct {
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
 	} `json:"runtimes"`
+}
+
+type daemonWorkspaceReposResponse struct {
+	WorkspaceID  string     `json:"workspace_id"`
+	Repos        []RepoData `json:"repos"`
+	ReposVersion string     `json:"repos_version"`
+}
+
+func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
+	if len(repos) == 0 {
+		return []RepoData{}
+	}
+
+	normalized := make([]RepoData, 0, len(repos))
+	seen := make(map[string]struct{}, len(repos))
+	for _, repo := range repos {
+		url := strings.TrimSpace(repo.URL)
+		if url == "" {
+			continue
+		}
+		if _, exists := seen[url]; exists {
+			continue
+		}
+		seen[url] = struct{}{}
+		normalized = append(normalized, RepoData{
+			URL:         url,
+			Description: strings.TrimSpace(repo.Description),
+		})
+	}
+	return normalized
+}
+
+func workspaceReposVersion(repos []RepoData) string {
+	urls := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		if repo.URL == "" {
+			continue
+		}
+		urls = append(urls, repo.URL)
+	}
+	sort.Strings(urls)
+	sum := sha256.Sum256([]byte(strings.Join(urls, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+func parseWorkspaceRepos(raw []byte) []RepoData {
+	if len(raw) == 0 {
+		return []RepoData{}
+	}
+
+	var repos []RepoData
+	if err := json.Unmarshal(raw, &repos); err != nil {
+		return []RepoData{}
+	}
+	return normalizeWorkspaceRepos(repos)
+}
+
+func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
+	repos := parseWorkspaceRepos(raw)
+	return daemonWorkspaceReposResponse{
+		WorkspaceID:  workspaceID,
+		Repos:        repos,
+		ReposVersion: workspaceReposVersion(repos),
+	}
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -248,16 +315,27 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	// Include workspace repos so the daemon can cache them locally.
-	var repos []RepoData
-	if ws.Repos != nil {
-		json.Unmarshal(ws.Repos, &repos)
-	}
-	if repos == nil {
-		repos = []RepoData{}
+	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtimes":      resp,
+		"repos":         repoResp.Repos,
+		"repos_version": repoResp.ReposVersion,
+	})
+}
+
+func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"runtimes": resp, "repos": repos})
+	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.

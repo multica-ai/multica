@@ -67,7 +67,7 @@ export function RepositoriesTab() {
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              GitHub repositories associated with this workspace. Agents use these to clone and work on code.
+              Git repositories associated with this workspace. Agents use these to clone and work on code.
             </p>
 
             {repos.map((repo, index) => (
@@ -78,7 +78,7 @@ export function RepositoriesTab() {
                     value={repo.url}
                     onChange={(e) => handleRepoChange(index, "url", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="https://github.com/org/repo"
+                    placeholder="https://git.example.com/org/repo.git"
                     className="text-sm"
                   />
                   <Input
