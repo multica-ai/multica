@@ -9,6 +9,7 @@ It covers:
 - isolated worktree development
 - the shared PostgreSQL model
 - testing and verification
+- full-stack isolated testing (backend + frontend + daemon from source)
 - troubleshooting and destructive reset options
 
 ## Development Model
@@ -307,6 +308,199 @@ make daemon
 
 The daemon authenticates using the CLI's stored token (`multica login`).
 It registers runtimes for all watched workspaces from the CLI config.
+
+## Full-Stack Isolated Testing
+
+This section covers running the complete stack (backend, frontend, daemon) from
+source in a fully isolated environment. Useful for testing end-to-end changes
+that span multiple components, or for automated CI/AI workflows that need zero
+human intervention.
+
+### Why Not Just `make daemon`?
+
+`make daemon` uses the system-installed CLI's stored token and connects to
+whatever server is configured in `~/.multica/config.json`. That's fine for
+day-to-day development against a shared server, but for fully isolated testing
+you need:
+
+- a local backend and frontend (from source)
+- a local daemon (from source) with its own profile
+- automated authentication (no browser login)
+- no interference with your production CLI config
+
+### Dynamic Profile Naming
+
+Each worktree must use a unique daemon profile to avoid collisions when
+multiple features run in parallel.
+
+The profile name is derived from the worktree directory using the same
+slug + hash pattern as `scripts/init-worktree-env.sh`:
+
+```bash
+WORKTREE_DIR="$(basename "$PWD")"
+SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
+HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
+OFFSET=$((HASH % 1000))
+PROFILE="dev-${SLUG}-${OFFSET}"
+```
+
+Example: worktree at `../multica-feat-auth` produces profile
+`dev-multica_feat_auth-347`, matching that worktree's port and database
+allocation.
+
+### Start the Isolated Environment
+
+Run all steps from the worktree root (where the Makefile is).
+
+#### 1. Start backend, frontend, and database
+
+```bash
+make dev
+```
+
+Wait for the backend to be healthy:
+
+```bash
+PORT=$(grep '^PORT=' .env.worktree 2>/dev/null || grep '^PORT=' .env | head -1 | cut -d= -f2)
+PORT=${PORT:-8080}
+SERVER="http://localhost:${PORT}"
+
+for i in $(seq 1 30); do
+  curl -sf "$SERVER/health" > /dev/null 2>&1 && break
+  sleep 2
+done
+```
+
+#### 2. Create a test user and token (automated auth)
+
+In non-production environments the verification code is fixed at `888888`:
+
+```bash
+curl -s -X POST "$SERVER/auth/send-code" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "dev@localhost"}'
+
+JWT=$(curl -s -X POST "$SERVER/auth/verify-code" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "dev@localhost", "code": "888888"}' | jq -r '.token')
+
+PAT=$(curl -s -X POST "$SERVER/api/tokens" \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "auto-dev", "expires_in_days": 365}' | jq -r '.token')
+```
+
+#### 3. Create a workspace
+
+```bash
+WS=$(curl -s -X POST "$SERVER/api/workspaces" \
+  -H "Authorization: Bearer $PAT" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Dev", "slug": "dev"}' | jq -r '.id')
+```
+
+#### 4. Compute profile name and write CLI config
+
+```bash
+# Compute profile (see Dynamic Profile Naming above)
+WORKTREE_DIR="$(basename "$PWD")"
+SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
+HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
+OFFSET=$((HASH % 1000))
+PROFILE="dev-${SLUG}-${OFFSET}"
+
+FRONTEND_PORT=$(grep '^FRONTEND_PORT=' .env.worktree 2>/dev/null || grep '^FRONTEND_PORT=' .env | head -1 | cut -d= -f2)
+FRONTEND_PORT=${FRONTEND_PORT:-3000}
+
+CONFIG_DIR="$HOME/.multica/profiles/$PROFILE"
+mkdir -p "$CONFIG_DIR"
+
+cat > "$CONFIG_DIR/config.json" << EOF
+{
+  "server_url": "$SERVER",
+  "app_url": "http://localhost:${FRONTEND_PORT}",
+  "token": "$PAT",
+  "workspace_id": "$WS",
+  "watched_workspaces": [{"id": "$WS", "name": "Dev"}]
+}
+EOF
+```
+
+#### 5. Start the daemon from source
+
+```bash
+make cli ARGS="daemon start --profile $PROFILE"
+```
+
+The daemon runs from the current worktree's Go source, connecting to the
+local backend. Agent-executed `multica` commands automatically use the same
+binary (the daemon prepends its own directory to `PATH`).
+
+### Stop the Isolated Environment
+
+```bash
+# Compute profile (same formula)
+PROFILE="dev-$(printf '%s' "$(basename "$PWD")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')-$(( $(printf '%s' "$PWD" | cksum | awk '{print $1}') % 1000 ))"
+
+# 1. Stop daemon
+make cli ARGS="daemon stop --profile $PROFILE"
+
+# 2. Stop backend + frontend
+make stop            # main checkout
+make stop-worktree   # worktree checkout
+
+# 3. (Optional) Stop shared PostgreSQL
+make db-down
+
+# 4. (Optional) Clean build artifacts
+make clean
+
+# 5. (Optional) Remove profile config
+rm -rf "$HOME/.multica/profiles/$PROFILE"
+```
+
+### Desktop App Local Testing
+
+To test the Electron desktop app against a local backend:
+
+```bash
+# After backend is running (make dev)
+pnpm dev:desktop
+```
+
+This automatically:
+
+1. Compiles the `multica` CLI from `server/cmd/multica` into
+   `apps/desktop/resources/bin/multica`
+2. Creates an isolated profile named `desktop-localhost-<PORT>`
+3. Starts and manages its own daemon instance
+4. Connects to the local backend
+
+Login in the Desktop UI with `dev@localhost` and code `888888`.
+
+If the backend runs on a non-default port (worktree), create
+`apps/desktop/.env.development.local`:
+
+```bash
+VITE_API_URL=http://localhost:<backend-port>
+VITE_WS_URL=ws://localhost:<backend-port>/ws
+```
+
+### Isolation Guarantee
+
+Nothing in this flow touches the system-installed `multica` or the default
+`~/.multica/config.json`:
+
+| Resource | System / Production | Local Dev (per-worktree) |
+|---|---|---|
+| Config | `~/.multica/config.json` | `~/.multica/profiles/dev-<slug>-<hash>/config.json` |
+| Daemon PID | `~/.multica/daemon.pid` | `~/.multica/profiles/dev-<slug>-<hash>/daemon.pid` |
+| Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
+| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<hash>/` |
+| Database | remote / production | local Docker: `multica_<slug>_<hash>` |
+| Desktop profile | `desktop-api.multica.ai` | `desktop-localhost-<port>` |
+
+Multiple worktrees can run simultaneously without conflict.
 
 ## Troubleshooting
 
