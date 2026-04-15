@@ -444,6 +444,25 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         { id, ...updates },
         { onError: () => toast.error("Failed to update issue") },
       );
+      // Hint: assigning an agent to a backlog issue won't trigger execution
+      // until the issue is moved to an active status.
+      if (
+        updates.assignee_type === "agent" &&
+        updates.assignee_id &&
+        issue.status === "backlog"
+      ) {
+        toast("Agent won't start in Backlog", {
+          description: "Move the issue to Todo to trigger execution.",
+          action: {
+            label: "Move to Todo",
+            onClick: () => updateIssueMutation.mutate(
+              { id, status: "todo" },
+              { onError: () => toast.error("Failed to update status") },
+            ),
+          },
+          duration: 6000,
+        });
+      }
     },
     [issue, id, updateIssueMutation],
   );

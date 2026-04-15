@@ -18,7 +18,7 @@ import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { useCreateIssue } from "@multica/core/issues/mutations";
+import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -97,6 +97,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
 
   const createIssueMutation = useCreateIssue();
+  const updateIssueMutation = useUpdateIssue();
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
@@ -139,6 +140,20 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           </button>
         </div>
       ), { duration: 5000 });
+      // Hint when creating a backlog issue with an agent assignee.
+      if (status === "backlog" && assigneeType === "agent" && assigneeId) {
+        toast("Agent won't start in Backlog", {
+          description: "Move the issue to Todo to trigger execution.",
+          action: {
+            label: "Move to Todo",
+            onClick: () => updateIssueMutation.mutate(
+              { id: issue.id, status: "todo" },
+              { onError: () => toast.error("Failed to update status") },
+            ),
+          },
+          duration: 6000,
+        });
+      }
     } catch {
       toast.error("Failed to create issue");
     } finally {
