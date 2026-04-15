@@ -20,6 +20,7 @@ type HealthResponse struct {
 	DaemonID   string            `json:"daemon_id"`
 	DeviceName string            `json:"device_name"`
 	ServerURL  string            `json:"server_url"`
+	CLIVersion string            `json:"cli_version"`
 	Agents     []string          `json:"agents"`
 	Workspaces []healthWorkspace `json:"workspaces"`
 }
@@ -76,6 +77,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			DaemonID:   d.cfg.DaemonID,
 			DeviceName: d.cfg.DeviceName,
 			ServerURL:  d.cfg.ServerBaseURL,
+			CLIVersion: d.cfg.CLIVersion,
 			Agents:     agents,
 			Workspaces: wsList,
 		}

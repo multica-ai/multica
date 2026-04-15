@@ -39,6 +39,7 @@ let getMainWindow: () => BrowserWindow | null = () => null;
 let operationInProgress = false;
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
+let cachedCliBinaryVersion: string | null | undefined = undefined;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
 
@@ -132,6 +133,7 @@ interface HealthPayload {
   daemon_id?: string;
   device_name?: string;
   server_url?: string;
+  cli_version?: string;
   agents?: string[];
   workspaces?: unknown[];
 }
@@ -359,6 +361,72 @@ async function resolveCliBinary(): Promise<string | null> {
   } finally {
     cliResolvePromise = null;
   }
+}
+
+/**
+ * Reads the version of the currently resolved CLI binary by invoking
+ * `multica version --output json`. Cached for the process lifetime — the
+ * bundled binary doesn't change after `bundle-cli.mjs` runs at dev/build time.
+ * Returns null on any failure (unknown `go` at bundle time, broken binary,
+ * etc.) so callers can fail open.
+ */
+async function getCliBinaryVersion(): Promise<string | null> {
+  if (cachedCliBinaryVersion !== undefined) return cachedCliBinaryVersion;
+  const bin = await resolveCliBinary();
+  if (!bin) {
+    cachedCliBinaryVersion = null;
+    return null;
+  }
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        bin,
+        ["version", "--output", "json"],
+        { timeout: 5_000 },
+        (err, out) => {
+          if (err) reject(err);
+          else resolve(out);
+        },
+      );
+    });
+    const parsed = JSON.parse(stdout) as { version?: string };
+    cachedCliBinaryVersion = parsed.version ?? null;
+  } catch (err) {
+    console.warn("[daemon] failed to read CLI binary version:", err);
+    cachedCliBinaryVersion = null;
+  }
+  return cachedCliBinaryVersion;
+}
+
+/**
+ * If a daemon is already running on the active profile's port, compares its
+ * reported `cli_version` to the CLI binary we would use to spawn a new one.
+ * Restarts only when BOTH versions are known AND they differ — a restart
+ * kills in-flight agent tasks, so we fail safe on any uncertainty.
+ *
+ * Returns `"restarted" | "ok" | "not_running"`.
+ */
+async function ensureRunningDaemonVersionMatches(): Promise<
+  "restarted" | "ok" | "not_running"
+> {
+  const active = await ensureActiveProfile();
+  const running = await fetchHealthAtPort(active.port);
+  if (!running || running.status !== "running") return "not_running";
+
+  const bundled = await getCliBinaryVersion();
+  const runningVersion = running.cli_version;
+
+  // Unknown on either side → can't prove mismatch → leave the daemon alone.
+  // This covers: bundled binary missing/broken, and older daemons that
+  // predate the cli_version field in /health.
+  if (!bundled || !runningVersion) return "ok";
+  if (runningVersion === bundled) return "ok";
+
+  console.log(
+    `[daemon] CLI version mismatch (bundled=${bundled} running=${runningVersion}) — restarting daemon`,
+  );
+  await restartDaemon();
+  return "restarted";
 }
 
 /**
@@ -755,7 +823,12 @@ export function setupDaemonManager(
     const bin = await resolveCliBinary();
     if (!bin) return;
     const health = await fetchHealth();
-    if (health.state === "running") return;
+    if (health.state === "running") {
+      // Daemon is up but may be running an older CLI than the one we just
+      // bundled. Restart it so the new binary actually takes effect.
+      await ensureRunningDaemonVersionMatches();
+      return;
+    }
     await startDaemon();
   });
 
