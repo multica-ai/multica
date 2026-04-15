@@ -15,20 +15,7 @@ import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { ExternalLink, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function openLink(href: string) {
-  if (href.startsWith("/")) {
-    window.dispatchEvent(
-      new CustomEvent("multica:navigate", { detail: { path: href } }),
-    );
-  } else {
-    window.open(href, "_blank", "noopener,noreferrer");
-  }
-}
+import { openLink, isMentionHref } from "./utils/link-handler";
 
 function truncateUrl(url: string, max = 48): string {
   if (url.length <= max) return url;
@@ -77,7 +64,10 @@ function useLinkHover(containerRef: React.RefObject<HTMLElement | null>, disable
       const link = target.closest("a") as HTMLAnchorElement | null;
       if (!link) return;
       const href = link.getAttribute("href");
-      if (!href || href.startsWith("mention://")) return;
+      if (!href || isMentionHref(href)) return;
+      // Issue mention cards render as <a class="issue-mention"> — they
+      // display their own rich info, a URL hover card is redundant.
+      if (link.classList.contains("issue-mention")) return;
 
       clearTimeout(hideTimer.current);
       showTimer.current = window.setTimeout(() => {

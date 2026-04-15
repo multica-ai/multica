@@ -24,16 +24,31 @@ export function preprocessMarkdown(markdown: string): string {
 }
 
 /**
- * Convert standalone `[name](cdnUrl)` lines into HTML that Tiptap's fileCard
- * parseHTML can recognise. Only matches non-image CDN URLs on their own line.
+ * LEGACY MIGRATION: Convert standalone `[name](cdnUrl)` lines into HTML that
+ * Tiptap's fileCard parseHTML can recognise. Only matches non-image CDN URLs
+ * on their own line.
+ *
+ * New file cards are saved as `!file[name](url)` via the fileCard extension's
+ * markdownTokenizer, which is unambiguous and doesn't need this preprocessing.
+ * This function remains for backward compatibility with content saved before
+ * the `!file` syntax was introduced. As users edit old content, it auto-migrates
+ * to the new syntax on save.
  *
  * Input:  `[report.pdf](https://multica-static.copilothub.ai/xxx.pdf)`
  * Output: `<div data-type="fileCard" data-href="url" data-filename="report.pdf"></div>`
  */
+/** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
+const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/;
+
+/** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */
 const FILE_LINK_LINE = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/;
 
 function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function toFileCardHtml(filename: string, url: string): string {
+  return `<div data-type="fileCard" data-href="${escapeAttr(url)}" data-filename="${escapeAttr(filename)}"></div>`;
 }
 
 function preprocessFileCards(markdown: string): string {
@@ -41,12 +56,20 @@ function preprocessFileCards(markdown: string): string {
     .split("\n")
     .map((line) => {
       const trimmed = line.trim();
+
+      // New syntax: !file[name](url) — always a file card, no hostname check needed.
+      const newMatch = trimmed.match(NEW_FILE_CARD_RE);
+      if (newMatch) {
+        return toFileCardHtml(newMatch[1]!, newMatch[2]!);
+      }
+
+      // Legacy: [name](cdnUrl) on its own line — CDN hostname matching.
       const match = trimmed.match(FILE_LINK_LINE);
       if (!match) return line;
       const filename = match[1]!;
       const url = match[2]!;
       if (!isFileCardUrl(url)) return line;
-      return `<div data-type="fileCard" data-href="${escapeAttr(url)}" data-filename="${escapeAttr(filename)}"></div>`;
+      return toFileCardHtml(filename, url);
     })
     .join("\n");
 }

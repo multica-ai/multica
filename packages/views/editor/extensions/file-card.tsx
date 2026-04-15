@@ -4,9 +4,14 @@
  * FileCard — Tiptap node extension for rendering uploaded non-image files
  * as styled cards instead of plain markdown links.
  *
- * Markdown serialization: `[filename](href)` — standard link syntax.
- * Preprocessing in preprocess.ts converts standalone CDN file links back
- * to fileCard HTML on load, completing the roundtrip.
+ * Markdown serialization: `!file[filename](href)` — custom syntax that is
+ * unambiguous (standard `[name](url)` is indistinguishable from regular links).
+ *
+ * Loading pipeline: preprocessFileCards in preprocess.ts converts both the
+ * new `!file[name](url)` syntax AND legacy `[name](cdnUrl)` lines into HTML
+ * divs BEFORE @tiptap/markdown parses the content. The markdownTokenizer
+ * below acts as a fallback for any direct markdown parsing that bypasses
+ * preprocessing.
  */
 
 import { Node, mergeAttributes } from "@tiptap/core";
@@ -146,10 +151,31 @@ export const FileCardExtension = Node.create({
     ];
   },
 
-  // Markdown serialization: fileCard → [filename](href)
+  // Markdown: custom !file[name](url) syntax for unambiguous roundtrip.
+  // Standard [name](url) is indistinguishable from regular links — the old
+  // regex-based CDN hostname matching in preprocessFileCards was fragile.
+  markdownTokenizer: {
+    name: "fileCard",
+    level: "block" as const,
+    start(src: string) {
+      return src.search(/^!file\[/m);
+    },
+    tokenize(src: string) {
+      const match = src.match(/^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)/);
+      if (!match) return undefined;
+      return {
+        type: "fileCard",
+        raw: match[0],
+        attributes: { filename: match[1], href: match[2] },
+      };
+    },
+  },
+  parseMarkdown: (token: any, helpers: any) => {
+    return helpers.createNode("fileCard", token.attributes);
+  },
   renderMarkdown: (node: any) => {
     const { href, filename } = node.attrs || {};
-    return `[${filename || "file"}](${href})`;
+    return `!file[${filename || "file"}](${href})`;
   },
 
   addNodeView() {

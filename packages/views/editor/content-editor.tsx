@@ -39,6 +39,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import "./content-editor.css";
@@ -122,6 +123,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const editor = useEditor({
       immediatelyRender: false,
+      // Note: in v3.22.1 the default is already false/undefined (same behavior).
+      // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
+      shouldRerenderOnTransaction: false,
       editable,
       content: defaultValue ? preprocessMarkdown(defaultValue) : "",
       contentType: defaultValue ? "markdown" : undefined,
@@ -152,18 +156,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
             const link = target.closest("a");
             const href = link?.getAttribute("href");
-            if (!href || href.startsWith("mention://")) return false;
+            if (!href || isMentionHref(href)) return false;
 
-            // Open the link. Internal paths use multica:navigate
-            // (Electron hash-router safe), external open in new tab.
             event.preventDefault();
-            if (href.startsWith("/")) {
-              window.dispatchEvent(
-                new CustomEvent("multica:navigate", { detail: { path: href } }),
-              );
-            } else {
-              window.open(href, "_blank", "noopener,noreferrer");
-            }
+            openLink(href);
             return true;
           },
         },

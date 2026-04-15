@@ -34,6 +34,7 @@ import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
 import "./content-editor.css";
 
@@ -112,7 +113,7 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ({ href, children }) => {
-    if (href?.startsWith("mention://")) {
+    if (isMentionHref(href)) {
       const match = href.match(
         /^mention:\/\/(member|agent|issue|all)\/(.+)$/,
       );
@@ -135,14 +136,7 @@ const components: Partial<Components> = {
         href={href}
         onClick={(e) => {
           e.preventDefault();
-          if (!href) return;
-          if (href.startsWith("/")) {
-            window.dispatchEvent(
-              new CustomEvent("multica:navigate", { detail: { path: href } }),
-            );
-          } else {
-            window.open(href, "_blank", "noopener,noreferrer");
-          }
+          if (href) openLink(href);
         }}
       >
         {children}
