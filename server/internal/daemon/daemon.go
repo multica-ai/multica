@@ -39,6 +39,7 @@ type Daemon struct {
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
+	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 }
 
 // New creates a new Daemon instance.
@@ -649,8 +650,10 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 				}
 				d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
 				wg.Add(1)
+				d.activeTasks.Add(1)
 				go func(t Task) {
 					defer wg.Done()
+					defer d.activeTasks.Add(-1)
 					defer func() { <-sem }()
 					d.handleTask(ctx, t)
 				}(*task)

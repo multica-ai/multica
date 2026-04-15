@@ -40,6 +40,10 @@ let operationInProgress = false;
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
 let cachedCliBinaryVersion: string | null | undefined = undefined;
+// Set when a CLI version mismatch was detected but the running daemon is
+// busy executing tasks. The poll loop retries the check on each tick and
+// fires the restart once active_task_count drops to 0.
+let pendingVersionRestart = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
 
@@ -134,6 +138,7 @@ interface HealthPayload {
   device_name?: string;
   server_url?: string;
   cli_version?: string;
+  active_task_count?: number;
   agents?: string[];
   workspaces?: unknown[];
 }
@@ -399,19 +404,27 @@ async function getCliBinaryVersion(): Promise<string | null> {
 }
 
 /**
- * If a daemon is already running on the active profile's port, compares its
- * reported `cli_version` to the CLI binary we would use to spawn a new one.
- * Restarts only when BOTH versions are known AND they differ — a restart
- * kills in-flight agent tasks, so we fail safe on any uncertainty.
+ * Compares the running daemon's `cli_version` against the CLI binary we
+ * would use to spawn a new one, and restarts only when safe.
  *
- * Returns `"restarted" | "ok" | "not_running"`.
+ * Restart is only fired when ALL of:
+ *   - a daemon is actually running on the active profile's port
+ *   - both sides report a version and the strings differ
+ *   - `active_task_count` is 0 (no in-flight agent work would be killed)
+ *
+ * On a confirmed mismatch while the daemon is busy, `pendingVersionRestart`
+ * is set; the poll loop retries this function on each 5s tick and will fire
+ * the restart as soon as the daemon drains.
  */
 async function ensureRunningDaemonVersionMatches(): Promise<
-  "restarted" | "ok" | "not_running"
+  "restarted" | "deferred" | "ok" | "not_running"
 > {
   const active = await ensureActiveProfile();
   const running = await fetchHealthAtPort(active.port);
-  if (!running || running.status !== "running") return "not_running";
+  if (!running || running.status !== "running") {
+    pendingVersionRestart = false;
+    return "not_running";
+  }
 
   const bundled = await getCliBinaryVersion();
   const runningVersion = running.cli_version;
@@ -419,12 +432,33 @@ async function ensureRunningDaemonVersionMatches(): Promise<
   // Unknown on either side → can't prove mismatch → leave the daemon alone.
   // This covers: bundled binary missing/broken, and older daemons that
   // predate the cli_version field in /health.
-  if (!bundled || !runningVersion) return "ok";
-  if (runningVersion === bundled) return "ok";
+  if (!bundled || !runningVersion) {
+    pendingVersionRestart = false;
+    return "ok";
+  }
+  if (runningVersion === bundled) {
+    pendingVersionRestart = false;
+    return "ok";
+  }
+
+  // Mismatch confirmed. If the daemon is currently running agent tasks,
+  // defer the restart so we don't kill them mid-execution. The poll loop
+  // will retry on each tick and fire the restart once the count drops to 0.
+  const activeTasks = running.active_task_count ?? 0;
+  if (activeTasks > 0) {
+    if (!pendingVersionRestart) {
+      console.log(
+        `[daemon] CLI version mismatch (bundled=${bundled} running=${runningVersion}); deferring restart until ${activeTasks} active task(s) finish`,
+      );
+    }
+    pendingVersionRestart = true;
+    return "deferred";
+  }
 
   console.log(
     `[daemon] CLI version mismatch (bundled=${bundled} running=${runningVersion}) — restarting daemon`,
   );
+  pendingVersionRestart = false;
   await restartDaemon();
   return "restarted";
 }
@@ -650,6 +684,10 @@ async function pollOnce(): Promise<void> {
   const status = await fetchHealth();
   currentState = status.state;
   sendStatus(status);
+  // Retry a deferred version-mismatch restart once the daemon drains.
+  if (pendingVersionRestart && status.state === "running") {
+    void ensureRunningDaemonVersionMatches();
+  }
 }
 
 function startPolling(): void {
