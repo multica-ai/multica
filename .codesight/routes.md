@@ -1,0 +1,295 @@
+# Routes
+
+## CRUD Resources
+
+- **`/api/workspaces`** GET | POST | PUT/:id | DELETE/:id → Workspace
+- **``** GET/:id | PUT/:id | DELETE/:id
+- **`/members`** GET | POST | GET/:id | PATCH/:id | DELETE/:id → Member
+- **`/api/tokens`** GET | POST | GET/:id | DELETE/:id → Token
+- **`/api/issues`** GET | POST | PUT/:id | DELETE/:id → Issue
+- **`/api/projects`** GET | POST | PUT/:id | DELETE/:id → Project
+- **`/api/autopilots`** GET | POST | PATCH/:id | DELETE/:id → Autopilot
+- **`/triggers`** POST | PATCH/:id | DELETE/:id → Trigger
+- **`/api/agents`** GET | POST | PUT/:id → Agent
+- **`/api/skills`** GET | POST | PUT/:id | DELETE/:id → Skill
+- **`/api/skills/files`** GET | GET/:id | PUT/:id | DELETE/:id → File
+- **`/{id}/files`** GET | GET/:id | PUT/:id | DELETE/:id → File
+- **`/api/chat/sessions`** GET | POST | DELETE/:id → Session
+- **`/`** GET | POST | PUT/:id | DELETE/:id
+- **`/files`** GET | GET/:id | PUT/:id | DELETE/:id → File
+
+## Other Routes
+
+### next-app
+
+- `GET` `/favicon.ico`
+
+### chi
+
+- `GET` `token` params() [auth, db] ✓
+- `GET` `state` params() [auth, db] ✓
+- `ALL` `/callback` params() [auth, db]
+- `GET` `X-Total-Count` params() [auth, upload]
+- `POST` `/api/daemon/register` params() [auth, db, upload] ✓
+- `POST` `/api/daemon/deregister` params() [auth, db, upload]
+- `POST` `/api/daemon/heartbeat` params() [auth, db, upload] ✓
+- `POST` `/api/daemon/runtimes/{runtimeId}/tasks/claim` params(runtimeId) [auth, db, upload]
+- `GET` `/api/daemon/runtimes/{runtimeId}/tasks/pending` params(runtimeId) [auth, db, upload]
+- `POST` `/api/daemon/runtimes/{runtimeId}/usage` params(runtimeId) [auth, db, upload]
+- `POST` `/api/daemon/runtimes/{runtimeId}/ping/{pingId}/result` params(runtimeId, pingId) [auth, db, upload]
+- `POST` `/api/daemon/runtimes/{runtimeId}/update/{updateId}/result` params(runtimeId, updateId) [auth, db, upload]
+- `GET` `/api/daemon/tasks/{taskId}/status` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/start` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/progress` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/complete` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/fail` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/usage` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/api/daemon/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/api/daemon/issues/{issueId}/gc-check` params(issueId) [auth, db, upload]
+- `GET` `/api/workspaces/members` params() [auth, db, upload]
+- `POST` `/api/workspaces/leave` params() [auth, db, upload]
+- `GET` `/api/workspaces/invitations` params() [auth, db, upload]
+- `POST` `/api/workspaces/members` params() [auth, db, upload]
+- `DELETE` `/api/workspaces/invitations/{invitationId}` params(invitationId) [auth, db, upload]
+- `GET` `/{id}/members` params(id) [auth, db, upload]
+- `POST` `/{id}/leave` params(id) [auth, db, upload]
+- `GET` `/{id}/invitations` params(id) [auth, db, upload]
+- `POST` `/{id}/members` params(id) [auth, db, upload]
+- `DELETE` `/{id}/invitations/{invitationId}` params(id, invitationId) [auth, db, upload]
+- `GET` `/api/issues/search` params() [auth, db, upload]
+- `GET` `/api/issues/child-progress` params() [auth, db, upload]
+- `POST` `/api/issues/batch-update` params() [auth, db, upload]
+- `POST` `/api/issues/batch-delete` params() [auth, db, upload]
+- `POST` `/api/issues/comments` params() [auth, db, upload]
+- `GET` `/api/issues/comments` params() [auth, db, upload]
+- `GET` `/api/issues/timeline` params() [auth, db, upload]
+- `GET` `/api/issues/subscribers` params() [auth, db, upload]
+- `POST` `/api/issues/subscribe` params() [auth, db, upload]
+- `POST` `/api/issues/unsubscribe` params() [auth, db, upload]
+- `GET` `/api/issues/active-task` params() [auth, db, upload]
+- `POST` `/api/issues/tasks/{taskId}/cancel` params(taskId) [auth, db, upload]
+- `GET` `/api/issues/task-runs` params() [auth, db, upload]
+- `GET` `/api/issues/usage` params() [auth, db, upload]
+- `POST` `/api/issues/reactions` params() [auth, db, upload]
+- `DELETE` `/api/issues/reactions` params() [auth, db, upload]
+- `GET` `/api/issues/attachments` params() [auth, db, upload]
+- `GET` `/api/issues/children` params() [auth, db, upload]
+- `POST` `/{id}/comments` params(id) [auth, db, upload]
+- `GET` `/{id}/comments` params(id) [auth, db, upload]
+- `GET` `/{id}/timeline` params(id) [auth, db, upload]
+- `GET` `/{id}/subscribers` params(id) [auth, db, upload]
+- `POST` `/{id}/subscribe` params(id) [auth, db, upload]
+- `POST` `/{id}/unsubscribe` params(id) [auth, db, upload]
+- `GET` `/{id}/active-task` params(id) [auth, db, upload]
+- `POST` `/{id}/tasks/{taskId}/cancel` params(id, taskId) [auth, db, upload]
+- `GET` `/{id}/task-runs` params(id) [auth, db, upload]
+- `GET` `/{id}/usage` params(id) [auth, db, upload]
+- `POST` `/{id}/reactions` params(id) [auth, db, upload]
+- `DELETE` `/{id}/reactions` params(id) [auth, db, upload]
+- `GET` `/{id}/attachments` params(id) [auth, db, upload]
+- `GET` `/{id}/children` params(id) [auth, db, upload]
+- `GET` `/api/projects/search` params() [auth, db, upload]
+- `POST` `/api/autopilots/trigger` params() [auth, db, upload]
+- `GET` `/api/autopilots/runs` params() [auth, db, upload]
+- `POST` `/api/autopilots/triggers` params() [auth, db, upload]
+- `POST` `/{id}/trigger` params(id) [auth, db, upload]
+- `GET` `/{id}/runs` params(id) [auth, db, upload]
+- `POST` `/{id}/triggers` params(id) [auth, db, upload]
+- `GET` `/api/pins` params() [auth, db, upload]
+- `POST` `/api/pins` params() [auth, db, upload]
+- `PUT` `/api/pins/reorder` params() [auth, db, upload]
+- `DELETE` `/api/pins/{itemType}/{itemId}` params(itemType, itemId) [auth, db, upload]
+- `PUT` `/api/comments/{commentId}` params(commentId) [auth, db, upload]
+- `DELETE` `/api/comments/{commentId}` params(commentId) [auth, db, upload]
+- `POST` `/api/comments/{commentId}/reactions` params(commentId) [auth, db, upload]
+- `DELETE` `/api/comments/{commentId}/reactions` params(commentId) [auth, db, upload]
+- `POST` `/api/agents/archive` params() [auth, db, upload]
+- `POST` `/api/agents/restore` params() [auth, db, upload]
+- `GET` `/api/agents/tasks` params() [auth, db, upload]
+- `GET` `/api/agents/skills` params() [auth, db, upload]
+- `PUT` `/api/agents/skills` params() [auth, db, upload]
+- `POST` `/{id}/archive` params(id) [auth, db, upload]
+- `POST` `/{id}/restore` params(id) [auth, db, upload]
+- `GET` `/{id}/tasks` params(id) [auth, db, upload]
+- `GET` `/{id}/skills` params(id) [auth, db, upload]
+- `PUT` `/{id}/skills` params(id) [auth, db, upload]
+- `POST` `/api/skills/import` params() [auth, db, upload]
+- `GET` `/api/usage/daily` params() [auth, db, upload]
+- `GET` `/api/usage/summary` params() [auth, db, upload]
+- `GET` `/api/runtimes` params() [auth, db, upload]
+- `GET` `/api/runtimes/usage` params() [auth, db, upload]
+- `GET` `/api/runtimes/activity` params() [auth, db, upload]
+- `POST` `/api/runtimes/ping` params() [auth, db, upload]
+- `GET` `/api/runtimes/ping/{pingId}` params(pingId) [auth, db, upload]
+- `POST` `/api/runtimes/update` params() [auth, db, upload]
+- `GET` `/api/runtimes/update/{updateId}` params(updateId) [auth, db, upload]
+- `DELETE` `/api/runtimes` params() [auth, db, upload]
+- `GET` `/{runtimeId}/usage` params(runtimeId) [auth, db, upload]
+- `GET` `/{runtimeId}/activity` params(runtimeId) [auth, db, upload]
+- `POST` `/{runtimeId}/ping` params(runtimeId) [auth, db, upload]
+- `GET` `/{runtimeId}/ping/{pingId}` params(runtimeId, pingId) [auth, db, upload]
+- `POST` `/{runtimeId}/update` params(runtimeId) [auth, db, upload]
+- `GET` `/{runtimeId}/update/{updateId}` params(runtimeId, updateId) [auth, db, upload]
+- `POST` `/api/chat/sessions/messages` params() [auth, db, upload]
+- `GET` `/api/chat/sessions/messages` params() [auth, db, upload]
+- `GET` `/api/chat/sessions/pending-task` params() [auth, db, upload]
+- `POST` `/api/chat/sessions/read` params() [auth, db, upload]
+- `POST` `/{sessionId}/messages` params(sessionId) [auth, db, upload]
+- `GET` `/{sessionId}/messages` params(sessionId) [auth, db, upload]
+- `GET` `/{sessionId}/pending-task` params(sessionId) [auth, db, upload]
+- `POST` `/{sessionId}/read` params(sessionId) [auth, db, upload]
+- `GET` `/api/inbox` params() [auth, db, upload] ✓
+- `GET` `/api/inbox/unread-count` params() [auth, db, upload]
+- `POST` `/api/inbox/mark-all-read` params() [auth, db, upload]
+- `POST` `/api/inbox/archive-all` params() [auth, db, upload]
+- `POST` `/api/inbox/archive-all-read` params() [auth, db, upload]
+- `POST` `/api/inbox/archive-completed` params() [auth, db, upload]
+- `POST` `/api/inbox/{id}/read` params(id) [auth, db, upload]
+- `POST` `/api/inbox/{id}/archive` params(id) [auth, db, upload]
+- `GET` `/health` params() [auth, db, upload] ✓
+- `GET` `/ws` params() [auth, db, upload] ✓
+- `GET` `/uploads/*` params() [auth, db, upload]
+- `POST` `/auth/send-code` params() [auth, db, upload] ✓
+- `POST` `/auth/verify-code` params() [auth, db, upload] ✓
+- `POST` `/auth/google` params() [auth, db, upload]
+- `POST` `/auth/logout` params() [auth, db, upload]
+- `POST` `/register` params() [auth, db, upload]
+- `POST` `/deregister` params() [auth, db, upload]
+- `POST` `/heartbeat` params() [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/tasks/claim` params(runtimeId) [auth, db, upload]
+- `GET` `/runtimes/{runtimeId}/tasks/pending` params(runtimeId) [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/usage` params(runtimeId) [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/ping/{pingId}/result` params(runtimeId, pingId) [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/update/{updateId}/result` params(runtimeId, updateId) [auth, db, upload]
+- `GET` `/tasks/{taskId}/status` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/start` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/progress` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/complete` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/fail` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/usage` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/issues/{issueId}/gc-check` params(issueId) [auth, db, upload]
+- `GET` `/api/config` params() [auth, db, upload]
+- `GET` `/api/me` params() [auth, db, upload] ✓
+- `PATCH` `/api/me` params() [auth, db, upload] ✓
+- `POST` `/api/cli-token` params() [auth, db, upload]
+- `POST` `/api/upload-file` params() [auth, db, upload] ✓
+- `POST` `/leave` params() [auth, db, upload]
+- `GET` `/invitations` params() [auth, db, upload]
+- `DELETE` `/invitations/{invitationId}` params(invitationId) [auth, db, upload]
+- `GET` `/api/invitations` params() [auth, db, upload]
+- `GET` `/api/invitations/{id}` params(id) [auth, db, upload]
+- `POST` `/api/invitations/{id}/accept` params(id) [auth, db, upload]
+- `POST` `/api/invitations/{id}/decline` params(id) [auth, db, upload]
+- `GET` `/api/assignee-frequency` params() [auth, db, upload]
+- `GET` `/search` params() [auth, db, upload]
+- `GET` `/child-progress` params() [auth, db, upload]
+- `POST` `/batch-update` params() [auth, db, upload]
+- `POST` `/batch-delete` params() [auth, db, upload]
+- `POST` `/comments` params() [auth, db, upload] ✓
+- `GET` `/comments` params() [auth, db, upload] ✓
+- `GET` `/timeline` params() [auth, db, upload] ✓
+- `GET` `/subscribers` params() [auth, db, upload] ✓
+- `POST` `/subscribe` params() [auth, db, upload] ✓
+- `POST` `/unsubscribe` params() [auth, db, upload] ✓
+- `GET` `/active-task` params() [auth, db, upload]
+- `POST` `/tasks/{taskId}/cancel` params(taskId) [auth, db, upload]
+- `GET` `/task-runs` params() [auth, db, upload]
+- `GET` `/usage` params() [auth, db, upload]
+- `POST` `/reactions` params() [auth, db, upload]
+- `DELETE` `/reactions` params() [auth, db, upload]
+- `GET` `/attachments` params() [auth, db, upload]
+- `GET` `/children` params() [auth, db, upload]
+- `GET` `/api/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `POST` `/trigger` params() [auth, db, upload]
+- `GET` `/runs` params() [auth, db, upload]
+- `PUT` `/reorder` params() [auth, db, upload]
+- `DELETE` `/{itemType}/{itemId}` params(itemType, itemId) [auth, db, upload]
+- `GET` `/api/attachments/{id}` params(id) [auth, db, upload]
+- `DELETE` `/api/attachments/{id}` params(id) [auth, db, upload]
+- `POST` `/archive` params() [auth, db, upload]
+- `POST` `/restore` params() [auth, db, upload]
+- `GET` `/tasks` params() [auth, db, upload]
+- `GET` `/skills` params() [auth, db, upload]
+- `PUT` `/skills` params() [auth, db, upload]
+- `POST` `/import` params() [auth, db, upload]
+- `GET` `/daily` params() [auth, db, upload]
+- `GET` `/summary` params() [auth, db, upload]
+- `GET` `/activity` params() [auth, db, upload]
+- `POST` `/ping` params() [auth, db, upload]
+- `GET` `/ping/{pingId}` params(pingId) [auth, db, upload]
+- `POST` `/update` params() [auth, db, upload]
+- `GET` `/update/{updateId}` params(updateId) [auth, db, upload]
+- `POST` `/api/tasks/{taskId}/cancel` params(taskId) [auth, db, upload]
+- `POST` `/messages` params() [auth, db, upload]
+- `GET` `/messages` params() [auth, db, upload]
+- `GET` `/pending-task` params() [auth, db, upload]
+- `POST` `/read` params() [auth, db, upload]
+- `GET` `/api/chat/pending-tasks` params() [auth, db, upload]
+- `GET` `/unread-count` params() [auth, db, upload]
+- `POST` `/mark-all-read` params() [auth, db, upload]
+- `POST` `/archive-all` params() [auth, db, upload]
+- `POST` `/archive-all-read` params() [auth, db, upload]
+- `POST` `/archive-completed` params() [auth, db, upload]
+- `POST` `/{id}/read` params(id) [auth, db, upload]
+- `GET` `X-CSRF-Token` params() [auth]
+- `GET` `Content-Type` params() [auth]
+- `GET` `Authorization` params() [auth]
+- `GET` `X-Workspace-ID` params() [auth]
+- `GET` `X-Agent-ID` params() [auth]
+- `GET` `X-Task-ID` params() [auth]
+- `ALL` `/health` params() [cache, payment] ✓
+- `ALL` `/repo/checkout` params() [cache, payment]
+- `GET` `include_archived` params() [auth, db, queue]
+- `GET` `status` params() [auth, db, payment] ✓
+- `GET` `limit` params() [auth, db, payment]
+- `GET` `offset` params() [auth, db, payment]
+- `GET` `since` params() [auth, db, queue, upload]
+- `GET` `X-User-ID` params() [auth, db]
+- `GET` `workspace_id` params() [auth, db] ✓
+- `GET` `q` params() [auth, db, queue, upload]
+- `GET` `include_closed` params() [auth, db, queue, upload]
+- `GET` `priority` params() [auth, db, queue, upload] ✓
+- `GET` `assignee_id` params() [auth, db, queue, upload] ✓
+- `GET` `assignee_ids` params() [auth, db, queue, upload]
+- `GET` `creator_id` params() [auth, db, queue, upload]
+- `GET` `project_id` params() [auth, db, queue, upload] ✓
+- `GET` `open_only` params() [auth, db, queue, upload]
+- `GET` `days` params() [auth, db, cache]
+- `GET` `owner` params() [auth, db, cache] ✓
+- `GET` `X-User-Email` params() [auth]
+- `GET` `Content-Security-Policy` params()
+- `GET` `Origin` params() [auth, db]
+- `ALL` `/ws` params() [auth] ✓
+
+## WebSocket Events
+
+- `WS` `issue:updated` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue:deleted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `inbox:new` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `comment:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `comment:updated` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `comment:deleted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `activity:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `reaction:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `reaction:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue_reaction:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue_reaction:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `subscriber:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `subscriber:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `workspace:deleted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `member:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `member:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:accepted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:declined` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:revoked` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `task:message` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `chat:message` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `chat:done` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `task:completed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `task:failed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `chat:session_read` — `packages/core/realtime/use-realtime-sync.ts`

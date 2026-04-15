@@ -23,7 +23,7 @@ function argsToEntries(args: string[]): ArgEntry[] {
 }
 
 function entriesToArgs(entries: ArgEntry[]): string[] {
-  return entries.map((e) => e.value).filter((v) => v.trim() !== "");
+  return entries.flatMap((e) => e.value.trim().split(/\s+/)).filter(Boolean);
 }
 
 export function CustomArgsTab({
@@ -77,7 +77,7 @@ export function CustomArgsTab({
           </Label>
           <p className="text-xs text-muted-foreground mt-0.5">
             Additional CLI arguments appended to the agent command at launch
-            (e.g. --model, --max-turns)
+            (e.g. --model claude-sonnet-4-20250514)
           </p>
         </div>
         <Button
@@ -98,7 +98,7 @@ export function CustomArgsTab({
               <Input
                 value={entry.value}
                 onChange={(e) => updateEntry(index, e.target.value)}
-                placeholder="--flag value"
+                placeholder="--model claude-sonnet-4-20250514"
                 className="flex-1 font-mono text-xs"
               />
               <button

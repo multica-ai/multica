@@ -1,0 +1,589 @@
+# Libraries
+
+- `apps/desktop/scripts/package.mjs` — function normalizeGitVersion: (raw) => void
+- `apps/desktop/src/main/cli-bootstrap.ts` — function managedCliPath: () => string, function ensureManagedCli: () => Promise<string>
+- `apps/desktop/src/main/daemon-manager.ts` — function setupDaemonManager: (windowGetter) => void
+- `apps/desktop/src/main/updater.ts` — function setupAutoUpdater: (getMainWindow) => void
+- `apps/desktop/src/main/version-decision.ts`
+  - function decideVersionAction: (bundled, running) => VersionAction
+  - interface VersionCheckHealth
+  - type VersionAction
+- `apps/desktop/src/renderer/src/hooks/use-document-title.ts` — function useDocumentTitle: (title) => void
+- `apps/desktop/src/renderer/src/hooks/use-tab-history.ts` — function useTabHistory: () => void, const popDirectionHints
+- `apps/desktop/src/renderer/src/hooks/use-tab-router-sync.ts` — function useTabRouterSync: (tabId, router) => void
+- `apps/desktop/src/renderer/src/hooks/use-tab-sync.ts` — function useActiveTitleSync: () => void
+- `apps/desktop/src/renderer/src/stores/tab-store.ts`
+  - function resolveRouteIcon: (pathname) => string
+  - interface Tab
+  - const useTabStore
+- `apps/desktop/src/shared/daemon-types.ts`
+  - function formatUptime: (uptime?) => string
+  - interface DaemonStatus
+  - interface DaemonPrefs
+  - type DaemonState
+  - const DAEMON_STATE_COLORS: Record<DaemonState, string>
+  - const DAEMON_STATE_LABELS: Record<DaemonState, string>
+- `apps/web/features/auth/auth-cookie.ts` — function setLoggedInCookie: () => void, function clearLoggedInCookie: () => void
+- `apps/web/proxy.ts` — function proxy: (_request) => void, const config
+- `e2e/fixtures.ts` — class TestApiClient
+- `e2e/helpers.ts`
+  - function loginAsDefault: (page) => void
+  - function createTestApi: () => Promise<TestApiClient>
+  - function openWorkspaceMenu: (page) => void
+- `packages/core/api/client.ts`
+  - class ApiError
+  - class ApiClient
+  - interface ApiClientOptions
+  - interface LoginResponse
+- `packages/core/api/index.ts`
+  - function setApiInstance: (instance) => void
+  - function getApi: () => ApiClientType
+  - const api
+- `packages/core/api/ws-client.ts` — class WSClient
+- `packages/core/auth/index.ts` — function registerAuthStore: (store) => void, const useAuthStore: AuthStoreInstance
+- `packages/core/auth/store.ts`
+  - function createAuthStore: (options) => void
+  - interface AuthStoreOptions
+  - interface AuthState
+- `packages/core/autopilots/mutations.ts`
+  - function useCreateAutopilot: () => void
+  - function useUpdateAutopilot: () => void
+  - function useDeleteAutopilot: () => void
+  - function useTriggerAutopilot: () => void
+  - function useCreateAutopilotTrigger: () => void
+  - function useUpdateAutopilotTrigger: () => void
+  - _...1 more_
+- `packages/core/autopilots/queries.ts`
+  - function autopilotListOptions: (wsId) => void
+  - function autopilotDetailOptions: (wsId, id) => void
+  - function autopilotRunsOptions: (wsId, id) => void
+  - const autopilotKeys
+- `packages/core/chat/index.ts` — function registerChatStore: (store) => void, const useChatStore: ChatStoreInstance
+- `packages/core/chat/mutations.ts`
+  - function useCreateChatSession: () => void
+  - function useMarkChatSessionRead: () => void
+  - function useArchiveChatSession: () => void
+- `packages/core/chat/queries.ts`
+  - function chatSessionsOptions: (wsId) => void
+  - function allChatSessionsOptions: (wsId) => void
+  - function chatSessionOptions: (wsId, id) => void
+  - function chatMessagesOptions: (sessionId) => void
+  - function pendingChatTaskOptions: (sessionId) => void
+  - function taskMessagesOptions: (taskId) => void
+  - _...2 more_
+- `packages/core/chat/store.ts`
+  - function createChatStore: (options) => void
+  - interface ChatTimelineItem
+  - interface ChatState
+  - interface ChatStoreOptions
+  - const DRAFT_NEW_SESSION
+  - const CHAT_MIN_W
+  - _...3 more_
+- `packages/core/config/index.ts`
+  - function useConfigStore: () => ConfigState;
+  - function useConfigStore: (selector) => void
+  - function useConfigStore: (selector?) => void
+  - const configStore
+- `packages/core/hooks/use-file-upload.ts`
+  - function useFileUpload: (api, onError?) => void
+  - interface UploadResult
+  - interface UploadContext
+- `packages/core/inbox/mutations.ts`
+  - function useMarkInboxRead: () => void
+  - function useArchiveInbox: () => void
+  - function useMarkAllInboxRead: () => void
+  - function useArchiveAllInbox: () => void
+  - function useArchiveAllReadInbox: () => void
+  - function useArchiveCompletedInbox: () => void
+- `packages/core/inbox/queries.ts`
+  - function inboxListOptions: (wsId) => void
+  - function deduplicateInboxItems: (items) => InboxItem[]
+  - const inboxKeys
+- `packages/core/inbox/ws-updaters.ts`
+  - function onInboxNew: (qc, wsId, _item) => void
+  - function onInboxIssueStatusChanged: (qc, wsId, issueId, status) => void
+  - function onInboxInvalidate: (qc, wsId) => void
+- `packages/core/issues/mutations.ts`
+  - function useLoadMoreDoneIssues: (myIssues?) => void
+  - function useCreateIssue: () => void
+  - function useUpdateIssue: () => void
+  - function useDeleteIssue: () => void
+  - function useBatchUpdateIssues: () => void
+  - function useBatchDeleteIssues: () => void
+  - _...8 more_
+- `packages/core/issues/queries.ts`
+  - function issueListOptions: (wsId) => void
+  - function myIssueListOptions: (wsId, scope, filter) => void
+  - function issueDetailOptions: (wsId, id) => void
+  - function childIssueProgressOptions: (wsId) => void
+  - function childIssuesOptions: (wsId, id) => void
+  - function issueTimelineOptions: (issueId) => void
+  - _...6 more_
+- `packages/core/issues/stores/view-store.ts`
+  - function createIssueViewStore: (persistKey) => StoreApi<IssueViewState>
+  - function registerViewStoreForWorkspaceSync: (store, subscribeToWorkspace?) => void
+  - function viewStoreSlice
+  - function viewStorePersistOptions
+  - function initFilterWorkspaceSync
+  - interface CardProperties
+  - _...8 more_
+- `packages/core/issues/ws-updaters.ts`
+  - function onIssueCreated: (qc, wsId, issue) => void
+  - function onIssueUpdated: (qc, wsId, issue) => void
+  - function onIssueDeleted: (qc, wsId, issueId) => void
+- `packages/core/logger.ts`
+  - function createLogger: (namespace) => Logger
+  - interface Logger
+  - const noopLogger: Logger
+- `packages/core/pins/mutations.ts`
+  - function useCreatePin: () => void
+  - function useDeletePin: () => void
+  - function useReorderPins: () => void
+- `packages/core/pins/queries.ts` — function pinListOptions: (wsId, userId) => void, const pinKeys
+- `packages/core/platform/persist-storage.ts` — function createPersistStorage: (adapter) => StateStorage
+- `packages/core/platform/storage-cleanup.ts` — function clearWorkspaceStorage: (adapter, wsId) => void
+- `packages/core/platform/workspace-storage.ts`
+  - function setCurrentWorkspaceId: (wsId) => void
+  - function registerForWorkspaceRehydration: (fn) => void
+  - function rehydrateAllWorkspaceStores: () => void
+  - function getCurrentWorkspaceId: () => string | null
+  - function createWorkspaceAwareStorage: (adapter) => StateStorage
+- `packages/core/projects/mutations.ts`
+  - function useCreateProject: () => void
+  - function useUpdateProject: () => void
+  - function useDeleteProject: () => void
+- `packages/core/projects/queries.ts`
+  - function projectListOptions: (wsId) => void
+  - function projectDetailOptions: (wsId, id) => void
+  - const projectKeys
+- `packages/core/query-client.ts` — function createQueryClient: () => QueryClient
+- `packages/core/realtime/hooks.ts` — function useWSEvent: (event, handler) => void, function useWSReconnect: (callback) => void
+- `packages/core/realtime/use-realtime-sync.ts` — function useRealtimeSync: (ws, stores, onToast?, type?) => void, interface RealtimeSyncStores
+- `packages/core/runtimes/hooks.ts` — function useMyRuntimesNeedUpdate: (wsId) => boolean, function useUpdatableRuntimeIds: (wsId) => Set<string>
+- `packages/core/runtimes/mutations.ts` — function useDeleteRuntime: (wsId) => void
+- `packages/core/runtimes/queries.ts`
+  - function runtimeListOptions: (wsId, owner?) => void
+  - function latestCliVersionOptions: () => void
+  - const runtimeKeys
+- `packages/core/utils.ts`
+  - function timeAgo: (dateStr) => string
+  - function generateUUID: () => string
+  - function createSafeId: () => string
+  - function createRequestId: (length) => string
+- `packages/core/workspace/hooks.ts` — function useActorName: () => void
+- `packages/core/workspace/index.ts` — function registerWorkspaceStore: (store) => void, const useWorkspaceStore: WorkspaceStoreInstance
+- `packages/core/workspace/mutations.ts`
+  - function useCreateWorkspace: () => void
+  - function useLeaveWorkspace: () => void
+  - function useDeleteWorkspace: () => void
+- `packages/core/workspace/queries.ts`
+  - function workspaceListOptions: () => void
+  - function memberListOptions: (wsId) => void
+  - function agentListOptions: (wsId) => void
+  - function skillListOptions: (wsId) => void
+  - function invitationListOptions: (wsId) => void
+  - function myInvitationListOptions: () => void
+  - _...2 more_
+- `packages/core/workspace/store.ts` — function createWorkspaceStore: (api, options?) => void, type WorkspaceStore
+- `packages/ui/hooks/use-auto-scroll.ts` — function useAutoScroll: (ref) => void
+- `packages/ui/hooks/use-mobile.ts` — function useIsMobile: () => void
+- `packages/ui/hooks/use-scroll-fade.ts` — function useScrollFade: (ref, fadeSize) => CSSProperties | undefined
+- `packages/ui/lib/utils.ts` — function cn: (...inputs) => void
+- `packages/ui/markdown/file-cards.ts`
+  - function isCdnUrl: (url, cdnDomain) => boolean
+  - function isFileCardUrl: (url, cdnDomain) => boolean
+  - function preprocessFileCards: (markdown, cdnDomain) => string
+- `packages/ui/markdown/linkify.ts`
+  - function detectLinks: (text) => DetectedLink[]
+  - function preprocessLinks: (text) => string
+  - function hasLinks: (text) => boolean
+- `packages/ui/markdown/mentions.ts` — function preprocessMentionShortcodes: (text) => string
+- `server/cmd/server/router.go` — function NewRouter: (pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router
+- `server/internal/auth/cloudfront.go` — function NewCloudFrontSignerFromEnv: () *CloudFrontSigner, class CloudFrontSigner
+- `server/internal/auth/cookie.go`
+  - function SetAuthCookies: (w http.ResponseWriter, token string) error
+  - function ClearAuthCookies: (w http.ResponseWriter)
+  - function ValidateCSRF: (r *http.Request) bool
+- `server/internal/auth/jwt.go`
+  - function JWTSecret: () []byte
+  - function GeneratePATToken: () (string, error)
+  - function GenerateDaemonToken: () (string, error)
+  - function HashToken: (token string) string
+- `server/internal/cli/client.go` — function NewAPIClient: (baseURL, workspaceID, token string) *APIClient, class APIClient
+- `server/internal/cli/config.go`
+  - function CLIConfigPath: () (string, error)
+  - function CLIConfigPathForProfile: (profile string) (string, error)
+  - function ProfileDir: (profile string) (string, error)
+  - function LoadCLIConfig: () (CLIConfig, error)
+  - function LoadCLIConfigForProfile: (profile string) (CLIConfig, error)
+  - function SaveCLIConfig: (cfg CLIConfig) error
+  - _...2 more_
+- `server/internal/cli/flags.go` — function FlagOrEnv: (cmd *cobra.Command, flagName, envKey, fallback string) string
+- `server/internal/cli/output.go` — function PrintTable: (w io.Writer, headers []string, rows [][]string), function PrintJSON: (w io.Writer, v any) error
+- `server/internal/cli/update.go`
+  - function FetchLatestRelease: () (*GitHubRelease, error)
+  - function IsBrewInstall: () bool
+  - function GetBrewPrefix: () string
+  - function UpdateViaBrew: () (string, error)
+  - function UpdateViaDownload: (targetVersion string) (string, error)
+  - class GitHubRelease
+- `server/internal/daemon/client.go`
+  - function NewClient: (baseURL string) *Client
+  - class Client
+  - class TaskMessageData
+  - class HeartbeatResponse
+  - class PendingPing
+  - class PendingUpdate
+  - _...3 more_
+- `server/internal/daemon/config.go`
+  - function LoadConfig: (overrides Overrides) (Config, error)
+  - function NormalizeServerBaseURL: (raw string) (string, error)
+  - class Config
+  - class Overrides
+- `server/internal/daemon/daemon.go` — function New: (cfg Config, logger *slog.Logger) *Daemon, class Daemon
+- `server/internal/daemon/execenv/execenv.go`
+  - function Prepare: (params PrepareParams, logger *slog.Logger) (*Environment, error)
+  - function Reuse: (workDir, provider string, task TaskContextForEnv, logger *slog.Logger) *Environment
+  - function WriteGCMeta: (envRoot, issueID, workspaceID string) error
+  - function ReadGCMeta: (envRoot string) (*GCMeta, error)
+  - class RepoContextForEnv
+  - class PrepareParams
+  - _...5 more_
+- `server/internal/daemon/execenv/runtime_config.go` — function InjectRuntimeConfig: (workDir, provider string, ctx TaskContextForEnv) error
+- `server/internal/daemon/health.go` — class HealthResponse
+- `server/internal/daemon/prompt.go` — function BuildPrompt: (task Task) string
+- `server/internal/daemon/repocache/cache.go`
+  - function New: (root string, logger *slog.Logger) *Cache
+  - class RepoInfo
+  - class CachedRepo
+  - class Cache
+  - class WorktreeParams
+  - class WorktreeResult
+- `server/internal/daemon/types.go`
+  - class AgentEntry
+  - class Runtime
+  - class RepoData
+  - class Task
+  - class AgentData
+  - class SkillData
+  - _...3 more_
+- `server/internal/daemon/usage/scanner.go`
+  - function NewScanner: (logger *slog.Logger) *Scanner
+  - class Record
+  - class Scanner
+- `server/internal/events/bus.go`
+  - function New: () *Bus
+  - class Event
+  - class Bus
+- `server/internal/handler/activity.go` — class TimelineEntry, class AssigneeFrequencyEntry
+- `server/internal/handler/agent.go`
+  - class AgentResponse
+  - class RepoData
+  - class AgentTaskResponse
+  - class TaskAgentData
+  - class CreateAgentRequest
+  - class UpdateAgentRequest
+- `server/internal/handler/auth.go`
+  - class UserResponse
+  - class LoginResponse
+  - class SendCodeRequest
+  - class VerifyCodeRequest
+  - class UpdateMeRequest
+  - class GoogleLoginRequest
+- `server/internal/handler/autopilot.go`
+  - class AutopilotResponse
+  - class AutopilotTriggerResponse
+  - class AutopilotRunResponse
+  - class CreateAutopilotRequest
+  - class UpdateAutopilotRequest
+  - class CreateAutopilotTriggerRequest
+  - _...1 more_
+- `server/internal/handler/chat.go`
+  - class CreateChatSessionRequest
+  - class SendChatMessageRequest
+  - class SendChatMessageResponse
+  - class PendingChatTaskResponse
+  - class PendingChatTasksResponse
+  - class PendingChatTaskItem
+  - _...2 more_
+- `server/internal/handler/comment.go` — class CommentResponse, class CreateCommentRequest
+- `server/internal/handler/config.go` — class AppConfig
+- `server/internal/handler/daemon.go`
+  - class DaemonRegisterRequest
+  - class DaemonHeartbeatRequest
+  - class TaskProgressRequest
+  - class TaskCompleteRequest
+  - class TaskUsagePayload
+  - class TaskFailRequest
+  - _...2 more_
+- `server/internal/handler/file.go` — class AttachmentResponse
+- `server/internal/handler/handler.go` — function New: (queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler, class Handler
+- `server/internal/handler/inbox.go` — class InboxItemResponse
+- `server/internal/handler/invitation.go` — class InvitationResponse
+- `server/internal/handler/issue.go`
+  - class IssueResponse
+  - class SearchIssueResponse
+  - class CreateIssueRequest
+  - class UpdateIssueRequest
+  - class BatchUpdateIssuesRequest
+  - class BatchDeleteIssuesRequest
+- `server/internal/handler/issue_reaction.go` — class IssueReactionResponse
+- `server/internal/handler/personal_access_token.go`
+  - class PersonalAccessTokenResponse
+  - class CreatePATResponse
+  - class CreatePATRequest
+- `server/internal/handler/pin.go`
+  - class PinnedItemResponse
+  - class CreatePinRequest
+  - class ReorderPinsRequest
+  - class ReorderItem
+- `server/internal/handler/project.go`
+  - class ProjectResponse
+  - class CreateProjectRequest
+  - class UpdateProjectRequest
+  - class SearchProjectResponse
+- `server/internal/handler/reaction.go` — class ReactionResponse
+- `server/internal/handler/runtime.go`
+  - class AgentRuntimeResponse
+  - class RuntimeUsageEntry
+  - class RuntimeUsageResponse
+- `server/internal/handler/runtime_ping.go`
+  - function NewPingStore: () *PingStore
+  - class PingRequest
+  - class PingStore
+- `server/internal/handler/runtime_update.go`
+  - function NewUpdateStore: () *UpdateStore
+  - class UpdateRequest
+  - class UpdateStore
+- `server/internal/handler/skill.go`
+  - class SkillResponse
+  - class SkillFileResponse
+  - class SkillWithFilesResponse
+  - class CreateSkillRequest
+  - class CreateSkillFileRequest
+  - class UpdateSkillRequest
+  - _...2 more_
+- `server/internal/handler/subscriber.go` — class SubscriberResponse
+- `server/internal/handler/workspace.go`
+  - class WorkspaceResponse
+  - class MemberResponse
+  - class CreateWorkspaceRequest
+  - class UpdateWorkspaceRequest
+  - class MemberWithUserResponse
+  - class CreateMemberRequest
+  - _...1 more_
+- `server/internal/logger/logger.go`
+  - function Init: ()
+  - function NewLogger: (component string) *slog.Logger
+  - function RequestAttrs: (r *http.Request) []any
+- `server/internal/mention/expand.go`
+  - function ExpandIssueIdentifiers: (ctx context.Context, resolver Resolver, workspaceID pgtype.UUID, content string) string
+  - interface IssueResolver
+  - interface PrefixResolver
+  - interface Resolver
+- `server/internal/middleware/auth.go` — function Auth: (queries *db.Queries) func(http.Handler) http.Handler
+- `server/internal/middleware/cloudfront.go` — function RefreshCloudFrontCookies: (signer *auth.CloudFrontSigner) func(http.Handler) http.Handler
+- `server/internal/middleware/csp.go` — function ContentSecurityPolicy: (next http.Handler) http.Handler
+- `server/internal/middleware/daemon_auth.go`
+  - function DaemonWorkspaceIDFromContext: (ctx context.Context) string
+  - function DaemonIDFromContext: (ctx context.Context) string
+  - function WithDaemonContext: (ctx context.Context, workspaceID, daemonID string) context.Context
+  - function DaemonAuth: (queries *db.Queries) func(http.Handler) http.Handler
+- `server/internal/middleware/request_logger.go` — function RequestLogger: (next http.Handler) http.Handler
+- `server/internal/middleware/workspace.go`
+  - function MemberFromContext: (ctx context.Context) (db.Member, bool)
+  - function WorkspaceIDFromContext: (ctx context.Context) string
+  - function SetMemberContext: (ctx context.Context, workspaceID string, member db.Member) context.Context
+  - function RequireWorkspaceMember: (queries *db.Queries) func(http.Handler) http.Handler
+  - function RequireWorkspaceRole: (queries *db.Queries, roles ...string) func(http.Handler) http.Handler
+  - function RequireWorkspaceMemberFromURL: (queries *db.Queries, param string) func(http.Handler) http.Handler
+  - _...1 more_
+- `server/internal/realtime/hub.go`
+  - function SetAllowedOrigins: (origins []string)
+  - function NewHub: () *Hub
+  - function HandleWebSocket: (hub *Hub, mc MembershipChecker, pr PATResolver, w http.ResponseWriter, r *http.Request)
+  - class Client
+  - class Hub
+  - interface MembershipChecker
+  - _...1 more_
+- `server/internal/sanitize/html.go` — function HTML: (input string) string
+- `server/internal/service/autopilot.go`
+  - function NewAutopilotService: (q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService
+  - class AutopilotService
+  - interface TxStarter
+- `server/internal/service/cron.go` — function ComputeNextRun: (cronExpr, timezone string) (time.Time, error), function ValidateTimezone: (timezone string) error
+- `server/internal/service/email.go` — function NewEmailService: () *EmailService, class EmailService
+- `server/internal/service/task.go`
+  - function NewTaskService: (q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskService
+  - class TaskService
+  - class AgentSkillData
+  - class AgentSkillFileData
+- `server/internal/storage/local.go` — function NewLocalStorageFromEnv: () *LocalStorage, class LocalStorage
+- `server/internal/storage/s3.go` — function NewS3StorageFromEnv: () *S3Storage, class S3Storage
+- `server/internal/util/mention.go`
+  - function ParseMentions: (content string) []Mention
+  - function HasMentionAll: (mentions []Mention) bool
+  - class Mention
+- `server/internal/util/pgx.go`
+  - function ParseUUID: (s string) pgtype.UUID
+  - function UUIDToString: (u pgtype.UUID) string
+  - function TextToPtr: (t pgtype.Text) *string
+  - function PtrToText: (s *string) pgtype.Text
+  - function StrToText: (s string) pgtype.Text
+  - function TimestampToString: (t pgtype.Timestamptz) string
+  - _...2 more_
+- `server/pkg/agent/agent.go`
+  - function New: (agentType string, cfg Config) (Backend, error)
+  - function DetectVersion: (ctx context.Context, executablePath string) (string, error)
+  - class ExecOptions
+  - class Session
+  - class Message
+  - class TokenUsage
+  - _...3 more_
+- `server/pkg/agent/version.go` — function CheckMinVersion: (agentType, detectedVersion string) error
+- `server/pkg/db/generated/activity.sql.go`
+  - class CountAssigneeChangesByActorParams
+  - class CountAssigneeChangesByActorRow
+  - class CreateActivityParams
+  - class ListActivitiesParams
+- `server/pkg/db/generated/agent.sql.go`
+  - class ArchiveAgentParams
+  - class CompleteAgentTaskParams
+  - class CreateAgentParams
+  - class CreateAgentTaskParams
+  - class FailAgentTaskParams
+  - class FailStaleTasksParams
+  - _...7 more_
+- `server/pkg/db/generated/attachment.sql.go`
+  - class CreateAttachmentParams
+  - class DeleteAttachmentParams
+  - class GetAttachmentParams
+  - class LinkAttachmentsToCommentParams
+  - class LinkAttachmentsToIssueParams
+  - class ListAttachmentsByCommentParams
+  - _...2 more_
+- `server/pkg/db/generated/autopilot.sql.go`
+  - class AdvanceTriggerNextRunParams
+  - class ClaimDueScheduleTriggersRow
+  - class CreateAutopilotParams
+  - class CreateAutopilotRunParams
+  - class CreateAutopilotTaskParams
+  - class CreateAutopilotTriggerParams
+  - _...10 more_
+- `server/pkg/db/generated/chat.sql.go`
+  - class CreateChatMessageParams
+  - class CreateChatSessionParams
+  - class CreateChatTaskParams
+  - class GetChatSessionInWorkspaceParams
+  - class GetLastChatTaskSessionRow
+  - class GetPendingChatTaskRow
+  - _...8 more_
+- `server/pkg/db/generated/comment.sql.go`
+  - class CountCommentsParams
+  - class CreateCommentParams
+  - class GetCommentInWorkspaceParams
+  - class HasAgentCommentedSinceParams
+  - class HasAgentRepliedInThreadParams
+  - class ListCommentsParams
+  - _...4 more_
+- `server/pkg/db/generated/daemon_token.sql.go` — class CreateDaemonTokenParams, class DeleteDaemonTokensByWorkspaceAndDaemonParams
+- `server/pkg/db/generated/db.go`
+  - function New: (db DBTX) *Queries
+  - class Queries
+  - interface DBTX
+- `server/pkg/db/generated/inbox.sql.go`
+  - class ArchiveAllInboxParams
+  - class ArchiveAllReadInboxParams
+  - class ArchiveCompletedInboxParams
+  - class ArchiveInboxByIssueParams
+  - class CountUnreadInboxParams
+  - class CreateInboxItemParams
+  - _...4 more_
+- `server/pkg/db/generated/invitation.sql.go`
+  - class CreateInvitationParams
+  - class GetPendingInvitationByEmailParams
+  - class ListPendingInvitationsByWorkspaceRow
+  - class ListPendingInvitationsForUserParams
+  - class ListPendingInvitationsForUserRow
+- `server/pkg/db/generated/issue.sql.go`
+  - class ChildIssueProgressRow
+  - class CountCreatedIssueAssigneesParams
+  - class CountCreatedIssueAssigneesRow
+  - class CountIssuesParams
+  - class CreateIssueParams
+  - class CreateIssueWithOriginParams
+  - _...8 more_
+- `server/pkg/db/generated/issue_reaction.sql.go` — class AddIssueReactionParams, class RemoveIssueReactionParams
+- `server/pkg/db/generated/member.sql.go`
+  - class CreateMemberParams
+  - class GetMemberByUserAndWorkspaceParams
+  - class ListMembersWithUserRow
+  - class UpdateMemberRoleParams
+- `server/pkg/db/generated/models.go`
+  - class ActivityLog
+  - class Agent
+  - class AgentRuntime
+  - class AgentSkill
+  - class AgentTaskQueue
+  - class Attachment
+  - _...29 more_
+- `server/pkg/db/generated/personal_access_token.sql.go` — class CreatePersonalAccessTokenParams, class RevokePersonalAccessTokenParams
+- `server/pkg/db/generated/pinned_item.sql.go`
+  - class CreatePinnedItemParams
+  - class DeletePinnedItemParams
+  - class DeletePinnedItemsByItemParams
+  - class GetMaxPinnedItemPositionParams
+  - class ListPinnedItemsParams
+  - class UpdatePinnedItemPositionParams
+- `server/pkg/db/generated/project.sql.go`
+  - class CreateProjectParams
+  - class GetProjectInWorkspaceParams
+  - class GetProjectIssueStatsRow
+  - class ListProjectsParams
+  - class UpdateProjectParams
+- `server/pkg/db/generated/reaction.sql.go` — class AddReactionParams, class RemoveReactionParams
+- `server/pkg/db/generated/runtime.sql.go`
+  - class DeleteStaleOfflineRuntimesRow
+  - class FailTasksForOfflineRuntimesRow
+  - class GetAgentRuntimeForWorkspaceParams
+  - class ListAgentRuntimesByOwnerParams
+  - class MarkStaleRuntimesOfflineRow
+  - class MigrateAgentsToRuntimeParams
+  - _...1 more_
+- `server/pkg/db/generated/runtime_usage.sql.go`
+  - class GetRuntimeTaskHourlyActivityRow
+  - class GetRuntimeUsageSummaryRow
+  - class ListRuntimeUsageParams
+  - class UpsertRuntimeUsageParams
+- `server/pkg/db/generated/skill.sql.go`
+  - class AddAgentSkillParams
+  - class CreateSkillParams
+  - class GetSkillInWorkspaceParams
+  - class ListAgentSkillsByWorkspaceRow
+  - class RemoveAgentSkillParams
+  - class UpdateSkillParams
+  - _...1 more_
+- `server/pkg/db/generated/subscriber.sql.go`
+  - class AddIssueSubscriberParams
+  - class IsIssueSubscriberParams
+  - class RemoveIssueSubscriberParams
+- `server/pkg/db/generated/task_message.sql.go` — class CreateTaskMessageParams, class ListTaskMessagesSinceParams
+- `server/pkg/db/generated/task_usage.sql.go`
+  - class GetIssueUsageSummaryRow
+  - class GetWorkspaceUsageByDayParams
+  - class GetWorkspaceUsageByDayRow
+  - class GetWorkspaceUsageSummaryParams
+  - class GetWorkspaceUsageSummaryRow
+  - class UpsertTaskUsageParams
+- `server/pkg/db/generated/user.sql.go` — class CreateUserParams, class UpdateUserParams
+- `server/pkg/db/generated/verification_code.sql.go` — class CreateVerificationCodeParams
+- `server/pkg/db/generated/workspace.sql.go` — class CreateWorkspaceParams, class UpdateWorkspaceParams
+- `server/pkg/protocol/messages.go`
+  - class Message
+  - class TaskDispatchPayload
+  - class TaskProgressPayload
+  - class TaskCompletedPayload
+  - class TaskMessagePayload
+  - class DaemonRegisterPayload
+  - _...5 more_
+- `server/pkg/redact/redact.go` — function InputMap: (m map[string]any) map[string]any, function Text: (s string) string

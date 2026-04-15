@@ -1,0 +1,1671 @@
+# multica — AI Context Map
+
+> **Stack:** next-app, chi | none | react | typescript
+> **Monorepo:** @multica/desktop, @multica/docs, @multica/web, @multica/core, @multica/eslint-config, @multica/tsconfig, @multica/ui, @multica/views, server
+
+> 296 routes (27 inferred) + 27 ws | 36 models | 182 components | 155 lib files | 85 env vars | 16 middleware | 20% test coverage
+> **Token savings:** this file is ~23,600 tokens. Without it, AI exploration would cost ~297,000 tokens. **Saves ~273,400 tokens per conversation.**
+> **Last scanned:** 2026-04-15 08:17 — re-run after significant changes
+
+---
+
+# Routes
+
+## CRUD Resources
+
+- **`/api/workspaces`** GET | POST | PUT/:id | DELETE/:id → Workspace
+- **``** GET/:id | PUT/:id | DELETE/:id
+- **`/members`** GET | POST | GET/:id | PATCH/:id | DELETE/:id → Member
+- **`/api/tokens`** GET | POST | GET/:id | DELETE/:id → Token
+- **`/api/issues`** GET | POST | PUT/:id | DELETE/:id → Issue
+- **`/api/projects`** GET | POST | PUT/:id | DELETE/:id → Project
+- **`/api/autopilots`** GET | POST | PATCH/:id | DELETE/:id → Autopilot
+- **`/triggers`** POST | PATCH/:id | DELETE/:id → Trigger
+- **`/api/agents`** GET | POST | PUT/:id → Agent
+- **`/api/skills`** GET | POST | PUT/:id | DELETE/:id → Skill
+- **`/api/skills/files`** GET | GET/:id | PUT/:id | DELETE/:id → File
+- **`/{id}/files`** GET | GET/:id | PUT/:id | DELETE/:id → File
+- **`/api/chat/sessions`** GET | POST | DELETE/:id → Session
+- **`/`** GET | POST | PUT/:id | DELETE/:id
+- **`/files`** GET | GET/:id | PUT/:id | DELETE/:id → File
+
+## Other Routes
+
+### next-app
+
+- `GET` `/favicon.ico`
+
+### chi
+
+- `GET` `token` params() [auth, db] ✓
+- `GET` `state` params() [auth, db] ✓
+- `ALL` `/callback` params() [auth, db]
+- `GET` `X-Total-Count` params() [auth, upload]
+- `POST` `/api/daemon/register` params() [auth, db, upload] ✓
+- `POST` `/api/daemon/deregister` params() [auth, db, upload]
+- `POST` `/api/daemon/heartbeat` params() [auth, db, upload] ✓
+- `POST` `/api/daemon/runtimes/{runtimeId}/tasks/claim` params(runtimeId) [auth, db, upload]
+- `GET` `/api/daemon/runtimes/{runtimeId}/tasks/pending` params(runtimeId) [auth, db, upload]
+- `POST` `/api/daemon/runtimes/{runtimeId}/usage` params(runtimeId) [auth, db, upload]
+- `POST` `/api/daemon/runtimes/{runtimeId}/ping/{pingId}/result` params(runtimeId, pingId) [auth, db, upload]
+- `POST` `/api/daemon/runtimes/{runtimeId}/update/{updateId}/result` params(runtimeId, updateId) [auth, db, upload]
+- `GET` `/api/daemon/tasks/{taskId}/status` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/start` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/progress` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/complete` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/fail` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/usage` params(taskId) [auth, db, upload]
+- `POST` `/api/daemon/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/api/daemon/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/api/daemon/issues/{issueId}/gc-check` params(issueId) [auth, db, upload]
+- `GET` `/api/workspaces/members` params() [auth, db, upload]
+- `POST` `/api/workspaces/leave` params() [auth, db, upload]
+- `GET` `/api/workspaces/invitations` params() [auth, db, upload]
+- `POST` `/api/workspaces/members` params() [auth, db, upload]
+- `DELETE` `/api/workspaces/invitations/{invitationId}` params(invitationId) [auth, db, upload]
+- `GET` `/{id}/members` params(id) [auth, db, upload]
+- `POST` `/{id}/leave` params(id) [auth, db, upload]
+- `GET` `/{id}/invitations` params(id) [auth, db, upload]
+- `POST` `/{id}/members` params(id) [auth, db, upload]
+- `DELETE` `/{id}/invitations/{invitationId}` params(id, invitationId) [auth, db, upload]
+- `GET` `/api/issues/search` params() [auth, db, upload]
+- `GET` `/api/issues/child-progress` params() [auth, db, upload]
+- `POST` `/api/issues/batch-update` params() [auth, db, upload]
+- `POST` `/api/issues/batch-delete` params() [auth, db, upload]
+- `POST` `/api/issues/comments` params() [auth, db, upload]
+- `GET` `/api/issues/comments` params() [auth, db, upload]
+- `GET` `/api/issues/timeline` params() [auth, db, upload]
+- `GET` `/api/issues/subscribers` params() [auth, db, upload]
+- `POST` `/api/issues/subscribe` params() [auth, db, upload]
+- `POST` `/api/issues/unsubscribe` params() [auth, db, upload]
+- `GET` `/api/issues/active-task` params() [auth, db, upload]
+- `POST` `/api/issues/tasks/{taskId}/cancel` params(taskId) [auth, db, upload]
+- `GET` `/api/issues/task-runs` params() [auth, db, upload]
+- `GET` `/api/issues/usage` params() [auth, db, upload]
+- `POST` `/api/issues/reactions` params() [auth, db, upload]
+- `DELETE` `/api/issues/reactions` params() [auth, db, upload]
+- `GET` `/api/issues/attachments` params() [auth, db, upload]
+- `GET` `/api/issues/children` params() [auth, db, upload]
+- `POST` `/{id}/comments` params(id) [auth, db, upload]
+- `GET` `/{id}/comments` params(id) [auth, db, upload]
+- `GET` `/{id}/timeline` params(id) [auth, db, upload]
+- `GET` `/{id}/subscribers` params(id) [auth, db, upload]
+- `POST` `/{id}/subscribe` params(id) [auth, db, upload]
+- `POST` `/{id}/unsubscribe` params(id) [auth, db, upload]
+- `GET` `/{id}/active-task` params(id) [auth, db, upload]
+- `POST` `/{id}/tasks/{taskId}/cancel` params(id, taskId) [auth, db, upload]
+- `GET` `/{id}/task-runs` params(id) [auth, db, upload]
+- `GET` `/{id}/usage` params(id) [auth, db, upload]
+- `POST` `/{id}/reactions` params(id) [auth, db, upload]
+- `DELETE` `/{id}/reactions` params(id) [auth, db, upload]
+- `GET` `/{id}/attachments` params(id) [auth, db, upload]
+- `GET` `/{id}/children` params(id) [auth, db, upload]
+- `GET` `/api/projects/search` params() [auth, db, upload]
+- `POST` `/api/autopilots/trigger` params() [auth, db, upload]
+- `GET` `/api/autopilots/runs` params() [auth, db, upload]
+- `POST` `/api/autopilots/triggers` params() [auth, db, upload]
+- `POST` `/{id}/trigger` params(id) [auth, db, upload]
+- `GET` `/{id}/runs` params(id) [auth, db, upload]
+- `POST` `/{id}/triggers` params(id) [auth, db, upload]
+- `GET` `/api/pins` params() [auth, db, upload]
+- `POST` `/api/pins` params() [auth, db, upload]
+- `PUT` `/api/pins/reorder` params() [auth, db, upload]
+- `DELETE` `/api/pins/{itemType}/{itemId}` params(itemType, itemId) [auth, db, upload]
+- `PUT` `/api/comments/{commentId}` params(commentId) [auth, db, upload]
+- `DELETE` `/api/comments/{commentId}` params(commentId) [auth, db, upload]
+- `POST` `/api/comments/{commentId}/reactions` params(commentId) [auth, db, upload]
+- `DELETE` `/api/comments/{commentId}/reactions` params(commentId) [auth, db, upload]
+- `POST` `/api/agents/archive` params() [auth, db, upload]
+- `POST` `/api/agents/restore` params() [auth, db, upload]
+- `GET` `/api/agents/tasks` params() [auth, db, upload]
+- `GET` `/api/agents/skills` params() [auth, db, upload]
+- `PUT` `/api/agents/skills` params() [auth, db, upload]
+- `POST` `/{id}/archive` params(id) [auth, db, upload]
+- `POST` `/{id}/restore` params(id) [auth, db, upload]
+- `GET` `/{id}/tasks` params(id) [auth, db, upload]
+- `GET` `/{id}/skills` params(id) [auth, db, upload]
+- `PUT` `/{id}/skills` params(id) [auth, db, upload]
+- `POST` `/api/skills/import` params() [auth, db, upload]
+- `GET` `/api/usage/daily` params() [auth, db, upload]
+- `GET` `/api/usage/summary` params() [auth, db, upload]
+- `GET` `/api/runtimes` params() [auth, db, upload]
+- `GET` `/api/runtimes/usage` params() [auth, db, upload]
+- `GET` `/api/runtimes/activity` params() [auth, db, upload]
+- `POST` `/api/runtimes/ping` params() [auth, db, upload]
+- `GET` `/api/runtimes/ping/{pingId}` params(pingId) [auth, db, upload]
+- `POST` `/api/runtimes/update` params() [auth, db, upload]
+- `GET` `/api/runtimes/update/{updateId}` params(updateId) [auth, db, upload]
+- `DELETE` `/api/runtimes` params() [auth, db, upload]
+- `GET` `/{runtimeId}/usage` params(runtimeId) [auth, db, upload]
+- `GET` `/{runtimeId}/activity` params(runtimeId) [auth, db, upload]
+- `POST` `/{runtimeId}/ping` params(runtimeId) [auth, db, upload]
+- `GET` `/{runtimeId}/ping/{pingId}` params(runtimeId, pingId) [auth, db, upload]
+- `POST` `/{runtimeId}/update` params(runtimeId) [auth, db, upload]
+- `GET` `/{runtimeId}/update/{updateId}` params(runtimeId, updateId) [auth, db, upload]
+- `POST` `/api/chat/sessions/messages` params() [auth, db, upload]
+- `GET` `/api/chat/sessions/messages` params() [auth, db, upload]
+- `GET` `/api/chat/sessions/pending-task` params() [auth, db, upload]
+- `POST` `/api/chat/sessions/read` params() [auth, db, upload]
+- `POST` `/{sessionId}/messages` params(sessionId) [auth, db, upload]
+- `GET` `/{sessionId}/messages` params(sessionId) [auth, db, upload]
+- `GET` `/{sessionId}/pending-task` params(sessionId) [auth, db, upload]
+- `POST` `/{sessionId}/read` params(sessionId) [auth, db, upload]
+- `GET` `/api/inbox` params() [auth, db, upload] ✓
+- `GET` `/api/inbox/unread-count` params() [auth, db, upload]
+- `POST` `/api/inbox/mark-all-read` params() [auth, db, upload]
+- `POST` `/api/inbox/archive-all` params() [auth, db, upload]
+- `POST` `/api/inbox/archive-all-read` params() [auth, db, upload]
+- `POST` `/api/inbox/archive-completed` params() [auth, db, upload]
+- `POST` `/api/inbox/{id}/read` params(id) [auth, db, upload]
+- `POST` `/api/inbox/{id}/archive` params(id) [auth, db, upload]
+- `GET` `/health` params() [auth, db, upload] ✓
+- `GET` `/ws` params() [auth, db, upload] ✓
+- `GET` `/uploads/*` params() [auth, db, upload]
+- `POST` `/auth/send-code` params() [auth, db, upload] ✓
+- `POST` `/auth/verify-code` params() [auth, db, upload] ✓
+- `POST` `/auth/google` params() [auth, db, upload]
+- `POST` `/auth/logout` params() [auth, db, upload]
+- `POST` `/register` params() [auth, db, upload]
+- `POST` `/deregister` params() [auth, db, upload]
+- `POST` `/heartbeat` params() [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/tasks/claim` params(runtimeId) [auth, db, upload]
+- `GET` `/runtimes/{runtimeId}/tasks/pending` params(runtimeId) [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/usage` params(runtimeId) [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/ping/{pingId}/result` params(runtimeId, pingId) [auth, db, upload]
+- `POST` `/runtimes/{runtimeId}/update/{updateId}/result` params(runtimeId, updateId) [auth, db, upload]
+- `GET` `/tasks/{taskId}/status` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/start` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/progress` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/complete` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/fail` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/usage` params(taskId) [auth, db, upload]
+- `POST` `/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `GET` `/issues/{issueId}/gc-check` params(issueId) [auth, db, upload]
+- `GET` `/api/config` params() [auth, db, upload]
+- `GET` `/api/me` params() [auth, db, upload] ✓
+- `PATCH` `/api/me` params() [auth, db, upload] ✓
+- `POST` `/api/cli-token` params() [auth, db, upload]
+- `POST` `/api/upload-file` params() [auth, db, upload] ✓
+- `POST` `/leave` params() [auth, db, upload]
+- `GET` `/invitations` params() [auth, db, upload]
+- `DELETE` `/invitations/{invitationId}` params(invitationId) [auth, db, upload]
+- `GET` `/api/invitations` params() [auth, db, upload]
+- `GET` `/api/invitations/{id}` params(id) [auth, db, upload]
+- `POST` `/api/invitations/{id}/accept` params(id) [auth, db, upload]
+- `POST` `/api/invitations/{id}/decline` params(id) [auth, db, upload]
+- `GET` `/api/assignee-frequency` params() [auth, db, upload]
+- `GET` `/search` params() [auth, db, upload]
+- `GET` `/child-progress` params() [auth, db, upload]
+- `POST` `/batch-update` params() [auth, db, upload]
+- `POST` `/batch-delete` params() [auth, db, upload]
+- `POST` `/comments` params() [auth, db, upload] ✓
+- `GET` `/comments` params() [auth, db, upload] ✓
+- `GET` `/timeline` params() [auth, db, upload] ✓
+- `GET` `/subscribers` params() [auth, db, upload] ✓
+- `POST` `/subscribe` params() [auth, db, upload] ✓
+- `POST` `/unsubscribe` params() [auth, db, upload] ✓
+- `GET` `/active-task` params() [auth, db, upload]
+- `POST` `/tasks/{taskId}/cancel` params(taskId) [auth, db, upload]
+- `GET` `/task-runs` params() [auth, db, upload]
+- `GET` `/usage` params() [auth, db, upload]
+- `POST` `/reactions` params() [auth, db, upload]
+- `DELETE` `/reactions` params() [auth, db, upload]
+- `GET` `/attachments` params() [auth, db, upload]
+- `GET` `/children` params() [auth, db, upload]
+- `GET` `/api/tasks/{taskId}/messages` params(taskId) [auth, db, upload]
+- `POST` `/trigger` params() [auth, db, upload]
+- `GET` `/runs` params() [auth, db, upload]
+- `PUT` `/reorder` params() [auth, db, upload]
+- `DELETE` `/{itemType}/{itemId}` params(itemType, itemId) [auth, db, upload]
+- `GET` `/api/attachments/{id}` params(id) [auth, db, upload]
+- `DELETE` `/api/attachments/{id}` params(id) [auth, db, upload]
+- `POST` `/archive` params() [auth, db, upload]
+- `POST` `/restore` params() [auth, db, upload]
+- `GET` `/tasks` params() [auth, db, upload]
+- `GET` `/skills` params() [auth, db, upload]
+- `PUT` `/skills` params() [auth, db, upload]
+- `POST` `/import` params() [auth, db, upload]
+- `GET` `/daily` params() [auth, db, upload]
+- `GET` `/summary` params() [auth, db, upload]
+- `GET` `/activity` params() [auth, db, upload]
+- `POST` `/ping` params() [auth, db, upload]
+- `GET` `/ping/{pingId}` params(pingId) [auth, db, upload]
+- `POST` `/update` params() [auth, db, upload]
+- `GET` `/update/{updateId}` params(updateId) [auth, db, upload]
+- `POST` `/api/tasks/{taskId}/cancel` params(taskId) [auth, db, upload]
+- `POST` `/messages` params() [auth, db, upload]
+- `GET` `/messages` params() [auth, db, upload]
+- `GET` `/pending-task` params() [auth, db, upload]
+- `POST` `/read` params() [auth, db, upload]
+- `GET` `/api/chat/pending-tasks` params() [auth, db, upload]
+- `GET` `/unread-count` params() [auth, db, upload]
+- `POST` `/mark-all-read` params() [auth, db, upload]
+- `POST` `/archive-all` params() [auth, db, upload]
+- `POST` `/archive-all-read` params() [auth, db, upload]
+- `POST` `/archive-completed` params() [auth, db, upload]
+- `POST` `/{id}/read` params(id) [auth, db, upload]
+- `GET` `X-CSRF-Token` params() [auth]
+- `GET` `Content-Type` params() [auth]
+- `GET` `Authorization` params() [auth]
+- `GET` `X-Workspace-ID` params() [auth]
+- `GET` `X-Agent-ID` params() [auth]
+- `GET` `X-Task-ID` params() [auth]
+- `ALL` `/health` params() [cache, payment] ✓
+- `ALL` `/repo/checkout` params() [cache, payment]
+- `GET` `include_archived` params() [auth, db, queue]
+- `GET` `status` params() [auth, db, payment] ✓
+- `GET` `limit` params() [auth, db, payment]
+- `GET` `offset` params() [auth, db, payment]
+- `GET` `since` params() [auth, db, queue, upload]
+- `GET` `X-User-ID` params() [auth, db]
+- `GET` `workspace_id` params() [auth, db] ✓
+- `GET` `q` params() [auth, db, queue, upload]
+- `GET` `include_closed` params() [auth, db, queue, upload]
+- `GET` `priority` params() [auth, db, queue, upload] ✓
+- `GET` `assignee_id` params() [auth, db, queue, upload] ✓
+- `GET` `assignee_ids` params() [auth, db, queue, upload]
+- `GET` `creator_id` params() [auth, db, queue, upload]
+- `GET` `project_id` params() [auth, db, queue, upload] ✓
+- `GET` `open_only` params() [auth, db, queue, upload]
+- `GET` `days` params() [auth, db, cache]
+- `GET` `owner` params() [auth, db, cache] ✓
+- `GET` `X-User-Email` params() [auth]
+- `GET` `Content-Security-Policy` params()
+- `GET` `Origin` params() [auth, db]
+- `ALL` `/ws` params() [auth] ✓
+
+## WebSocket Events
+
+- `WS` `issue:updated` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue:deleted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `inbox:new` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `comment:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `comment:updated` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `comment:deleted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `activity:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `reaction:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `reaction:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue_reaction:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `issue_reaction:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `subscriber:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `subscriber:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `workspace:deleted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `member:removed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `member:added` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:created` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:accepted` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:declined` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `invitation:revoked` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `task:message` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `chat:message` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `chat:done` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `task:completed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `task:failed` — `packages/core/realtime/use-realtime-sync.ts`
+- `WS` `chat:session_read` — `packages/core/realtime/use-realtime-sync.ts`
+
+---
+
+# Schema
+
+### user
+- id: uuid (pk)
+- name: text (required)
+- email: text (unique)
+- avatar_url: text
+
+### workspace
+- id: uuid (pk)
+- name: text (required)
+- slug: text (unique)
+- description: text
+- settings: jsonb (required)
+
+### member
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- user_id: uuid (required, fk)
+- role: text (required)
+
+### agent
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- name: text (required)
+- avatar_url: text
+- runtime_mode: text (required)
+- runtime_config: jsonb (required)
+- visibility: text (required)
+- status: text (required)
+- max_concurrent_tasks: integer (required)
+- owner_id: uuid (fk)
+
+### issue
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- title: text (required)
+- description: text
+- status: text (required)
+- priority: text (required)
+- assignee_id: uuid (fk)
+- creator_type: text (required)
+- creator_id: uuid (required, fk)
+- parent_issue_id: uuid (fk)
+- acceptance_criteria: jsonb (required)
+- context_refs: jsonb (required)
+- position: float (required)
+- due_date: timestamp(tz)
+
+### issue_label
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- name: text (required)
+- color: text (required)
+
+### issue_to_label
+- issue_id: uuid (required, fk)
+- label_id: uuid (required, fk)
+
+### issue_dependency
+- id: uuid (pk)
+- issue_id: uuid (required, fk)
+- depends_on_issue_id: uuid (required, fk)
+- type: text (required)
+
+### comment
+- id: uuid (pk)
+- issue_id: uuid (required, fk)
+- author_type: text (required)
+- author_id: uuid (required, fk)
+- content: text (required)
+- type: text (required)
+
+### inbox_item
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- recipient_type: text (required)
+- recipient_id: uuid (required, fk)
+- type: text (required)
+- severity: text (required)
+- issue_id: uuid (fk)
+- title: text (required)
+- body: text
+- read: boolean (required)
+- archived: boolean (required)
+
+### agent_task_queue
+- id: uuid (pk)
+- agent_id: uuid (required, fk)
+- issue_id: uuid (required, fk)
+- status: text (required)
+- priority: integer (required)
+- dispatched_at: timestamp(tz)
+- started_at: timestamp(tz)
+- completed_at: timestamp(tz)
+- result: jsonb
+- error: text
+
+### daemon_connection
+- id: uuid (pk)
+- agent_id: uuid (required, fk)
+- daemon_id: text (required, fk)
+- status: text (required)
+- last_heartbeat_at: timestamp(tz)
+- runtime_info: jsonb (required)
+
+### activity_log
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- issue_id: uuid (fk)
+- actor_id: uuid (fk)
+- action: text (required)
+- details: jsonb (required)
+
+### agent_runtime
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- daemon_id: text (fk)
+- name: text (required)
+- runtime_mode: text (required)
+- provider: text (required)
+- status: text (required)
+- device_info: text (required)
+- metadata: jsonb (required)
+- last_seen_at: timestamp(tz)
+
+### daemon_pairing_session
+- id: uuid (pk)
+- token: text (required)
+- daemon_id: text (required, fk)
+- device_name: text (required)
+- runtime_name: text (required)
+- runtime_type: text (required)
+- runtime_version: text (required)
+- workspace_id: uuid (fk)
+- approved_by: uuid (fk)
+- status: text (required)
+- approved_at: timestamp(tz)
+- claimed_at: timestamp(tz)
+- expires_at: timestamp(tz) (required)
+
+### skill
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- name: text (required)
+- description: text (required)
+- content: text (required)
+- config: jsonb (required)
+- created_by: uuid (fk)
+
+### skill_file
+- id: uuid (pk)
+- skill_id: uuid (required, fk)
+- path: text (required)
+- content: text (required)
+
+### agent_skill
+- agent_id: uuid (required, fk)
+- skill_id: uuid (required, fk)
+
+### verification_code
+- id: uuid (pk)
+- email: text (required)
+- code: text (required)
+- expires_at: timestamp(tz) (required)
+- used: boolean (required)
+
+### personal_access_token
+- id: uuid (pk)
+- user_id: uuid (required, fk)
+- name: text (required)
+- token_hash: text (required)
+- token_prefix: text (required)
+- expires_at: timestamp(tz)
+- last_used_at: timestamp(tz)
+- revoked: boolean (required)
+
+### runtime_usage
+- id: uuid (pk)
+- runtime_id: uuid (required, fk)
+- date: date (required)
+- provider: text (required)
+- model: text (required)
+- input_tokens: bigint (required)
+- output_tokens: bigint (required)
+- cache_read_tokens: bigint (required)
+- cache_write_tokens: bigint (required)
+
+### issue_subscriber
+- issue_id: uuid (required, fk)
+- user_type: text (required)
+- user_id: uuid (required, fk)
+- reason: text (required)
+
+### comment_reaction
+- id: uuid (pk)
+- comment_id: uuid (required, fk)
+- workspace_id: uuid (required, fk)
+- actor_type: text (required)
+- actor_id: uuid (required, fk)
+- emoji: text (required)
+
+### task_message
+- id: uuid (pk)
+- task_id: uuid (required, fk)
+- seq: integer (required)
+- type: text (required)
+- tool: text
+- content: text
+- input: jsonb
+- output: text
+
+### issue_reaction
+- id: uuid (pk)
+- issue_id: uuid (required, fk)
+- workspace_id: uuid (required, fk)
+- actor_type: text (required)
+- actor_id: uuid (required, fk)
+- emoji: text (required)
+
+### attachment
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- issue_id: uuid (fk)
+- comment_id: uuid (fk)
+- uploader_type: text (required)
+- uploader_id: uuid (required, fk)
+- filename: text (required)
+- url: text (required)
+- content_type: text (required)
+- size_bytes: bigint (required)
+
+### daemon_token
+- id: uuid (pk)
+- token_hash: text (required)
+- workspace_id: uuid (required, fk)
+- daemon_id: text (required, fk)
+- expires_at: timestamp(tz) (required)
+
+### task_usage
+- id: uuid (pk)
+- task_id: uuid (required, fk)
+- provider: text (required)
+- model: text (required)
+- input_tokens: bigint (required)
+- output_tokens: bigint (required)
+- cache_read_tokens: bigint (required)
+- cache_write_tokens: bigint (required)
+
+### chat_session
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- agent_id: uuid (required, fk)
+- creator_id: uuid (required, fk)
+- title: text (required)
+- session_id: text (fk)
+- work_dir: text
+- status: text (required)
+
+### chat_message
+- id: uuid (pk)
+- chat_session_id: uuid (required, fk)
+- role: text (required)
+- content: text (required)
+- task_id: uuid (fk)
+
+### project
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- title: text (required)
+- description: text
+- icon: text
+- status: text (required)
+- lead_id: uuid (fk)
+
+### pinned_item
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- user_id: uuid (required, fk)
+- item_type: text (required)
+- item_id: uuid (required, fk)
+- position: float (required)
+
+### workspace_invitation
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- inviter_id: uuid (required, fk)
+- invitee_email: text (required)
+- invitee_user_id: uuid (fk)
+- role: text (required)
+- status: text (required)
+- expires_at: timestamp(tz) (required)
+
+### autopilot
+- id: uuid (pk)
+- workspace_id: uuid (required, fk)
+- project_id: uuid (fk)
+- title: text (required)
+- description: text
+- assignee_id: uuid (required, fk)
+- priority: text (required)
+- status: text (required)
+- execution_mode: text (required)
+- issue_title_template: text
+- concurrency_policy: text (required)
+- created_by_type: text (required)
+- created_by_id: uuid (required, fk)
+- last_run_at: timestamp(tz)
+
+### autopilot_trigger
+- id: uuid (pk)
+- autopilot_id: uuid (required, fk)
+- kind: text (required)
+- enabled: boolean (required)
+- cron_expression: text
+- timezone: text (default)
+- next_run_at: timestamp(tz)
+- webhook_token: text
+- label: text
+- last_fired_at: timestamp(tz)
+
+### autopilot_run
+- id: uuid (pk)
+- autopilot_id: uuid (required, fk)
+- trigger_id: uuid (fk)
+- source: text (required)
+- status: text (required)
+- issue_id: uuid (fk)
+- task_id: uuid (fk)
+- triggered_at: timestamp(tz) (required)
+- completed_at: timestamp(tz)
+- failure_reason: text
+- trigger_payload: jsonb
+- result: jsonb
+
+---
+
+# Components
+
+- **App** — `apps/desktop/src/renderer/src/App.tsx`
+- **DaemonPanel** — props: open, onOpenChange, status — `apps/desktop/src/renderer/src/components/daemon-panel.tsx`
+- **DaemonRuntimeCard** — `apps/desktop/src/renderer/src/components/daemon-runtime-card.tsx`
+- **DaemonSettingsTab** — `apps/desktop/src/renderer/src/components/daemon-settings-tab.tsx`
+- **DesktopShell** — `apps/desktop/src/renderer/src/components/desktop-layout.tsx`
+- **TabBar** — `apps/desktop/src/renderer/src/components/tab-bar.tsx`
+- **TabContent** — `apps/desktop/src/renderer/src/components/tab-content.tsx`
+- **UpdateNotification** — `apps/desktop/src/renderer/src/components/update-notification.tsx`
+- **AutopilotDetailPage** — `apps/desktop/src/renderer/src/pages/autopilot-detail-page.tsx`
+- **IssueDetailPage** — `apps/desktop/src/renderer/src/pages/issue-detail-page.tsx`
+- **DesktopLoginPage** — `apps/desktop/src/renderer/src/pages/login.tsx`
+- **ProjectDetailPage** — `apps/desktop/src/renderer/src/pages/project-detail-page.tsx`
+- **DesktopNavigationProvider** — `apps/desktop/src/renderer/src/platform/navigation.tsx`
+- **TabNavigationProvider** — props: router — `apps/desktop/src/renderer/src/platform/navigation.tsx`
+- **TitleSync** — `apps/desktop/src/renderer/src/routes.tsx`
+- **Layout** — `apps/docs/app/(home)/layout.tsx`
+- **HomePage** — `apps/docs/app/(home)/page.tsx`
+- **Page** — props: params — `apps/docs/app/docs/[[...slug]]/page.tsx`
+- **Layout** — `apps/docs/app/docs/layout.tsx`
+- **Layout** — `apps/docs/app/layout.tsx`
+- **InviteAcceptPage** [client] — `apps/web/app/(auth)/invite/[id]/page.tsx`
+- **Page** [client] — `apps/web/app/(auth)/login/page.tsx`
+- **OnboardingPage** [client] — `apps/web/app/(auth)/onboarding/page.tsx`
+- **Page** [client] — props: params — `apps/web/app/(dashboard)/autopilots/[id]/page.tsx`
+- **Page** [client] — `apps/web/app/(dashboard)/autopilots/page.tsx`
+- **IssueDetailPage** [client] — props: params — `apps/web/app/(dashboard)/issues/[id]/page.tsx`
+- **Page** [client] — `apps/web/app/(dashboard)/issues/page.tsx`
+- **Layout** [client] — `apps/web/app/(dashboard)/layout.tsx`
+- **DashboardLoading** — `apps/web/app/(dashboard)/loading.tsx`
+- **Page** [client] — `apps/web/app/(dashboard)/my-issues/page.tsx`
+- **ProjectDetailPage** [client] — props: params — `apps/web/app/(dashboard)/projects/[id]/page.tsx`
+- **Page** [client] — `apps/web/app/(dashboard)/projects/page.tsx`
+- **AboutPage** — `apps/web/app/(landing)/about/page.tsx`
+- **ChangelogPage** — `apps/web/app/(landing)/changelog/page.tsx`
+- **HomepagePage** — `apps/web/app/(landing)/homepage/page.tsx`
+- **LandingLayout** — `apps/web/app/(landing)/layout.tsx`
+- **LandingPage** — `apps/web/app/(landing)/page.tsx`
+- **CallbackPage** [client] — `apps/web/app/auth/callback/page.tsx`
+- **RootLayout** — `apps/web/app/layout.tsx`
+- **LocaleSync** [client] — `apps/web/components/locale-sync.tsx`
+- **WebProviders** [client] — `apps/web/components/web-providers.tsx`
+- **AboutPageClient** [client] — `apps/web/features/landing/components/about-page-client.tsx`
+- **ChangelogPageClient** [client] — `apps/web/features/landing/components/changelog-page-client.tsx`
+- **FAQSection** [client] — `apps/web/features/landing/components/faq-section.tsx`
+- **FeaturesSection** [client] — `apps/web/features/landing/components/features-section.tsx`
+- **HowItWorksSection** [client] — `apps/web/features/landing/components/how-it-works-section.tsx`
+- **LandingFooter** [client] — `apps/web/features/landing/components/landing-footer.tsx`
+- **LandingHeader** [client] — props: variant — `apps/web/features/landing/components/landing-header.tsx`
+- **LandingHero** [client] — `apps/web/features/landing/components/landing-hero.tsx`
+- **MulticaLanding** [client] — `apps/web/features/landing/components/multica-landing.tsx`
+- **OpenSourceSection** [client] — `apps/web/features/landing/components/open-source-section.tsx`
+- **GitHubMark** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **XMark** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **ImageIcon** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **ClaudeCodeLogo** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **CodexLogo** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **OpenClawLogo** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **GeminiCliLogo** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **OpenCodeLogo** — props: className — `apps/web/features/landing/components/shared.tsx`
+- **LocaleProvider** [client] — props: initialLocale — `apps/web/features/landing/i18n/context.tsx`
+- **WebNavigationProvider** [client] — `apps/web/platform/navigation.tsx`
+- **WorkspaceIdProvider** [client] — props: wsId — `packages/core/hooks.tsx`
+- **ViewStoreProvider** [client] — props: store — `packages/core/issues/stores/view-store-context.tsx`
+- **AuthInitializer** [client] — props: onLogin, onLogout, storage, cookieAuth — `packages/core/platform/auth-initializer.tsx`
+- **CoreProvider** [client] — props: apiBaseUrl, wsUrl, storage, cookieAuth, onLogin, onLogout — `packages/core/platform/core-provider.tsx`
+- **QueryProvider** [client] — `packages/core/provider.tsx`
+- **WSProvider** [client] — props: wsUrl, authStore, workspaceStore, storage, cookieAuth, onToast — `packages/core/realtime/provider.tsx`
+- **AgentDetail** [client] — props: agent, runtimes, members, currentUserId, onUpdate, onArchive, onRestore — `packages/views/agents/components/agent-detail.tsx`
+- **AgentListItem** [client] — props: agent, isSelected, onClick — `packages/views/agents/components/agent-list-item.tsx`
+- **AgentsPage** [client] — `packages/views/agents/components/agents-page.tsx`
+- **CreateAgentDialog** [client] — props: runtimes, runtimesLoading, members, currentUserId, onClose, onCreate — `packages/views/agents/components/create-agent-dialog.tsx`
+- **CustomArgsTab** [client] — props: agent, onSave — `packages/views/agents/components/tabs/custom-args-tab.tsx`
+- **EnvTab** [client] — props: agent, readOnly, onSave — `packages/views/agents/components/tabs/env-tab.tsx`
+- **InstructionsTab** [client] — props: agent, onSave — `packages/views/agents/components/tabs/instructions-tab.tsx`
+- **SettingsTab** [client] — props: agent, runtimes, members, currentUserId, onSave — `packages/views/agents/components/tabs/settings-tab.tsx`
+- **SkillsTab** [client] — props: agent — `packages/views/agents/components/tabs/skills-tab.tsx`
+- **TasksTab** [client] — props: agent — `packages/views/agents/components/tabs/tasks-tab.tsx`
+- **LoginPage** [client] — props: logo, onSuccess, google, cliCallback, lastWorkspaceId, onTokenObtained, onGoogleLogin — `packages/views/auth/login-page.tsx`
+- **AutopilotDetailPage** [client] — props: autopilotId — `packages/views/autopilots/components/autopilot-detail-page.tsx`
+- **AutopilotsPage** [client] — `packages/views/autopilots/components/autopilots-page.tsx`
+- **TriggerConfigSection** [client] — props: config, onChange — `packages/views/autopilots/components/trigger-config.tsx`
+- **ChatFab** [client] — `packages/views/chat/components/chat-fab.tsx`
+- **ChatInput** [client] — props: onSend, onStop, isRunning, disabled, agentName, leftAdornment — `packages/views/chat/components/chat-input.tsx`
+- **ChatMessageList** [client] — props: messages, pendingTaskId, isWaiting — `packages/views/chat/components/chat-message-list.tsx`
+- **ChatMessageSkeleton** [client] — `packages/views/chat/components/chat-message-list.tsx`
+- **ChatResizeHandles** [client] — props: onDragStart — `packages/views/chat/components/chat-resize-handles.tsx`
+- **ChatSessionHistory** [client] — `packages/views/chat/components/chat-session-history.tsx`
+- **ChatWindow** [client] — `packages/views/chat/components/chat-window.tsx`
+- **ActorAvatar** [client] — props: actorType, actorId, size, className — `packages/views/common/actor-avatar.tsx`
+- **CommentInput** [client] — props: entityId, entityKey, placeholder, onSubmit, className — `packages/views/common/comment-input.tsx`
+- **Markdown** [client] — `packages/views/common/markdown.tsx`
+- **MarkButton** [client] — props: editor, mark, icon, label, shortcut, isActive — `packages/views/editor/bubble-menu.tsx`
+- **TABLE_BG_COLORS** — props: defaultValue, onUpdate, placeholder, editable, className, debounceMs, onSubmit, onBlur, onUploadFile, showToolbar — `packages/views/editor/content-editor.tsx`
+- **CodeBlockView** [client] — props: node — `packages/views/editor/extensions/code-block-view.tsx`
+- **AttachmentCard** [client] — props: href, filename, uploading, editable, onDelete — `packages/views/editor/extensions/file-card.tsx`
+- **ImageLightbox** [client] — props: src, alt, onClose — `packages/views/editor/extensions/image-view.tsx`
+- **MentionList** [client] — props: items, command — `packages/views/editor/extensions/mention-suggestion.tsx`
+- **MentionView** [client] — props: node — `packages/views/editor/extensions/mention-view.tsx`
+- **FileDropOverlay** — props: className — `packages/views/editor/file-drop-overlay.tsx`
+- **SHOW_DELAY** [client] — `packages/views/editor/link-hover-card.tsx`
+- **ReadonlyContent** [client] — props: content, className — `packages/views/editor/readonly-content.tsx`
+- **SingleLineDocument** [client] — props: defaultValue, placeholder, className, autoFocus, onSubmit, onBlur, onChange — `packages/views/editor/title-editor.tsx`
+- **InboxDetailLabel** [client] — props: item — `packages/views/inbox/components/inbox-detail-label.tsx`
+- **InboxListItem** [client] — props: item, isSelected, onClick, onArchive — `packages/views/inbox/components/inbox-list-item.tsx`
+- **InboxPage** [client] — `packages/views/inbox/components/inbox-page.tsx`
+- **InvitePage** [client] — props: invitationId — `packages/views/invite/invite-page.tsx`
+- **AgentLiveCard** [client] — props: issueId — `packages/views/issues/components/agent-live-card.tsx`
+- **TaskRunHistory** [client] — props: issueId — `packages/views/issues/components/agent-live-card.tsx`
+- **AgentTranscriptDialog** [client] — props: open, onOpenChange, task, items, agentName, isLive — `packages/views/issues/components/agent-transcript-dialog.tsx`
+- **BatchActionToolbar** [client] — `packages/views/issues/components/batch-action-toolbar.tsx`
+- **BoardCardContent** [client] — props: issue, editable, childProgress — `packages/views/issues/components/board-card.tsx`
+- **DraggableBoardCard** [client] — props: issue, childProgress — `packages/views/issues/components/board-card.tsx`
+- **BoardColumn** [client] — props: status, issueIds, issueMap, childProgressMap, totalCount, footer — `packages/views/issues/components/board-column.tsx`
+- **BoardView** [client] — props: issues, allIssues, visibleStatuses, hiddenStatuses, onMoveIssue, childProgressMap, doneTotalOverride, myIssuesScope, myIssuesFilter — `packages/views/issues/components/board-view.tsx`
+- **DeleteCommentDialog** [client] — props: issueId, entry, allReplies, currentUserId, onReply, onEdit, onDelete, onToggleReaction, highlightedCommentId — `packages/views/issues/components/comment-card.tsx`
+- **CommentInput** [client] — props: issueId, onSubmit — `packages/views/issues/components/comment-input.tsx`
+- **InfiniteScrollSentinel** [client] — props: onVisible, loading — `packages/views/issues/components/infinite-scroll-sentinel.tsx`
+- **IssueDetail** [client] — props: issueId, onDelete, defaultSidebarOpen, layoutId, highlightCommentId — `packages/views/issues/components/issue-detail.tsx`
+- **IssueMentionCard** [client] — props: issueId, fallbackLabel — `packages/views/issues/components/issue-mention-card.tsx`
+- **IssuesHeader** [client] — props: scopedIssues — `packages/views/issues/components/issues-header.tsx`
+- **IssuesPage** [client] — `packages/views/issues/components/issues-page.tsx`
+- **ListRow** [client] — props: issue, childProgress — `packages/views/issues/components/list-row.tsx`
+- **ListView** [client] — props: issues, visibleStatuses, childProgressMap, doneTotalOverride, myIssuesScope, myIssuesFilter — `packages/views/issues/components/list-view.tsx`
+- **AssigneePicker** [client] — props: assigneeType, assigneeId, onUpdate, customTrigger, triggerRender, controlledOpen, controlledOnOpenChange, align — `packages/views/issues/components/pickers/assignee-picker.tsx`
+- **DueDatePicker** [client] — props: dueDate, onUpdate, customTrigger, triggerRender, align — `packages/views/issues/components/pickers/due-date-picker.tsx`
+- **PriorityPicker** [client] — props: priority, onUpdate, customTrigger, triggerRender, controlledOpen, controlledOnOpenChange, align — `packages/views/issues/components/pickers/priority-picker.tsx`
+- **PropertyPicker** [client] — props: open, onOpenChange, trigger, triggerRender, width, align, searchable, searchPlaceholder, onSearchChange — `packages/views/issues/components/pickers/property-picker.tsx`
+- **PickerItem** [client] — props: selected, disabled, onClick, hoverClassName — `packages/views/issues/components/pickers/property-picker.tsx`
+- **PickerSection** [client] — props: label — `packages/views/issues/components/pickers/property-picker.tsx`
+- **PickerEmpty** [client] — `packages/views/issues/components/pickers/property-picker.tsx`
+- **StatusPicker** [client] — props: status, onUpdate, customTrigger, triggerRender, controlledOpen, controlledOnOpenChange, align — `packages/views/issues/components/pickers/status-picker.tsx`
+- **PriorityIcon** — props: priority, className, inheritColor — `packages/views/issues/components/priority-icon.tsx`
+- **ProgressRing** — props: done, total, size — `packages/views/issues/components/progress-ring.tsx`
+- **ReplyInput** [client] — props: issueId, placeholder, avatarType, avatarId, onSubmit, size — `packages/views/issues/components/reply-input.tsx`
+- **StatusIcon** — props: status, className, inheritColor — `packages/views/issues/components/status-icon.tsx`
+- **AppSidebar** [client] — props: topSlot, searchSlot, headerClassName, headerStyle — `packages/views/layout/app-sidebar.tsx`
+- **DashboardGuard** [client] — props: loginPath, onboardingPath, loadingFallback — `packages/views/layout/dashboard-guard.tsx`
+- **DashboardLayout** [client] — props: extra, searchSlot, loadingIndicator, loginPath, onboardingPath — `packages/views/layout/dashboard-layout.tsx`
+- **CreateIssueModal** [client] — props: onClose, data — `packages/views/modals/create-issue.tsx`
+- **CreateWorkspaceModal** [client] — props: onClose — `packages/views/modals/create-workspace.tsx`
+- **ModalRegistry** [client] — `packages/views/modals/registry.tsx`
+- **MyIssuesHeader** [client] — props: allIssues — `packages/views/my-issues/components/my-issues-header.tsx`
+- **MyIssuesPage** [client] — `packages/views/my-issues/components/my-issues-page.tsx`
+- **AppLink** [client] — props: href, onClick — `packages/views/navigation/app-link.tsx`
+- **NavigationProvider** [client] — props: value — `packages/views/navigation/context.tsx`
+- **OnboardingWizard** [client] — props: onComplete — `packages/views/onboarding/onboarding-wizard.tsx`
+- **StepAgent** [client] — props: wsId, onNext, onAgentCreated — `packages/views/onboarding/step-agent.tsx`
+- **StepComplete** [client] — props: wsId, agent, onEnter — `packages/views/onboarding/step-complete.tsx`
+- **StepRuntime** [client] — props: wsId, onNext — `packages/views/onboarding/step-runtime.tsx`
+- **StepWorkspace** [client] — props: onNext — `packages/views/onboarding/step-workspace.tsx`
+- **ProjectDetail** [client] — props: projectId — `packages/views/projects/components/project-detail.tsx`
+- **ProjectPicker** [client] — props: projectId, onUpdate, triggerRender, align — `packages/views/projects/components/project-picker.tsx`
+- **ProjectsPage** [client] — `packages/views/projects/components/projects-page.tsx`
+- **ActivityHeatmap** — props: usage — `packages/views/runtimes/components/charts/activity-heatmap.tsx`
+- **DailyCostChart** — props: data — `packages/views/runtimes/components/charts/daily-cost-chart.tsx`
+- **DailyTokenChart** — props: data — `packages/views/runtimes/components/charts/daily-token-chart.tsx`
+- **HourlyActivityChart** — props: runtimeId — `packages/views/runtimes/components/charts/hourly-activity-chart.tsx`
+- **ModelDistributionChart** — props: data — `packages/views/runtimes/components/charts/model-distribution-chart.tsx`
+- **PingSection** — props: runtimeId — `packages/views/runtimes/components/ping-section.tsx`
+- **ProviderLogo** — props: provider, className — `packages/views/runtimes/components/provider-logo.tsx`
+- **RuntimeDetail** [client] — props: runtime — `packages/views/runtimes/components/runtime-detail.tsx`
+- **RuntimeList** — props: runtimes, selectedId, onSelect, filter, onFilterChange, ownerFilter, onOwnerFilterChange, updatableIds — `packages/views/runtimes/components/runtime-list.tsx`
+- **RuntimesPage** [client] — props: topSlot — `packages/views/runtimes/components/runtimes-page.tsx`
+- **RuntimeModeIcon** — props: mode — `packages/views/runtimes/components/shared.tsx`
+- **StatusBadge** — props: status — `packages/views/runtimes/components/shared.tsx`
+- **InfoField** — props: label, value, mono — `packages/views/runtimes/components/shared.tsx`
+- **TokenCard** — props: label, value — `packages/views/runtimes/components/shared.tsx`
+- **UpdateSection** — props: runtimeId, currentVersion, isOnline, launchedBy — `packages/views/runtimes/components/update-section.tsx`
+- **UsageSection** [client] — props: runtimeId — `packages/views/runtimes/components/usage-section.tsx`
+- **SearchCommand** [client] — `packages/views/search/search-command.tsx`
+- **SearchTrigger** [client] — `packages/views/search/search-trigger.tsx`
+- **AccountTab** [client] — `packages/views/settings/components/account-tab.tsx`
+- **AppearanceTab** [client] — `packages/views/settings/components/appearance-tab.tsx`
+- **MembersTab** [client] — `packages/views/settings/components/members-tab.tsx`
+- **RepositoriesTab** [client] — `packages/views/settings/components/repositories-tab.tsx`
+- **SettingsPage** [client] — props: extraAccountTabs — `packages/views/settings/components/settings-page.tsx`
+- **TokensTab** [client] — `packages/views/settings/components/tokens-tab.tsx`
+- **WorkspaceTab** [client] — `packages/views/settings/components/workspace-tab.tsx`
+- **FileTree** [client] — props: filePaths, selectedPath, onSelect — `packages/views/skills/components/file-tree.tsx`
+- **FileViewer** [client] — props: path, content, onChange — `packages/views/skills/components/file-viewer.tsx`
+- **SkillsPage** [client] — `packages/views/skills/components/skills-page.tsx`
+- **WorkspaceAvatar** — props: name, size, className — `packages/views/workspace/workspace-avatar.tsx`
+
+---
+
+# Libraries
+
+- `apps/desktop/scripts/package.mjs` — function normalizeGitVersion: (raw) => void
+- `apps/desktop/src/main/cli-bootstrap.ts` — function managedCliPath: () => string, function ensureManagedCli: () => Promise<string>
+- `apps/desktop/src/main/daemon-manager.ts` — function setupDaemonManager: (windowGetter) => void
+- `apps/desktop/src/main/updater.ts` — function setupAutoUpdater: (getMainWindow) => void
+- `apps/desktop/src/main/version-decision.ts`
+  - function decideVersionAction: (bundled, running) => VersionAction
+  - interface VersionCheckHealth
+  - type VersionAction
+- `apps/desktop/src/renderer/src/hooks/use-document-title.ts` — function useDocumentTitle: (title) => void
+- `apps/desktop/src/renderer/src/hooks/use-tab-history.ts` — function useTabHistory: () => void, const popDirectionHints
+- `apps/desktop/src/renderer/src/hooks/use-tab-router-sync.ts` — function useTabRouterSync: (tabId, router) => void
+- `apps/desktop/src/renderer/src/hooks/use-tab-sync.ts` — function useActiveTitleSync: () => void
+- `apps/desktop/src/renderer/src/stores/tab-store.ts`
+  - function resolveRouteIcon: (pathname) => string
+  - interface Tab
+  - const useTabStore
+- `apps/desktop/src/shared/daemon-types.ts`
+  - function formatUptime: (uptime?) => string
+  - interface DaemonStatus
+  - interface DaemonPrefs
+  - type DaemonState
+  - const DAEMON_STATE_COLORS: Record<DaemonState, string>
+  - const DAEMON_STATE_LABELS: Record<DaemonState, string>
+- `apps/web/features/auth/auth-cookie.ts` — function setLoggedInCookie: () => void, function clearLoggedInCookie: () => void
+- `apps/web/proxy.ts` — function proxy: (_request) => void, const config
+- `e2e/fixtures.ts` — class TestApiClient
+- `e2e/helpers.ts`
+  - function loginAsDefault: (page) => void
+  - function createTestApi: () => Promise<TestApiClient>
+  - function openWorkspaceMenu: (page) => void
+- `packages/core/api/client.ts`
+  - class ApiError
+  - class ApiClient
+  - interface ApiClientOptions
+  - interface LoginResponse
+- `packages/core/api/index.ts`
+  - function setApiInstance: (instance) => void
+  - function getApi: () => ApiClientType
+  - const api
+- `packages/core/api/ws-client.ts` — class WSClient
+- `packages/core/auth/index.ts` — function registerAuthStore: (store) => void, const useAuthStore: AuthStoreInstance
+- `packages/core/auth/store.ts`
+  - function createAuthStore: (options) => void
+  - interface AuthStoreOptions
+  - interface AuthState
+- `packages/core/autopilots/mutations.ts`
+  - function useCreateAutopilot: () => void
+  - function useUpdateAutopilot: () => void
+  - function useDeleteAutopilot: () => void
+  - function useTriggerAutopilot: () => void
+  - function useCreateAutopilotTrigger: () => void
+  - function useUpdateAutopilotTrigger: () => void
+  - _...1 more_
+- `packages/core/autopilots/queries.ts`
+  - function autopilotListOptions: (wsId) => void
+  - function autopilotDetailOptions: (wsId, id) => void
+  - function autopilotRunsOptions: (wsId, id) => void
+  - const autopilotKeys
+- `packages/core/chat/index.ts` — function registerChatStore: (store) => void, const useChatStore: ChatStoreInstance
+- `packages/core/chat/mutations.ts`
+  - function useCreateChatSession: () => void
+  - function useMarkChatSessionRead: () => void
+  - function useArchiveChatSession: () => void
+- `packages/core/chat/queries.ts`
+  - function chatSessionsOptions: (wsId) => void
+  - function allChatSessionsOptions: (wsId) => void
+  - function chatSessionOptions: (wsId, id) => void
+  - function chatMessagesOptions: (sessionId) => void
+  - function pendingChatTaskOptions: (sessionId) => void
+  - function taskMessagesOptions: (taskId) => void
+  - _...2 more_
+- `packages/core/chat/store.ts`
+  - function createChatStore: (options) => void
+  - interface ChatTimelineItem
+  - interface ChatState
+  - interface ChatStoreOptions
+  - const DRAFT_NEW_SESSION
+  - const CHAT_MIN_W
+  - _...3 more_
+- `packages/core/config/index.ts`
+  - function useConfigStore: () => ConfigState;
+  - function useConfigStore: (selector) => void
+  - function useConfigStore: (selector?) => void
+  - const configStore
+- `packages/core/hooks/use-file-upload.ts`
+  - function useFileUpload: (api, onError?) => void
+  - interface UploadResult
+  - interface UploadContext
+- `packages/core/inbox/mutations.ts`
+  - function useMarkInboxRead: () => void
+  - function useArchiveInbox: () => void
+  - function useMarkAllInboxRead: () => void
+  - function useArchiveAllInbox: () => void
+  - function useArchiveAllReadInbox: () => void
+  - function useArchiveCompletedInbox: () => void
+- `packages/core/inbox/queries.ts`
+  - function inboxListOptions: (wsId) => void
+  - function deduplicateInboxItems: (items) => InboxItem[]
+  - const inboxKeys
+- `packages/core/inbox/ws-updaters.ts`
+  - function onInboxNew: (qc, wsId, _item) => void
+  - function onInboxIssueStatusChanged: (qc, wsId, issueId, status) => void
+  - function onInboxInvalidate: (qc, wsId) => void
+- `packages/core/issues/mutations.ts`
+  - function useLoadMoreDoneIssues: (myIssues?) => void
+  - function useCreateIssue: () => void
+  - function useUpdateIssue: () => void
+  - function useDeleteIssue: () => void
+  - function useBatchUpdateIssues: () => void
+  - function useBatchDeleteIssues: () => void
+  - _...8 more_
+- `packages/core/issues/queries.ts`
+  - function issueListOptions: (wsId) => void
+  - function myIssueListOptions: (wsId, scope, filter) => void
+  - function issueDetailOptions: (wsId, id) => void
+  - function childIssueProgressOptions: (wsId) => void
+  - function childIssuesOptions: (wsId, id) => void
+  - function issueTimelineOptions: (issueId) => void
+  - _...6 more_
+- `packages/core/issues/stores/view-store.ts`
+  - function createIssueViewStore: (persistKey) => StoreApi<IssueViewState>
+  - function registerViewStoreForWorkspaceSync: (store, subscribeToWorkspace?) => void
+  - function viewStoreSlice
+  - function viewStorePersistOptions
+  - function initFilterWorkspaceSync
+  - interface CardProperties
+  - _...8 more_
+- `packages/core/issues/ws-updaters.ts`
+  - function onIssueCreated: (qc, wsId, issue) => void
+  - function onIssueUpdated: (qc, wsId, issue) => void
+  - function onIssueDeleted: (qc, wsId, issueId) => void
+- `packages/core/logger.ts`
+  - function createLogger: (namespace) => Logger
+  - interface Logger
+  - const noopLogger: Logger
+- `packages/core/pins/mutations.ts`
+  - function useCreatePin: () => void
+  - function useDeletePin: () => void
+  - function useReorderPins: () => void
+- `packages/core/pins/queries.ts` — function pinListOptions: (wsId, userId) => void, const pinKeys
+- `packages/core/platform/persist-storage.ts` — function createPersistStorage: (adapter) => StateStorage
+- `packages/core/platform/storage-cleanup.ts` — function clearWorkspaceStorage: (adapter, wsId) => void
+- `packages/core/platform/workspace-storage.ts`
+  - function setCurrentWorkspaceId: (wsId) => void
+  - function registerForWorkspaceRehydration: (fn) => void
+  - function rehydrateAllWorkspaceStores: () => void
+  - function getCurrentWorkspaceId: () => string | null
+  - function createWorkspaceAwareStorage: (adapter) => StateStorage
+- `packages/core/projects/mutations.ts`
+  - function useCreateProject: () => void
+  - function useUpdateProject: () => void
+  - function useDeleteProject: () => void
+- `packages/core/projects/queries.ts`
+  - function projectListOptions: (wsId) => void
+  - function projectDetailOptions: (wsId, id) => void
+  - const projectKeys
+- `packages/core/query-client.ts` — function createQueryClient: () => QueryClient
+- `packages/core/realtime/hooks.ts` — function useWSEvent: (event, handler) => void, function useWSReconnect: (callback) => void
+- `packages/core/realtime/use-realtime-sync.ts` — function useRealtimeSync: (ws, stores, onToast?, type?) => void, interface RealtimeSyncStores
+- `packages/core/runtimes/hooks.ts` — function useMyRuntimesNeedUpdate: (wsId) => boolean, function useUpdatableRuntimeIds: (wsId) => Set<string>
+- `packages/core/runtimes/mutations.ts` — function useDeleteRuntime: (wsId) => void
+- `packages/core/runtimes/queries.ts`
+  - function runtimeListOptions: (wsId, owner?) => void
+  - function latestCliVersionOptions: () => void
+  - const runtimeKeys
+- `packages/core/utils.ts`
+  - function timeAgo: (dateStr) => string
+  - function generateUUID: () => string
+  - function createSafeId: () => string
+  - function createRequestId: (length) => string
+- `packages/core/workspace/hooks.ts` — function useActorName: () => void
+- `packages/core/workspace/index.ts` — function registerWorkspaceStore: (store) => void, const useWorkspaceStore: WorkspaceStoreInstance
+- `packages/core/workspace/mutations.ts`
+  - function useCreateWorkspace: () => void
+  - function useLeaveWorkspace: () => void
+  - function useDeleteWorkspace: () => void
+- `packages/core/workspace/queries.ts`
+  - function workspaceListOptions: () => void
+  - function memberListOptions: (wsId) => void
+  - function agentListOptions: (wsId) => void
+  - function skillListOptions: (wsId) => void
+  - function invitationListOptions: (wsId) => void
+  - function myInvitationListOptions: () => void
+  - _...2 more_
+- `packages/core/workspace/store.ts` — function createWorkspaceStore: (api, options?) => void, type WorkspaceStore
+- `packages/ui/hooks/use-auto-scroll.ts` — function useAutoScroll: (ref) => void
+- `packages/ui/hooks/use-mobile.ts` — function useIsMobile: () => void
+- `packages/ui/hooks/use-scroll-fade.ts` — function useScrollFade: (ref, fadeSize) => CSSProperties | undefined
+- `packages/ui/lib/utils.ts` — function cn: (...inputs) => void
+- `packages/ui/markdown/file-cards.ts`
+  - function isCdnUrl: (url, cdnDomain) => boolean
+  - function isFileCardUrl: (url, cdnDomain) => boolean
+  - function preprocessFileCards: (markdown, cdnDomain) => string
+- `packages/ui/markdown/linkify.ts`
+  - function detectLinks: (text) => DetectedLink[]
+  - function preprocessLinks: (text) => string
+  - function hasLinks: (text) => boolean
+- `packages/ui/markdown/mentions.ts` — function preprocessMentionShortcodes: (text) => string
+- `server/cmd/server/router.go` — function NewRouter: (pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router
+- `server/internal/auth/cloudfront.go` — function NewCloudFrontSignerFromEnv: () *CloudFrontSigner, class CloudFrontSigner
+- `server/internal/auth/cookie.go`
+  - function SetAuthCookies: (w http.ResponseWriter, token string) error
+  - function ClearAuthCookies: (w http.ResponseWriter)
+  - function ValidateCSRF: (r *http.Request) bool
+- `server/internal/auth/jwt.go`
+  - function JWTSecret: () []byte
+  - function GeneratePATToken: () (string, error)
+  - function GenerateDaemonToken: () (string, error)
+  - function HashToken: (token string) string
+- `server/internal/cli/client.go` — function NewAPIClient: (baseURL, workspaceID, token string) *APIClient, class APIClient
+- `server/internal/cli/config.go`
+  - function CLIConfigPath: () (string, error)
+  - function CLIConfigPathForProfile: (profile string) (string, error)
+  - function ProfileDir: (profile string) (string, error)
+  - function LoadCLIConfig: () (CLIConfig, error)
+  - function LoadCLIConfigForProfile: (profile string) (CLIConfig, error)
+  - function SaveCLIConfig: (cfg CLIConfig) error
+  - _...2 more_
+- `server/internal/cli/flags.go` — function FlagOrEnv: (cmd *cobra.Command, flagName, envKey, fallback string) string
+- `server/internal/cli/output.go` — function PrintTable: (w io.Writer, headers []string, rows [][]string), function PrintJSON: (w io.Writer, v any) error
+- `server/internal/cli/update.go`
+  - function FetchLatestRelease: () (*GitHubRelease, error)
+  - function IsBrewInstall: () bool
+  - function GetBrewPrefix: () string
+  - function UpdateViaBrew: () (string, error)
+  - function UpdateViaDownload: (targetVersion string) (string, error)
+  - class GitHubRelease
+- `server/internal/daemon/client.go`
+  - function NewClient: (baseURL string) *Client
+  - class Client
+  - class TaskMessageData
+  - class HeartbeatResponse
+  - class PendingPing
+  - class PendingUpdate
+  - _...3 more_
+- `server/internal/daemon/config.go`
+  - function LoadConfig: (overrides Overrides) (Config, error)
+  - function NormalizeServerBaseURL: (raw string) (string, error)
+  - class Config
+  - class Overrides
+- `server/internal/daemon/daemon.go` — function New: (cfg Config, logger *slog.Logger) *Daemon, class Daemon
+- `server/internal/daemon/execenv/execenv.go`
+  - function Prepare: (params PrepareParams, logger *slog.Logger) (*Environment, error)
+  - function Reuse: (workDir, provider string, task TaskContextForEnv, logger *slog.Logger) *Environment
+  - function WriteGCMeta: (envRoot, issueID, workspaceID string) error
+  - function ReadGCMeta: (envRoot string) (*GCMeta, error)
+  - class RepoContextForEnv
+  - class PrepareParams
+  - _...5 more_
+- `server/internal/daemon/execenv/runtime_config.go` — function InjectRuntimeConfig: (workDir, provider string, ctx TaskContextForEnv) error
+- `server/internal/daemon/health.go` — class HealthResponse
+- `server/internal/daemon/prompt.go` — function BuildPrompt: (task Task) string
+- `server/internal/daemon/repocache/cache.go`
+  - function New: (root string, logger *slog.Logger) *Cache
+  - class RepoInfo
+  - class CachedRepo
+  - class Cache
+  - class WorktreeParams
+  - class WorktreeResult
+- `server/internal/daemon/types.go`
+  - class AgentEntry
+  - class Runtime
+  - class RepoData
+  - class Task
+  - class AgentData
+  - class SkillData
+  - _...3 more_
+- `server/internal/daemon/usage/scanner.go`
+  - function NewScanner: (logger *slog.Logger) *Scanner
+  - class Record
+  - class Scanner
+- `server/internal/events/bus.go`
+  - function New: () *Bus
+  - class Event
+  - class Bus
+- `server/internal/handler/activity.go` — class TimelineEntry, class AssigneeFrequencyEntry
+- `server/internal/handler/agent.go`
+  - class AgentResponse
+  - class RepoData
+  - class AgentTaskResponse
+  - class TaskAgentData
+  - class CreateAgentRequest
+  - class UpdateAgentRequest
+- `server/internal/handler/auth.go`
+  - class UserResponse
+  - class LoginResponse
+  - class SendCodeRequest
+  - class VerifyCodeRequest
+  - class UpdateMeRequest
+  - class GoogleLoginRequest
+- `server/internal/handler/autopilot.go`
+  - class AutopilotResponse
+  - class AutopilotTriggerResponse
+  - class AutopilotRunResponse
+  - class CreateAutopilotRequest
+  - class UpdateAutopilotRequest
+  - class CreateAutopilotTriggerRequest
+  - _...1 more_
+- `server/internal/handler/chat.go`
+  - class CreateChatSessionRequest
+  - class SendChatMessageRequest
+  - class SendChatMessageResponse
+  - class PendingChatTaskResponse
+  - class PendingChatTasksResponse
+  - class PendingChatTaskItem
+  - _...2 more_
+- `server/internal/handler/comment.go` — class CommentResponse, class CreateCommentRequest
+- `server/internal/handler/config.go` — class AppConfig
+- `server/internal/handler/daemon.go`
+  - class DaemonRegisterRequest
+  - class DaemonHeartbeatRequest
+  - class TaskProgressRequest
+  - class TaskCompleteRequest
+  - class TaskUsagePayload
+  - class TaskFailRequest
+  - _...2 more_
+- `server/internal/handler/file.go` — class AttachmentResponse
+- `server/internal/handler/handler.go` — function New: (queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler, class Handler
+- `server/internal/handler/inbox.go` — class InboxItemResponse
+- `server/internal/handler/invitation.go` — class InvitationResponse
+- `server/internal/handler/issue.go`
+  - class IssueResponse
+  - class SearchIssueResponse
+  - class CreateIssueRequest
+  - class UpdateIssueRequest
+  - class BatchUpdateIssuesRequest
+  - class BatchDeleteIssuesRequest
+- `server/internal/handler/issue_reaction.go` — class IssueReactionResponse
+- `server/internal/handler/personal_access_token.go`
+  - class PersonalAccessTokenResponse
+  - class CreatePATResponse
+  - class CreatePATRequest
+- `server/internal/handler/pin.go`
+  - class PinnedItemResponse
+  - class CreatePinRequest
+  - class ReorderPinsRequest
+  - class ReorderItem
+- `server/internal/handler/project.go`
+  - class ProjectResponse
+  - class CreateProjectRequest
+  - class UpdateProjectRequest
+  - class SearchProjectResponse
+- `server/internal/handler/reaction.go` — class ReactionResponse
+- `server/internal/handler/runtime.go`
+  - class AgentRuntimeResponse
+  - class RuntimeUsageEntry
+  - class RuntimeUsageResponse
+- `server/internal/handler/runtime_ping.go`
+  - function NewPingStore: () *PingStore
+  - class PingRequest
+  - class PingStore
+- `server/internal/handler/runtime_update.go`
+  - function NewUpdateStore: () *UpdateStore
+  - class UpdateRequest
+  - class UpdateStore
+- `server/internal/handler/skill.go`
+  - class SkillResponse
+  - class SkillFileResponse
+  - class SkillWithFilesResponse
+  - class CreateSkillRequest
+  - class CreateSkillFileRequest
+  - class UpdateSkillRequest
+  - _...2 more_
+- `server/internal/handler/subscriber.go` — class SubscriberResponse
+- `server/internal/handler/workspace.go`
+  - class WorkspaceResponse
+  - class MemberResponse
+  - class CreateWorkspaceRequest
+  - class UpdateWorkspaceRequest
+  - class MemberWithUserResponse
+  - class CreateMemberRequest
+  - _...1 more_
+- `server/internal/logger/logger.go`
+  - function Init: ()
+  - function NewLogger: (component string) *slog.Logger
+  - function RequestAttrs: (r *http.Request) []any
+- `server/internal/mention/expand.go`
+  - function ExpandIssueIdentifiers: (ctx context.Context, resolver Resolver, workspaceID pgtype.UUID, content string) string
+  - interface IssueResolver
+  - interface PrefixResolver
+  - interface Resolver
+- `server/internal/middleware/auth.go` — function Auth: (queries *db.Queries) func(http.Handler) http.Handler
+- `server/internal/middleware/cloudfront.go` — function RefreshCloudFrontCookies: (signer *auth.CloudFrontSigner) func(http.Handler) http.Handler
+- `server/internal/middleware/csp.go` — function ContentSecurityPolicy: (next http.Handler) http.Handler
+- `server/internal/middleware/daemon_auth.go`
+  - function DaemonWorkspaceIDFromContext: (ctx context.Context) string
+  - function DaemonIDFromContext: (ctx context.Context) string
+  - function WithDaemonContext: (ctx context.Context, workspaceID, daemonID string) context.Context
+  - function DaemonAuth: (queries *db.Queries) func(http.Handler) http.Handler
+- `server/internal/middleware/request_logger.go` — function RequestLogger: (next http.Handler) http.Handler
+- `server/internal/middleware/workspace.go`
+  - function MemberFromContext: (ctx context.Context) (db.Member, bool)
+  - function WorkspaceIDFromContext: (ctx context.Context) string
+  - function SetMemberContext: (ctx context.Context, workspaceID string, member db.Member) context.Context
+  - function RequireWorkspaceMember: (queries *db.Queries) func(http.Handler) http.Handler
+  - function RequireWorkspaceRole: (queries *db.Queries, roles ...string) func(http.Handler) http.Handler
+  - function RequireWorkspaceMemberFromURL: (queries *db.Queries, param string) func(http.Handler) http.Handler
+  - _...1 more_
+- `server/internal/realtime/hub.go`
+  - function SetAllowedOrigins: (origins []string)
+  - function NewHub: () *Hub
+  - function HandleWebSocket: (hub *Hub, mc MembershipChecker, pr PATResolver, w http.ResponseWriter, r *http.Request)
+  - class Client
+  - class Hub
+  - interface MembershipChecker
+  - _...1 more_
+- `server/internal/sanitize/html.go` — function HTML: (input string) string
+- `server/internal/service/autopilot.go`
+  - function NewAutopilotService: (q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService
+  - class AutopilotService
+  - interface TxStarter
+- `server/internal/service/cron.go` — function ComputeNextRun: (cronExpr, timezone string) (time.Time, error), function ValidateTimezone: (timezone string) error
+- `server/internal/service/email.go` — function NewEmailService: () *EmailService, class EmailService
+- `server/internal/service/task.go`
+  - function NewTaskService: (q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskService
+  - class TaskService
+  - class AgentSkillData
+  - class AgentSkillFileData
+- `server/internal/storage/local.go` — function NewLocalStorageFromEnv: () *LocalStorage, class LocalStorage
+- `server/internal/storage/s3.go` — function NewS3StorageFromEnv: () *S3Storage, class S3Storage
+- `server/internal/util/mention.go`
+  - function ParseMentions: (content string) []Mention
+  - function HasMentionAll: (mentions []Mention) bool
+  - class Mention
+- `server/internal/util/pgx.go`
+  - function ParseUUID: (s string) pgtype.UUID
+  - function UUIDToString: (u pgtype.UUID) string
+  - function TextToPtr: (t pgtype.Text) *string
+  - function PtrToText: (s *string) pgtype.Text
+  - function StrToText: (s string) pgtype.Text
+  - function TimestampToString: (t pgtype.Timestamptz) string
+  - _...2 more_
+- `server/pkg/agent/agent.go`
+  - function New: (agentType string, cfg Config) (Backend, error)
+  - function DetectVersion: (ctx context.Context, executablePath string) (string, error)
+  - class ExecOptions
+  - class Session
+  - class Message
+  - class TokenUsage
+  - _...3 more_
+- `server/pkg/agent/version.go` — function CheckMinVersion: (agentType, detectedVersion string) error
+- `server/pkg/db/generated/activity.sql.go`
+  - class CountAssigneeChangesByActorParams
+  - class CountAssigneeChangesByActorRow
+  - class CreateActivityParams
+  - class ListActivitiesParams
+- `server/pkg/db/generated/agent.sql.go`
+  - class ArchiveAgentParams
+  - class CompleteAgentTaskParams
+  - class CreateAgentParams
+  - class CreateAgentTaskParams
+  - class FailAgentTaskParams
+  - class FailStaleTasksParams
+  - _...7 more_
+- `server/pkg/db/generated/attachment.sql.go`
+  - class CreateAttachmentParams
+  - class DeleteAttachmentParams
+  - class GetAttachmentParams
+  - class LinkAttachmentsToCommentParams
+  - class LinkAttachmentsToIssueParams
+  - class ListAttachmentsByCommentParams
+  - _...2 more_
+- `server/pkg/db/generated/autopilot.sql.go`
+  - class AdvanceTriggerNextRunParams
+  - class ClaimDueScheduleTriggersRow
+  - class CreateAutopilotParams
+  - class CreateAutopilotRunParams
+  - class CreateAutopilotTaskParams
+  - class CreateAutopilotTriggerParams
+  - _...10 more_
+- `server/pkg/db/generated/chat.sql.go`
+  - class CreateChatMessageParams
+  - class CreateChatSessionParams
+  - class CreateChatTaskParams
+  - class GetChatSessionInWorkspaceParams
+  - class GetLastChatTaskSessionRow
+  - class GetPendingChatTaskRow
+  - _...8 more_
+- `server/pkg/db/generated/comment.sql.go`
+  - class CountCommentsParams
+  - class CreateCommentParams
+  - class GetCommentInWorkspaceParams
+  - class HasAgentCommentedSinceParams
+  - class HasAgentRepliedInThreadParams
+  - class ListCommentsParams
+  - _...4 more_
+- `server/pkg/db/generated/daemon_token.sql.go` — class CreateDaemonTokenParams, class DeleteDaemonTokensByWorkspaceAndDaemonParams
+- `server/pkg/db/generated/db.go`
+  - function New: (db DBTX) *Queries
+  - class Queries
+  - interface DBTX
+- `server/pkg/db/generated/inbox.sql.go`
+  - class ArchiveAllInboxParams
+  - class ArchiveAllReadInboxParams
+  - class ArchiveCompletedInboxParams
+  - class ArchiveInboxByIssueParams
+  - class CountUnreadInboxParams
+  - class CreateInboxItemParams
+  - _...4 more_
+- `server/pkg/db/generated/invitation.sql.go`
+  - class CreateInvitationParams
+  - class GetPendingInvitationByEmailParams
+  - class ListPendingInvitationsByWorkspaceRow
+  - class ListPendingInvitationsForUserParams
+  - class ListPendingInvitationsForUserRow
+- `server/pkg/db/generated/issue.sql.go`
+  - class ChildIssueProgressRow
+  - class CountCreatedIssueAssigneesParams
+  - class CountCreatedIssueAssigneesRow
+  - class CountIssuesParams
+  - class CreateIssueParams
+  - class CreateIssueWithOriginParams
+  - _...8 more_
+- `server/pkg/db/generated/issue_reaction.sql.go` — class AddIssueReactionParams, class RemoveIssueReactionParams
+- `server/pkg/db/generated/member.sql.go`
+  - class CreateMemberParams
+  - class GetMemberByUserAndWorkspaceParams
+  - class ListMembersWithUserRow
+  - class UpdateMemberRoleParams
+- `server/pkg/db/generated/models.go`
+  - class ActivityLog
+  - class Agent
+  - class AgentRuntime
+  - class AgentSkill
+  - class AgentTaskQueue
+  - class Attachment
+  - _...29 more_
+- `server/pkg/db/generated/personal_access_token.sql.go` — class CreatePersonalAccessTokenParams, class RevokePersonalAccessTokenParams
+- `server/pkg/db/generated/pinned_item.sql.go`
+  - class CreatePinnedItemParams
+  - class DeletePinnedItemParams
+  - class DeletePinnedItemsByItemParams
+  - class GetMaxPinnedItemPositionParams
+  - class ListPinnedItemsParams
+  - class UpdatePinnedItemPositionParams
+- `server/pkg/db/generated/project.sql.go`
+  - class CreateProjectParams
+  - class GetProjectInWorkspaceParams
+  - class GetProjectIssueStatsRow
+  - class ListProjectsParams
+  - class UpdateProjectParams
+- `server/pkg/db/generated/reaction.sql.go` — class AddReactionParams, class RemoveReactionParams
+- `server/pkg/db/generated/runtime.sql.go`
+  - class DeleteStaleOfflineRuntimesRow
+  - class FailTasksForOfflineRuntimesRow
+  - class GetAgentRuntimeForWorkspaceParams
+  - class ListAgentRuntimesByOwnerParams
+  - class MarkStaleRuntimesOfflineRow
+  - class MigrateAgentsToRuntimeParams
+  - _...1 more_
+- `server/pkg/db/generated/runtime_usage.sql.go`
+  - class GetRuntimeTaskHourlyActivityRow
+  - class GetRuntimeUsageSummaryRow
+  - class ListRuntimeUsageParams
+  - class UpsertRuntimeUsageParams
+- `server/pkg/db/generated/skill.sql.go`
+  - class AddAgentSkillParams
+  - class CreateSkillParams
+  - class GetSkillInWorkspaceParams
+  - class ListAgentSkillsByWorkspaceRow
+  - class RemoveAgentSkillParams
+  - class UpdateSkillParams
+  - _...1 more_
+- `server/pkg/db/generated/subscriber.sql.go`
+  - class AddIssueSubscriberParams
+  - class IsIssueSubscriberParams
+  - class RemoveIssueSubscriberParams
+- `server/pkg/db/generated/task_message.sql.go` — class CreateTaskMessageParams, class ListTaskMessagesSinceParams
+- `server/pkg/db/generated/task_usage.sql.go`
+  - class GetIssueUsageSummaryRow
+  - class GetWorkspaceUsageByDayParams
+  - class GetWorkspaceUsageByDayRow
+  - class GetWorkspaceUsageSummaryParams
+  - class GetWorkspaceUsageSummaryRow
+  - class UpsertTaskUsageParams
+- `server/pkg/db/generated/user.sql.go` — class CreateUserParams, class UpdateUserParams
+- `server/pkg/db/generated/verification_code.sql.go` — class CreateVerificationCodeParams
+- `server/pkg/db/generated/workspace.sql.go` — class CreateWorkspaceParams, class UpdateWorkspaceParams
+- `server/pkg/protocol/messages.go`
+  - class Message
+  - class TaskDispatchPayload
+  - class TaskProgressPayload
+  - class TaskCompletedPayload
+  - class TaskMessagePayload
+  - class DaemonRegisterPayload
+  - _...5 more_
+- `server/pkg/redact/redact.go` — function InputMap: (m map[string]any) map[string]any, function Text: (s string) string
+
+---
+
+# Config
+
+## Environment Variables
+
+- `ALLOWED_ORIGINS` **required** — .env.example
+- `APP_ENV` **required** — server/internal/auth/cookie.go
+- `APPLE_TEAM_ID` **required** — apps/desktop/scripts/package.mjs
+- `AWS_ACCESS_KEY_ID` (has default) — .env
+- `AWS_ENDPOINT_URL` **required** — server/internal/storage/s3.go
+- `AWS_SECRET_ACCESS_KEY` (has default) — .env
+- `BACKEND_URL` (has default) — .env
+- `CLAUDE_CONFIG_DIR` **required** — server/internal/daemon/usage/claude.go
+- `CLOUDFRONT_DOMAIN` **required** — .env.example
+- `CLOUDFRONT_KEY_PAIR_ID` **required** — .env.example
+- `CLOUDFRONT_PRIVATE_KEY` **required** — .env.example
+- `CLOUDFRONT_PRIVATE_KEY_SECRET` (has default) — .env.example
+- `CODEX_HOME` **required** — server/internal/daemon/execenv/codex_home.go
+- `COLLABORATION_PORT` (has default) — .env
+- `COOKIE_DOMAIN` **required** — .env.example
+- `CORS_ALLOWED_ORIGINS` **required** — apps/web/next.config.ts
+- `DATABASE_URL` (has default) — .env.example
+- `ELECTRON_RENDERER_URL` **required** — apps/desktop/src/main/index.ts
+- `FRONTEND_ORIGIN` (has default) — .env.example
+- `FRONTEND_PORT` (has default) — .env.example
+- `GOOGLE_CLIENT_ID` **required** — .env.example
+- `GOOGLE_CLIENT_SECRET` **required** — .env.example
+- `GOOGLE_REDIRECT_URI` (has default) — .env.example
+- `HERMES_HOME` **required** — server/internal/daemon/usage/hermes.go
+- `HOME` **required** — server/internal/daemon/repocache/cache_test.go
+- `JWT_SECRET` (has default) — .env.example
+- `LOCAL_UPLOAD_BASE_URL` (has default) — .env.example
+- `LOCAL_UPLOAD_DIR` (has default) — .env.example
+- `LOG_LEVEL` **required** — server/internal/logger/logger.go
+- `MINIO_CONSOLE_PORT` (has default) — .env
+- `MINIO_DATA_DIR` (has default) — .env
+- `MINIO_PORT` (has default) — .env
+- `MINIO_ROOT_PASSWORD` (has default) — .env
+- `MINIO_ROOT_USER` (has default) — .env
+- `MULTICA_AGENT_ID` **required** — server/cmd/multica/cmd_agent.go
+- `MULTICA_AGENT_NAME` **required** — server/cmd/multica/cmd_repo.go
+- `MULTICA_APP_URL` (has default) — .env.example
+- `MULTICA_CLAUDE_MODEL` **required** — server/internal/daemon/config.go
+- `MULTICA_CODEX_MODEL` **required** — .env.example
+- `MULTICA_CODEX_PATH` (has default) — .env.example
+- `MULTICA_CODEX_TIMEOUT` (has default) — .env.example
+- `MULTICA_CODEX_WORKDIR` **required** — .env.example
+- `MULTICA_DAEMON_CONFIG` **required** — .env.example
+- `MULTICA_DAEMON_DEVICE_NAME` **required** — .env.example
+- `MULTICA_DAEMON_HEARTBEAT_INTERVAL` (has default) — .env.example
+- `MULTICA_DAEMON_ID` **required** — .env.example
+- `MULTICA_DAEMON_POLL_INTERVAL` (has default) — .env.example
+- `MULTICA_DAEMON_PORT` **required** — server/cmd/multica/cmd_repo.go
+- `MULTICA_GC_ENABLED` **required** — server/internal/daemon/config.go
+- `MULTICA_GEMINI_MODEL` **required** — server/internal/daemon/config.go
+- `MULTICA_HERMES_MODEL` **required** — server/internal/daemon/config.go
+- `MULTICA_KEEP_ENV_AFTER_TASK` **required** — server/internal/daemon/config.go
+- `MULTICA_LAUNCHED_BY` **required** — server/cmd/multica/cmd_daemon.go
+- `MULTICA_OPENCLAW_MODEL` **required** — server/internal/daemon/config.go
+- `MULTICA_OPENCODE_MODEL` **required** — server/internal/daemon/config.go
+- `MULTICA_SERVER_URL` (has default) — .env.example
+- `MULTICA_TASK_ID` **required** — server/cmd/multica/cmd_agent.go
+- `MULTICA_TOKEN` **required** — server/cmd/multica/cmd_auth.go
+- `MULTICA_WORKSPACE_ID` **required** — .env.example
+- `MULTICA_WORKSPACES_ROOT` **required** — server/internal/daemon/config.go
+- `NEXT_PUBLIC_API_URL` **required** — .env.example
+- `NEXT_PUBLIC_COLLAB_URL` (has default) — .env
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` **required** — .env.example
+- `NEXT_PUBLIC_WS_URL` **required** — .env.example
+- `NODE_ENV` **required** — apps/web/components/theme-provider.tsx
+- `OPENCLAW_HOME` **required** — server/internal/daemon/usage/openclaw.go
+- `PATH` **required** — apps/desktop/src/main/daemon-manager.ts
+- `PLAYWRIGHT_BASE_URL` **required** — playwright.config.ts
+- `PORT` (has default) — .env.example
+- `POSTGRES_DB` (has default) — .env.example
+- `POSTGRES_PASSWORD` (has default) — .env.example
+- `POSTGRES_PORT` (has default) — .env.example
+- `POSTGRES_USER` (has default) — .env.example
+- `REMOTE_API_URL` **required** — apps/web/next.config.ts
+- `RESEND_API_KEY` **required** — .env.example
+- `RESEND_FROM_EMAIL` (has default) — .env.example
+- `S3_BUCKET` **required** — .env.example
+- `S3_ENDPOINT` (has default) — .env
+- `S3_REGION` (has default) — .env.example
+- `STANDALONE` **required** — apps/web/next.config.ts
+- `VITE_API_URL` **required** — apps/desktop/src/renderer/src/App.tsx
+- `VITE_APP_URL` **required** — apps/desktop/src/renderer/src/platform/navigation.tsx
+- `VITE_WEB_URL` **required** — apps/desktop/src/renderer/src/pages/login.tsx
+- `VITE_WS_URL` **required** — apps/desktop/src/renderer/src/App.tsx
+- `XDG_DATA_HOME` **required** — server/internal/daemon/usage/opencode.go
+
+## Config Files
+
+- `.env.example`
+- `Dockerfile`
+- `apps/docs/next.config.mjs`
+- `apps/web/next.config.ts`
+- `docker-compose.yml`
+
+---
+
+# Middleware
+
+## auth
+- auth-cookie — `apps/web/features/auth/auth-cookie.ts`
+- auth.spec — `e2e/auth.spec.ts`
+- auth-initializer — `packages/core/platform/auth-initializer.tsx`
+- dashboard-guard — `packages/views/layout/dashboard-guard.tsx`
+- use-dashboard-guard — `packages/views/layout/use-dashboard-guard.ts`
+- auth — `server/internal/handler/auth.go`
+- auth — `server/internal/middleware/auth.go`
+- auth_test — `server/internal/middleware/auth_test.go`
+- cloudfront — `server/internal/middleware/cloudfront.go`
+- daemon_auth — `server/internal/middleware/daemon_auth.go`
+
+## custom
+- csp — `server/internal/middleware/csp.go`
+- csp_test — `server/internal/middleware/csp_test.go`
+- workspace — `server/internal/middleware/workspace.go`
+- 022_task_lifecycle_guards.down — `server/migrations/022_task_lifecycle_guards.down.sql`
+- 022_task_lifecycle_guards.up — `server/migrations/022_task_lifecycle_guards.up.sql`
+
+## logging
+- request_logger — `server/internal/middleware/request_logger.go`
+
+---
+
+# Dependency Graph
+
+## Most Imported Files (change these carefully)
+
+- `encoding/json` — imported by **67** files
+- `log/slog` — imported by **59** files
+- `net/http` — imported by **59** files
+- `path/filepath` — imported by **32** files
+- `packages/core/types/index.ts` — imported by **24** files
+- `packages/views/common/actor-avatar.tsx` — imported by **22** files
+- `packages/core/api/index.ts` — imported by **18** files
+- `packages/views/navigation/index.ts` — imported by **18** files
+- `os/exec` — imported by **16** files
+- `net/http/httptest` — imported by **14** files
+- `apps/web/features/landing/i18n/index.ts` — imported by **10** files
+- `packages/core/types/storage.ts` — imported by **10** files
+- `packages/views/editor/index.ts` — imported by **10** files
+- `packages/core/logger.ts` — imported by **9** files
+- `packages/core/platform/storage.ts` — imported by **9** files
+- `apps/web/features/landing/components/shared.tsx` — imported by **8** files
+- `packages/core/api/client.ts` — imported by **8** files
+- `packages/core/hooks.tsx` — imported by **8** files
+- `packages/core/platform/workspace-storage.ts` — imported by **8** files
+- `packages/views/issues/components/status-icon.tsx` — imported by **8** files
+
+## Import Map (who imports what)
+
+- `encoding/json` ← `server/cmd/multica/cmd_agent.go`, `server/cmd/multica/cmd_daemon.go`, `server/cmd/multica/cmd_issue_test.go`, `server/cmd/multica/cmd_repo.go`, `server/cmd/multica/cmd_skill.go` +62 more
+- `log/slog` ← `server/cmd/migrate/main.go`, `server/cmd/server/activity_listeners.go`, `server/cmd/server/autopilot_listeners.go`, `server/cmd/server/autopilot_scheduler.go`, `server/cmd/server/listeners.go` +54 more
+- `net/http` ← `server/cmd/multica/cmd_auth.go`, `server/cmd/multica/cmd_daemon.go`, `server/cmd/multica/cmd_issue_test.go`, `server/cmd/multica/cmd_repo.go`, `server/cmd/multica/cmd_setup.go` +54 more
+- `path/filepath` ← `server/cmd/migrate/main.go`, `server/cmd/multica/cmd_attachment.go`, `server/cmd/multica/cmd_daemon.go`, `server/internal/cli/client.go`, `server/internal/cli/config.go` +27 more
+- `packages/core/types/index.ts` ← `packages/core/auth/store.ts`, `packages/core/chat/mutations.ts`, `packages/core/chat/store.ts`, `packages/core/hooks/use-file-upload.ts`, `packages/core/inbox/mutations.ts` +19 more
+- `packages/views/common/actor-avatar.tsx` ← `packages/views/agents/components/agent-detail.tsx`, `packages/views/agents/components/agent-list-item.tsx`, `packages/views/agents/components/create-agent-dialog.tsx`, `packages/views/agents/components/tabs/settings-tab.tsx`, `packages/views/autopilots/components/autopilot-detail-page.tsx` +17 more
+- `packages/core/api/index.ts` ← `packages/core/autopilots/mutations.ts`, `packages/core/autopilots/queries.ts`, `packages/core/chat/mutations.ts`, `packages/core/chat/queries.ts`, `packages/core/inbox/mutations.ts` +13 more
+- `packages/views/navigation/index.ts` ← `packages/views/autopilots/components/autopilot-detail-page.tsx`, `packages/views/autopilots/components/autopilots-page.tsx`, `packages/views/editor/extensions/mention-view.tsx`, `packages/views/editor/readonly-content.tsx`, `packages/views/inbox/components/inbox-page.tsx` +13 more
+- `os/exec` ← `server/cmd/multica/cmd_auth.go`, `server/cmd/multica/cmd_daemon.go`, `server/cmd/multica/cmd_daemon_unix.go`, `server/internal/cli/update.go`, `server/internal/daemon/config.go` +11 more
+- `net/http/httptest` ← `server/cmd/multica/cmd_issue_test.go`, `server/cmd/server/integration_test.go`, `server/internal/cli/client_test.go`, `server/internal/daemon/daemon_test.go`, `server/internal/daemon/gc_test.go` +9 more
+
+---
+
+# Test Coverage
+
+> **20%** of routes and models are covered by tests
+> 71 test files found
+
+## Covered Routes
+
+- GET:token
+- GET:state
+- POST:/api/daemon/register
+- POST:/api/daemon/heartbeat
+- GET:/api/workspaces
+- POST:/api/workspaces
+- PUT:/api/workspaces
+- PATCH:/api/workspaces
+- DELETE:/api/workspaces
+- GET:/api/issues
+- POST:/api/issues
+- PUT:/api/issues
+- DELETE:/api/issues
+- GET:/api/agents
+- POST:/api/agents
+- PUT:/api/agents
+- GET:/api/inbox
+- GET:/health
+- GET:/ws
+- POST:/auth/send-code
+- POST:/auth/verify-code
+- GET:/api/me
+- PATCH:/api/me
+- POST:/api/upload-file
+- GET:/
+- POST:/
+- GET:/members
+- PUT:/
+- PATCH:/
+- POST:/members
+- DELETE:/
+- POST:/comments
+- GET:/comments
+- GET:/timeline
+- GET:/subscribers
+- POST:/subscribe
+- POST:/unsubscribe
+- ALL:/health
+- GET:status
+- GET:workspace_id
+- GET:priority
+- GET:assignee_id
+- GET:project_id
+- GET:owner
+- ALL:/ws
+- WS:issue:updated
+- WS:issue:created
+- WS:issue:deleted
+- WS:comment:deleted
+- WS:task:failed
+
+## Covered Models
+
+- user
+- workspace
+- member
+- agent
+- issue
+- comment
+- inbox_item
+- agent_task_queue
+- activity_log
+- agent_runtime
+- skill
+- verification_code
+- issue_subscriber
+- attachment
+- project
+- autopilot
+
+---
+
+_Generated by [codesight](https://github.com/Houseofmvps/codesight) — see your codebase clearly_
