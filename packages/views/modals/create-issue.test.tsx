@@ -49,6 +49,7 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
 
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
+  useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
