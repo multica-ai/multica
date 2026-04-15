@@ -12,6 +12,10 @@ build
 bin
 dist-electron
 *.tsbuildinfo
+# ...except electron-builder's source resources dir, which holds tracked
+# config files (entitlements, icons) — not build output.
+!apps/desktop/build/
+!apps/desktop/build/**
 
 # env
 .env*
