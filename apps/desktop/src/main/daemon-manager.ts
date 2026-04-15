@@ -835,6 +835,9 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:retry-install", async () => {
     cachedCliBinary = undefined;
     cliResolvePromise = null;
+    // A retry-install may land a new CLI at a different version; drop the
+    // cached version string so the next check re-reads the binary.
+    cachedCliBinaryVersion = undefined;
     await bootstrapCli();
   });
   ipcMain.handle("daemon:get-prefs", () => loadPrefs());
