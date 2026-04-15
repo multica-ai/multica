@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -190,6 +192,110 @@ func TestMergeUsage(t *testing.T) {
 	}
 }
 
+func TestResolveTaskModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		runtimeConfig   any
+		providerDefault string
+		want            string
+	}{
+		{
+			name:            "no runtime config uses provider default",
+			runtimeConfig:   nil,
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.4",
+		},
+		{
+			name: "absent model uses provider default and ignores extra keys",
+			runtimeConfig: map[string]any{
+				"temperature": 0.2,
+				"notes":       "preserved elsewhere",
+			},
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.4",
+		},
+		{
+			name: "string model overrides provider default",
+			runtimeConfig: map[string]any{
+				"model": "gpt-5.3-codex-spark",
+			},
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.3-codex-spark",
+		},
+		{
+			name: "whitespace around model is trimmed",
+			runtimeConfig: map[string]any{
+				"model": "  gpt-5.3-codex-spark  ",
+			},
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.3-codex-spark",
+		},
+		{
+			name: "empty model uses provider default",
+			runtimeConfig: map[string]any{
+				"model": "",
+			},
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.4",
+		},
+		{
+			name: "whitespace model uses provider default",
+			runtimeConfig: map[string]any{
+				"model": " \t\n ",
+			},
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.4",
+		},
+		{
+			name: "non-string model uses provider default",
+			runtimeConfig: map[string]any{
+				"model": 123,
+			},
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.4",
+		},
+		{
+			name:            "raw json runtime config model overrides provider default",
+			runtimeConfig:   json.RawMessage(`{"model":"gpt-5.3-codex-spark","keep":"value"}`),
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.3-codex-spark",
+		},
+		{
+			name:            "invalid json uses provider default",
+			runtimeConfig:   json.RawMessage(`{"model":`),
+			providerDefault: "gpt-5.4",
+			want:            "gpt-5.4",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resolveTaskModel(tt.providerDefault, tt.runtimeConfig); got != tt.want {
+				t.Fatalf("resolveTaskModel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskModelDoesNotMutateRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	runtimeConfig := map[string]any{
+		"model": "gpt-5.3-codex-spark",
+		"keep":  "value",
+	}
+	if got := resolveTaskModel("gpt-5.4", runtimeConfig); got != "gpt-5.3-codex-spark" {
+		t.Fatalf("resolveTaskModel() = %q, want gpt-5.3-codex-spark", got)
+	}
+	if got := runtimeConfig["keep"]; got != "value" {
+		t.Fatalf("runtime config extra key changed: got %v", got)
+	}
+}
+
 // fakeBackend is a test double for agent.Backend that returns preconfigured
 // results. Each call to Execute pops the next entry from the results slice.
 type fakeBackend struct {
@@ -221,6 +327,76 @@ func newTestDaemon(t *testing.T) *Daemon {
 	return &Daemon{
 		client: NewClient(srv.URL),
 		logger: slog.Default(),
+	}
+}
+
+func TestRunTaskPassesResolvedModelToExecOptions(t *testing.T) {
+	oldNewAgentBackend := newAgentBackend
+	t.Cleanup(func() {
+		newAgentBackend = oldNewAgentBackend
+	})
+
+	tests := []struct {
+		name          string
+		runtimeConfig any
+		wantModel     string
+	}{
+		{
+			name:      "no runtime config passes provider default",
+			wantModel: "gpt-5.4",
+		},
+		{
+			name: "runtime config model override is passed",
+			runtimeConfig: map[string]any{
+				"model":       "gpt-5.3-codex-spark",
+				"temperature": 0.2,
+			},
+			wantModel: "gpt-5.3-codex-spark",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &fakeBackend{
+				results: []agent.Result{{
+					Status: "completed",
+					Output: "done",
+				}},
+			}
+			newAgentBackend = func(agentType string, cfg agent.Config) (agent.Backend, error) {
+				if agentType != "claude" {
+					t.Fatalf("agent type = %q, want claude", agentType)
+				}
+				return backend, nil
+			}
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			d := New(Config{
+				ServerBaseURL:  "http://example.test",
+				Agents:         map[string]AgentEntry{"claude": {Path: "claude", Model: "gpt-5.4"}},
+				WorkspacesRoot: t.TempDir(),
+				AgentTimeout:   time.Second,
+			}, logger)
+
+			_, err := d.runTask(context.Background(), Task{
+				ID:          "task-00000001",
+				AgentID:     "agent-1",
+				IssueID:     "issue-1",
+				WorkspaceID: "workspace-1",
+				Agent: &AgentData{
+					ID:            "agent-1",
+					Name:          "Test Agent",
+					Instructions:  "Test instructions",
+					RuntimeConfig: tt.runtimeConfig,
+				},
+			}, "claude", logger)
+			if err != nil {
+				t.Fatalf("runTask() error = %v", err)
+			}
+			if backend.calls[0].Model != tt.wantModel {
+				t.Fatalf("ExecOptions.Model = %q, want %q", backend.calls[0].Model, tt.wantModel)
+			}
+		})
 	}
 }
 

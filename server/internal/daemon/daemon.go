@@ -24,11 +24,13 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+var newAgentBackend = agent.New
+
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
-	reposVersion    string             // stored for future use: skip refresh when version unchanged
+	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
@@ -1026,7 +1028,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			agentEnv[k] = v
 		}
 	}
-	backend, err := agent.New(provider, agent.Config{
+	backend, err := newAgentBackend(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
@@ -1035,11 +1037,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
+	effectiveModel := entry.Model
+	if task.Agent != nil {
+		effectiveModel = resolveTaskModel(entry.Model, task.Agent.RuntimeConfig)
+	}
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
-		"model", entry.Model,
+		"model", effectiveModel,
 		"reused", reused,
 	)
 	if task.PriorSessionID != "" {
@@ -1054,7 +1060,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	}
 	execOpts := agent.ExecOptions{
 		Cwd:             env.WorkDir,
-		Model:           entry.Model,
+		Model:           effectiveModel,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 		CustomArgs:      customArgs,
