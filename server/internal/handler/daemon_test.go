@@ -201,6 +201,81 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntimeIncludesAgentRuntimeConfig(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	err := testPool.QueryRow(context.Background(), `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+	if err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent SET runtime_config = $1 WHERE id = $2
+	`, []byte(`{"model":"gpt-5.3-codex-spark","keep":"value"}`), agentID); err != nil {
+		t.Fatalf("setup: update runtime_config: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE agent SET runtime_config = '{}'::jsonb WHERE id = $1`, agentID)
+	})
+
+	var issueID, taskID string
+	err = testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'daemon-claim-runtime-config-test', 'todo', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID)
+	if err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	err = testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'queued', $3)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID)
+	if err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "claim-runtime-config-test")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentTaskResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Agent == nil {
+		t.Fatalf("expected agent payload")
+	}
+	cfg, ok := resp.Agent.RuntimeConfig.(map[string]any)
+	if !ok {
+		t.Fatalf("runtime_config = %#v, want object", resp.Agent.RuntimeConfig)
+	}
+	if got := cfg["model"]; got != "gpt-5.3-codex-spark" {
+		t.Fatalf("runtime_config.model = %#v, want gpt-5.3-codex-spark", got)
+	}
+	if got := cfg["keep"]; got != "value" {
+		t.Fatalf("runtime_config.keep = %#v, want value", got)
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -38,14 +38,6 @@ type AgentResponse struct {
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
-	var rc any
-	if a.RuntimeConfig != nil {
-		json.Unmarshal(a.RuntimeConfig, &rc)
-	}
-	if rc == nil {
-		rc = map[string]any{}
-	}
-
 	var customEnv map[string]string
 	if a.CustomEnv != nil {
 		if err := json.Unmarshal(a.CustomEnv, &customEnv); err != nil {
@@ -75,7 +67,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Instructions:       a.Instructions,
 		AvatarURL:          textToPtr(a.AvatarUrl),
 		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
+		RuntimeConfig:      runtimeConfigToResponse(a.RuntimeConfig),
 		CustomEnv:          customEnv,
 		CustomArgs:         customArgs,
 		Visibility:         a.Visibility,
@@ -90,6 +82,17 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 }
 
+func runtimeConfigToResponse(raw []byte) any {
+	var rc any
+	if raw != nil {
+		json.Unmarshal(raw, &rc)
+	}
+	if rc == nil {
+		return map[string]any{}
+	}
+	return rc
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
@@ -98,23 +101,23 @@ type RepoData struct {
 }
 
 type AgentTaskResponse struct {
-	ID             string         `json:"id"`
-	AgentID        string         `json:"agent_id"`
-	RuntimeID      string         `json:"runtime_id"`
-	IssueID        string         `json:"issue_id"`
-	WorkspaceID    string         `json:"workspace_id"`
-	Status         string         `json:"status"`
-	Priority       int32          `json:"priority"`
-	DispatchedAt   *string        `json:"dispatched_at"`
-	StartedAt      *string        `json:"started_at"`
-	CompletedAt    *string        `json:"completed_at"`
-	Result         any            `json:"result"`
-	Error          *string        `json:"error"`
-	Agent          *TaskAgentData `json:"agent,omitempty"`
-	Repos          []RepoData     `json:"repos,omitempty"`
-	CreatedAt      string         `json:"created_at"`
-	PriorSessionID   string         `json:"prior_session_id,omitempty"`    // session ID from a previous task on same issue
-	PriorWorkDir     string         `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
+	ID                    string         `json:"id"`
+	AgentID               string         `json:"agent_id"`
+	RuntimeID             string         `json:"runtime_id"`
+	IssueID               string         `json:"issue_id"`
+	WorkspaceID           string         `json:"workspace_id"`
+	Status                string         `json:"status"`
+	Priority              int32          `json:"priority"`
+	DispatchedAt          *string        `json:"dispatched_at"`
+	StartedAt             *string        `json:"started_at"`
+	CompletedAt           *string        `json:"completed_at"`
+	Result                any            `json:"result"`
+	Error                 *string        `json:"error"`
+	Agent                 *TaskAgentData `json:"agent,omitempty"`
+	Repos                 []RepoData     `json:"repos,omitempty"`
+	CreatedAt             string         `json:"created_at"`
+	PriorSessionID        string         `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
+	PriorWorkDir          string         `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
@@ -124,12 +127,13 @@ type AgentTaskResponse struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	RuntimeConfig any                      `json:"runtime_config,omitempty"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -138,16 +142,16 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		json.Unmarshal(t.Result, &result)
 	}
 	return AgentTaskResponse{
-		ID:           uuidToString(t.ID),
-		AgentID:      uuidToString(t.AgentID),
-		RuntimeID:    uuidToString(t.RuntimeID),
-		IssueID:      uuidToString(t.IssueID),
-		Status:       t.Status,
-		Priority:     t.Priority,
-		DispatchedAt: timestampToPtr(t.DispatchedAt),
-		StartedAt:    timestampToPtr(t.StartedAt),
-		CompletedAt:  timestampToPtr(t.CompletedAt),
-		Result:       result,
+		ID:               uuidToString(t.ID),
+		AgentID:          uuidToString(t.AgentID),
+		RuntimeID:        uuidToString(t.RuntimeID),
+		IssueID:          uuidToString(t.IssueID),
+		Status:           t.Status,
+		Priority:         t.Priority,
+		DispatchedAt:     timestampToPtr(t.DispatchedAt),
+		StartedAt:        timestampToPtr(t.StartedAt),
+		CompletedAt:      timestampToPtr(t.CompletedAt),
+		Result:           result,
 		Error:            textToPtr(t.Error),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
@@ -335,8 +339,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
-
-
 
 type UpdateAgentRequest struct {
 	Name               *string            `json:"name"`

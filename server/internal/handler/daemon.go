@@ -477,12 +477,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
-			CustomEnv:    customEnv,
-			CustomArgs:   customArgs,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			RuntimeConfig: runtimeConfigToResponse(agent.RuntimeConfig),
+			Skills:        skills,
+			CustomEnv:     customEnv,
+			CustomArgs:    customArgs,
 		}
 	}
 
