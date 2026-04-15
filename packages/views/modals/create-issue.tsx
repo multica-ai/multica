@@ -158,7 +158,8 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <>
+    <Dialog open={!backlogHintIssueId} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
@@ -298,29 +299,30 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           </Button>
         </div>
       </DialogContent>
+    </Dialog>
 
-      <BacklogAgentHintDialog
-        open={!!backlogHintIssueId}
-        onOpenChange={(v) => {
-          if (!v) {
-            setBacklogHintIssueId(null);
-            onClose();
-          }
-        }}
-        onDismissPermanently={() => {
-          localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
-        }}
-        onMoveToTodo={() => {
-          if (backlogHintIssueId) {
-            updateIssueMutation.mutate(
-              { id: backlogHintIssueId, status: "todo" },
-              { onError: () => toast.error("Failed to update status") },
-            );
-          }
+    <BacklogAgentHintDialog
+      open={!!backlogHintIssueId}
+      onOpenChange={(v) => {
+        if (!v) {
           setBacklogHintIssueId(null);
           onClose();
-        }}
-      />
-    </Dialog>
+        }
+      }}
+      onDismissPermanently={() => {
+        localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+      }}
+      onMoveToTodo={() => {
+        if (backlogHintIssueId) {
+          updateIssueMutation.mutate(
+            { id: backlogHintIssueId, status: "todo" },
+            { onError: () => toast.error("Failed to update status") },
+          );
+        }
+        setBacklogHintIssueId(null);
+        onClose();
+      }}
+    />
+    </>
   );
 }

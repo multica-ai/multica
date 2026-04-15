@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Archive, ArrowRight, Bot } from "lucide-react";
 import {
   AlertDialog,
@@ -23,6 +24,8 @@ export function BacklogAgentHintDialog({
   onDismissPermanently,
   onMoveToTodo,
 }: BacklogAgentHintDialogProps) {
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="w-[calc(100vw-2rem)] !max-w-[460px] gap-0 overflow-hidden rounded-lg p-0">
@@ -55,19 +58,27 @@ export function BacklogAgentHintDialog({
         </div>
 
         <div className="border-t bg-muted/30 px-5 py-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <AlertDialogCancel
-              variant="ghost"
-              className="w-full justify-center text-muted-foreground sm:w-auto"
-              onClick={onDismissPermanently}
-            >
-              Don&apos;t show again
-            </AlertDialogCancel>
+          <div className="flex flex-col gap-3 sm:gap-2">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={dontShowAgain}
+                onChange={(e) => setDontShowAgain(e.target.checked)}
+                className="size-4 rounded border-border accent-primary cursor-pointer"
+              />
+              Don&apos;t show this again
+            </label>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <AlertDialogCancel className="w-full sm:w-auto">
+              <AlertDialogCancel
+                className="w-full sm:w-auto"
+                onClick={() => { if (dontShowAgain) onDismissPermanently(); }}
+              >
                 Keep in Backlog
               </AlertDialogCancel>
-              <AlertDialogAction className="w-full sm:w-auto" onClick={onMoveToTodo}>
+              <AlertDialogAction
+                className="w-full sm:w-auto"
+                onClick={() => { if (dontShowAgain) onDismissPermanently(); onMoveToTodo(); }}
+              >
                 Move to Todo
               </AlertDialogAction>
             </div>
