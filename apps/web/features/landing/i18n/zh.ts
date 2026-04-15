@@ -223,6 +223,10 @@ export const zh: LandingDict = {
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
           { label: "\u66f4\u65b0\u65e5\u5fd7", href: "/changelog" },
+          { label: "\u7f51\u7ad9\u6ce8\u518c", href: "/zh/imprint" },
+          { label: "\u9690\u79c1\u653f\u7b56", href: "/zh/privacy-policy" },
+          { label: "\u670d\u52a1\u6761\u6b3e", href: "/zh/terms" },
+          { label: "Cookies", href: "/zh/cookies" },
         ],
       },
       resources: {

@@ -1,9 +1,10 @@
-export type Locale = "en" | "zh";
+export type Locale = "en" | "de" | "zh";
 
-export const locales: Locale[] = ["en", "zh"];
+export const locales: Locale[] = ["en", "de", "zh"];
 
 export const localeLabels: Record<Locale, string> = {
   en: "EN",
+  de: "DE",
   zh: "\u4e2d\u6587",
 };
 

@@ -223,6 +223,10 @@ export const en: LandingDict = {
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
           { label: "Changelog", href: "/changelog" },
+          { label: "Imprint", href: "/en/imprint" },
+          { label: "Privacy Policy", href: "/en/privacy-policy" },
+          { label: "Terms", href: "/en/terms" },
+          { label: "Cookies", href: "/en/cookies" },
         ],
       },
       resources: {
