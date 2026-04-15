@@ -250,7 +250,7 @@ func (d *Daemon) providerToRuntimeMap() map[string]string {
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
-		version, err := agent.DetectVersion(ctx, entry.Path)
+		version, err := agent.DetectVersion(ctx, name, entry.Path)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue

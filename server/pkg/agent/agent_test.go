@@ -46,7 +46,7 @@ func TestNewDefaultsLogger(t *testing.T) {
 
 func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	t.Parallel()
-	_, err := DetectVersion(context.Background(), "/nonexistent/binary")
+	_, err := DetectVersion(context.Background(), "claude", "/nonexistent/binary")
 	if err == nil {
 		t.Fatal("expected error for missing binary")
 	}
