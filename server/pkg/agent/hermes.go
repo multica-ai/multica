@@ -34,7 +34,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	cmd := exec.CommandContext(runCtx, execPath, "acp")
+	args := []string{"acp"}
+	if profile := b.cfg.Env["HERMES_PROFILE"]; profile != "" {
+		args = append([]string{"--profile", profile}, args...)
+	}
+	cmd := exec.CommandContext(runCtx, execPath, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
