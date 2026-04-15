@@ -28,13 +28,14 @@ function AppContent() {
     window.daemonAPI.setTargetApiUrl(DAEMON_TARGET_API_URL);
   }, []);
 
-  // Listen for auth token delivered via deep link (multica://auth/callback?token=...)
+  // Listen for auth token delivered via deep link (multica://auth/callback?token=...).
+  // daemonAPI.syncToken is handled separately by the [user] effect below, which
+  // fires whenever a user logs in (deep link, session restore, account switch).
   useEffect(() => {
     return window.desktopAPI.onAuthToken(async (token) => {
       setBootstrapping(true);
       try {
-        const loggedIn = await useAuthStore.getState().loginWithToken(token);
-        await window.daemonAPI.syncToken(token, loggedIn.id);
+        await useAuthStore.getState().loginWithToken(token);
         const wsList = await api.listWorkspaces();
         const lastWsId = localStorage.getItem("multica_workspace_id");
         useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWsId);
