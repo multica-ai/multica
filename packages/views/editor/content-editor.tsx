@@ -79,6 +79,7 @@ interface ContentEditorProps {
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
+  setContent: (markdown: string) => void;
   focus: () => void;
   uploadFile: (file: File) => void;
   /** True when file uploads are still in progress. */
@@ -198,6 +199,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
       clearContent: () => {
         editor?.commands.clearContent();
+      },
+      setContent: (markdown: string) => {
+        editor?.commands.setContent(markdown, { contentType: "markdown" });
       },
       focus: () => {
         editor?.commands.focus();
