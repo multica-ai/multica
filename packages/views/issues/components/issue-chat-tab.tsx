@@ -13,11 +13,9 @@ import { issueChatSessionsOptions, chatKeys } from "@multica/core/chat/queries";
 import type {
   ChatMessage,
   SendChatMessageResponse,
-  TaskMessagePayload,
   ChatDonePayload,
 } from "@multica/core/types";
-import type { ChatTimelineItem } from "@multica/core/chat";
-import { MessageSquare, Pencil, ChevronDown } from "lucide-react";
+import { MessageSquare, Plus, ChevronDown } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 
 
@@ -31,7 +29,6 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
-  const [timelineItems, setTimelineItems] = useState<ChatTimelineItem[]>([]);
   const [editingTitle, setEditingTitle] = useState(false);
 
   const { data: sessions = [] } = useQuery(issueChatSessionsOptions(issueId));
@@ -62,7 +59,7 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
     onSuccess: (session) => {
       qc.invalidateQueries({ queryKey: ["issue-chat-sessions", issueId] });
       setActiveSessionId(session.id);
-      setTimelineItems([]);
+
       setPendingTaskId(null);
     },
   });
@@ -87,25 +84,9 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
           qc.invalidateQueries({ queryKey: chatKeys.messages(sid) });
         }
       }
-      setTimelineItems([]);
+
       setPendingTaskId(null);
     };
-
-    const unsubMessage = subscribe("task:message", (payload) => {
-      const p = payload as TaskMessagePayload;
-      if (!matchesPending(p.task_id)) return;
-      setTimelineItems((prev) => [
-        ...prev,
-        {
-          seq: p.seq,
-          type: p.type,
-          tool: p.tool,
-          content: p.content,
-          input: p.input,
-          output: p.output,
-        },
-      ]);
-    });
 
     const unsubDone = subscribe("chat:done", (payload) => {
       const p = payload as ChatDonePayload;
@@ -126,7 +107,6 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
     });
 
     return () => {
-      unsubMessage();
       unsubDone();
       unsubCompleted();
       unsubFailed();
@@ -175,7 +155,7 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
     if (activeSessionId) {
       qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
     }
-    setTimelineItems([]);
+    /* timeline managed by ChatMessageList */;
     setPendingTaskId(null);
   }, [pendingTaskId, activeSessionId, qc]);
 
@@ -190,7 +170,7 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
   );
 
   const availableAgents = agents.filter((a) => !a.archived_at);
-  const hasMessages = messages.length > 0 || timelineItems.length > 0;
+  const hasMessages = messages.length > 0 || !!pendingTaskId;
 
   // Get current session's agent for command list
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -201,13 +181,13 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
     if (pendingTaskId) {
       try { await api.cancelTaskById(pendingTaskId); } catch {}
       setPendingTaskId(null);
-      setTimelineItems([]);
+
     }
 
     const existing = sessions.find((s) => s.agent_id === agentId);
     if (existing) {
       setActiveSessionId(existing.id);
-      setTimelineItems([]);
+
       setPendingTaskId(null);
     } else {
       createSession.mutate(agentId);
@@ -262,9 +242,11 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
         <select
           className="text-xs bg-transparent border rounded px-2 py-1 outline-none"
           value={activeSessionId || ""}
+          onDoubleClick={() => {
+            if (activeSessionId) setEditingTitle(true);
+          }}
           onChange={(e) => {
             setActiveSessionId(e.target.value);
-            setTimelineItems([]);
             setPendingTaskId(null);
             setEditingTitle(false);
           }}
@@ -279,13 +261,13 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
             );
           })}
         </select>
-        {activeSessionId && (
+        {activeAgent && (
           <button
-            onClick={() => setEditingTitle(true)}
-            className="text-xs text-muted-foreground hover:text-foreground"
-            title="Rename session"
+            onClick={() => createSession.mutate(activeAgent.id)}
+            className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
           >
-            <Pencil className="h-3 w-3" />
+            <Plus className="h-3 w-3" />
+            New
           </button>
         )}
       </div>
@@ -317,7 +299,7 @@ export function IssueChatTab({ issueId }: IssueChatTabProps) {
       {hasMessages && (
         <ChatMessageList
           messages={messages}
-          timelineItems={timelineItems}
+          pendingTaskId={pendingTaskId}
           isWaiting={!!pendingTaskId}
         />
       )}
