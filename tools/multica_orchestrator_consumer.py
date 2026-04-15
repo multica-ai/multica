@@ -46,6 +46,7 @@ ADMISSION_AUTONOMOUS_WORKFLOW_ANALYSIS_DENIED = "autonomous_workflow_analysis_de
 ADMISSION_CHILD_CARD_CREATION_DENIED = "child_card_creation_denied"
 ADMISSION_HUMAN_REVIEW_MISSING_ASK_DENIED = "human_review_missing_ask_denied"
 ADMISSION_AUTONOMOUS_AGENT_LAUNCH_DENIED = "autonomous_agent_launch_denied"
+MANUAL_ALLOW_STRING_VALUES = {"true", "yes", "allow", "allowed", "approve", "approved"}
 
 TRAINER_PROJECT_ID = "072b1862-109e-43c3-98d8-c18515961b93"
 MULTICA_PROJECT_ID = "d02043a2-5fa2-463e-803d-a3e38133553a"
@@ -162,12 +163,17 @@ def run_command(command: list[str], *, timeout: int = 30) -> None:
 
 
 def has_explicit_manual_allow(event: dict[str, Any]) -> bool:
-    for key in ("manual_user_requested", "operator_requested", "human_opt_in_id", "allow_autonomous_llm"):
+    for key in ("manual_user_requested", "operator_requested", "allow_autonomous_llm"):
         value = event.get(key)
-        if isinstance(value, bool) and value:
+        if isinstance(value, bool):
+            if value:
+                return True
+            continue
+        if isinstance(value, str) and value.strip().lower() in MANUAL_ALLOW_STRING_VALUES:
             return True
-        if isinstance(value, str) and value.strip():
-            return True
+    token = event.get("human_opt_in_id")
+    if isinstance(token, str) and token.strip():
+        return True
     return False
 
 

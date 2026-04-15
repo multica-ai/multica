@@ -232,6 +232,62 @@ class ConsumerTests(unittest.TestCase):
                 consumer.ADMISSION_MANUAL_USER_REQUESTED,
             )
 
+    def test_manual_allow_falsey_values_do_not_bypass_assignment_clamp(self) -> None:
+        cases = [
+            {"manual_user_requested": "false"},
+            {"operator_requested": "no"},
+            {"allow_autonomous_llm": "0"},
+            {"allow_autonomous_llm": "off"},
+            {"manual_user_requested": "deny"},
+            {"manual_user_requested": ""},
+            {"manual_user_requested": "   "},
+            {"manual_user_requested": False},
+            {"manual_user_requested": 1},
+        ]
+        for extra in cases:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as td:
+                tmp = Path(td)
+                event(
+                    tmp,
+                    agent_id=consumer.MULTICA_BUILD_AGENT_ID,
+                    summary="Implemented the fix. Validation passed.",
+                    extra=extra,
+                )
+                fake = FakeMultica(issue())
+
+                self.assertEqual(self.run_consumer(tmp, fake), 0)
+
+                self.assertIn(["/fake/multica", "issue", "status", ISSUE_ID, "in_review"], fake.commands)
+                self.assert_no_agent_assign(fake)
+                comments = self.comments(fake)
+                self.assertEqual(len(comments), 1)
+                self.assertIn(consumer.ADMISSION_AUTONOMOUS_AGENT_LAUNCH_DENIED, comments[0])
+
+    def test_manual_allow_deliberate_string_values_allow_assignment(self) -> None:
+        for key, value in [
+            ("manual_user_requested", "true"),
+            ("operator_requested", "yes"),
+            ("allow_autonomous_llm", "approved"),
+            ("human_opt_in_id", "operator-approval-123"),
+        ]:
+            with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as td:
+                tmp = Path(td)
+                event(
+                    tmp,
+                    agent_id=consumer.MULTICA_BUILD_AGENT_ID,
+                    summary="Implemented the fix. Validation passed.",
+                    extra={key: value},
+                )
+                fake = FakeMultica(issue())
+
+                self.assertEqual(self.run_consumer(tmp, fake), 0)
+
+                self.assertIn(["/fake/multica", "issue", "status", ISSUE_ID, "in_review"], fake.commands)
+                self.assertIn(["/fake/multica", "issue", "assign", ISSUE_ID, "--to", "Multica Review Agent"], fake.commands)
+                comments = self.comments(fake)
+                self.assertEqual(len(comments), 1)
+                self.assertIn("Next-agent prompt:", comments[0])
+
     def test_build_agent_no_blocking_findings_still_routes_to_review(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
