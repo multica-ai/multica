@@ -278,6 +278,31 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.2.0",
+        date: "2026-04-15",
+        title: "桌面应用、Autopilot 与邀请",
+        changes: [],
+        features: [
+          "macOS 桌面应用——原生 Electron 应用，支持标签页系统、内置 Daemon 管理、沉浸模式和自动更新",
+          "Autopilot——Agent 定时和触发式自动化任务",
+          "工作区邀请，支持邮件通知和专用接受页面",
+          "Agent 自定义 CLI 参数，支持高级运行时配置",
+          "聊天界面重设计，新增未读追踪和会话管理优化",
+          "创建 Agent 对话框显示运行时所有者和 Mine/All 筛选",
+        ],
+        improvements: [
+          "Inter 字体 + CJK 回退，中英文自动间距",
+          "侧边栏用户菜单改为整行弹出面板",
+          "WebSocket ping/pong 心跳检测断线连接",
+          "普通成员现在可以创建 Agent 和管理自己的 Skills",
+        ],
+        fixes: [
+          "Agent 在已参与的线程收到回复时正确触发",
+          "自部署：Docker 本地上传文件持久化，WebSocket URL 自动适配局域网",
+          "Cmd+K 最近 Issue 列表状态过期",
+        ],
+      },
+      {
         version: "0.1.33",
         date: "2026-04-14",
         title: "Gemini CLI 与 Agent 环境变量",
