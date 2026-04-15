@@ -599,10 +599,34 @@ function profileArgs(active: ActiveProfile): string[] {
 // Env passed to every CLI child so the daemon process knows it was spawned
 // by the Desktop app. The server uses this to mark runtimes as managed and
 // hide CLI self-update UI.
-const DESKTOP_SPAWN_ENV = {
-  ...process.env,
-  MULTICA_LAUNCHED_BY: "desktop",
-};
+//
+// On macOS, apps launched from the Dock inherit a stripped-down PATH that
+// omits Homebrew and other user-installed tool directories. We augment it
+// here so the daemon can find agent CLIs (claude, codex, openclaw, etc.)
+// that the user installed via brew or other package managers.
+function buildDesktopSpawnEnv(): NodeJS.ProcessEnv {
+  const base = process.env["PATH"] ?? "";
+  const extras =
+    process.platform === "darwin"
+      ? [
+          join(homedir(), ".local", "bin"),
+          "/opt/homebrew/bin",
+          "/opt/homebrew/sbin",
+          "/usr/local/bin",
+          "/usr/local/sbin",
+        ]
+      : [join(homedir(), ".local", "bin")];
+  const parts = base.split(process.platform === "win32" ? ";" : ":");
+  for (const extra of extras) {
+    if (!parts.includes(extra)) parts.push(extra);
+  }
+  return {
+    ...process.env,
+    PATH: parts.join(process.platform === "win32" ? ";" : ":"),
+    MULTICA_LAUNCHED_BY: "desktop",
+  };
+}
+const DESKTOP_SPAWN_ENV = buildDesktopSpawnEnv();
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
