@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
@@ -12,6 +12,8 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar, DashboardGuard } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
+import { OnboardingWizard } from "@multica/views/onboarding";
+import { useWorkspaceStore } from "@multica/core/workspace";
 import { DesktopNavigationProvider } from "@/platform/navigation";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { TabBar } from "./tab-bar";
@@ -85,6 +87,28 @@ function useInternalLinkHandler() {
 export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
+
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  // Freeze the "needs onboarding" decision at first mount so that creating
+  // a workspace mid-wizard (step 0) doesn't unmount the wizard and dump
+  // the user into the main shell before they finish the later steps.
+  // DesktopShell is only mounted after AppContent's bootstrapping finishes,
+  // so `!workspace` at first render is a reliable empty-state signal.
+  const initialNeedsOnboarding = useRef<boolean | null>(null);
+  if (initialNeedsOnboarding.current === null) {
+    initialNeedsOnboarding.current = !workspace;
+  }
+  const [onboardingDone, setOnboardingDone] = useState(false);
+
+  if (initialNeedsOnboarding.current && !onboardingDone) {
+    return (
+      <DesktopNavigationProvider>
+        <div className="h-screen overflow-auto">
+          <OnboardingWizard onComplete={() => setOnboardingDone(true)} />
+        </div>
+      </DesktopNavigationProvider>
+    );
+  }
 
   return (
     <DesktopNavigationProvider>

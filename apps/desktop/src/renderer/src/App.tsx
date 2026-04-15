@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
@@ -13,6 +13,14 @@ import { UpdateNotification } from "./components/update-notification";
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
+  // hydrateWorkspace sequentially. loginWithToken sets user+isLoading=false
+  // as soon as getMe resolves, which would cause DesktopShell to mount
+  // before the workspace list is hydrated and briefly see `!workspace`.
+  // This local flag keeps the loading screen up until the whole chain
+  // finishes, so the shell's "needs onboarding?" check gets a definitive
+  // workspace state on first render.
+  const [bootstrapping, setBootstrapping] = useState(false);
 
   // Tell the main process which backend URL we talk to, so daemon-manager
   // can pick the matching CLI profile (server_url from ~/.multica config).
@@ -23,6 +31,7 @@ function AppContent() {
   // Listen for auth token delivered via deep link (multica://auth/callback?token=...)
   useEffect(() => {
     return window.desktopAPI.onAuthToken(async (token) => {
+      setBootstrapping(true);
       try {
         const loggedIn = await useAuthStore.getState().loginWithToken(token);
         await window.daemonAPI.syncToken(token, loggedIn.id);
@@ -31,6 +40,8 @@ function AppContent() {
         useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWsId);
       } catch {
         // Token invalid or expired — user stays on login page
+      } finally {
+        setBootstrapping(false);
       }
     });
   }, []);
@@ -51,7 +62,7 @@ function AppContent() {
     })();
   }, [user]);
 
-  if (isLoading) {
+  if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
         <MulticaIcon className="size-6 animate-pulse" />
