@@ -51,11 +51,10 @@ type repoCheckoutRequest struct {
 	TaskID      string `json:"task_id"`
 }
 
-// serveHealth runs the health HTTP server on the given listener.
-// Blocks until ctx is cancelled.
-func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+// healthHandler returns the /health HTTP handler. Extracted from serveHealth
+// so tests can exercise it without spinning up a listener.
+func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		d.mu.Lock()
 		var wsList []healthWorkspace
 		for id, ws := range d.workspaces {
@@ -86,7 +85,14 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	})
+	}
+}
+
+// serveHealth runs the health HTTP server on the given listener.
+// Blocks until ctx is cancelled.
+func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", d.healthHandler(startedAt))
 
 	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

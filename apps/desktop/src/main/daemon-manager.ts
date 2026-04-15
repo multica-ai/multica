@@ -18,6 +18,7 @@ import { join } from "path";
 import { homedir } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
+import { decideVersionAction } from "./version-decision";
 
 const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
@@ -405,7 +406,9 @@ async function getCliBinaryVersion(): Promise<string | null> {
 
 /**
  * Compares the running daemon's `cli_version` against the CLI binary we
- * would use to spawn a new one, and restarts only when safe.
+ * would use to spawn a new one, and restarts only when safe. The decision
+ * logic itself is in `version-decision.ts` (pure, unit-tested); this
+ * wrapper handles the async plumbing and side effects.
  *
  * Restart is only fired when ALL of:
  *   - a daemon is actually running on the active profile's port
@@ -421,46 +424,34 @@ async function ensureRunningDaemonVersionMatches(): Promise<
 > {
   const active = await ensureActiveProfile();
   const running = await fetchHealthAtPort(active.port);
-  if (!running || running.status !== "running") {
-    pendingVersionRestart = false;
-    return "not_running";
-  }
-
   const bundled = await getCliBinaryVersion();
-  const runningVersion = running.cli_version;
+  const action = decideVersionAction(bundled, running);
 
-  // Unknown on either side → can't prove mismatch → leave the daemon alone.
-  // This covers: bundled binary missing/broken, and older daemons that
-  // predate the cli_version field in /health.
-  if (!bundled || !runningVersion) {
-    pendingVersionRestart = false;
-    return "ok";
-  }
-  if (runningVersion === bundled) {
-    pendingVersionRestart = false;
-    return "ok";
-  }
-
-  // Mismatch confirmed. If the daemon is currently running agent tasks,
-  // defer the restart so we don't kill them mid-execution. The poll loop
-  // will retry on each tick and fire the restart once the count drops to 0.
-  const activeTasks = running.active_task_count ?? 0;
-  if (activeTasks > 0) {
-    if (!pendingVersionRestart) {
-      console.log(
-        `[daemon] CLI version mismatch (bundled=${bundled} running=${runningVersion}); deferring restart until ${activeTasks} active task(s) finish`,
-      );
+  switch (action) {
+    case "not_running":
+      pendingVersionRestart = false;
+      return "not_running";
+    case "ok":
+      pendingVersionRestart = false;
+      return "ok";
+    case "defer": {
+      if (!pendingVersionRestart) {
+        const activeTasks = running?.active_task_count ?? 0;
+        console.log(
+          `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
+        );
+      }
+      pendingVersionRestart = true;
+      return "deferred";
     }
-    pendingVersionRestart = true;
-    return "deferred";
+    case "restart":
+      console.log(
+        `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}) — restarting daemon`,
+      );
+      pendingVersionRestart = false;
+      await restartDaemon();
+      return "restarted";
   }
-
-  console.log(
-    `[daemon] CLI version mismatch (bundled=${bundled} running=${runningVersion}) — restarting daemon`,
-  );
-  pendingVersionRestart = false;
-  await restartDaemon();
-  return "restarted";
 }
 
 /**

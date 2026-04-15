@@ -13,6 +13,7 @@
     "preview": "electron-vite preview",
     "package": "pnpm run bundle-cli && electron-builder",
     "lint": "eslint .",
+    "test": "vitest run",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -47,6 +48,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwindcss": "^4",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
