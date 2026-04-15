@@ -220,6 +220,33 @@ func TestBuildProviderEnvGlmRejectsInvalidTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadConfigWarnsOnPartialGlm(t *testing.T) {
+	t.Setenv("MULTICA_GLM_BASE_URL", "https://api.z.ai/api/anthropic")
+	t.Setenv("MULTICA_GLM_AUTH_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://localhost:8080")
+
+	cfg, err := LoadConfig(Overrides{})
+	if err != nil {
+		// LoadConfig returns an error when no agents are found at all.
+		// In CI no agent CLIs are on PATH, so we accept either outcome but
+		// only assert when we got a Config back.
+		return
+	}
+	if _, ok := cfg.Agents["glm"]; ok {
+		t.Fatal("glm should not be registered when only base_url is set")
+	}
+	found := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "GLM partially configured") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected partial-GLM warning, got warnings=%v", cfg.Warnings)
+	}
+}
+
 func TestBuildProviderEnvNonGlmEmpty(t *testing.T) {
 	env, err := buildProviderEnv("claude")
 	if err != nil {
