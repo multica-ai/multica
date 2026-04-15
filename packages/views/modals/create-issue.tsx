@@ -11,20 +11,11 @@ import {
   DialogContent,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
+import { BacklogAgentHintDialog } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -308,45 +299,28 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         </div>
       </DialogContent>
 
-      {/* Backlog agent hint dialog */}
-      <AlertDialog open={!!backlogHintIssueId} onOpenChange={(v) => { if (!v) { setBacklogHintIssueId(null); onClose(); } }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Agent won&apos;t start in Backlog</AlertDialogTitle>
-            <AlertDialogDescription>
-              Issues in Backlog are parked — the agent won&apos;t start until the issue is moved to an active status like Todo.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
-                setBacklogHintIssueId(null);
-                onClose();
-              }}
-            >
-              Don&apos;t show again
-            </AlertDialogCancel>
-            <AlertDialogCancel onClick={() => { setBacklogHintIssueId(null); onClose(); }}>
-              Keep in Backlog
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (backlogHintIssueId) {
-                  updateIssueMutation.mutate(
-                    { id: backlogHintIssueId, status: "todo" },
-                    { onError: () => toast.error("Failed to update status") },
-                  );
-                }
-                setBacklogHintIssueId(null);
-                onClose();
-              }}
-            >
-              Move to Todo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <BacklogAgentHintDialog
+        open={!!backlogHintIssueId}
+        onOpenChange={(v) => {
+          if (!v) {
+            setBacklogHintIssueId(null);
+            onClose();
+          }
+        }}
+        onDismissPermanently={() => {
+          localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+        }}
+        onMoveToTodo={() => {
+          if (backlogHintIssueId) {
+            updateIssueMutation.mutate(
+              { id: backlogHintIssueId, status: "todo" },
+              { onError: () => toast.error("Failed to update status") },
+            );
+          }
+          setBacklogHintIssueId(null);
+          onClose();
+        }}
+      />
     </Dialog>
   );
 }
