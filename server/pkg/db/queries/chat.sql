@@ -101,3 +101,13 @@ WHERE id = $1;
 -- unread boundary stable across multiple incoming replies.
 UPDATE chat_session SET unread_since = now()
 WHERE id = $1 AND unread_since IS NULL;
+
+-- name: CreateIssueChatSession :one
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, issue_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: ListChatSessionsByIssue :many
+SELECT * FROM chat_session
+WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at DESC;
