@@ -15,7 +15,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
-import { BacklogAgentHintDialog } from "../issues/components/backlog-agent-hint-dialog";
+import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -117,39 +117,42 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         project_id: projectId,
       });
       clearDraft();
-      // Show backlog hint dialog instead of closing immediately.
-      if (
+      const shouldShowBacklogHint =
         status === "backlog" && assigneeType === "agent" && assigneeId &&
-        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
-      ) {
+        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true";
+
+      if (shouldShowBacklogHint) {
         setBacklogHintIssueId(issue.id);
       } else {
         onClose();
       }
-      toast.custom((t) => (
-        <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
-              <Check className="size-3" />
+
+      if (!shouldShowBacklogHint) {
+        toast.custom((t) => (
+          <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
+                <Check className="size-3" />
+              </div>
+              <span className="text-sm font-medium">Issue created</span>
             </div>
-            <span className="text-sm font-medium">Issue created</span>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+              <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
+              <span className="truncate">{issue.identifier} – {issue.title}</span>
+            </div>
+            <button
+              type="button"
+              className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+              onClick={() => {
+                router.push(`/issues/${issue.id}`);
+                toast.dismiss(t);
+              }}
+            >
+              View issue
+            </button>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
-            <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
-            <span className="truncate">{issue.identifier} – {issue.title}</span>
-          </div>
-          <button
-            type="button"
-            className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
-            onClick={() => {
-              router.push(`/issues/${issue.id}`);
-              toast.dismiss(t);
-            }}
-          >
-            View issue
-          </button>
-        </div>
-      ), { duration: 5000 });
+        ), { duration: 5000 });
+      }
     } catch {
       toast.error("Failed to create issue");
     } finally {
@@ -158,171 +161,180 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   };
 
   return (
-    <>
-    <Dialog open={!backlogHintIssueId} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent
-        finalFocus={false}
-        showCloseButton={false}
-        className={cn(
-          "p-0 gap-0 flex flex-col overflow-hidden",
-          "!top-1/2 !left-1/2 !-translate-x-1/2",
-          "!transition-all !duration-300 !ease-out",
-          isExpanded
-            ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-            : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
-        )}
-      >
-        <DialogTitle className="sr-only">New Issue</DialogTitle>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
-            {typeof data?.parent_issue_identifier === "string" && (
-              <>
-                <span className="text-muted-foreground">{data.parent_issue_identifier}</span>
-                <ChevronRight className="size-3 text-muted-foreground/50" />
-              </>
-            )}
-            <span className="font-medium">{data?.parent_issue_id ? "New sub-issue" : "New issue"}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                  >
-                    {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                  </button>
-                }
-              />
-              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={onClose}
-                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                  >
-                    <XIcon className="size-4" />
-                  </button>
-                }
-              />
-              <TooltipContent side="bottom">Close</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-
-        {/* Title */}
-        <div className="px-5 pb-2 shrink-0">
-          <TitleEditor
-            autoFocus
-            defaultValue={draft.title}
-            placeholder="Issue title"
-            className="text-lg font-semibold"
-            onChange={(v) => updateTitle(v)}
-            onSubmit={handleSubmit}
-          />
-        </div>
-
-        {/* Description — takes remaining space */}
-        <div {...descDropZoneProps} className="relative flex-1 min-h-0 overflow-y-auto px-5">
-          <ContentEditor
-            ref={descEditorRef}
-            defaultValue={draft.description}
-            placeholder="Add description..."
-            onUpdate={(md) => setDraft({ description: md })}
-            onUploadFile={handleUpload}
-            debounceMs={500}
-          />
-          {descDragOver && <FileDropOverlay />}
-        </div>
-
-        {/* Property toolbar */}
-        <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
-          {/* Status */}
-          <StatusPicker
-            status={status}
-            onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
-            triggerRender={<PillButton />}
-            align="start"
-          />
-
-          {/* Priority */}
-          <PriorityPicker
-            priority={priority}
-            onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
-            triggerRender={<PillButton />}
-            align="start"
-          />
-
-          {/* Assignee */}
-          <AssigneePicker
-            assigneeType={assigneeType ?? null}
-            assigneeId={assigneeId ?? null}
-            onUpdate={(u) => updateAssignee(
-              u.assignee_type ?? undefined,
-              u.assignee_id ?? undefined,
-            )}
-            triggerRender={<PillButton />}
-            align="start"
-          />
-
-          {/* Due date */}
-          <DueDatePicker
-            dueDate={dueDate}
-            onUpdate={(u) => updateDueDate(u.due_date ?? null)}
-            triggerRender={<PillButton />}
-            align="start"
-          />
-
-          {/* Project */}
-          <ProjectPicker
-            projectId={projectId ?? null}
-            onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-            triggerRender={<PillButton />}
-            align="start"
-          />
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-          <FileUploadButton
-            onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-          />
-          <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-            {submitting ? "Creating..." : "Create Issue"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-
-    <BacklogAgentHintDialog
-      open={!!backlogHintIssueId}
+    <Dialog
+      open
       onOpenChange={(v) => {
         if (!v) {
           setBacklogHintIssueId(null);
           onClose();
         }
       }}
-      onDismissPermanently={() => {
-        localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
-      }}
-      onMoveToTodo={() => {
-        if (backlogHintIssueId) {
-          updateIssueMutation.mutate(
-            { id: backlogHintIssueId, status: "todo" },
-            { onError: () => toast.error("Failed to update status") },
-          );
-        }
-        setBacklogHintIssueId(null);
-        onClose();
-      }}
-    />
-    </>
+    >
+      <DialogContent
+        finalFocus={false}
+        showCloseButton={false}
+        className={cn(
+          "p-0 gap-0 flex flex-col overflow-hidden",
+          "!top-1/2 !left-1/2 !-translate-x-1/2",
+          backlogHintIssueId
+            ? "!max-w-[480px] !w-[calc(100vw-2rem)] !h-auto !-translate-y-1/2 !transition-none !duration-0"
+            : "!transition-all !duration-300 !ease-out",
+          !backlogHintIssueId && isExpanded
+            ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
+            : !backlogHintIssueId
+              ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
+              : "",
+        )}
+      >
+        {backlogHintIssueId ? (
+          <BacklogAgentHintContent
+            onKeepInBacklog={() => {
+              setBacklogHintIssueId(null);
+              onClose();
+            }}
+            onDismissPermanently={() => {
+              localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+            }}
+            onMoveToTodo={() => {
+              updateIssueMutation.mutate(
+                { id: backlogHintIssueId, status: "todo" },
+                { onError: () => toast.error("Failed to update status") },
+              );
+              setBacklogHintIssueId(null);
+              onClose();
+            }}
+          />
+        ) : (
+          <>
+            <DialogTitle className="sr-only">New Issue</DialogTitle>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground">{workspaceName}</span>
+                <ChevronRight className="size-3 text-muted-foreground/50" />
+                {typeof data?.parent_issue_identifier === "string" && (
+                  <>
+                    <span className="text-muted-foreground">{data.parent_issue_identifier}</span>
+                    <ChevronRight className="size-3 text-muted-foreground/50" />
+                  </>
+                )}
+                <span className="font-medium">{data?.parent_issue_id ? "New sub-issue" : "New issue"}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                      >
+                        {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                      </button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        onClick={onClose}
+                        className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    }
+                  />
+                  <TooltipContent side="bottom">Close</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+
+            {/* Title */}
+            <div className="px-5 pb-2 shrink-0">
+              <TitleEditor
+                autoFocus
+                defaultValue={draft.title}
+                placeholder="Issue title"
+                className="text-lg font-semibold"
+                onChange={(v) => updateTitle(v)}
+                onSubmit={handleSubmit}
+              />
+            </div>
+
+            {/* Description — takes remaining space */}
+            <div {...descDropZoneProps} className="relative flex-1 min-h-0 overflow-y-auto px-5">
+              <ContentEditor
+                ref={descEditorRef}
+                defaultValue={draft.description}
+                placeholder="Add description..."
+                onUpdate={(md) => setDraft({ description: md })}
+                onUploadFile={handleUpload}
+                debounceMs={500}
+              />
+              {descDragOver && <FileDropOverlay />}
+            </div>
+
+            {/* Property toolbar */}
+            <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
+              {/* Status */}
+              <StatusPicker
+                status={status}
+                onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Priority */}
+              <PriorityPicker
+                priority={priority}
+                onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Assignee */}
+              <AssigneePicker
+                assigneeType={assigneeType ?? null}
+                assigneeId={assigneeId ?? null}
+                onUpdate={(u) => updateAssignee(
+                  u.assignee_type ?? undefined,
+                  u.assignee_id ?? undefined,
+                )}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Due date */}
+              <DueDatePicker
+                dueDate={dueDate}
+                onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Project */}
+              <ProjectPicker
+                projectId={projectId ?? null}
+                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
+              <FileUploadButton
+                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+              />
+              <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+                {submitting ? "Creating..." : "Create Issue"}
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
