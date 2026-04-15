@@ -4,6 +4,6 @@ export { StatusPicker, PriorityPicker, AssigneePicker, canAssignAgent, DueDatePi
 export { IssueDetail } from "./issue-detail";
 export { IssuesPage } from "./issues-page";
 export { CommentCard } from "./comment-card";
-export { CommentInput } from "./comment-input";
+export { CommentInput } from "../../common/comment-input";
 export { ReplyInput } from "./reply-input";
 export { IssueMentionCard } from "./issue-mention-card";

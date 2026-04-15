@@ -62,7 +62,7 @@ import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@m
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
-import { CommentInput } from "./comment-input";
+import { CommentInput } from "../../common/comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -367,7 +367,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
-      recordVisit(issue.id);
+      recordVisit({
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        status: issue.status,
+      });
     }
   }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1320,7 +1325,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
+              <CommentInput entityId={id} entityKey="issueId" onSubmit={submitComment} />
             </div>
           </div>
         </div>
