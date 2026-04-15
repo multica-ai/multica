@@ -56,7 +56,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 const createChatSession = `-- name: CreateChatSession :one
 INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
 VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, issue_id
 `
 
 type CreateChatSessionParams struct {
@@ -86,6 +86,7 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnreadSince,
+		&i.IssueID,
 	)
 	return i, err
 }
@@ -134,6 +135,46 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 	return i, err
 }
 
+const createIssueChatSession = `-- name: CreateIssueChatSession :one
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, issue_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, issue_id
+`
+
+type CreateIssueChatSessionParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+	Title       string      `json:"title"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) CreateIssueChatSession(ctx context.Context, arg CreateIssueChatSessionParams) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, createIssueChatSession,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.CreatorID,
+		arg.Title,
+		arg.IssueID,
+	)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnreadSince,
+		&i.IssueID,
+	)
+	return i, err
+}
+
 const getChatMessage = `-- name: GetChatMessage :one
 SELECT id, chat_session_id, role, content, task_id, created_at FROM chat_message
 WHERE id = $1
@@ -154,7 +195,7 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 }
 
 const getChatSession = `-- name: GetChatSession :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, issue_id FROM chat_session
 WHERE id = $1
 `
 
@@ -173,12 +214,13 @@ func (q *Queries) GetChatSession(ctx context.Context, id pgtype.UUID) (ChatSessi
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnreadSince,
+		&i.IssueID,
 	)
 	return i, err
 }
 
 const getChatSessionInWorkspace = `-- name: GetChatSessionInWorkspace :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, issue_id FROM chat_session
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -202,6 +244,7 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnreadSince,
+		&i.IssueID,
 	)
 	return i, err
 }
@@ -247,7 +290,7 @@ func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.U
 }
 
 const listAllChatSessionsByCreator = `-- name: ListAllChatSessionsByCreator :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.issue_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
@@ -271,6 +314,7 @@ type ListAllChatSessionsByCreatorRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -295,6 +339,7 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UnreadSince,
+			&i.IssueID,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -341,7 +386,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatSessionsByCreator = `-- name: ListChatSessionsByCreator :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.issue_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
@@ -365,6 +410,7 @@ type ListChatSessionsByCreatorRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -392,7 +438,52 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UnreadSince,
+			&i.IssueID,
 			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionsByIssue = `-- name: ListChatSessionsByIssue :many
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, issue_id FROM chat_session
+WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at DESC
+`
+
+type ListChatSessionsByIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ListChatSessionsByIssue(ctx context.Context, arg ListChatSessionsByIssueParams) ([]ChatSession, error) {
+	rows, err := q.db.Query(ctx, listChatSessionsByIssue, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChatSession{}
+	for rows.Next() {
+		var i ChatSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.IssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -501,7 +592,7 @@ func (q *Queries) UpdateChatSessionSession(ctx context.Context, arg UpdateChatSe
 const updateChatSessionTitle = `-- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, issue_id
 `
 
 type UpdateChatSessionTitleParams struct {
@@ -524,6 +615,7 @@ func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSess
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UnreadSince,
+		&i.IssueID,
 	)
 	return i, err
 }

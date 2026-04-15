@@ -42,6 +42,16 @@ type IssueResponse struct {
 	UpdatedAt          string                  `json:"updated_at"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	AcceptanceCriteria json.RawMessage         `json:"acceptance_criteria"`
+	ContextRefs        json.RawMessage         `json:"context_refs"`
+	Scope              json.RawMessage         `json:"scope"`
+}
+
+func defaultJSONBSlice(data json.RawMessage) []byte {
+	if data == nil || len(data) == 0 {
+		return []byte("[]")
+	}
+	return []byte(data)
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -62,9 +72,12 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
+		DueDate:            timestampToPtr(i.DueDate),
+		CreatedAt:          timestampToString(i.CreatedAt),
+		UpdatedAt:          timestampToString(i.UpdatedAt),
+		AcceptanceCriteria: i.AcceptanceCriteria,
+		ContextRefs:        i.ContextRefs,
+		Scope:              i.Scope,
 	}
 }
 
@@ -764,8 +777,11 @@ type CreateIssueRequest struct {
 	AssigneeID         *string  `json:"assignee_id"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	DueDate            *string         `json:"due_date"`
+	AttachmentIDs      []string        `json:"attachment_ids,omitempty"`
+	AcceptanceCriteria json.RawMessage `json:"acceptance_criteria,omitempty"`
+	ContextRefs        json.RawMessage `json:"context_refs,omitempty"`
+	Scope              json.RawMessage `json:"scope,omitempty"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -880,6 +896,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:            dueDate,
 		Number:             issueNumber,
 		ProjectID:          projectID,
+		AcceptanceCriteria: defaultJSONBSlice(req.AcceptanceCriteria),
+		ContextRefs:        defaultJSONBSlice(req.ContextRefs),
+		Scope:              defaultJSONBSlice(req.Scope),
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -935,9 +954,12 @@ type UpdateIssueRequest struct {
 	AssigneeType       *string  `json:"assignee_type"`
 	AssigneeID         *string  `json:"assignee_id"`
 	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	DueDate            *string          `json:"due_date"`
+	ParentIssueID      *string          `json:"parent_issue_id"`
+	ProjectID          *string          `json:"project_id"`
+	AcceptanceCriteria *json.RawMessage `json:"acceptance_criteria,omitempty"`
+	ContextRefs        *json.RawMessage `json:"context_refs,omitempty"`
+	Scope              *json.RawMessage `json:"scope,omitempty"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1059,6 +1081,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
+	}
+
+	if req.AcceptanceCriteria != nil {
+		params.AcceptanceCriteria = []byte(*req.AcceptanceCriteria)
+	}
+	if req.ContextRefs != nil {
+		params.ContextRefs = []byte(*req.ContextRefs)
+	}
+	if req.Scope != nil {
+		params.Scope = []byte(*req.Scope)
 	}
 
 	// Enforce agent visibility: private agents can only be assigned by owner/admin.
@@ -1382,6 +1414,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			} else {
 				params.ProjectID = pgtype.UUID{Valid: false}
 			}
+		}
+
+		if req.Updates.AcceptanceCriteria != nil {
+			params.AcceptanceCriteria = []byte(*req.Updates.AcceptanceCriteria)
+		}
+		if req.Updates.ContextRefs != nil {
+			params.ContextRefs = []byte(*req.Updates.ContextRefs)
+		}
+		if req.Updates.Scope != nil {
+			params.Scope = []byte(*req.Updates.Scope)
 		}
 
 		// Enforce agent visibility for batch assignment.
