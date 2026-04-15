@@ -38,6 +38,9 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
 	}
 	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
+	if agentID := b.cfg.Env["OPENCLAW_AGENT_ID"]; agentID != "" {
+		args = append(args, "--agent", agentID)
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
