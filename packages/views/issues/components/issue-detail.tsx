@@ -449,7 +449,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       if (
         updates.assignee_type === "agent" &&
         updates.assignee_id &&
-        issue.status === "backlog"
+        issue.status === "backlog" &&
+        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
       ) {
         toast("Agent won't start in Backlog", {
           description: "Move the issue to Todo to trigger execution.",
@@ -460,7 +461,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               { onError: () => toast.error("Failed to update status") },
             ),
           },
-          duration: 6000,
+          cancel: {
+            label: "Don't show again",
+            onClick: () => localStorage.setItem("multica:backlog-agent-hint-dismissed", "true"),
+          },
+          duration: 8000,
         });
       }
     },

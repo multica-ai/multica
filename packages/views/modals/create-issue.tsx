@@ -141,7 +141,10 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         </div>
       ), { duration: 5000 });
       // Hint when creating a backlog issue with an agent assignee.
-      if (status === "backlog" && assigneeType === "agent" && assigneeId) {
+      if (
+        status === "backlog" && assigneeType === "agent" && assigneeId &&
+        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
+      ) {
         toast("Agent won't start in Backlog", {
           description: "Move the issue to Todo to trigger execution.",
           action: {
@@ -151,7 +154,11 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
               { onError: () => toast.error("Failed to update status") },
             ),
           },
-          duration: 6000,
+          cancel: {
+            label: "Don't show again",
+            onClick: () => localStorage.setItem("multica:backlog-agent-hint-dismissed", "true"),
+          },
+          duration: 8000,
         });
       }
     } catch {
