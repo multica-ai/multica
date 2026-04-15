@@ -1,0 +1,36 @@
+{
+  "name": "@multica/ios",
+  "version": "0.0.1",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "scripts/with-env.sh expo start",
+    "ios": "scripts/with-env.sh expo run:ios",
+    "android": "scripts/with-env.sh expo run:android",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@react-navigation/bottom-tabs": "^7.3.0",
+    "@react-navigation/native": "^7.1.0",
+    "@tanstack/react-query": "catalog:",
+    "expo": "~53.0.0",
+    "expo-constants": "~17.1.8",
+    "expo-linking": "~7.1.7",
+    "expo-router": "~5.1.11",
+    "expo-status-bar": "~2.2.0",
+    "react": "19.0.0",
+    "react-native": "0.79.6",
+    "react-native-get-random-values": "^1.11.0",
+    "react-native-mmkv": "^3.2.0",
+    "react-native-safe-area-context": "~5.4.0",
+    "react-native-screens": "~4.11.1",
+    "react-native-url-polyfill": "^3.0.0",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "~19.0.10",
+    "typescript": "~5.8.3"
+  }
+}

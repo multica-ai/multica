@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Workspace } from "../types";
 import { api } from "../api";
 import { workspaceKeys, workspaceListOptions } from "./queries";
-import { useWorkspaceStore } from "./index";
+import { useWorkspaceStore } from "./singleton";
 
 export function useCreateWorkspace() {
   const qc = useQueryClient();

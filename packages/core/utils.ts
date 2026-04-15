@@ -46,5 +46,40 @@ export function createSafeId(): string {
 
 /** Request id helper used for logs/tracing headers. */
 export function createRequestId(length = 8): string {
-  return createSafeId().replace(/-/g, "").slice(0, length);
+  if (length <= 0) return "";
+
+  const cryptoObj = globalThis.crypto;
+
+  if (cryptoObj?.randomUUID) {
+    try {
+      return cryptoObj.randomUUID().replace(/-/g, "").slice(0, length);
+    } catch {
+      // Fall through to getRandomValues / non-secure tracing id.
+    }
+  }
+
+  if (cryptoObj?.getRandomValues) {
+    try {
+      const bytes = new Uint8Array(length);
+      cryptoObj.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => (byte % 36).toString(36)).join("");
+    } catch {
+      // Fall through to non-secure tracing id.
+    }
+  }
+
+  return createNonSecureRequestId(length);
+}
+
+let requestIdCounter = 0;
+
+function createNonSecureRequestId(length: number): string {
+  requestIdCounter = (requestIdCounter + 1) % Number.MAX_SAFE_INTEGER;
+
+  let id = `${Date.now().toString(36)}${requestIdCounter.toString(36)}`;
+  while (id.length < length) {
+    id += Math.random().toString(36).slice(2);
+  }
+
+  return id.slice(0, length);
 }

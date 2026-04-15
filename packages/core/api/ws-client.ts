@@ -9,6 +9,8 @@ export class WSClient {
   private token: string | null = null;
   private workspaceId: string | null = null;
   private cookieAuth = false;
+  private queryTokenAuth = false;
+  private headers: Record<string, string> | undefined;
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private hasConnectedBefore = false;
@@ -16,10 +18,12 @@ export class WSClient {
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
 
-  constructor(url: string, options?: { logger?: Logger; cookieAuth?: boolean }) {
+  constructor(url: string, options?: { logger?: Logger; cookieAuth?: boolean; queryTokenAuth?: boolean; headers?: Record<string, string> }) {
     this.baseUrl = url;
     this.logger = options?.logger ?? noopLogger;
     this.cookieAuth = options?.cookieAuth ?? false;
+    this.queryTokenAuth = options?.queryTokenAuth ?? false;
+    this.headers = options?.headers;
   }
 
   setAuth(token: string | null, workspaceId: string) {
@@ -35,12 +39,21 @@ export class WSClient {
     // is delivered as the first WebSocket message after the connection opens.
     if (this.workspaceId)
       url.searchParams.set("workspace_id", this.workspaceId);
+    // Native clients sometimes connect to deployed servers that predate
+    // first-frame auth. Keep this opt-in so browser/desktop clients do not
+    // put bearer tokens in URLs.
+    if (!this.cookieAuth && this.queryTokenAuth && this.token) {
+      url.searchParams.set("token", this.token);
+    }
 
-    this.ws = new WebSocket(url.toString());
+    const ws = this.headers
+      ? new (WebSocket as any)(url.toString(), [], { headers: this.headers })
+      : new WebSocket(url.toString());
+    this.ws = ws;
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
       if (!this.cookieAuth && this.token) {
-        this.ws!.send(
+        ws.send(
           JSON.stringify({ type: "auth", payload: { token: this.token } }),
         );
         return;
@@ -49,8 +62,12 @@ export class WSClient {
       this.onAuthenticated();
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event: MessageEvent) => {
       const msg = JSON.parse(event.data as string) as WSMessage;
+      if ((msg as any).error) {
+        this.logger.error("server rejected websocket", (msg as any).error);
+        return;
+      }
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
         return;
@@ -67,12 +84,12 @@ export class WSClient {
       }
     };
 
-    this.ws.onclose = () => {
-      this.logger.warn("disconnected, reconnecting in 3s");
+    ws.onclose = () => {
+      this.logger.debug("disconnected, reconnecting in 3s");
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };

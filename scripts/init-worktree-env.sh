@@ -41,8 +41,11 @@ GOOGLE_REDIRECT_URI=${frontend_origin}/auth/callback
 
 FRONTEND_PORT=${frontend_port}
 FRONTEND_ORIGIN=${frontend_origin}
+CORS_ALLOWED_ORIGINS=${frontend_origin},http://localhost:${backend_port},http://localhost:8081
 NEXT_PUBLIC_API_URL=http://localhost:${backend_port}
 NEXT_PUBLIC_WS_URL=ws://localhost:${backend_port}/ws
+EXPO_PUBLIC_API_URL=http://localhost:${backend_port}
+EXPO_PUBLIC_WS_URL=ws://localhost:${backend_port}/ws
 EOF
 
 echo "Generated $ENV_FILE for worktree '$worktree_name'"

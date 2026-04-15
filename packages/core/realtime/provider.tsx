@@ -37,6 +37,10 @@ export interface WSProviderProps {
   storage: StorageAdapter;
   /** When true, use HttpOnly cookies instead of token query param for WS auth. */
   cookieAuth?: boolean;
+  /** Native compatibility fallback for older deployed WS servers. */
+  queryTokenAuth?: boolean;
+  /** Optional native WebSocket headers, e.g. Origin for strict deployed servers. */
+  wsHeaders?: Record<string, string>;
   /** Optional callback for showing toast messages (platform-specific, e.g. sonner) */
   onToast?: (message: string, type?: "info" | "error") => void;
 }
@@ -48,6 +52,8 @@ export function WSProvider({
   workspaceStore,
   storage,
   cookieAuth,
+  queryTokenAuth,
+  wsHeaders,
   onToast,
 }: WSProviderProps) {
   const user = authStore((s) => s.user);
@@ -65,6 +71,8 @@ export function WSProvider({
     const ws = new WSClient(wsUrl, {
       logger: createLogger("ws"),
       cookieAuth,
+      queryTokenAuth,
+      headers: wsHeaders,
     });
     ws.setAuth(token, workspace.id);
     setWsClient(ws);
@@ -74,7 +82,15 @@ export function WSProvider({
       ws.disconnect();
       setWsClient(null);
     };
-  }, [user, workspace, wsUrl, storage, cookieAuth]);
+  }, [
+    user,
+    workspace,
+    wsUrl,
+    storage,
+    cookieAuth,
+    queryTokenAuth,
+    wsHeaders,
+  ]);
 
   const stores: RealtimeSyncStores = { authStore, workspaceStore };
 

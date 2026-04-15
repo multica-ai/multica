@@ -109,6 +109,13 @@ export function useRealtimeSync(
         const wsId = workspaceStore.getState().workspace?.id;
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      task: () => {
+        const wsId = workspaceStore.getState().workspace?.id;
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+          onInboxInvalidate(qc, wsId);
+        }
+      },
       pin: () => {
         const wsId = workspaceStore.getState().workspace?.id;
         const userId = authStore.getState().user?.id;
@@ -145,6 +152,7 @@ export function useRealtimeSync(
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
       "subscriber:added", "subscriber:removed",
+      "task:message", "task:progress",
       "daemon:heartbeat",
       // Chat / task events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read",
@@ -202,38 +210,44 @@ export function useRealtimeSync(
     // is invalidated even when IssueDetail is unmounted, so stale data
     // isn't served on next mount (staleTime: Infinity relies on this).
 
-    const invalidateTimeline = (issueId: string) => {
+    const invalidateIssue = (issueId: string) => {
+      const wsId = workspaceStore.getState().workspace?.id;
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      if (wsId) {
+        qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+        qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      }
     };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) invalidateIssue(comment.issue_id);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) invalidateIssue(comment.issue_id);
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) invalidateIssue(issue_id);
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
       const { issue_id } = p as ActivityCreatedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) invalidateIssue(issue_id);
     });
 
     const unsubReactionAdded = ws.on("reaction:added", (p) => {
       const { issue_id } = p as ReactionAddedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) invalidateIssue(issue_id);
     });
 
     const unsubReactionRemoved = ws.on("reaction:removed", (p) => {
       const { issue_id } = p as ReactionRemovedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) invalidateIssue(issue_id);
     });
 
     // --- Issue-level reactions & subscribers (global fallback) ---

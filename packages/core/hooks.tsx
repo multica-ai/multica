@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import { getCurrentWorkspaceId } from "./platform/workspace-storage";
 
 const WorkspaceIdContext = createContext<string | null>(null);
 
@@ -19,7 +20,7 @@ export function WorkspaceIdProvider({
 }
 
 export function useWorkspaceId(): string {
-  const wsId = useContext(WorkspaceIdContext);
+  const wsId = useContext(WorkspaceIdContext) ?? getCurrentWorkspaceId();
   if (!wsId) throw new Error("useWorkspaceId: no workspace selected — wrap in WorkspaceIdProvider");
   return wsId;
 }

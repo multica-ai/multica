@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Multica",
+    "slug": "multica",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "multica",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.multica.app"
+    },
+    "plugins": ["expo-router", "./plugins/withFmtFix"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

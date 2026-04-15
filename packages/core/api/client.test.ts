@@ -6,6 +6,23 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("does not require crypto for auth request tracing ids", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("crypto", undefined);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.sendCode("user@example.com")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/auth/send-code",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "user@example.com" }),
+      }),
+    );
+  });
+
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",
