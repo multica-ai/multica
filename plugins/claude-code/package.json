@@ -1,0 +1,23 @@
+{
+  "name": "@multica/claude-code-plugin",
+  "version": "0.1.0",
+  "description": "Claude Code plugin for Multica — manage issues, projects, and agents from the terminal",
+  "license": "Apache-2.0",
+  "files": [
+    ".claude-plugin",
+    "skills",
+    "hooks",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "multica",
+    "project-management",
+    "ai-agents"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
