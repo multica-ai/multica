@@ -11,7 +11,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "preview": "electron-vite preview",
-    "package": "pnpm run bundle-cli && electron-builder",
+    "package": "node scripts/package.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "postinstall": "electron-builder install-app-deps"
