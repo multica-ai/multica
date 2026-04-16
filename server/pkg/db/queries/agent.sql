@@ -176,7 +176,7 @@ ORDER BY priority DESC, created_at ASC;
 
 -- name: ListActiveTasksByIssue :many
 SELECT * FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
 ORDER BY created_at DESC;
 
 -- name: ListTasksByIssue :many

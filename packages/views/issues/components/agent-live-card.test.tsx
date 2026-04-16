@@ -121,7 +121,7 @@ describe("TaskRunEntry retry button", () => {
     expect(screen.queryByText("Retry")).not.toBeInTheDocument();
   });
 
-  it("shows 'retried' label when task was already retried", async () => {
+  it("hides retry button when task was already retried", async () => {
     const originalTask = makeTask({ id: "task-1", status: "failed" });
     const retryTask = makeTask({ id: "task-2", status: "completed", error: null, retried_from_id: "task-1" });
     mockListTasksByIssue.mockResolvedValue([retryTask, originalTask]);
@@ -130,12 +130,12 @@ describe("TaskRunEntry retry button", () => {
     await waitFor(() => expect(screen.getByText(/Execution history/)).toBeInTheDocument());
     fireEvent.click(screen.getByText(/Execution history/));
 
-    await waitFor(() => expect(screen.getByText("retried")).toBeInTheDocument());
-    // The original task should not have a Retry button
+    // The original task should not have a Retry button (already retried)
+    await waitFor(() => expect(screen.getByText("failed")).toBeInTheDocument());
     expect(screen.queryByText("Retry")).not.toBeInTheDocument();
   });
 
-  it("calls api.retryTask on click and refreshes list", async () => {
+  it("calls api.retryTask on click, hides button, and refreshes list", async () => {
     const failedTask = makeTask({ status: "failed" });
     mockListTasksByIssue.mockResolvedValue([failedTask]);
     mockRetryTask.mockResolvedValue(makeTask({ id: "task-2", status: "queued" }));
@@ -147,9 +147,29 @@ describe("TaskRunEntry retry button", () => {
     await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Retry"));
 
-    await waitFor(() => expect(mockRetryTask).toHaveBeenCalledWith("task-1"));
-    // After success, should refresh task list
+    // Shows "Retrying..." during the request
+    await waitFor(() => expect(screen.getByText("Retrying...")).toBeInTheDocument());
+
+    // After success, button disappears and task list refreshes
+    await waitFor(() => expect(screen.queryByText("Retry")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Retrying...")).not.toBeInTheDocument());
     expect(mockListTasksByIssue).toHaveBeenCalledWith("issue-1");
+  });
+
+  it("reverts to Retry button on failure", async () => {
+    const failedTask = makeTask({ status: "failed" });
+    mockListTasksByIssue.mockResolvedValue([failedTask]);
+    mockRetryTask.mockRejectedValue(new Error("an active task already exists"));
+
+    render(<TaskRunHistory issueId="issue-1" />);
+    await waitFor(() => expect(screen.getByText(/Execution history/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText(/Execution history/));
+
+    await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Retry"));
+
+    // After failure, button reverts back to "Retry"
+    await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
   });
 
   it("shows toast on retry failure", async () => {

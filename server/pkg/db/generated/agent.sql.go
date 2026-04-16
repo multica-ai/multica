@@ -624,7 +624,7 @@ func (q *Queries) HasRetryTask(ctx context.Context, retriedFromID pgtype.UUID) (
 
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, retried_from_id FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
 ORDER BY created_at DESC
 `
 

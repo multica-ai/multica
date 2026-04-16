@@ -532,6 +532,7 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
   const isRetryable = task.status === "failed" || task.status === "cancelled";
   const alreadyRetried = retried || allTasks.some((t) => t.retried_from_id === task.id);
   const hasActiveTask = allTasks.some((t) => t.status === "queued" || t.status === "dispatched" || t.status === "running");
+  const showRetryButton = isRetryable && !alreadyRetried;
 
   const handleRetry = useCallback(async () => {
     if (retrying || alreadyRetried) return;
@@ -543,7 +544,6 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to retry task";
       toast.error(msg);
-    } finally {
       setRetrying(false);
     }
   }, [task.id, retrying, alreadyRetried, onRetried]);
@@ -563,7 +563,7 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
           {new Date(task.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
         {duration && <span className="text-muted-foreground">{duration}</span>}
-        {isRetryable && !alreadyRetried && (
+        {showRetryButton && (
           <span
             role="button"
             tabIndex={0}
@@ -573,14 +573,11 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
             title={hasActiveTask ? "A task is already running on this issue" : "Retry this task"}
           >
             {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-            <span>Retry</span>
+            <span>{retrying ? "Retrying..." : "Retry"}</span>
           </span>
         )}
-        {isRetryable && alreadyRetried && (
-          <span className="ml-auto text-muted-foreground">retried</span>
-        )}
         <span className={cn(
-          !isRetryable && "ml-auto",
+          !showRetryButton && "ml-auto",
           "capitalize",
           task.status === "completed" ? "text-success" : task.status === "cancelled" ? "text-muted-foreground" : "text-destructive",
         )}>
