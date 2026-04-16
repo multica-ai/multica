@@ -24,6 +24,29 @@ INSERT INTO agent (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING *;
 
+-- name: UpsertAgent :one
+-- Idempotent agent creation: inserts a new agent or updates the existing one
+-- if an agent with the same (workspace_id, name) already exists.
+-- owner_id is never overwritten on conflict — the original owner is preserved.
+INSERT INTO agent (
+    workspace_id, name, description, avatar_url, runtime_mode,
+    runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
+    instructions, custom_env, custom_args
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (workspace_id, name) DO UPDATE SET
+    description = EXCLUDED.description,
+    avatar_url = EXCLUDED.avatar_url,
+    runtime_mode = EXCLUDED.runtime_mode,
+    runtime_config = EXCLUDED.runtime_config,
+    runtime_id = EXCLUDED.runtime_id,
+    visibility = EXCLUDED.visibility,
+    max_concurrent_tasks = EXCLUDED.max_concurrent_tasks,
+    instructions = EXCLUDED.instructions,
+    custom_env = EXCLUDED.custom_env,
+    custom_args = EXCLUDED.custom_args,
+    updated_at = now()
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args;
+
 -- name: UpdateAgent :one
 UPDATE agent SET
     name = COALESCE(sqlc.narg('name'), name),

@@ -280,6 +280,87 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 	return i, err
 }
 
+const upsertAgent = `-- name: UpsertAgent :one
+INSERT INTO agent (
+    workspace_id, name, description, avatar_url, runtime_mode,
+    runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
+    instructions, custom_env, custom_args
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (workspace_id, name) DO UPDATE SET
+    description = EXCLUDED.description,
+    avatar_url = EXCLUDED.avatar_url,
+    runtime_mode = EXCLUDED.runtime_mode,
+    runtime_config = EXCLUDED.runtime_config,
+    runtime_id = EXCLUDED.runtime_id,
+    visibility = EXCLUDED.visibility,
+    max_concurrent_tasks = EXCLUDED.max_concurrent_tasks,
+    instructions = EXCLUDED.instructions,
+    custom_env = EXCLUDED.custom_env,
+    custom_args = EXCLUDED.custom_args,
+    updated_at = now()
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args
+`
+
+type UpsertAgentParams struct {
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	Name               string      `json:"name"`
+	Description        string      `json:"description"`
+	AvatarUrl          pgtype.Text `json:"avatar_url"`
+	RuntimeMode        string      `json:"runtime_mode"`
+	RuntimeConfig      []byte      `json:"runtime_config"`
+	RuntimeID          pgtype.UUID `json:"runtime_id"`
+	Visibility         string      `json:"visibility"`
+	MaxConcurrentTasks int32       `json:"max_concurrent_tasks"`
+	OwnerID            pgtype.UUID `json:"owner_id"`
+	Instructions       string      `json:"instructions"`
+	CustomEnv          []byte      `json:"custom_env"`
+	CustomArgs         []byte      `json:"custom_args"`
+}
+
+// Idempotent agent creation: inserts a new agent or updates the existing one
+// if an agent with the same (workspace_id, name) already exists.
+// owner_id is never overwritten on conflict — the original owner is preserved.
+func (q *Queries) UpsertAgent(ctx context.Context, arg UpsertAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, upsertAgent,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.AvatarUrl,
+		arg.RuntimeMode,
+		arg.RuntimeConfig,
+		arg.RuntimeID,
+		arg.Visibility,
+		arg.MaxConcurrentTasks,
+		arg.OwnerID,
+		arg.Instructions,
+		arg.CustomEnv,
+		arg.CustomArgs,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+	)
+	return i, err
+}
+
 const createAgentTask = `-- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
 VALUES ($1, $2, $3, 'queued', $4, $5)

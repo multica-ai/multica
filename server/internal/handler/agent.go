@@ -303,7 +303,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ca = []byte("[]")
 	}
 
-	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
+	agent, err := h.Queries.UpsertAgent(r.Context(), db.UpsertAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
 		Description:        req.Description,
