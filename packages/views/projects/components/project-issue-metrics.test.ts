@@ -27,21 +27,28 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 describe("getProjectIssueMetrics", () => {
-  it("uses project totals for progress and project-local done issues for the kanban done count", () => {
-    const metrics = getProjectIssueMetrics(
-      { issue_count: 9, done_count: 5 },
-      [
-        makeIssue({ id: "issue-1", status: "done" }),
-        makeIssue({ id: "issue-2", status: "done" }),
-        makeIssue({ id: "issue-3", status: "cancelled" }),
-        makeIssue({ id: "issue-4", status: "todo" }),
-      ],
-    );
+  it("computes metrics from actual loaded issues, not denormalized project counts", () => {
+    const metrics = getProjectIssueMetrics([
+      makeIssue({ id: "issue-1", status: "done" }),
+      makeIssue({ id: "issue-2", status: "done" }),
+      makeIssue({ id: "issue-3", status: "cancelled" }),
+      makeIssue({ id: "issue-4", status: "todo" }),
+    ]);
 
     expect(metrics).toEqual({
-      totalCount: 9,
-      completedCount: 5,
+      totalCount: 4,
+      completedCount: 2,
       doneColumnCount: 2,
+    });
+  });
+
+  it("returns zeros for empty issue list", () => {
+    const metrics = getProjectIssueMetrics([]);
+
+    expect(metrics).toEqual({
+      totalCount: 0,
+      completedCount: 0,
+      doneColumnCount: 0,
     });
   });
 });

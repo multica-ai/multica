@@ -1,12 +1,11 @@
-import type { Issue, Project } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 
-export function getProjectIssueMetrics(
-  project: Pick<Project, "issue_count" | "done_count">,
-  projectIssues: Issue[],
-) {
+export function getProjectIssueMetrics(projectIssues: Issue[]) {
+  const totalCount = projectIssues.length;
+  const completedCount = projectIssues.filter((issue) => issue.status === "done").length;
   return {
-    totalCount: project.issue_count,
-    completedCount: project.done_count,
-    doneColumnCount: projectIssues.filter((issue) => issue.status === "done").length,
+    totalCount,
+    completedCount,
+    doneColumnCount: completedCount,
   };
 }
