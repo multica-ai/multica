@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -914,6 +915,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error())); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
+		}
+	}
+
+	// For providers that don't self-manage issue status (e.g. cursor-agent
+	// runs in print mode and may not successfully call the multica CLI),
+	// auto-transition the issue to in_review after successful completion.
+	// This is a safety net — providers that already set the status are
+	// unaffected since setting in_review on an already-in_review issue is a no-op.
+	if result.Status == "completed" && task.IssueID != "" {
+		if out, err := exec.CommandContext(ctx, "multica", "issue", "status", task.IssueID, "in_review").CombinedOutput(); err != nil {
+			taskLog.Warn("auto-transition issue to in_review failed (non-fatal)", "error", err, "output", string(out))
+		} else {
+			taskLog.Info("auto-transitioned issue to in_review", "issue_id", task.IssueID)
 		}
 	}
 

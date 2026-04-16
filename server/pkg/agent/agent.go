@@ -83,13 +83,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, opencode, openclaw, hermes, or gemini)
+	ExecutablePath string            // path to CLI binary (claude, codex, cursor-agent, opencode, openclaw, hermes, or gemini)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "opencode", "openclaw", "hermes", "gemini".
+// Supported types: "claude", "codex", "cursor", "opencode", "openclaw", "hermes", "gemini".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -100,6 +100,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &claudeBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
+	case "cursor":
+		return &cursorBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
 	case "openclaw":
@@ -109,7 +111,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "gemini":
 		return &geminiBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw, hermes, gemini)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, cursor, opencode, openclaw, hermes, gemini)", agentType)
 	}
 }
 
