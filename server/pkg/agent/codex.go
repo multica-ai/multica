@@ -615,6 +615,13 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 }
 
 func (c *codexClient) handleRawNotification(method string, params map[string]any) {
+	// Ignore notifications from threads other than the one we are tracking.
+	// Codex multiplexes subagent threads (e.g. memory consolidation) on the
+	// same stdio pipe; only our thread should drive turn lifecycle and output.
+	if threadID, ok := params["threadId"].(string); ok && c.threadID != "" && threadID != c.threadID {
+		return
+	}
+
 	switch method {
 	case "turn/started":
 		c.turnStarted = true
@@ -677,12 +684,8 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		}
 
 	case "thread/status/changed":
-		threadID, _ := params["threadId"].(string)
 		statusType := extractNestedString(params, "status", "type")
-		// Only react to status changes from the tracked thread; ignore
-		// subagent threads (e.g. memory consolidation) whose idle signal
-		// would otherwise prematurely terminate the main turn.
-		if statusType == "idle" && c.turnStarted && (threadID == "" || threadID == c.threadID) {
+		if statusType == "idle" && c.turnStarted {
 			if c.onTurnDone != nil {
 				c.onTurnDone(false)
 			}
