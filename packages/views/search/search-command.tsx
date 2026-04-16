@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Check,
   Clock,
   Loader2,
   MessageSquare,
@@ -12,6 +13,8 @@ import {
   FolderKanban,
   Bot,
   Monitor,
+  Moon,
+  Sun,
   BookOpenText,
   Settings,
   type LucideIcon,
@@ -36,6 +39,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
+import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "./search-store";
 
@@ -106,6 +110,36 @@ const navPages: NavPage[] = [
   { key: "settings", label: "Settings", icon: Settings, keywords: ["settings", "config", "preferences"] },
 ];
 
+type ThemeValue = "light" | "dark" | "system";
+
+interface ThemeAction {
+  value: ThemeValue;
+  label: string;
+  icon: LucideIcon;
+  keywords: string[];
+}
+
+const themeActions: ThemeAction[] = [
+  {
+    value: "light",
+    label: "Switch to Light Theme",
+    icon: Sun,
+    keywords: ["light", "theme", "appearance", "mode", "bright"],
+  },
+  {
+    value: "dark",
+    label: "Switch to Dark Theme",
+    icon: Moon,
+    keywords: ["dark", "theme", "appearance", "mode", "night"],
+  },
+  {
+    value: "system",
+    label: "Use System Theme",
+    icon: Monitor,
+    keywords: ["system", "theme", "appearance", "mode", "auto"],
+  },
+];
+
 interface SearchResults {
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
@@ -119,6 +153,7 @@ export function SearchCommand() {
   const wsId = useWorkspaceId();
   const p: WorkspacePaths = useWorkspacePaths();
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+  const { theme, setTheme } = useTheme();
 
   const recentIssues = useMemo(() => {
     const issueMap = new Map(allIssues.map((i) => [i.id, i]));
@@ -141,6 +176,16 @@ export function SearchCommand() {
       (page) =>
         page.label.toLowerCase().includes(q) ||
         page.keywords.some((kw) => kw.includes(q)),
+    );
+  }, [query]);
+
+  const filteredThemeActions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return themeActions.filter(
+      (action) =>
+        action.label.toLowerCase().includes(q) ||
+        action.keywords.some((kw) => kw.includes(q)),
     );
   }, [query]);
 
@@ -262,6 +307,14 @@ export function SearchCommand() {
     [push, setOpen, p],
   );
 
+  const handleThemeSelect = useCallback(
+    (value: ThemeValue) => {
+      setTheme(value);
+      setOpen(false);
+    },
+    [setTheme, setOpen],
+  );
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -317,17 +370,52 @@ export function SearchCommand() {
               </CommandPrimitive.Group>
             )}
 
+            {/* Actions section — theme toggles, only shown when query matches */}
+            {filteredThemeActions.length > 0 && (
+              <CommandPrimitive.Group className="p-2">
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  Actions
+                </div>
+                {filteredThemeActions.map((action) => {
+                  const active = theme === action.value;
+                  return (
+                    <CommandPrimitive.Item
+                      key={action.value}
+                      value={`action:theme:${action.value}`}
+                      onSelect={() => handleThemeSelect(action.value)}
+                      className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    >
+                      <action.icon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">
+                        <HighlightText text={action.label} query={query} />
+                      </span>
+                      {active && (
+                        <Check
+                          aria-label="Current theme"
+                          className="ml-auto size-4 shrink-0 text-muted-foreground"
+                        />
+                      )}
+                    </CommandPrimitive.Item>
+                  );
+                })}
+              </CommandPrimitive.Group>
+            )}
+
             {isLoading && (
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>
             )}
 
-            {!isLoading && query.trim() && !hasResults && filteredPages.length === 0 && (
-              <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
-                No results found.
-              </CommandPrimitive.Empty>
-            )}
+            {!isLoading &&
+              query.trim() &&
+              !hasResults &&
+              filteredPages.length === 0 &&
+              filteredThemeActions.length === 0 && (
+                <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
+                  No results found.
+                </CommandPrimitive.Empty>
+              )}
 
             {!isLoading && results.projects.length > 0 && (
               <CommandPrimitive.Group

@@ -5,12 +5,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchCommand } from "./search-command";
 import { useSearchStore } from "./search-store";
 
-const { mockPush, mockSearchIssues, mockSearchProjects, mockRecentItems, mockAllIssues } = vi.hoisted(() => ({
+const {
+  mockPush,
+  mockSearchIssues,
+  mockSearchProjects,
+  mockRecentItems,
+  mockAllIssues,
+  mockSetTheme,
+  mockTheme,
+} = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
   mockSearchProjects: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
+  mockSetTheme: vi.fn(),
+  mockTheme: { current: "system" as "light" | "dark" | "system" },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -60,6 +70,10 @@ vi.mock("../navigation", () => ({
   }),
 }));
 
+vi.mock("@multica/ui/components/common/theme-provider", () => ({
+  useTheme: () => ({ theme: mockTheme.current, setTheme: mockSetTheme }),
+}));
+
 describe("SearchCommand", () => {
   beforeEach(() => {
     mockPush.mockReset();
@@ -67,6 +81,8 @@ describe("SearchCommand", () => {
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
+    mockSetTheme.mockReset();
+    mockTheme.current = "system";
 
     // cmdk calls scrollIntoView on the first selected item, which jsdom doesn't implement
     Element.prototype.scrollIntoView = vi.fn();
@@ -146,6 +162,62 @@ describe("SearchCommand", () => {
     expect(screen.getByText("MUL-1")).toBeInTheDocument();
     expect(screen.getByText("Second issue")).toBeInTheDocument();
     expect(screen.getByText("MUL-2")).toBeInTheDocument();
+  });
+
+  it("filters theme actions by query keywords", async () => {
+    const user = userEvent.setup();
+    render(<SearchCommand />);
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "dark");
+
+    await waitFor(() => {
+      expect(screen.getByText("Actions")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Switch to Dark Theme" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Switch to Light Theme")).not.toBeInTheDocument();
+    expect(screen.queryByText("Use System Theme")).not.toBeInTheDocument();
+  });
+
+  it("applies the selected theme and closes the palette", async () => {
+    const user = userEvent.setup();
+    mockTheme.current = "light";
+    render(<SearchCommand />);
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "dark");
+
+    const darkItem = await screen.findByText(
+      (_, el) => el?.textContent === "Switch to Dark Theme" && el?.tagName === "SPAN",
+    );
+    await user.click(darkItem);
+
+    expect(mockSetTheme).toHaveBeenCalledWith("dark");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("matches theme action via generic 'theme' keyword and marks current theme", async () => {
+    const user = userEvent.setup();
+    mockTheme.current = "dark";
+    render(<SearchCommand />);
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "theme");
+
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Switch to Light Theme" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Switch to Dark Theme" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Use System Theme" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
   });
 
   it("filters out recent items not present in query cache", () => {
