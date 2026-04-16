@@ -472,6 +472,12 @@ export class ApiClient {
     });
   }
 
+  async retryTask(taskId: string): Promise<AgentTask> {
+    return this.fetch(`/api/tasks/${taskId}/retry`, {
+      method: "POST",
+    });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");

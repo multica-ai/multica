@@ -79,6 +79,7 @@ type AgentTaskQueue struct {
 	WorkDir          pgtype.Text        `json:"work_dir"`
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	RetriedFromID    pgtype.UUID        `json:"retried_from_id"`
 }
 
 type Attachment struct {

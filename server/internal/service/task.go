@@ -20,6 +20,15 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+// Sentinel errors for RetryTask.
+var (
+	ErrTaskNotFound    = errors.New("task not found")
+	ErrTaskNotRetryable = errors.New("task is not retryable: only failed or cancelled tasks can be retried")
+	ErrAlreadyRetried  = errors.New("task has already been retried")
+	ErrActiveTaskExists = errors.New("an active task already exists for this issue")
+	ErrIssueClosed     = errors.New("cannot retry: issue is closed")
+)
+
 type TaskService struct {
 	Queries *db.Queries
 	Hub     *realtime.Hub
@@ -174,6 +183,77 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 
 	return &task, nil
+}
+
+// RetryTask creates a new queued task as a retry of a failed or cancelled task.
+// Guards: task must be failed/cancelled, not already retried, no active task
+// on the same issue, and the issue must not be closed/done.
+func (s *TaskService) RetryTask(ctx context.Context, taskID pgtype.UUID, workspaceID string) (*db.AgentTaskQueue, error) {
+	// Load the original task.
+	original, err := s.Queries.GetAgentTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, fmt.Errorf("get task: %w", err)
+	}
+
+	// Only failed or cancelled tasks can be retried.
+	if original.Status != "failed" && original.Status != "cancelled" {
+		return nil, ErrTaskNotRetryable
+	}
+
+	// Guard: this task must not have been retried already.
+	hasRetry, err := s.Queries.HasRetryTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("check retry: %w", err)
+	}
+	if hasRetry {
+		return nil, ErrAlreadyRetried
+	}
+
+	// Guard: no active task on the same issue.
+	if original.IssueID.Valid {
+		hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, original.IssueID)
+		if err != nil {
+			return nil, fmt.Errorf("check active task: %w", err)
+		}
+		if hasActive {
+			return nil, ErrActiveTaskExists
+		}
+
+		// Guard: issue must not be closed/done.
+		issue, err := s.Queries.GetIssue(ctx, original.IssueID)
+		if err != nil {
+			return nil, fmt.Errorf("get issue: %w", err)
+		}
+		if issue.Status == "done" || issue.Status == "closed" {
+			return nil, ErrIssueClosed
+		}
+
+		// Verify issue belongs to the expected workspace.
+		if util.UUIDToString(issue.WorkspaceID) != workspaceID {
+			return nil, ErrTaskNotFound
+		}
+	}
+
+	// Create the retry task.
+	newTask, err := s.Queries.CreateRetryTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("create retry task: %w", err)
+	}
+
+	slog.Info("task retried",
+		"original_task_id", util.UUIDToString(taskID),
+		"new_task_id", util.UUIDToString(newTask.ID),
+		"issue_id", util.UUIDToString(newTask.IssueID),
+		"agent_id", util.UUIDToString(newTask.AgentID),
+	)
+
+	// Broadcast task:dispatch so frontends show the new live card.
+	s.broadcastTaskDispatch(ctx, newTask)
+
+	return &newTask, nil
 }
 
 // ClaimTask atomically claims the next queued task for an agent,

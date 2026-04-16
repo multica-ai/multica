@@ -90,6 +90,7 @@ type AgentTaskResponse struct {
 	CreatedAt      string         `json:"created_at"`
 	PriorSessionID   string         `json:"prior_session_id,omitempty"`    // session ID from a previous task on same issue
 	PriorWorkDir     string         `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
+	RetriedFromID         *string        `json:"retried_from_id,omitempty"`         // original task that was retried
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
@@ -123,6 +124,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		Result:       result,
 		Error:            textToPtr(t.Error),
 		CreatedAt:        timestampToString(t.CreatedAt),
+		RetriedFromID:    uuidToPtr(t.RetriedFromID),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 	}
 }

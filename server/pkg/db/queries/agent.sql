@@ -115,6 +115,10 @@ RETURNING *;
 -- name: GetLastTaskSession :one
 -- Returns the session_id and work_dir from the most recent completed task
 -- for a given (agent_id, issue_id) pair, used for session resumption.
+-- INTENTIONAL: only completed tasks are eligible. Do NOT add failed/cancelled
+-- here — resuming a failed session re-loads broken context (hallucination
+-- loops, bad tool state) and the agent will likely fail again. Fresh starts
+-- on failure is a deliberate safety rail.
 SELECT session_id, work_dir FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS NOT NULL
 ORDER BY completed_at DESC
@@ -179,6 +183,21 @@ ORDER BY created_at DESC;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: CreateRetryTask :one
+-- Creates a new queued task as a retry of a failed/cancelled task.
+-- Copies agent_id, runtime_id, issue_id, and trigger_comment_id from the original.
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, retried_from_id)
+SELECT t.agent_id, t.runtime_id, t.issue_id, 'queued', t.priority, t.trigger_comment_id, t.id
+FROM agent_task_queue t
+WHERE t.id = $1
+RETURNING *;
+
+-- name: HasRetryTask :one
+-- Returns true if a retry task already exists for the given original task.
+-- Used as double-retry guard.
+SELECT count(*) > 0 AS has_retry FROM agent_task_queue
+WHERE retried_from_id = $1;
 
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()

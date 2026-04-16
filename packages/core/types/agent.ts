@@ -34,6 +34,7 @@ export interface AgentTask {
   completed_at: string | null;
   result: unknown;
   error: string | null;
+  retried_from_id: string | null;
   created_at: string;
 }
 
