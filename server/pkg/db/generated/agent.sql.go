@@ -366,7 +366,7 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 
 const failStaleTasks = `-- name: FailStaleTasks :many
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'task timed out'
+SET status = 'cancelled', completed_at = now(), error = 'task timed out (swept)'
 WHERE (status = 'dispatched' AND dispatched_at < now() - make_interval(secs => $1::double precision))
    OR (status = 'running' AND started_at < now() - make_interval(secs => $2::double precision))
 RETURNING id, agent_id, issue_id

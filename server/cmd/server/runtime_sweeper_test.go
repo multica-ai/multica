@@ -79,7 +79,7 @@ func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 }
 
 // TestSweepStaleTasksBroadcastsWithWorkspaceID verifies that when the task sweeper
-// fails a stale running task, the task:failed event is broadcast with the correct
+// cancels a stale running task, the task:cancelled event is broadcast with the correct
 // WorkspaceID so it reaches frontend WebSocket clients (events without WorkspaceID
 // are silently dropped by the WS listener — that was the original bug).
 func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
@@ -93,41 +93,41 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 
-	// Capture task:failed events to verify WorkspaceID is set
+	// Capture task:cancelled events to verify WorkspaceID is set
 	var taskEvents []events.Event
 	var mu sync.Mutex
-	bus.Subscribe("task:failed", func(e events.Event) {
+	bus.Subscribe("task:cancelled", func(e events.Event) {
 		mu.Lock()
 		taskEvents = append(taskEvents, e)
 		mu.Unlock()
 	})
 
 	// Use very short timeouts to trigger the sweep on our test task
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	sweptTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0, // 1 second — our task is 3 hours old
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks query failed: %v", err)
 	}
-	if len(failedTasks) == 0 {
-		t.Fatal("expected at least 1 stale task to be failed")
+	if len(sweptTasks) == 0 {
+		t.Fatal("expected at least 1 stale task to be swept")
 	}
 
 	// Verify our task was included
 	found := false
-	for _, ft := range failedTasks {
+	for _, ft := range sweptTasks {
 		if ft.ID.Bytes == parseUUIDBytes(taskID) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected task %s to be in failed tasks list", taskID)
+		t.Fatalf("expected task %s to be in swept tasks list", taskID)
 	}
 
 	// Call broadcastFailedTasks — this is what we're testing
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	broadcastFailedTasks(context.Background(), queries, bus, sweptTasks)
 
 	// Verify the event was published with WorkspaceID (the core of the bug fix)
 	mu.Lock()
@@ -137,7 +137,7 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 		payload, _ := e.Payload.(map[string]any)
 		if payload["task_id"] == taskID {
 			if e.WorkspaceID == "" {
-				t.Fatal("task:failed event is missing WorkspaceID — this was the original bug")
+				t.Fatal("task:cancelled event is missing WorkspaceID — this was the original bug")
 			}
 			if e.WorkspaceID != testWorkspaceID {
 				t.Fatalf("expected WorkspaceID %s, got %s", testWorkspaceID, e.WorkspaceID)
@@ -147,17 +147,17 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 		}
 	}
 	if !foundEvent {
-		t.Fatalf("expected task:failed event for task %s", taskID)
+		t.Fatalf("expected task:cancelled event for task %s", taskID)
 	}
 
-	// Verify DB: task should be failed
+	// Verify DB: swept task must be cancelled, not failed.
 	var status string
 	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if err != nil {
 		t.Fatalf("failed to query task status: %v", err)
 	}
-	if status != "failed" {
-		t.Fatalf("expected task status 'failed', got '%s'", status)
+	if status != "cancelled" {
+		t.Fatalf("expected task status 'cancelled' (infrastructure interruption, not failure), got '%s'", status)
 	}
 }
 
@@ -235,40 +235,40 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 
-	// Capture task:failed events
+	// Capture task:cancelled events
 	var taskEvents []events.Event
 	var mu sync.Mutex
-	bus.Subscribe("task:failed", func(e events.Event) {
+	bus.Subscribe("task:cancelled", func(e events.Event) {
 		mu.Lock()
 		taskEvents = append(taskEvents, e)
 		mu.Unlock()
 	})
 
-	// Fail stale tasks — dispatch timeout of 1 second (our task is 10 minutes old)
-	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+	// Sweep stale tasks — dispatch timeout of 1 second (our task is 10 minutes old)
+	sweptTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 1.0,
 		RunningTimeoutSecs:  9000.0,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
 	}
-	if len(failedTasks) == 0 {
+	if len(sweptTasks) == 0 {
 		t.Fatal("expected at least 1 stale dispatched task")
 	}
 
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	broadcastFailedTasks(context.Background(), queries, bus, sweptTasks)
 
-	// Verify DB: task should be failed
+	// Verify DB: swept task must be cancelled, not failed.
 	var status string
 	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if err != nil {
 		t.Fatalf("failed to query task: %v", err)
 	}
-	if status != "failed" {
-		t.Fatalf("expected task status 'failed', got '%s'", status)
+	if status != "cancelled" {
+		t.Fatalf("expected task status 'cancelled' (infrastructure interruption), got '%s'", status)
 	}
 
-	// Verify task:failed event was published WITH WorkspaceID
+	// Verify task:cancelled event was published WITH WorkspaceID
 	mu.Lock()
 	defer mu.Unlock()
 	found := false
@@ -276,7 +276,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 		payload, _ := e.Payload.(map[string]any)
 		if payload["task_id"] == taskID {
 			if e.WorkspaceID == "" {
-				t.Fatal("task:failed event is missing WorkspaceID — this was the bug")
+				t.Fatal("task:cancelled event is missing WorkspaceID — this was the bug")
 			}
 			if e.WorkspaceID != testWorkspaceID {
 				t.Fatalf("expected WorkspaceID %s, got %s", testWorkspaceID, e.WorkspaceID)

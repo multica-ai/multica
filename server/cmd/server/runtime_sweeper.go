@@ -143,7 +143,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) 
 		return
 	}
 
-	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+	slog.Info("task sweeper: cancelled stale tasks", "count", len(failedTasks))
 	broadcastFailedTasks(ctx, queries, bus, failedTasks)
 }
 
@@ -203,14 +203,14 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 		}
 
 		bus.Publish(events.Event{
-			Type:        protocol.EventTaskFailed,
+			Type:        protocol.EventTaskCancelled,
 			WorkspaceID: workspaceID,
 			ActorType:   "system",
 			Payload: map[string]any{
 				"task_id":  util.UUIDToString(ft.ID),
 				"agent_id": util.UUIDToString(ft.AgentID),
 				"issue_id": util.UUIDToString(ft.IssueID),
-				"status":   "failed",
+				"status":   "cancelled",
 			},
 		})
 
