@@ -564,15 +564,17 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
         </span>
         {duration && <span className="text-muted-foreground">{duration}</span>}
         {isRetryable && !alreadyRetried && (
-          <button
-            onClick={(e) => { e.stopPropagation(); handleRetry(); }}
-            disabled={retrying || hasActiveTask}
-            className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); if (!(retrying || hasActiveTask)) handleRetry(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (!(retrying || hasActiveTask)) handleRetry(); } }}
+            className={cn("ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer", (retrying || hasActiveTask) && "opacity-50 pointer-events-none")}
             title={hasActiveTask ? "A task is already running on this issue" : "Retry this task"}
           >
             {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
             <span>Retry</span>
-          </button>
+          </span>
         )}
         {isRetryable && alreadyRetried && (
           <span className="ml-auto text-muted-foreground">retried</span>
