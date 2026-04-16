@@ -75,7 +75,7 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 	params := &resend.SendEmailRequest{
 		From:    s.fromEmail,
 		To:      []string{to},
-		Subject: fmt.Sprintf("%s invited you to %s on Multica", safeInviter, safeWorkspace),
+		Subject: fmt.Sprintf("%s invited you to %s on Multica", inviterName, workspaceName),
 		Html: fmt.Sprintf(
 			`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
 				<h2>You're invited to join %s</h2>
