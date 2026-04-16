@@ -8,30 +8,21 @@ import (
 	"testing"
 )
 
-
-func TestCreateAgent_Idempotent(t *testing.T) {
+func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
-	}
-
-	// Guard: skip if the local DB is missing required columns (stale schema).
-	var hasCustomArgs bool
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent' AND column_name='custom_args')`,
-	).Scan(&hasCustomArgs); err != nil || !hasCustomArgs {
-		t.Skip("agent table missing custom_args column — run migrations first")
 	}
 
 	// Clean up any agents created by this test.
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
 			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
-			testWorkspaceID, "idempotent-test-agent",
+			testWorkspaceID, "duplicate-name-test-agent",
 		)
 	})
 
 	body := map[string]any{
-		"name":                 "idempotent-test-agent",
+		"name":                 "duplicate-name-test-agent",
 		"description":          "first description",
 		"runtime_id":           testRuntimeID,
 		"visibility":           "private",
