@@ -1374,17 +1374,40 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	return result
 }
 
+// blockedEnvKeys covers daemon-managed internals plus well-known code-injection
+// and TLS/proxy-hijack vectors that would otherwise let a custom_env value
+// gain execution or traffic interception on the daemon host.
+var blockedEnvKeys = map[string]struct{}{
+	// Daemon-managed core
+	"HOME": {}, "PATH": {}, "USER": {}, "SHELL": {}, "TERM": {}, "CODEX_HOME": {},
+
+	// Code-injection via dynamic loader / interpreters
+	"LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
+	"DYLD_INSERT_LIBRARIES": {}, "DYLD_LIBRARY_PATH": {},
+	"NODE_OPTIONS": {}, "NODE_PATH": {},
+	"PYTHONPATH": {}, "PYTHONSTARTUP": {},
+
+	// Proxy / TLS hijacking
+	"HTTP_PROXY": {}, "HTTPS_PROXY": {}, "ALL_PROXY": {}, "NO_PROXY": {},
+	"SSL_CERT_FILE": {}, "SSL_CERT_DIR": {},
+	"NODE_TLS_REJECT_UNAUTHORIZED": {},
+
+	// Git-driven command execution
+	"GIT_SSH_COMMAND": {}, "GIT_TERMINAL_PROMPT": {},
+	"GIT_EXEC_PATH": {}, "GIT_TEMPLATE_DIR": {},
+
+	// Editor-as-shell
+	"EDITOR": {}, "VISUAL": {},
+}
+
 // isBlockedEnvKey returns true if the key must not be overridden by user-
 // configured custom_env. This prevents accidental or malicious override of
-// daemon-internal variables and critical system paths.
+// daemon-internal variables, critical system paths, and known RCE vectors.
 func isBlockedEnvKey(key string) bool {
 	upper := strings.ToUpper(key)
 	if strings.HasPrefix(upper, "MULTICA_") {
 		return true
 	}
-	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME":
-		return true
-	}
-	return false
+	_, ok := blockedEnvKeys[upper]
+	return ok
 }
