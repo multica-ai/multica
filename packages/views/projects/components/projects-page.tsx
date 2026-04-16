@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { Plus, FolderKanban, ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus, Check } from "lucide-react";
+import { Plus, FolderKanban, ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus, Check, MoreHorizontal, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useCreateProject, useUpdateProject } from "@multica/core/projects/mutations";
+import { useCreateProject, useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER, PROJECT_PRIORITY_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspaceStore } from "@multica/core/workspace";
@@ -25,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -33,6 +34,16 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { TitleEditor } from "../../editor";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
@@ -52,15 +63,18 @@ function formatRelativeDate(date: string): string {
 
 function ProjectRow({ project }: { project: Project }) {
   const wsId = useWorkspaceId();
+  const router = useNavigation();
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
   const updateProject = useUpdateProject();
+  const deleteProject = useDeleteProject();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const leadQuery = leadFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery));
@@ -71,6 +85,18 @@ function ProjectRow({ project }: { project: Project }) {
     },
     [project.id, updateProject],
   );
+
+  const handleDelete = useCallback(() => {
+    deleteProject.mutate(project.id, {
+      onSuccess: () => {
+        toast.success("Project deleted");
+        setDeleteDialogOpen(false);
+      },
+      onError: () => {
+        toast.error("Failed to delete project");
+      },
+    });
+  }, [deleteProject, project.id]);
 
   return (
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
@@ -224,6 +250,44 @@ function ProjectRow({ project }: { project: Project }) {
       <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {formatRelativeDate(project.created_at)}
       </span>
+
+      {/* Actions */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`Actions for ${project.title}`}>
+              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => router.push(`/projects/${project.id}`)}>
+            Open project
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete project
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will delete the project. Issues will not be deleted but will be unlinked.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -582,6 +646,7 @@ export function ProjectsPage() {
               <span className="w-24 text-center shrink-0">Progress</span>
               <span className="w-10 text-center shrink-0">Lead</span>
               <span className="w-20 text-right shrink-0">Created</span>
+              <span className="w-6 shrink-0" />
             </div>
             {/* Rows */}
             {projects.map((project) => (
