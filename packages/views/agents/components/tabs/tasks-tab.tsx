@@ -83,18 +83,16 @@ export function TasksTab({ agent }: { agent: Agent }) {
             const issue = issueMap.get(task.issue_id);
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
+            const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
+              isRunning
+                ? "border-success/40 bg-success/5"
+                : task.status === "dispatched"
+                  ? "border-info/40 bg-info/5"
+                  : ""
+            }`;
 
-            return (
-              <div
-                key={task.id}
-                className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
-                  isRunning
-                    ? "border-success/40 bg-success/5"
-                    : task.status === "dispatched"
-                      ? "border-info/40 bg-info/5"
-                      : ""
-                }`}
-              >
+            const content = (
+              <>
                 <Icon
                   className={`h-4 w-4 shrink-0 ${config.color} ${
                     isRunning ? "animate-spin" : ""
@@ -103,18 +101,15 @@ export function TasksTab({ agent }: { agent: Agent }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     {issue && (
-                      <AppLink
-                        href={`/issues/${issue.id}`}
-                        className="shrink-0 text-xs font-mono text-muted-foreground hover:text-foreground hover:underline"
-                      >
+                      <span className="shrink-0 text-xs font-mono text-muted-foreground">
                         {issue.identifier}
-                      </AppLink>
+                      </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
                       {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
                     </span>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
+                  <div className="mt-0.5 text-xs text-muted-foreground">
                     {isRunning && task.started_at
                       ? `Started ${new Date(task.started_at).toLocaleString()}`
                       : task.status === "dispatched" && task.dispatched_at
@@ -129,6 +124,24 @@ export function TasksTab({ agent }: { agent: Agent }) {
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>
                   {config.label}
                 </span>
+              </>
+            );
+
+            if (issue) {
+              return (
+                <AppLink
+                  key={task.id}
+                  href={`/issues/${issue.id}`}
+                  className={`${rowClassName} text-foreground no-underline hover:no-underline`}
+                >
+                  {content}
+                </AppLink>
+              );
+            }
+
+            return (
+              <div key={task.id} className={rowClassName}>
+                {content}
               </div>
             );
           })}
