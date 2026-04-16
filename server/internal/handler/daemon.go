@@ -518,6 +518,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.PriorWorkDir = prior.WorkDir.String
 			}
 		}
+
+		// Workflow-level work_dir sharing: if no prior work_dir was found for
+		// this (agent, issue) pair, check if this task belongs to a workflow run
+		// that already has a work_dir from a previous step. This lets different
+		// agents in the same workflow share the same execution directory.
+		if resp.PriorWorkDir == "" {
+			if wfWorkDir, err := h.Queries.GetWorkflowRunWorkDirByTaskID(r.Context(), task.ID); err == nil && wfWorkDir.Valid {
+				resp.PriorWorkDir = wfWorkDir.String
+				slog.Debug("using workflow run work_dir for task", "task_id", uuidToString(task.ID), "work_dir", wfWorkDir.String)
+			}
+		}
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.

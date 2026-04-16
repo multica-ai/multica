@@ -280,6 +280,11 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
           popup = document.createElement("div");
           popup.style.position = "fixed";
           popup.style.zIndex = "50";
+          // Prevent mousedown from stealing focus away from the editor.
+          // Without this, clicking a suggestion item blurs the editor,
+          // the suggestion plugin fires onExit → destroys the popup,
+          // and the click event never reaches the button handler.
+          popup.addEventListener("mousedown", (e) => e.preventDefault());
           popup.appendChild(renderer.element);
           document.body.appendChild(popup);
 

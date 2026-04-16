@@ -3,6 +3,7 @@ import type { Issue } from "@multica/core/types";
 import { filterIssues, type IssueFilters } from "./filter";
 
 const NO_FILTER: IssueFilters = {
+  dateFilter: "all",
   statusFilters: [],
   priorityFilters: [],
   assigneeFilters: [],

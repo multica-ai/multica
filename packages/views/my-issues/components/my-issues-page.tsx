@@ -77,6 +77,7 @@ export function MyIssuesPage() {
   const issues = useMemo(
     () =>
       filterIssues(myIssues, {
+        dateFilter: "all",
         statusFilters,
         priorityFilters,
         assigneeFilters: [],

@@ -417,7 +417,8 @@ describe("IssuesPage (shared)", () => {
   it("shows scope tab buttons", async () => {
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("All");
+    const allButtons = await screen.findAllByText("All");
+    expect(allButtons.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
   });

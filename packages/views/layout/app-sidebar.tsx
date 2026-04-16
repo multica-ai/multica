@@ -30,6 +30,8 @@ import {
   FolderKanban,
   X,
   Zap,
+  Workflow,
+  Sparkles,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -84,9 +86,11 @@ import { clearWorkspaceStorage, defaultStorage } from "@multica/core/platform";
 type NavKey =
   | "inbox"
   | "myIssues"
+  | "command"
   | "issues"
   | "projects"
   | "autopilots"
+  | "workflows"
   | "agents"
   | "runtimes"
   | "skills"
@@ -98,10 +102,12 @@ const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
 ];
 
 const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
+  { key: "command", label: "CEO Command", icon: Sparkles },
   { key: "issues", label: "Issues", icon: ListTodo },
   { key: "projects", label: "Projects", icon: FolderKanban },
   { key: "autopilots", label: "Autopilot", icon: Zap },
   { key: "agents", label: "Agents", icon: Bot },
+  { key: "workflows", label: "Workflows", icon: Workflow },
 ];
 
 const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [

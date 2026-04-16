@@ -39,6 +39,7 @@ type Handler struct {
 	Bus              *events.Bus
 	TaskService      *service.TaskService
 	AutopilotService *service.AutopilotService
+	WorkflowService  *service.WorkflowService
 	EmailService     *service.EmailService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
@@ -61,6 +62,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Bus:              bus,
 		TaskService:      taskSvc,
 		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		WorkflowService:  service.NewWorkflowService(queries, hub, bus, taskSvc, txStarter),
 		EmailService:     emailService,
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),

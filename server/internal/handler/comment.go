@@ -381,6 +381,14 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
+	// Skip @mention auto-dispatch when the issue is managed by an active
+	// workflow run.  The workflow engine controls step ordering; mention-
+	// triggered tasks would bypass that and cause parallel execution.
+	if hasActive, err := h.Queries.HasActiveWorkflowRunForIssue(ctx, issue.ID); err == nil && hasActive {
+		slog.Debug("skipping @mention task enqueue: issue belongs to active workflow", "issue_id", util.UUIDToString(issue.ID))
+		return
+	}
+
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
 	// When replying in a thread, inherit mentions from the parent comment

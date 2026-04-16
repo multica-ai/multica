@@ -40,8 +40,12 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "dueDate", label: "Due date" },
 ];
 
+/** Date filter value: "today" = current date, "all" = no date filter, or ISO date string (e.g. "2026-04-16") */
+export type DateFilterValue = "today" | "all" | string;
+
 export interface IssueViewState {
   viewMode: ViewMode;
+  dateFilter: DateFilterValue;
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
@@ -54,6 +58,7 @@ export interface IssueViewState {
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
   setViewMode: (mode: ViewMode) => void;
+  setDateFilter: (value: DateFilterValue) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
@@ -72,6 +77,7 @@ export interface IssueViewState {
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
   viewMode: "board",
+  dateFilter: "today",
   statusFilters: [],
   priorityFilters: [],
   assigneeFilters: [],
@@ -90,6 +96,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   listCollapsedStatuses: [],
 
   setViewMode: (mode) => set({ viewMode: mode }),
+  setDateFilter: (value) => set({ dateFilter: value }),
   toggleStatusFilter: (status) =>
     set((state) => ({
       statusFilters: state.statusFilters.includes(status)
@@ -156,6 +163,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     }),
   clearFilters: () =>
     set({
+      dateFilter: "today",
       statusFilters: [],
       priorityFilters: [],
       assigneeFilters: [],
@@ -186,6 +194,7 @@ export const viewStorePersistOptions = (name: string) => ({
   storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
     viewMode: state.viewMode,
+    dateFilter: state.dateFilter,
     statusFilters: state.statusFilters,
     priorityFilters: state.priorityFilters,
     assigneeFilters: state.assigneeFilters,

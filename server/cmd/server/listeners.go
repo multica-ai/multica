@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -160,5 +164,41 @@ func registerListeners(bus *events.Bus, hub *realtime.Hub) {
 			hub.Broadcast(data)
 		}
 		// Otherwise drop — no global broadcast for non-daemon events without a workspace.
+	})
+}
+
+// registerWorkflowListeners subscribes to task events so the workflow engine
+// can advance runs when agent steps complete or fail.
+func registerWorkflowListeners(bus *events.Bus, wf *service.WorkflowService) {
+	parseTaskID := func(e events.Event) (pgtype.UUID, bool) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return pgtype.UUID{}, false
+		}
+		idStr, ok := payload["task_id"].(string)
+		if !ok || idStr == "" {
+			return pgtype.UUID{}, false
+		}
+		var id pgtype.UUID
+		if err := id.Scan(idStr); err != nil {
+			return pgtype.UUID{}, false
+		}
+		return id, true
+	}
+
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		taskID, ok := parseTaskID(e)
+		if !ok {
+			return
+		}
+		wf.OnTaskCompleted(context.Background(), taskID)
+	})
+
+	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
+		taskID, ok := parseTaskID(e)
+		if !ok {
+			return
+		}
+		wf.OnTaskFailed(context.Background(), taskID)
 	})
 }

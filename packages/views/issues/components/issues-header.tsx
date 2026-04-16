@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  CalendarDays,
   Check,
   ChevronDown,
   CircleDot,
@@ -38,6 +39,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   ALL_STATUSES,
   STATUS_CONFIG,
@@ -54,6 +56,7 @@ import {
   SORT_OPTIONS,
   CARD_PROPERTY_OPTIONS,
   type ActorFilterValue,
+  type DateFilterValue,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import {
@@ -86,6 +89,7 @@ function HoverCheck({ checked }: { checked: boolean }) {
 // ---------------------------------------------------------------------------
 
 function getActiveFilterCount(state: {
+  dateFilter: DateFilterValue;
   statusFilters: string[];
   priorityFilters: string[];
   assigneeFilters: ActorFilterValue[];
@@ -95,6 +99,7 @@ function getActiveFilterCount(state: {
   includeNoProject: boolean;
 }) {
   let count = 0;
+  if (state.dateFilter !== "today") count++;
   if (state.statusFilters.length > 0) count++;
   if (state.priorityFilters.length > 0) count++;
   if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
@@ -377,6 +382,21 @@ function ProjectSubContent({
 }
 
 // ---------------------------------------------------------------------------
+// Date filter label helper
+// ---------------------------------------------------------------------------
+
+function formatDateLabel(value: DateFilterValue): string {
+  if (value === "today") return "Today";
+  if (value === "all") return "All";
+  // Format ISO date string nicely
+  const d = new Date(value + "T00:00:00");
+  const now = new Date();
+  const isToday = value === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  if (isToday) return "Today";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// ---------------------------------------------------------------------------
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
@@ -385,6 +405,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const setScope = useIssuesScopeStore((s) => s.setScope);
 
   const viewMode = useViewStore((s) => s.viewMode);
+  const dateFilter = useViewStore((s) => s.dateFilter);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
@@ -401,6 +422,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
 
   const hasActiveFilters =
     getActiveFilterCount({
+      dateFilter,
       statusFilters,
       priorityFilters,
       assigneeFilters,
@@ -415,7 +437,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons */}
+      {/* Left: scope buttons + date filter */}
       <div className="flex items-center gap-1">
         {SCOPES.map((s) => (
           <Tooltip key={s.value}>
@@ -438,6 +460,91 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
             <TooltipContent side="bottom">{s.description}</TooltipContent>
           </Tooltip>
         ))}
+
+        <div className="mx-1.5 h-4 w-px bg-border" />
+
+        {/* Date filter */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className={
+                  dateFilter === "today"
+                    ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                    : "text-muted-foreground"
+                }
+                onClick={() => act.setDateFilter("today")}
+              >
+                Today
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom">Show today&apos;s issues</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className={
+                  dateFilter === "all"
+                    ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                    : "text-muted-foreground"
+                }
+                onClick={() => act.setDateFilter("all")}
+              >
+                All
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom">Show all issues</TooltipContent>
+        </Tooltip>
+        <Popover>
+          <Tooltip>
+            <PopoverTrigger
+              render={
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={
+                        dateFilter !== "today" && dateFilter !== "all"
+                          ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      <CalendarDays className="size-3.5 mr-1" />
+                      {dateFilter !== "today" && dateFilter !== "all"
+                        ? formatDateLabel(dateFilter)
+                        : "Pick date"}
+                    </Button>
+                  }
+                />
+              }
+            />
+            <TooltipContent side="bottom">Pick a specific date</TooltipContent>
+          </Tooltip>
+          <PopoverContent align="start" className="w-auto p-0">
+            <Calendar
+              mode="single"
+              selected={
+                dateFilter !== "today" && dateFilter !== "all"
+                  ? new Date(dateFilter + "T00:00:00")
+                  : undefined
+              }
+              onSelect={(day) => {
+                if (day) {
+                  const iso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+                  act.setDateFilter(iso);
+                }
+              }}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
 
       {/* Right: filter + display + view toggle */}

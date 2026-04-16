@@ -34,6 +34,9 @@ export const RESERVED_SLUGS = new Set([
   "runtimes",
   "skills",
   "settings",
+  "workflows",
+  "schedules",
+  "command",
 
   // Next.js / hosting internals
   "_next",

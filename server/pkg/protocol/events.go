@@ -85,6 +85,19 @@ const (
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
 
+	// Workflow events
+	EventWorkflowCreated     = "workflow:created"
+	EventWorkflowUpdated     = "workflow:updated"
+	EventWorkflowDeleted     = "workflow:deleted"
+	EventWorkflowRunCreated  = "workflow_run:created"
+	EventWorkflowRunUpdated  = "workflow_run:updated"
+	EventWorkflowStepUpdated = "workflow_step:updated"
+
+	// Schedule events
+	EventScheduleCreated = "schedule:created"
+	EventScheduleUpdated = "schedule:updated"
+	EventScheduleDeleted = "schedule:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

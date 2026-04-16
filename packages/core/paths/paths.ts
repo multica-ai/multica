@@ -30,6 +30,10 @@ function workspaceScoped(slug: string) {
     runtimes: () => `${ws}/runtimes`,
     skills: () => `${ws}/skills`,
     settings: () => `${ws}/settings`,
+    workflows: () => `${ws}/workflows`,
+    workflowDetail: (id: string) => `${ws}/workflows/${encode(id)}`,
+    schedules: () => `${ws}/schedules`,
+    command: () => `${ws}/command`,
   };
 }
 

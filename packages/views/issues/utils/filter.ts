@@ -1,7 +1,8 @@
 import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
-import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { ActorFilterValue, DateFilterValue } from "@multica/core/issues/stores/view-store";
 
 export interface IssueFilters {
+  dateFilter: DateFilterValue;
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
@@ -9,6 +10,18 @@ export interface IssueFilters {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+}
+
+/**
+ * Resolve a DateFilterValue to a date string (YYYY-MM-DD) or null (= no filter).
+ */
+function resolveDateFilter(value: DateFilterValue): string | null {
+  if (value === "all") return null;
+  if (value === "today") {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return value; // specific ISO date string
 }
 
 /**
@@ -21,11 +34,17 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
+  const { dateFilter, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  const dateStr = resolveDateFilter(dateFilter);
 
   return issues.filter((issue) => {
+    // Date filter: compare against created_at date portion
+    if (dateStr && issue.created_at) {
+      const issueDate = issue.created_at.slice(0, 10); // "YYYY-MM-DD"
+      if (issueDate !== dateStr) return false;
+    }
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
       return false;
 

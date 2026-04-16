@@ -348,6 +348,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
 
+			// CEO command — single entry-point for orchestrated workflows
+			r.Post("/api/command", h.SendCEOCommand)
+			r.Get("/api/command/history", h.ListCEOCommands)
+
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)
@@ -361,6 +365,44 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
+
+			// Workflows
+			r.Route("/api/workflows", func(r chi.Router) {
+				r.Get("/", h.ListWorkflows)
+				r.Post("/", h.CreateWorkflow)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWorkflow)
+					r.Put("/", h.UpdateWorkflow)
+					r.Delete("/", h.DeleteWorkflow)
+					r.Get("/runs", h.ListWorkflowRuns)
+					r.Post("/trigger", h.TriggerWorkflow)
+					r.Get("/schedules", h.ListSchedulesForWorkflow)
+				})
+			})
+
+			// Workflow runs
+			r.Route("/api/workflow-runs/{id}", func(r chi.Router) {
+				r.Get("/", h.GetWorkflowRun)
+				r.Post("/cancel", h.CancelWorkflowRun)
+				r.Post("/plan", h.SubmitWorkflowPlan)
+			})
+
+			// Workflow step approvals & reviews
+			r.Post("/api/workflow-step-runs/{id}/approve", h.ApproveStepRun)
+			r.Post("/api/workflow-step-runs/{id}/review", h.SubmitReview)
+			r.Get("/api/approvals/pending", h.ListPendingApprovals)
+
+			// Schedules
+			r.Route("/api/schedules", func(r chi.Router) {
+				r.Get("/", h.ListSchedules)
+				r.Post("/", h.CreateSchedule)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetSchedule)
+					r.Put("/", h.UpdateSchedule)
+					r.Delete("/", h.DeleteSchedule)
+					r.Post("/toggle", h.ToggleSchedule)
+				})
+			})
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

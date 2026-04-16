@@ -350,6 +350,26 @@ type RuntimeUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Schedule struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	WorkflowID   pgtype.UUID        `json:"workflow_id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	ScheduleType string             `json:"schedule_type"`
+	CronExpr     pgtype.Text        `json:"cron_expr"`
+	OnceAt       pgtype.Timestamptz `json:"once_at"`
+	Timezone     string             `json:"timezone"`
+	Weekdays     []int32            `json:"weekdays"`
+	TimeOfDay    pgtype.Time        `json:"time_of_day"`
+	NextRunAt    pgtype.Timestamptz `json:"next_run_at"`
+	LastRunAt    pgtype.Timestamptz `json:"last_run_at"`
+	Enabled      bool               `json:"enabled"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -412,6 +432,56 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type Workflow struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Steps          []byte             `json:"steps"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt     pgtype.Timestamptz `json:"archived_at"`
+	Mode           string             `json:"mode"`
+	PlannerAgentID pgtype.UUID        `json:"planner_agent_id"`
+	IsCeoCommand   bool               `json:"is_ceo_command"`
+}
+
+type WorkflowRun struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkflowID       pgtype.UUID        `json:"workflow_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	TriggerType      string             `json:"trigger_type"`
+	TriggerID        pgtype.UUID        `json:"trigger_id"`
+	Status           string             `json:"status"`
+	CurrentStepIndex int32              `json:"current_step_index"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	Context          []byte             `json:"context"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	DynamicSteps     []byte             `json:"dynamic_steps"`
+	PlannerTaskID    pgtype.UUID        `json:"planner_task_id"`
+	SkipReview       bool               `json:"skip_review"`
+	WorkDir          pgtype.Text        `json:"work_dir"`
+}
+
+type WorkflowStepRun struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkflowRunID   pgtype.UUID        `json:"workflow_run_id"`
+	StepIndex       int32              `json:"step_index"`
+	StepType        string             `json:"step_type"`
+	Status          string             `json:"status"`
+	AgentTaskID     pgtype.UUID        `json:"agent_task_id"`
+	ReviewerID      pgtype.UUID        `json:"reviewer_id"`
+	Decision        pgtype.Text        `json:"decision"`
+	DecisionComment pgtype.Text        `json:"decision_comment"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	RedirectToStep  pgtype.Int4        `json:"redirect_to_step"`
 }
 
 type Workspace struct {

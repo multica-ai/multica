@@ -84,7 +84,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("  - For content with special characters (backticks, quotes), pipe via stdin: `cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin`\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n")
+	b.WriteString("- `multica workflow plan <run-id> --steps '<json>'` — Submit an execution plan for an orchestrated workflow run\n")
+	b.WriteString("- `multica workflow review <step-run-id> --decision <approve|reject|stop|redirect> [--comment \"...\"] [--redirect-to N]` — Submit a review decision for a workflow step\n\n")
 
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
