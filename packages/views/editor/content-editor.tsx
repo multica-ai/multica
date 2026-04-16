@@ -35,6 +35,7 @@ import {
 import { useEditor, EditorContent } from "@tiptap/react";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
@@ -113,6 +114,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUploadFileRef = useRef(onUploadFile);
     const prevContentRef = useRef(defaultValue);
 
+    // Current workspace slug kept in a ref so the click handler always sees the
+    // latest value without recreating the editor. Used by openLink to prefix
+    // legacy /issues/... style paths that lack a workspace slug.
+    const workspaceSlug = useWorkspaceSlug();
+    const workspaceSlugRef = useRef(workspaceSlug);
+    workspaceSlugRef.current = workspaceSlug;
+
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
@@ -159,7 +167,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
-            openLink(href);
+            openLink(href, workspaceSlugRef.current);
             return true;
           },
         },

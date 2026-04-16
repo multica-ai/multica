@@ -1,0 +1,3 @@
+-- Cannot reverse the slug rename — the original 'workspace' slug is lost
+-- and we'd risk colliding multiple workspaces on the same value.
+-- This migration is intentionally one-way.

@@ -6,12 +6,12 @@ import { ChevronRight, ListTodo } from "lucide-react";
 import type { IssueStatus } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { useIssueViewStore, initFilterWorkspaceSync } from "@multica/core/issues/stores/view-store";
+import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, childIssueProgressOptions } from "@multica/core/issues/queries";
@@ -27,7 +27,7 @@ export function IssuesPage() {
   const wsId = useWorkspaceId();
   const { data: allIssues = [], isLoading: loading } = useQuery(issueListOptions(wsId));
 
-  const workspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
@@ -38,9 +38,8 @@ export function IssuesPage() {
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
 
-  useEffect(() => {
-    initFilterWorkspaceSync((cb) => useWorkspaceStore.subscribe((s) => cb(s.workspace?.id)));
-  }, []);
+  // Clear filter state when switching between workspaces (URL-driven).
+  useClearFiltersOnWorkspaceChange(useIssueViewStore, wsId);
 
   useEffect(() => {
     useIssueSelectionStore.getState().clear();

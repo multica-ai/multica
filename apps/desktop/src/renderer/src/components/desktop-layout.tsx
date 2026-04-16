@@ -13,7 +13,7 @@ import { AppSidebar, DashboardGuard } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { StepWorkspace } from "@multica/views/onboarding";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { DesktopNavigationProvider } from "@/platform/navigation";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { OnboardingGate } from "./onboarding-gate";
@@ -89,7 +89,7 @@ export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
 
-  const workspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = useCurrentWorkspace();
 
   return (
     <DesktopNavigationProvider>
@@ -102,7 +102,6 @@ export function DesktopShell() {
         )}
       >
         <DashboardGuard
-          loginPath="/login"
           loadingFallback={
             <div className="flex h-screen items-center justify-center">
               <MulticaIcon className="size-6 animate-pulse" />

@@ -7,7 +7,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { useCreateProject, useUpdateProject } from "@multica/core/projects/mutations";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER, PROJECT_PRIORITY_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { AppLink, useNavigation } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -52,6 +52,7 @@ function formatRelativeDate(date: string): string {
 
 function ProjectRow({ project }: { project: Project }) {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
   const updateProject = useUpdateProject();
@@ -76,7 +77,7 @@ function ProjectRow({ project }: { project: Project }) {
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
       {/* Icon + Name (navigates to detail) */}
       <AppLink
-        href={`/projects/${project.id}`}
+        href={wsPaths.projectDetail(project.id)}
         className="flex min-w-0 flex-1 items-center gap-2"
       >
         <span className="shrink-0 w-[24px] text-center text-base">{project.icon || "📁"}</span>
@@ -250,7 +251,9 @@ function PillButton({
 
 function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const router = useNavigation();
-  const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const workspace = useCurrentWorkspace();
+  const workspaceName = workspace?.name;
+  const wsPaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -301,7 +304,7 @@ function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       setLeadType(undefined);
       setLeadId(undefined);
       toast.success("Project created");
-      router.push(`/projects/${project.id}`);
+      router.push(wsPaths.projectDetail(project.id));
     } catch {
       toast.error("Failed to create project");
     } finally {

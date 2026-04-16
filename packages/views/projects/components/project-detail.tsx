@@ -16,7 +16,7 @@ import { issueListOptions, childIssueProgressOptions } from "@multica/core/issue
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_PRIORITY_CONFIG } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -183,9 +183,11 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const workspace = useCurrentWorkspace();
+  const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -247,10 +249,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     deleteProject.mutate(project.id, {
       onSuccess: () => {
         toast.success("Project deleted");
-        router.push("/projects");
+        router.push(wsPaths.projects());
       },
     });
-  }, [project, deleteProject, router]);
+  }, [project, deleteProject, router, wsPaths]);
 
   if (isLoading) {
     return (
@@ -494,7 +496,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         <div className="flex h-full flex-col">
           <PageHeader className="gap-2 bg-background text-sm">
             <div className="flex flex-1 items-center gap-1.5 min-w-0">
-              <AppLink href="/projects" className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+              <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
                 {workspaceName ?? "Projects"}
               </AppLink>
               <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />

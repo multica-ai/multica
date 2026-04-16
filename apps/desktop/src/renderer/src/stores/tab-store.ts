@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
+import { isGlobalPath } from "@multica/core/paths";
 import type { DataRouter } from "react-router-dom";
 import { createTabRouter } from "../routes";
 
@@ -45,29 +46,50 @@ interface TabStore {
 // ---------------------------------------------------------------------------
 
 const ROUTE_ICONS: Record<string, string> = {
-  "/inbox": "Inbox",
-  "/my-issues": "CircleUser",
-  "/issues": "ListTodo",
-  "/projects": "FolderKanban",
-  "/agents": "Bot",
-  "/runtimes": "Monitor",
-  "/skills": "BookOpenText",
-  "/settings": "Settings",
+  inbox: "Inbox",
+  "my-issues": "CircleUser",
+  issues: "ListTodo",
+  projects: "FolderKanban",
+  autopilots: "ListTodo",
+  agents: "Bot",
+  runtimes: "Monitor",
+  skills: "BookOpenText",
+  settings: "Settings",
 };
 
-/** Resolve a route icon. Title is NOT determined here — it comes from document.title. */
+/**
+ * Resolve a route icon from a pathname. Title is NOT determined here — it
+ * comes from document.title.
+ *
+ * Path shape after the workspace URL refactor:
+ *  - workspace-scoped: `/{workspaceSlug}/{route}/...` → use segment index 1
+ *  - global (onboarding/invite/auth/login): `/{route}/...` → use segment index 0
+ *
+ * `isGlobalPath` is the single source of truth for which prefixes are global.
+ */
 export function resolveRouteIcon(pathname: string): string {
-  return ROUTE_ICONS[pathname]
-    ?? (pathname.startsWith("/issues/") ? "ListTodo" : undefined)
-    ?? (pathname.startsWith("/projects/") ? "FolderKanban" : undefined)
-    ?? "ListTodo";
+  const segments = pathname.split("/").filter(Boolean);
+  const routeSegment = isGlobalPath(pathname)
+    ? (segments[0] ?? "")
+    : (segments[1] ?? "");
+  return ROUTE_ICONS[routeSegment] ?? "ListTodo";
 }
 
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PATH = "/issues";
+/**
+ * Sentinel path for new tabs with no explicit destination. The tab store is
+ * workspace-implicit — it doesn't know which workspace is active, so it can't
+ * build a `/:slug/issues` path itself. Instead we hand off to the router: `/`
+ * matches the top-level index route, which redirects to the workspace default
+ * (slug-aware redirect lives in routes.tsx / App.tsx).
+ *
+ * `title` and `icon` on the placeholder tab get overwritten by
+ * useTabRouterSync + useActiveTitleSync once the redirect resolves.
+ */
+const DEFAULT_PATH = "/";
 
 function createId(): string {
   return createSafeId();

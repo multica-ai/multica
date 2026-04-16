@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@multica/core/auth";
+import { paths } from "@multica/core/paths";
 import { OnboardingWizard } from "@multica/views/onboarding";
 
 export default function OnboardingPage() {
@@ -12,12 +13,14 @@ export default function OnboardingPage() {
 
   // Redirect to login if not authenticated
   useEffect(() => {
-    if (!isLoading && !user) router.replace("/login");
+    if (!isLoading && !user) router.replace(paths.login());
   }, [isLoading, user, router]);
 
   if (isLoading || !user) return null;
 
   return (
-    <OnboardingWizard onComplete={() => router.push("/issues")} />
+    <OnboardingWizard
+      onComplete={(ws) => router.push(paths.workspace(ws.slug).issues())}
+    />
   );
 }

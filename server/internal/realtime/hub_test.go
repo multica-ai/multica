@@ -44,7 +44,7 @@ func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
 	mc := &mockMembershipChecker{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		HandleWebSocket(hub, mc, nil, w, r)
+		HandleWebSocket(hub, mc, nil, nil, w, r)
 	})
 	server := httptest.NewServer(mux)
 	return hub, server

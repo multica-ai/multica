@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useWorkspaceStore } from "@multica/core/workspace";
-import type { Agent } from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
+import type { Agent, Workspace } from "@multica/core/types";
 import { StepWorkspace } from "./step-workspace";
 import { StepRuntime } from "./step-runtime";
 import { StepAgent } from "./step-agent";
@@ -16,16 +17,30 @@ const STEPS = [
 ] as const;
 
 export interface OnboardingWizardProps {
-  onComplete: () => void;
+  /**
+   * Called when the user finishes the wizard. The just-configured workspace is
+   * passed so the caller can navigate into it (/{slug}/issues). Onboarding is a
+   * pre-workspace global route, so the URL has no slug while it runs.
+   */
+  onComplete: (workspace: Workspace) => void;
 }
 
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
-  const [step, setStep] = useState(() =>
-    useWorkspaceStore.getState().workspace ? 1 : 0,
-  );
-  const [createdAgent, setCreatedAgent] = useState<Agent | null>(null);
+  // Canonical source for workspace existence: the React Query list cache. The
+  // onboarding route itself is global (no slug in URL), so useCurrentWorkspace
+  // can't help here — we read the list directly. `useCreateWorkspace` adds the
+  // new workspace to this cache in its onSuccess, so step 0 → step 1 happens
+  // once the list query is populated.
+  const { data: wsList = [] } = useQuery(workspaceListOptions());
+  // A user arriving at /onboarding normally has 0 workspaces. After the first
+  // step they have exactly one. In the rare case the list already has entries
+  // (e.g. the user manually navigated to /onboarding), pick the most recent —
+  // that's the one the onboarding flow should configure.
+  const workspace: Workspace | null = wsList[wsList.length - 1] ?? null;
+  const wsId = workspace?.id ?? null;
 
-  const wsId = useWorkspaceStore((s) => s.workspace?.id) ?? null;
+  const [step, setStep] = useState(() => (workspace ? 1 : 0));
+  const [createdAgent, setCreatedAgent] = useState<Agent | null>(null);
 
   useEffect(() => {
     if (step === 0 && wsId) {
@@ -102,11 +117,11 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
             onAgentCreated={setCreatedAgent}
           />
         )}
-        {step === 3 && wsId && (
+        {step === 3 && workspace && (
           <StepComplete
-            wsId={wsId}
+            wsId={workspace.id}
             agent={createdAgent}
-            onEnter={onComplete}
+            onEnter={() => onComplete(workspace)}
           />
         )}
       </div>

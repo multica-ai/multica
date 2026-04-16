@@ -30,6 +30,7 @@ import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
@@ -89,7 +90,8 @@ function urlTransform(url: string): string {
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
   const { push, openInNewTab } = useNavigation();
-  const path = `/issues/${issueId}`;
+  const p = useWorkspacePaths();
+  const path = p.issueDetail(issueId);
   return (
     <span
       className="inline align-middle"
@@ -110,39 +112,50 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
   );
 }
 
+// Named component so it can call useWorkspaceSlug() — arrow function inlined
+// inside `components` below would still work, but extracting it keeps the
+// hook usage explicit and avoids hook-in-object-literal surprises.
+function ReadonlyLink({
+  href,
+  children,
+}: {
+  href?: string;
+  children?: React.ReactNode;
+}) {
+  const slug = useWorkspaceSlug();
+
+  if (isMentionHref(href)) {
+    const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
+    if (match?.[1] === "issue" && match[2]) {
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : undefined;
+      return <IssueMentionLink issueId={match[2]} label={label} />;
+    }
+    // Member / agent / all mentions
+    return <span className="mention">{children}</span>;
+  }
+
+  // Regular links — open directly on click
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        if (href) openLink(href, slug);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
-  a: ({ href, children }) => {
-    if (isMentionHref(href)) {
-      const match = href.match(
-        /^mention:\/\/(member|agent|issue|all)\/(.+)$/,
-      );
-      if (match?.[1] === "issue" && match[2]) {
-        const label =
-          typeof children === "string"
-            ? children
-            : Array.isArray(children)
-              ? children.join("")
-              : undefined;
-        return <IssueMentionLink issueId={match[2]} label={label} />;
-      }
-      // Member / agent / all mentions
-      return <span className="mention">{children}</span>;
-    }
-
-    // Regular links — open directly on click
-    return (
-      <a
-        href={href}
-        onClick={(e) => {
-          e.preventDefault();
-          if (href) openLink(href);
-        }}
-      >
-        {children}
-      </a>
-    );
-  },
+  a: ReadonlyLink,
 
   // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
   img: function ReadonlyImage({ src, alt }) {

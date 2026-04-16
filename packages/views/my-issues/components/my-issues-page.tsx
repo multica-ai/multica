@@ -7,7 +7,7 @@ import { ChevronRight, ListTodo } from "lucide-react";
 import type { IssueStatus } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useQuery } from "@tanstack/react-query";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -18,7 +18,7 @@ import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-st
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
-import { registerViewStoreForWorkspaceSync } from "@multica/core/issues/stores/view-store";
+import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue, useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
@@ -28,7 +28,7 @@ import { MyIssuesHeader } from "./my-issues-header";
 
 export function MyIssuesPage() {
   const user = useAuthStore((s) => s.user);
-  const workspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
@@ -37,9 +37,8 @@ export function MyIssuesPage() {
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
 
-  useEffect(() => {
-    registerViewStoreForWorkspaceSync(myIssuesViewStore);
-  }, []);
+  // Clear filter state when switching between workspaces (URL-driven).
+  useClearFiltersOnWorkspaceChange(myIssuesViewStore, wsId);
 
   useEffect(() => {
     useIssueSelectionStore.getState().clear();

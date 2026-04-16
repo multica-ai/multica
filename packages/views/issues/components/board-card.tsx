@@ -10,6 +10,7 @@ import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { CalendarDays } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config";
@@ -186,6 +187,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
 };
 
 export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
+  const p = useWorkspacePaths();
   const {
     attributes,
     listeners,
@@ -213,7 +215,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
       className={isDragging ? "opacity-30" : ""}
     >
       <AppLink
-        href={`/issues/${issue.id}`}
+        href={p.issueDetail(issue.id)}
         className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
       >
         <BoardCardContent issue={issue} editable childProgress={childProgress} />

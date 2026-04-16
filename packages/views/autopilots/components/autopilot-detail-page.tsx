@@ -13,6 +13,7 @@ import {
 } from "@multica/core/autopilots/mutations";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useNavigation, AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
@@ -58,6 +59,7 @@ const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: ty
 };
 
 function RunRow({ run }: { run: AutopilotRun }) {
+  const wsPaths = useWorkspacePaths();
   const cfg = (RUN_STATUS_CONFIG[run.status] ?? RUN_STATUS_CONFIG["issue_created"])!;
   const StatusIcon = cfg.icon;
 
@@ -68,7 +70,7 @@ function RunRow({ run }: { run: AutopilotRun }) {
       <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
         {run.issue_id ? (
-          <AppLink href={`/issues/${run.issue_id}`} className="hover:underline">
+          <AppLink href={wsPaths.issueDetail(run.issue_id)} className="hover:underline">
             Issue linked
           </AppLink>
         ) : run.failure_reason ? (
@@ -356,6 +358,7 @@ function AddTriggerDialog({
 
 export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const { getActorName } = useActorName();
 
@@ -401,7 +404,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     try {
       await deleteAutopilot.mutateAsync(autopilotId);
       toast.success("Autopilot deleted");
-      router.push("/autopilots");
+      router.push(wsPaths.autopilots());
     } catch {
       toast.error("Failed to delete autopilot");
     }
@@ -417,7 +420,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
       {/* Header */}
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
-          <AppLink href="/autopilots" className="text-muted-foreground hover:text-foreground transition-colors">
+          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors">
             <Zap className="h-4 w-4" />
           </AppLink>
           <span className="text-muted-foreground">/</span>
