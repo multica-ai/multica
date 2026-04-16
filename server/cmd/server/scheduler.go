@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	// schedulerInterval is how often we check for due schedules.
-	schedulerInterval = 30 * time.Second
+	// workflowSchedulerInterval is how often we check for due schedules.
+	workflowSchedulerInterval = 30 * time.Second
 )
 
 // runScheduler periodically checks for due schedules and triggers their workflows.
 // It follows the same pattern as runRuntimeSweeper.
 func runScheduler(ctx context.Context, queries *db.Queries, workflowSvc *service.WorkflowService) {
-	ticker := time.NewTicker(schedulerInterval)
+	ticker := time.NewTicker(workflowSchedulerInterval)
 	defer ticker.Stop()
 
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)

@@ -395,43 +395,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
-			// Workflows
-			r.Route("/api/workflows", func(r chi.Router) {
-				r.Get("/", h.ListWorkflows)
-				r.Post("/", h.CreateWorkflow)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetWorkflow)
-					r.Put("/", h.UpdateWorkflow)
-					r.Delete("/", h.DeleteWorkflow)
-					r.Get("/runs", h.ListWorkflowRuns)
-					r.Post("/trigger", h.TriggerWorkflow)
-				})
-			})
-
-			// Workflow runs
-			r.Route("/api/workflow-runs/{id}", func(r chi.Router) {
-				r.Get("/", h.GetWorkflowRun)
-				r.Post("/cancel", h.CancelWorkflowRun)
-				r.Post("/plan", h.SubmitWorkflowPlan)
-			})
-
-			// Workflow step approvals & reviews
-			r.Post("/api/workflow-step-runs/{id}/approve", h.ApproveStepRun)
-			r.Post("/api/workflow-step-runs/{id}/review", h.SubmitReview)
-			r.Get("/api/approvals/pending", h.ListPendingApprovals)
-
-			// Schedules
-			r.Route("/api/schedules", func(r chi.Router) {
-				r.Get("/", h.ListSchedules)
-				r.Post("/", h.CreateSchedule)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetSchedule)
-					r.Put("/", h.UpdateSchedule)
-					r.Delete("/", h.DeleteSchedule)
-					r.Post("/toggle", h.ToggleSchedule)
-				})
-			})
-
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
