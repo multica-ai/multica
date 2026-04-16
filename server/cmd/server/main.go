@@ -85,6 +85,12 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 
+	// Start workflow scheduler to trigger due schedules.
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	workflowSvc := service.NewWorkflowService(queries, hub, bus, taskSvc, pool)
+	registerWorkflowListeners(bus, workflowSvc)
+	go runScheduler(schedCtx, queries, workflowSvc)
+
 	// Graceful shutdown
 	go func() {
 		slog.Info("server starting", "port", port)
@@ -101,6 +107,7 @@ func main() {
 	slog.Info("shutting down server")
 	sweepCancel()
 	autopilotCancel()
+	schedCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

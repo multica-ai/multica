@@ -51,3 +51,32 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  Workflow,
+  WorkflowStep,
+  WorkflowStepType,
+  WorkflowMode,
+  WorkflowRun,
+  WorkflowRunStatus,
+  WorkflowStepRun,
+  WorkflowStepRunStatus,
+  WorkflowRunDetail,
+  ApprovalDecision,
+  ReviewDecision,
+  CreateWorkflowRequest,
+  UpdateWorkflowRequest,
+  ListWorkflowsResponse,
+  ListWorkflowRunsResponse,
+  ApproveStepRunRequest,
+  SubmitPlanRequest,
+  ReviewDecisionRequest,
+  CEOCommandRequest,
+  CEOCommandResponse,
+} from "./workflow";
+export type {
+  Schedule,
+  ScheduleType,
+  CreateScheduleRequest,
+  UpdateScheduleRequest,
+  ListSchedulesResponse,
+} from "./schedule";

@@ -31,6 +31,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +62,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      network: host
       args:
         REMOTE_API_URL: http://backend:8080
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}

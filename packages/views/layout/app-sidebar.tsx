@@ -30,6 +30,11 @@ import {
   FolderKanban,
   X,
   Zap,
+  Ellipsis,
+  PinOff,
+  Workflow,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -83,10 +88,13 @@ const personalNav = [
 ];
 
 const workspaceNav = [
+  { href: "/command", label: "CEO Command", icon: Sparkles },
   { href: "/issues", label: "Issues", icon: ListTodo },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/autopilots", label: "Autopilot", icon: Zap },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/workflows", label: "Workflows", icon: Workflow },
+  { href: "/schedules", label: "Schedules", icon: Clock },
 ];
 
 const configureNav = [
