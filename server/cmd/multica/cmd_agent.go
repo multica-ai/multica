@@ -114,6 +114,7 @@ func init() {
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
+	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array (e.g. '[\"--model\", \"o3\"]')")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -124,6 +125,7 @@ func init() {
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
+	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array (e.g. '[\"--model\", \"o3\"]')")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -337,6 +339,14 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["runtime_config"] = rc
 	}
+	if cmd.Flags().Changed("custom-args") {
+		v, _ := cmd.Flags().GetString("custom-args")
+		var ca []string
+		if err := json.Unmarshal([]byte(v), &ca); err != nil {
+			return fmt.Errorf("--custom-args must be a valid JSON array: %w", err)
+		}
+		body["custom_args"] = ca
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -394,6 +404,14 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["runtime_config"] = rc
 	}
+	if cmd.Flags().Changed("custom-args") {
+		v, _ := cmd.Flags().GetString("custom-args")
+		var ca []string
+		if err := json.Unmarshal([]byte(v), &ca); err != nil {
+			return fmt.Errorf("--custom-args must be a valid JSON array: %w", err)
+		}
+		body["custom_args"] = ca
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -408,7 +426,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --custom-args, --visibility, --status, or --max-concurrent-tasks")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

@@ -24,6 +24,7 @@ type AgentResponse struct {
 	RuntimeMode        string            `json:"runtime_mode"`
 	RuntimeConfig      any               `json:"runtime_config"`
 	CustomEnv          map[string]string `json:"custom_env"`
+	CustomArgs         []string          `json:"custom_args"`
 	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
 	Visibility         string            `json:"visibility"`
 	Status             string            `json:"status"`
@@ -55,6 +56,16 @@ func agentToResponse(a db.Agent) AgentResponse {
 		customEnv = map[string]string{}
 	}
 
+	var customArgs []string
+	if a.CustomArgs != nil {
+		if err := json.Unmarshal(a.CustomArgs, &customArgs); err != nil {
+			slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(a.ID), "error", err)
+		}
+	}
+	if customArgs == nil {
+		customArgs = []string{}
+	}
+
 	return AgentResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
@@ -66,6 +77,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		RuntimeMode:        a.RuntimeMode,
 		RuntimeConfig:      rc,
 		CustomEnv:          customEnv,
+		CustomArgs:         customArgs,
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
@@ -117,6 +129,7 @@ type TaskAgentData struct {
 	Instructions string                   `json:"instructions"`
 	Skills       []service.AgentSkillData `json:"skills,omitempty"`
 	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs   []string                 `json:"custom_args,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -232,6 +245,7 @@ type CreateAgentRequest struct {
 	RuntimeID          string            `json:"runtime_id"`
 	RuntimeConfig      any               `json:"runtime_config"`
 	CustomEnv          map[string]string `json:"custom_env"`
+	CustomArgs         []string          `json:"custom_args"`
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 }
@@ -284,6 +298,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ce = []byte("{}")
 	}
 
+	ca, _ := json.Marshal(req.CustomArgs)
+	if req.CustomArgs == nil {
+		ca = []byte("[]")
+	}
+
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
@@ -297,6 +316,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            parseUUID(ownerID),
 		CustomEnv:          ce,
+		CustomArgs:         ca,
 	})
 	if err != nil {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -326,6 +346,7 @@ type UpdateAgentRequest struct {
 	RuntimeID          *string            `json:"runtime_id"`
 	RuntimeConfig      any                `json:"runtime_config"`
 	CustomEnv          *map[string]string `json:"custom_env"`
+	CustomArgs         *[]string          `json:"custom_args"`
 	Visibility         *string            `json:"visibility"`
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
@@ -409,6 +430,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomEnv != nil {
 		ce, _ := json.Marshal(*req.CustomEnv)
 		params.CustomEnv = ce
+	}
+	if req.CustomArgs != nil {
+		ca, _ := json.Marshal(*req.CustomArgs)
+		params.CustomArgs = ca
 	}
 	if req.RuntimeID != nil {
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{

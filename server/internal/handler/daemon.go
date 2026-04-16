@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -124,6 +127,70 @@ type DaemonRegisterRequest struct {
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
 	} `json:"runtimes"`
+}
+
+type daemonWorkspaceReposResponse struct {
+	WorkspaceID  string     `json:"workspace_id"`
+	Repos        []RepoData `json:"repos"`
+	ReposVersion string     `json:"repos_version"`
+}
+
+func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
+	if len(repos) == 0 {
+		return []RepoData{}
+	}
+
+	normalized := make([]RepoData, 0, len(repos))
+	seen := make(map[string]struct{}, len(repos))
+	for _, repo := range repos {
+		url := strings.TrimSpace(repo.URL)
+		if url == "" {
+			continue
+		}
+		if _, exists := seen[url]; exists {
+			continue
+		}
+		seen[url] = struct{}{}
+		normalized = append(normalized, RepoData{
+			URL:         url,
+			Description: strings.TrimSpace(repo.Description),
+		})
+	}
+	return normalized
+}
+
+func workspaceReposVersion(repos []RepoData) string {
+	urls := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		if repo.URL == "" {
+			continue
+		}
+		urls = append(urls, repo.URL)
+	}
+	sort.Strings(urls)
+	sum := sha256.Sum256([]byte(strings.Join(urls, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+func parseWorkspaceRepos(raw []byte) []RepoData {
+	if len(raw) == 0 {
+		return []RepoData{}
+	}
+
+	var repos []RepoData
+	if err := json.Unmarshal(raw, &repos); err != nil {
+		return []RepoData{}
+	}
+	return normalizeWorkspaceRepos(repos)
+}
+
+func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
+	repos := parseWorkspaceRepos(raw)
+	return daemonWorkspaceReposResponse{
+		WorkspaceID:  workspaceID,
+		Repos:        repos,
+		ReposVersion: workspaceReposVersion(repos),
+	}
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -250,16 +317,27 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	// Include workspace repos so the daemon can cache them locally.
-	var repos []RepoData
-	if ws.Repos != nil {
-		json.Unmarshal(ws.Repos, &repos)
-	}
-	if repos == nil {
-		repos = []RepoData{}
+	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtimes":      resp,
+		"repos":         repoResp.Repos,
+		"repos_version": repoResp.ReposVersion,
+	})
+}
+
+func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"runtimes": resp, "repos": repos})
+	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -382,7 +460,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build response with fresh agent data (name + skills + custom_env).
+	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
@@ -392,12 +470,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
+		var customArgs []string
+		if agent.CustomArgs != nil {
+			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
+				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
+			}
+		}
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
 			Instructions: agent.Instructions,
 			Skills:       skills,
 			CustomEnv:    customEnv,
+			CustomArgs:   customArgs,
 		}
 	}
 
@@ -817,8 +902,12 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 // Returns { tasks: [...] } array (may be empty).
 func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
 
-	tasks, err := h.Queries.ListActiveTasksByIssue(r.Context(), parseUUID(issueID))
+	tasks, err := h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID)
 	if err != nil {
 		tasks = nil
 	}
@@ -832,10 +921,24 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 }
 
 // CancelTask cancels a running or queued task by ID.
+// Verifies both that the URL-parameter issue belongs to the caller's workspace
+// and that the task belongs to that same issue — a task UUID from a different
+// issue (in any workspace) must not be cancellable through this route.
 func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
-	taskID := chi.URLParam(r, "taskId")
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
 
-	task, err := h.TaskService.CancelTask(r.Context(), parseUUID(taskID))
+	taskID := chi.URLParam(r, "taskId")
+	existing, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil || uuidToString(existing.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	task, err := h.TaskService.CancelTask(r.Context(), existing.ID)
 	if err != nil {
 		slog.Warn("cancel task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -849,8 +952,12 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 // ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
 
-	tasks, err := h.Queries.ListTasksByIssue(r.Context(), parseUUID(issueID))
+	tasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
@@ -931,8 +1038,12 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 // GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
 
-	row, err := h.Queries.GetIssueUsageSummary(r.Context(), parseUUID(issueID))
+	row, err := h.Queries.GetIssueUsageSummary(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
@@ -948,11 +1059,16 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetIssueGCCheck returns minimal issue info needed by the daemon GC loop.
+// Gated on workspace access so a daemon token scoped to workspace A cannot
+// read issue metadata from workspace B via UUID enumeration.
 func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "issueId")
 	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

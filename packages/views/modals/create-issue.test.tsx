@@ -29,14 +29,11 @@ vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
 
-vi.mock("@multica/core/workspace", () => ({
-  useWorkspaceStore: Object.assign(
-    (selector?: (state: { workspace: { name: string } }) => unknown) => {
-      const state = { workspace: { name: "Test Workspace" } };
-      return selector ? selector(state) : state;
-    },
-    { getState: () => ({ workspace: { name: "Test Workspace" } }) },
-  ),
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ name: "Test Workspace" }),
+  useWorkspacePaths: () => ({
+    issueDetail: (id: string) => `/ws-test/issues/${id}`,
+  }),
 }));
 
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
@@ -49,6 +46,7 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
 
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
+  useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
@@ -222,7 +220,7 @@ describe("CreateIssueModal", () => {
 
     await user.click(screen.getByRole("button", { name: "View issue" }));
 
-    expect(mockPush).toHaveBeenCalledWith("/issues/issue-123");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 });

@@ -1,8 +1,30 @@
 import { app, shell, BrowserWindow, ipcMain } from "electron";
+import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
+import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
+
+// macOS/Linux GUI launches inherit a minimal PATH from launchd that omits
+// the user's shell config (~/.zshrc, Homebrew, nvm, ~/.local/bin, etc.).
+// Run the user's login shell once to recover the real PATH so the bundled
+// multica CLI can find agent binaries like claude/codex/opencode. Must run
+// before any child_process.spawn / execFile call in the main process —
+// ES module imports are hoisted, so this block executes before createWindow
+// or any daemon-manager spawn.
+if (process.platform !== "win32") {
+  fixPath();
+  // Fallback: prepend common install locations in case fix-path came up
+  // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
+  // to duplicate — PATH lookups short-circuit on first match.
+  const fallbackPaths = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    join(homedir(), ".local/bin"),
+  ];
+  process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
+}
 
 const PROTOCOL = "multica";
 

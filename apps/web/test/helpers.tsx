@@ -55,6 +55,7 @@ export const mockAgents: Agent[] = [
     runtime_mode: "cloud",
     runtime_config: {},
     custom_env: {},
+    custom_args: [],
     custom_env_redacted: false,
     visibility: "workspace",
     max_concurrent_tasks: 3,
@@ -77,7 +78,6 @@ export const mockAuthValue: Record<string, any> = {
   isLoading: false,
   login: vi.fn(),
   logout: vi.fn(),
-  switchWorkspace: vi.fn(),
   updateWorkspace: vi.fn(),
   updateCurrentUser: vi.fn(),
   getMemberName: (userId: string) => {

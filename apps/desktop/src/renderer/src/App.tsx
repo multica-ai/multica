@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -13,6 +14,15 @@ import { UpdateNotification } from "./components/update-notification";
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const qc = useQueryClient();
+  // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
+  // setQueryData sequentially. loginWithToken sets user+isLoading=false
+  // as soon as getMe resolves, which would cause DesktopShell to mount
+  // before the workspace list is hydrated and briefly see `!workspace`.
+  // This local flag keeps the loading screen up until the whole chain
+  // finishes, so the shell's "needs onboarding?" check gets a definitive
+  // workspace state on first render.
+  const [bootstrapping, setBootstrapping] = useState(false);
 
   // Tell the main process which backend URL we talk to, so daemon-manager
   // can pick the matching CLI profile (server_url from ~/.multica config).
@@ -20,20 +30,28 @@ function AppContent() {
     window.daemonAPI.setTargetApiUrl(DAEMON_TARGET_API_URL);
   }, []);
 
-  // Listen for auth token delivered via deep link (multica://auth/callback?token=...)
+  // Listen for auth token delivered via deep link (multica://auth/callback?token=...).
+  // daemonAPI.syncToken is handled separately by the [user] effect below, which
+  // fires whenever a user logs in (deep link, session restore, account switch).
   useEffect(() => {
     return window.desktopAPI.onAuthToken(async (token) => {
+      setBootstrapping(true);
       try {
-        const loggedIn = await useAuthStore.getState().loginWithToken(token);
-        await window.daemonAPI.syncToken(token, loggedIn.id);
+        await useAuthStore.getState().loginWithToken(token);
+        // Seed React Query cache with the workspace list so the index-route
+        // redirect (routes.tsx `IndexRedirect`) can resolve the initial
+        // destination without a second fetch. Workspace side-effects
+        // (setCurrentWorkspace, persist namespace) are synced later by
+        // WorkspaceRouteLayout when the URL resolves.
         const wsList = await api.listWorkspaces();
-        const lastWsId = localStorage.getItem("multica_workspace_id");
-        useWorkspaceStore.getState().hydrateWorkspace(wsList, lastWsId);
+        qc.setQueryData(workspaceKeys.list(), wsList);
       } catch {
         // Token invalid or expired — user stays on login page
+      } finally {
+        setBootstrapping(false);
       }
     });
-  }, []);
+  }, [qc]);
 
   // Sync token and start the daemon whenever the user logs in.
   useEffect(() => {
@@ -51,7 +69,7 @@ function AppContent() {
     })();
   }, [user]);
 
-  if (isLoading) {
+  if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
         <MulticaIcon className="size-6 animate-pulse" />

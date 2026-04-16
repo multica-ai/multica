@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -16,7 +16,7 @@ import { issueListOptions, childIssueProgressOptions } from "@multica/core/issue
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_PRIORITY_CONFIG } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -35,6 +35,8 @@ import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
+import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +55,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
+import { PageHeader } from "../../layout/page-header";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -180,9 +183,11 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const workspace = useCurrentWorkspace();
+  const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -198,9 +203,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [progressOpen, setProgressOpen] = useState(true);
+  const [descriptionOpen, setDescriptionOpen] = useState(true);
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -208,6 +216,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const sidebarRef = usePanelRef();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    if (isMobile) {
+      setSidebarOpen(false);
+      sidebarRef.current?.collapse();
+    }
+  }, [isMobile]);
 
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);
@@ -234,10 +249,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     deleteProject.mutate(project.id, {
       onSuccess: () => {
         toast.success("Project deleted");
-        router.push("/projects");
+        router.push(wsPaths.projects());
       },
     });
-  }, [project, deleteProject, router]);
+  }, [project, deleteProject, router, wsPaths]);
 
   if (isLoading) {
     return (
@@ -258,115 +273,313 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* Header bar — breadcrumb */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-4 text-sm">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <AppLink href="/projects" className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
-            {workspaceName ?? "Projects"}
-          </AppLink>
-          <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-          <span className="truncate">{project.title}</span>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-xs" className="text-muted-foreground shrink-0">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="start" className="w-48">
-              <DropdownMenuItem onClick={() => {
-                if (isPinned) {
-                  deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                } else {
-                  createPin.mutate({ item_type: "project", item_id: projectId });
-                }
-              }}>
-                {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                navigator.clipboard.writeText(window.location.href);
-                toast.success("Link copied");
-              }}>
-                <Link2 className="h-3.5 w-3.5" />
-                Copy link
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => setDeleteDialogOpen(true)}
+  const sidebarContent = (
+    <div className="space-y-5">
+      {/* Icon + Title */}
+      <div>
+        <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                title="Change icon"
               >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete project
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className={cn("text-muted-foreground", isPinned && "text-foreground")}
-            title={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-            onClick={() => {
-              if (isPinned) {
-                deletePinMut.mutate({ itemType: "project", itemId: projectId });
-              } else {
-                createPin.mutate({ item_type: "project", item_id: projectId });
-              }
-            }}
-          >
-            {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground"
-            onClick={() => {
-              navigator.clipboard.writeText(window.location.href);
-              toast.success("Link copied");
-            }}
-          >
-            <Link2 className="h-4 w-4" />
-          </Button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant={sidebarOpen ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  className={sidebarOpen ? "" : "text-muted-foreground"}
-                  onClick={() => {
-                    const panel = sidebarRef.current;
-                    if (!panel) return;
-                    if (panel.isCollapsed()) panel.expand();
-                    else panel.collapse();
-                  }}
-                >
-                  <PanelRight className="h-4 w-4" />
-                </Button>
-              }
+                {project.icon || "📁"}
+              </button>
+            }
+          />
+          <PopoverContent align="start" className="w-auto p-0">
+            <EmojiPicker
+              onSelect={(emoji) => {
+                handleUpdateField({ icon: emoji });
+                setIconPickerOpen(false);
+              }}
             />
-            <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
-          </Tooltip>
-        </div>
+          </PopoverContent>
+        </Popover>
+        <TitleEditor
+          key={`title-${projectId}`}
+          defaultValue={project.title}
+          placeholder="Project title"
+          className="mt-2 w-full text-base font-semibold leading-snug tracking-tight"
+          onBlur={(value) => {
+            const trimmed = value.trim();
+            if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
+          }}
+        />
       </div>
 
-      {/* Main content — issues list + sidebar */}
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-        <ResizablePanel id="content" minSize="50%">
-          <div className="flex h-full flex-col">
-            <ViewStoreProvider store={projectViewStore}>
+      {/* Properties */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setPropertiesOpen(!propertiesOpen)}
+        >
+          Properties
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+        </button>
+        {propertiesOpen && <div className="space-y-0.5 pl-2">
+          <PropRow label="Status">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                    <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
+                    <span>{statusCfg.label}</span>
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-44">
+                {PROJECT_STATUS_ORDER.map((s) => (
+                  <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
+                    <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
+                    <span>{PROJECT_STATUS_CONFIG[s].label}</span>
+                    {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </PropRow>
+          <PropRow label="Priority">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                    <PriorityIcon priority={project.priority} />
+                    <span>{priorityCfg.label}</span>
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-44">
+                {PROJECT_PRIORITY_ORDER.map((p) => (
+                  <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
+                    <PriorityIcon priority={p} />
+                    <span>{PROJECT_PRIORITY_CONFIG[p].label}</span>
+                    {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </PropRow>
+          <PropRow label="Lead">
+            <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+              <PopoverTrigger
+                render={
+                  <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                    {project.lead_type && project.lead_id ? (
+                      <>
+                        <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={16} />
+                        <span>{getActorName(project.lead_type, project.lead_id)}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">No lead</span>
+                    )}
+                  </button>
+                }
+              />
+              <PopoverContent align="start" className="w-52 p-0">
+                <div className="px-2 py-1.5 border-b">
+                  <input
+                    type="text"
+                    value={leadFilter}
+                    onChange={(e) => setLeadFilter(e.target.value)}
+                    placeholder="Assign lead..."
+                    className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                  />
+                </div>
+                <div className="p-1 max-h-60 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => { handleUpdateField({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                  >
+                    <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">No lead</span>
+                  </button>
+                  {filteredMembers.length > 0 && (
+                    <>
+                      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
+                      {filteredMembers.map((m) => (
+                        <button
+                          type="button"
+                          key={m.user_id}
+                          onClick={() => { handleUpdateField({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        >
+                          <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                          <span>{m.name}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {filteredAgents.length > 0 && (
+                    <>
+                      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
+                      {filteredAgents.map((a) => (
+                        <button
+                          type="button"
+                          key={a.id}
+                          onClick={() => { handleUpdateField({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        >
+                          <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                          <span>{a.name}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
+                    <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </PropRow>
+        </div>}
+      </div>
+
+      {/* Progress */}
+      {issueMetrics.totalCount > 0 && (() => {
+        const pct = Math.round((issueMetrics.completedCount / issueMetrics.totalCount) * 100);
+        return (
+          <div>
+            <button
+              className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => setProgressOpen(!progressOpen)}
+            >
+              Progress
+              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90" : ""}`} />
+            </button>
+            {progressOpen && <div className="pl-2 flex items-center gap-3">
+              <div className="relative h-2 flex-1 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                {issueMetrics.completedCount}/{issueMetrics.totalCount}
+              </span>
+            </div>}
+          </div>
+        );
+      })()}
+
+      {/* Description */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setDescriptionOpen(!descriptionOpen)}
+        >
+          Description
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${descriptionOpen ? "rotate-90" : ""}`} />
+        </button>
+        {descriptionOpen && <div className="pl-2">
+          <ContentEditor
+            ref={descEditorRef}
+            key={projectId}
+            defaultValue={project.description || ""}
+            placeholder="Add description..."
+            onUpdate={(md) => handleUpdateField({ description: md || null })}
+            debounceMs={1500}
+          />
+        </div>}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+      <ResizablePanel id="content" minSize="50%">
+        <div className="flex h-full flex-col">
+          <PageHeader className="gap-2 bg-background text-sm">
+            <div className="flex flex-1 items-center gap-1.5 min-w-0">
+              <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                {workspaceName ?? "Projects"}
+              </AppLink>
+              <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+              <span className="truncate">{project.title}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={cn("text-muted-foreground", isPinned && "text-foreground")}
+                title={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                onClick={() => {
+                  if (isPinned) {
+                    deletePinMut.mutate({ itemType: "project", itemId: projectId });
+                  } else {
+                    createPin.mutate({ item_type: "project", item_id: projectId });
+                  }
+                }}
+              >
+                {isPinned ? <PinOff /> : <Pin />}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                      <MoreHorizontal />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-auto">
+                  <DropdownMenuItem onClick={() => {
+                    navigator.clipboard.writeText(window.location.href);
+                    toast.success("Link copied");
+                  }}>
+                    <Link2 className="h-3.5 w-3.5" />
+                    Copy link
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete project
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant={sidebarOpen ? "secondary" : "ghost"}
+                      size="icon-sm"
+                      className={sidebarOpen ? "" : "text-muted-foreground"}
+                      onClick={() => {
+                        if (isMobile) {
+                          setSidebarOpen(!sidebarOpen);
+                        } else {
+                          const panel = sidebarRef.current;
+                          if (!panel) return;
+                          if (panel.isCollapsed()) panel.expand();
+                          else panel.collapse();
+                        }
+                      }}
+                    >
+                      <PanelRight />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+              </Tooltip>
+            </div>
+          </PageHeader>
+
+          <ViewStoreProvider store={projectViewStore}>
               <IssuesHeader scopedIssues={projectIssues} />
               <ProjectIssuesContent projectIssues={projectIssues} />
               <BatchActionToolbar />
             </ViewStoreProvider>
           </div>
         </ResizablePanel>
-        <ResizableHandle />
+        {!isMobile && <ResizableHandle />}
+        {!isMobile && (
         <ResizablePanel
           id="sidebar"
           defaultSize={sidebarOpen ? 320 : 0}
@@ -377,224 +590,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           panelRef={sidebarRef}
           onResize={(size) => setSidebarOpen(size.inPixels > 0)}
         >
-          {/* RIGHT: Properties sidebar */}
           <div className="overflow-y-auto border-l h-full">
-            <div className="p-4 space-y-5">
-              {/* Icon + Title */}
-              <div>
-                <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-                  <PopoverTrigger
-                    render={
-                      <button
-                        type="button"
-                        className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                        title="Change icon"
-                      >
-                        {project.icon || "📁"}
-                      </button>
-                    }
-                  />
-                  <PopoverContent align="start" className="w-auto p-0">
-                    <EmojiPicker
-                      onSelect={(emoji) => {
-                        handleUpdateField({ icon: emoji });
-                        setIconPickerOpen(false);
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-
-                <TitleEditor
-                  key={`title-${projectId}`}
-                  defaultValue={project.title}
-                  placeholder="Project title"
-                  className="mt-2 w-full text-base font-semibold leading-snug tracking-tight"
-                  onBlur={(value) => {
-                    const trimmed = value.trim();
-                    if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
-                  }}
-                />
-              </div>
-
-              {/* Properties section */}
-              <div>
-                <button
-                  className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => setPropertiesOpen(!propertiesOpen)}
-                >
-                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-                  Properties
-                </button>
-
-                {propertiesOpen && <div className="space-y-0.5 pl-2">
-                  {/* Status */}
-                  <PropRow label="Status">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
-                            <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
-                            <span>{statusCfg.label}</span>
-                          </button>
-                        }
-                      />
-                      <DropdownMenuContent align="start" className="w-44">
-                        {PROJECT_STATUS_ORDER.map((s) => (
-                          <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
-                            <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
-                            <span>{PROJECT_STATUS_CONFIG[s].label}</span>
-                            {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </PropRow>
-
-                  {/* Priority */}
-                  <PropRow label="Priority">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
-                            <PriorityIcon priority={project.priority} />
-                            <span>{priorityCfg.label}</span>
-                          </button>
-                        }
-                      />
-                      <DropdownMenuContent align="start" className="w-44">
-                        {PROJECT_PRIORITY_ORDER.map((p) => (
-                          <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
-                            <PriorityIcon priority={p} />
-                            <span>{PROJECT_PRIORITY_CONFIG[p].label}</span>
-                            {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </PropRow>
-
-                  {/* Lead */}
-                  <PropRow label="Lead">
-                    <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
-                      <PopoverTrigger
-                        render={
-                          <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
-                            {project.lead_type && project.lead_id ? (
-                              <>
-                                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={16} />
-                                <span>{getActorName(project.lead_type, project.lead_id)}</span>
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground">No lead</span>
-                            )}
-                          </button>
-                        }
-                      />
-                      <PopoverContent align="start" className="w-52 p-0">
-                        <div className="px-2 py-1.5 border-b">
-                          <input
-                            type="text"
-                            value={leadFilter}
-                            onChange={(e) => setLeadFilter(e.target.value)}
-                            placeholder="Assign lead..."
-                            className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-                          />
-                        </div>
-                        <div className="p-1 max-h-60 overflow-y-auto">
-                          <button
-                            type="button"
-                            onClick={() => { handleUpdateField({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                          >
-                            <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-muted-foreground">No lead</span>
-                          </button>
-                          {filteredMembers.length > 0 && (
-                            <>
-                              <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
-                              {filteredMembers.map((m) => (
-                                <button
-                                  type="button"
-                                  key={m.user_id}
-                                  onClick={() => { handleUpdateField({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
-                                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                                >
-                                  <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
-                                  <span>{m.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          )}
-                          {filteredAgents.length > 0 && (
-                            <>
-                              <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
-                              {filteredAgents.map((a) => (
-                                <button
-                                  type="button"
-                                  key={a.id}
-                                  onClick={() => { handleUpdateField({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
-                                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
-                                >
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={16} />
-                                  <span>{a.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          )}
-                          {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
-                            <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
-                          )}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </PropRow>
-                </div>}
-              </div>
-
-              {/* Progress */}
-              {issueMetrics.totalCount > 0 && (() => {
-                const pct = Math.round((issueMetrics.completedCount / issueMetrics.totalCount) * 100);
-                return (
-                  <div>
-                    <div className="text-xs font-medium mb-2 flex items-center gap-1">
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
-                      Progress
-                    </div>
-                    <div className="pl-2 flex items-center gap-3">
-                      <div className="relative h-2 flex-1 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                        {issueMetrics.completedCount}/{issueMetrics.totalCount}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Description */}
-              <div>
-                <h3 className="text-xs font-medium mb-2 flex items-center gap-1">
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
-                  Description
-                </h3>
-                <div className="pl-2">
-                  <ContentEditor
-                    ref={descEditorRef}
-                    key={projectId}
-                    defaultValue={project.description || ""}
-                    placeholder="Add description..."
-                    onUpdate={(md) => handleUpdateField({ description: md || null })}
-                    debounceMs={1500}
-                  />
-                </div>
-              </div>
+            <div className="p-4">
+              {sidebarContent}
             </div>
           </div>
         </ResizablePanel>
+        )}
+        {isMobile && (
+          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+            <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+              {sidebarContent}
+            </SheetContent>
+          </Sheet>
+        )}
       </ResizablePanelGroup>
 
       {/* Delete confirmation */}
@@ -614,6 +623,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

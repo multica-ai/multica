@@ -11,7 +11,7 @@ import {
 import { ReactRenderer } from "@tiptap/react";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { getCurrentWsId } from "@multica/core/platform";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Issue, ListIssuesResponse, MemberWithUser, Agent } from "@multica/core/types";
@@ -219,7 +219,10 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 > {
   return {
     items: ({ query }) => {
-      const wsId = useWorkspaceStore.getState().workspace?.id;
+      // Read workspace id imperatively because this runs in TipTap factory scope
+      // (outside React render). getCurrentWsId() is the non-React
+      // singleton set by the URL-driven workspace layout.
+      const wsId = getCurrentWsId();
       const members: MemberWithUser[] = wsId ? qc.getQueryData(workspaceKeys.members(wsId)) ?? [] : [];
       const agents: Agent[] = wsId ? qc.getQueryData(workspaceKeys.agents(wsId)) ?? [] : [];
       const issues: Issue[] = wsId

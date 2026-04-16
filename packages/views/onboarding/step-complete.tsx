@@ -46,7 +46,7 @@ function getOnboardingIssues(): OnboardingIssueDef[] {
         "",
         "**Steps:**",
         "1. Go to **Settings** in the sidebar",
-        "2. Under **Repositories**, add a GitHub repo URL",
+        "2. Under **Repositories**, add a Git repository URL",
         "3. The agent daemon will sync the repo locally",
         "",
         "Once connected, your agents can clone, branch, and push code as part of any task.",

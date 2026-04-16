@@ -125,7 +125,7 @@ export function SkillsTab({
               </div>
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 onClick={() => handleRemove(skill.id)}
                 disabled={saving}
                 className="text-muted-foreground hover:text-destructive"

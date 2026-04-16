@@ -31,6 +31,21 @@ vi.mock("@multica/core", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({
+    inbox: () => "/ws-test/inbox",
+    myIssues: () => "/ws-test/my-issues",
+    issues: () => "/ws-test/issues",
+    projects: () => "/ws-test/projects",
+    agents: () => "/ws-test/agents",
+    runtimes: () => "/ws-test/runtimes",
+    skills: () => "/ws-test/skills",
+    settings: () => "/ws-test/settings",
+    issueDetail: (id: string) => `/ws-test/issues/${id}`,
+    projectDetail: (id: string) => `/ws-test/projects/${id}`,
+  }),
+}));
+
 vi.mock("@multica/core/issues/queries", () => ({
   issueListOptions: () => ({ queryKey: ["issues", "ws-test", "list"], enabled: false }),
 }));
@@ -110,7 +125,7 @@ describe("SearchCommand", () => {
     const settingsItem = await screen.findByText("Settings");
     await user.click(settingsItem);
 
-    expect(mockPush).toHaveBeenCalledWith("/settings");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
     expect(useSearchStore.getState().open).toBe(false);
   });
 

@@ -48,6 +48,7 @@ export interface Agent {
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
   custom_env: Record<string, string>;
+  custom_args: string[];
   custom_env_redacted: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
@@ -68,6 +69,7 @@ export interface CreateAgentRequest {
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
+  custom_args?: string[];
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
 }
@@ -80,6 +82,7 @@ export interface UpdateAgentRequest {
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
+  custom_args?: string[];
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;

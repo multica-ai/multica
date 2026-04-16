@@ -6,20 +6,20 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceStore } from "@multica/core/workspace";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import type { WorkspaceRepo } from "@multica/core/types";
+import type { Workspace, WorkspaceRepo } from "@multica/core/types";
 
 export function RepositoriesTab() {
   const user = useAuthStore((s) => s.user);
-  const workspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
+  const qc = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
   const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
   const [saving, setSaving] = useState(false);
@@ -36,7 +36,9 @@ export function RepositoriesTab() {
     setSaving(true);
     try {
       const updated = await api.updateWorkspace(workspace.id, { repos });
-      updateWorkspace(updated);
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
       toast.success("Repositories saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save repositories");
@@ -67,7 +69,7 @@ export function RepositoriesTab() {
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              GitHub repositories associated with this workspace. Agents use these to clone and work on code.
+              Git repositories associated with this workspace. Agents use these to clone and work on code.
             </p>
 
             {repos.map((repo, index) => (
@@ -78,7 +80,7 @@ export function RepositoriesTab() {
                     value={repo.url}
                     onChange={(e) => handleRepoChange(index, "url", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="https://github.com/org/repo"
+                    placeholder="https://git.example.com/org/repo.git"
                     className="text-sm"
                   />
                   <Input

@@ -7,9 +7,11 @@ import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { useCreateAutopilot, useCreateAutopilotTrigger } from "@multica/core/autopilots/mutations";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -143,13 +145,14 @@ const EXECUTION_MODE_LABELS: Record<string, string> = {
 
 function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const { getActorName } = useActorName();
+  const wsPaths = useWorkspacePaths();
   const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
   const StatusIcon = statusCfg.icon;
 
   return (
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
       <AppLink
-        href={`/autopilots/${autopilot.id}`}
+        href={wsPaths.autopilotDetail(autopilot.id)}
         className="flex min-w-0 flex-1 items-center gap-2"
       >
         <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -346,7 +349,7 @@ export function AutopilotsPage() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-5">
+      <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">Autopilot</h1>
@@ -358,7 +361,7 @@ export function AutopilotsPage() {
           <Plus className="h-3.5 w-3.5 mr-1" />
           New autopilot
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Table */}
       <div className="flex-1 overflow-y-auto">

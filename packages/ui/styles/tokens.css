@@ -27,7 +27,6 @@
     --color-brand: var(--brand);
     --color-brand-foreground: var(--brand-foreground);
     --color-priority: var(--priority);
-    --color-canvas: var(--canvas);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -86,7 +85,6 @@
     --sidebar-ring: oklch(0.705 0.015 286.067);
     --brand: oklch(0.55 0.16 255);
     --brand-foreground: oklch(0.985 0 0);
-    --canvas: oklch(0.95 0.002 286);
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
     --info: oklch(0.55 0.18 250);
@@ -130,7 +128,6 @@
     --sidebar-ring: oklch(0.552 0.016 285.938);
     --brand: oklch(0.65 0.16 255);
     --brand-foreground: oklch(0.985 0 0);
-    --canvas: oklch(0.2 0.005 286);
     --success: oklch(0.65 0.15 145);
     --warning: oklch(0.70 0.16 85);
     --info: oklch(0.65 0.18 250);

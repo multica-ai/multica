@@ -20,22 +20,46 @@ import {
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceStore } from "@multica/core/workspace";
 import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import {
+  memberListOptions,
+  workspaceKeys,
+  workspaceListOptions,
+} from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { paths } from "@multica/core/paths";
 import type { Workspace } from "@multica/core/types";
+import { useNavigation } from "../../navigation";
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);
-  const workspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const qc = useQueryClient();
-  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
   const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
+  const navigation = useNavigation();
+
+  /**
+   * After leaving/deleting the current workspace, send the user to a safe URL:
+   * another workspace they still have access to, or onboarding if they have none.
+   * The list is freshly fetched (staleTime: 0) because the cache still contains
+   * the just-removed workspace until the background invalidation resolves.
+   */
+  const navigateAwayFromCurrentWorkspace = async () => {
+    const wsList = await qc.fetchQuery({
+      ...workspaceListOptions(),
+      staleTime: 0,
+    });
+    const remaining = wsList.filter((w) => w.id !== workspace?.id);
+    const next = remaining[0];
+    navigation.push(
+      next ? paths.workspace(next.slug).issues() : paths.onboarding(),
+    );
+  };
 
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
@@ -68,7 +92,6 @@ export function WorkspaceTab() {
         description,
         context,
       });
-      updateWorkspace(updated);
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
@@ -90,6 +113,7 @@ export function WorkspaceTab() {
         setActionId("leave");
         try {
           await leaveWorkspace.mutateAsync(workspace.id);
+          await navigateAwayFromCurrentWorkspace();
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "Failed to leave workspace");
         } finally {
@@ -109,6 +133,7 @@ export function WorkspaceTab() {
         setActionId("delete-workspace");
         try {
           await deleteWorkspace.mutateAsync(workspace.id);
+          await navigateAwayFromCurrentWorkspace();
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "Failed to delete workspace");
         } finally {

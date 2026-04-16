@@ -45,6 +45,7 @@ type AgentData struct {
 	Instructions string            `json:"instructions"`
 	Skills       []SkillData       `json:"skills"`
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
+	CustomArgs   []string          `json:"custom_args,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

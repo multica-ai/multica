@@ -598,11 +598,12 @@ function profileArgs(active: ActiveProfile): string[] {
 
 // Env passed to every CLI child so the daemon process knows it was spawned
 // by the Desktop app. The server uses this to mark runtimes as managed and
-// hide CLI self-update UI.
-const DESKTOP_SPAWN_ENV = {
-  ...process.env,
-  MULTICA_LAUNCHED_BY: "desktop",
-};
+// hide CLI self-update UI. Computed lazily so it picks up the PATH fix
+// applied by fix-path in main/index.ts — as a top-level const it would
+// snapshot process.env at import time, before that block runs.
+function desktopSpawnEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+}
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
@@ -624,7 +625,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
     execFile(
       bin,
       args,
-      { timeout: 20_000, env: DESKTOP_SPAWN_ENV },
+      { timeout: 20_000, env: desktopSpawnEnv() },
       (err) => {
         if (err) {
           currentState = "stopped";

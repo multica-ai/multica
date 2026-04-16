@@ -38,6 +38,7 @@ type Agent struct {
 	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy         pgtype.UUID        `json:"archived_by"`
 	CustomEnv          []byte             `json:"custom_env"`
+	CustomArgs         []byte             `json:"custom_args"`
 }
 
 type AgentRuntime struct {

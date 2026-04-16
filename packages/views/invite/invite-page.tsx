@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { useWorkspaceStore } from "@multica/core/workspace";
-import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  workspaceKeys,
+  workspaceListOptions,
+} from "@multica/core/workspace/queries";
+import { paths } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -17,7 +19,6 @@ export interface InvitePageProps {
 
 export function InvitePage({ invitationId }: InvitePageProps) {
   const { push } = useNavigation();
-  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const qc = useQueryClient();
   const [accepting, setAccepting] = useState(false);
   const [declining, setDeclining] = useState(false);
@@ -29,21 +30,31 @@ export function InvitePage({ invitationId }: InvitePageProps) {
     queryFn: () => api.getInvitation(invitationId),
   });
 
+  // Workspace list for the fallback "Go to dashboard" destinations. The invite
+  // page is a pre-workspace global route so we can't rely on WorkspaceSlugProvider.
+  const { data: wsList = [] } = useQuery(workspaceListOptions());
+  const fallbackDest =
+    wsList[0] ? paths.workspace(wsList[0].slug).issues() : paths.onboarding();
+
   const handleAccept = async () => {
     setAccepting(true);
     setError(null);
     try {
       await api.acceptInvitation(invitationId);
       setDone("accepted");
-      // Refresh workspace list and switch to the new workspace.
-      const wsList = await qc.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
-      const ws = wsList.find((w) => w.id === invitation?.workspace_id);
-      if (ws) {
-        switchWorkspace(ws);
-      }
+      // Fetch the refreshed workspace list so we know the joined workspace's slug.
+      const nextList = await qc.fetchQuery({
+        ...workspaceListOptions(),
+        staleTime: 0,
+      });
+      const joined = nextList.find((w) => w.id === invitation?.workspace_id);
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      // Navigate to the workspace after a short delay for the success state.
-      setTimeout(() => push("/issues"), 1000);
+      // Navigate into the joined workspace. The [workspaceSlug]/layout will
+      // sync api client, stores, and the last_workspace_slug cookie from the URL.
+      const dest = joined
+        ? paths.workspace(joined.slug).issues()
+        : fallbackDest;
+      setTimeout(() => push(dest), 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to accept invitation");
     } finally {
@@ -83,9 +94,9 @@ export function InvitePage({ invitationId }: InvitePageProps) {
             </div>
             <h2 className="text-lg font-semibold">Invitation not found</h2>
             <p className="text-sm text-muted-foreground text-center">
-              This invitation may have expired, been revoked, or doesn't belong to your account.
+              This invitation may have expired, been revoked, or doesn&apos;t belong to your account.
             </p>
-            <Button variant="outline" onClick={() => push("/issues")}>
+            <Button variant="outline" onClick={() => push(fallbackDest)}>
               Go to dashboard
             </Button>
           </CardContent>
@@ -116,8 +127,8 @@ export function InvitePage({ invitationId }: InvitePageProps) {
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <h2 className="text-lg font-semibold">Invitation declined</h2>
-            <p className="text-sm text-muted-foreground">You won't be added to this workspace.</p>
-            <Button variant="outline" onClick={() => push("/issues")}>
+            <p className="text-sm text-muted-foreground">You won&apos;t be added to this workspace.</p>
+            <Button variant="outline" onClick={() => push(fallbackDest)}>
               Go to dashboard
             </Button>
           </CardContent>

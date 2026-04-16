@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+// codexBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args.
+var codexBlockedArgs = map[string]blockedArgMode{
+	"--listen": blockedWithValue, // stdio:// transport for daemon communication
+}
+
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
@@ -34,7 +40,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	cmd := exec.CommandContext(runCtx, execPath, "app-server", "--listen", "stdio://")
+	codexArgs := append([]string{"app-server", "--listen", "stdio://"}, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, b.cfg.Logger)...)
+	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
+	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", codexArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

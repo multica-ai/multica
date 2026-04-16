@@ -278,6 +278,31 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.2.0",
+        date: "2026-04-15",
+        title: "Desktop App, Autopilot & Invitations",
+        changes: [],
+        features: [
+          "Desktop app for macOS — native Electron app with tab system, built-in daemon management, immersive mode, and auto-update",
+          "Autopilot — scheduled and triggered automations for AI agents",
+          "Workspace invitations with email notifications and dedicated accept page",
+          "Custom CLI arguments per agent for advanced runtime configuration",
+          "Chat redesign with unread tracking and improved session management",
+          "Create Agent dialog shows runtime owner with Mine/All filter",
+        ],
+        improvements: [
+          "Inter font with CJK fallback and automatic CJK+Latin spacing",
+          "Sidebar user menu redesigned as full-row popover",
+          "WebSocket ping/pong heartbeat to detect dead connections",
+          "Members can now create agents and manage their own skills",
+        ],
+        fixes: [
+          "Agent now triggered on reply in threads where it already participated",
+          "Self-hosting: local uploads persist in Docker, WebSocket URL auto-derived for LAN access",
+          "Stale cmd+k recent issues resolved",
+        ],
+      },
+      {
         version: "0.1.33",
         date: "2026-04-14",
         title: "Gemini CLI & Agent Env Vars",

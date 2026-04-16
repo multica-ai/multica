@@ -7,7 +7,10 @@
 import "./env";
 import pg from "pg";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? "8080"}`;
+// `||` (not `??`) so an empty `NEXT_PUBLIC_API_URL=` in .env still falls
+// back to localhost. dotenv sets unset-vs-empty both as "" — treating them
+// the same matches user intent.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
 
 interface TestWorkspace {
@@ -18,6 +21,7 @@ interface TestWorkspace {
 
 export class TestApiClient {
   private token: string | null = null;
+  private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
 
@@ -86,11 +90,16 @@ export class TestApiClient {
     this.workspaceId = id;
   }
 
+  setWorkspaceSlug(slug: string) {
+    this.workspaceSlug = slug;
+  }
+
   async ensureWorkspace(name = "E2E Workspace", slug = "e2e-workspace") {
     const workspaces = await this.getWorkspaces();
     const workspace = workspaces.find((item) => item.slug === slug) ?? workspaces[0];
     if (workspace) {
       this.workspaceId = workspace.id;
+      this.workspaceSlug = workspace.slug;
       return workspace;
     }
 
@@ -150,7 +159,8 @@ export class TestApiClient {
       ...((init?.headers as Record<string, string>) ?? {}),
     };
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    if (this.workspaceSlug) headers["X-Workspace-Slug"] = this.workspaceSlug;
+    else if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
     return fetch(`${API_BASE}${path}`, { ...init, headers });
   }
 }

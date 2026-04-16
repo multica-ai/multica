@@ -41,7 +41,7 @@ export function HowItWorksSection() {
         </div>
 
         <div className="mt-14 flex flex-wrap items-center gap-4">
-          <Link href={user ? "/issues" : "/login"} className={heroButtonClassName("solid")}>
+          <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
             {user ? t.header.dashboard : t.howItWorks.cta}
           </Link>
           <Link

@@ -8,7 +8,6 @@ import userEvent from "@testing-library/user-event";
 
 const mockSendCode = vi.hoisted(() => vi.fn());
 const mockVerifyCode = vi.hoisted(() => vi.fn());
-const mockHydrateWorkspace = vi.hoisted(() => vi.fn());
 const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
@@ -34,20 +33,6 @@ vi.mock("@multica/core/auth", () => ({
       getState: () => ({
         sendCode: mockSendCode,
         verifyCode: mockVerifyCode,
-      }),
-    },
-  ),
-}));
-
-vi.mock("@multica/core/workspace", () => ({
-  useWorkspaceStore: Object.assign(
-    (selector?: (s: unknown) => unknown) => {
-      const state = { hydrateWorkspace: mockHydrateWorkspace };
-      return selector ? selector(state) : state;
-    },
-    {
-      getState: () => ({
-        hydrateWorkspace: mockHydrateWorkspace,
       }),
     },
   ),
@@ -224,11 +209,10 @@ describe("LoginPage", () => {
   // Code verification
   // -------------------------------------------------------------------------
 
-  it("calls verifyCode, listWorkspaces, hydrateWorkspace, then onSuccess", async () => {
+  it("calls verifyCode, seeds workspace list cache, then onSuccess", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     mockVerifyCode.mockResolvedValueOnce(undefined);
     mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
-    mockHydrateWorkspace.mockReturnValueOnce({ id: "ws-1" });
 
     render(<LoginPage onSuccess={onSuccess} />);
 
@@ -253,9 +237,11 @@ describe("LoginPage", () => {
         "123456",
       );
       expect(mockApiListWorkspaces).toHaveBeenCalled();
-      expect(mockHydrateWorkspace).toHaveBeenCalledWith(
+      // The workspace list is seeded into React Query so onSuccess can read
+      // it synchronously to compute a destination URL.
+      expect(mockSetQueryData).toHaveBeenCalledWith(
+        expect.arrayContaining(["workspaces", "list"]),
         [{ id: "ws-1" }],
-        undefined,
       );
       expect(onSuccess).toHaveBeenCalled();
     });
@@ -620,7 +606,6 @@ describe("LoginPage", () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     mockVerifyCode.mockResolvedValueOnce(undefined);
     mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
-    mockHydrateWorkspace.mockReturnValueOnce({ id: "ws-1" });
     const onTokenObtained = vi.fn();
 
     render(
@@ -674,43 +659,6 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-  // -------------------------------------------------------------------------
-  // lastWorkspaceId
-  // -------------------------------------------------------------------------
-
-  it("passes lastWorkspaceId to hydrateWorkspace", async () => {
-    mockSendCode.mockResolvedValueOnce(undefined);
-    mockVerifyCode.mockResolvedValueOnce(undefined);
-    mockApiListWorkspaces.mockResolvedValueOnce([
-      { id: "ws-1" },
-      { id: "ws-2" },
-    ]);
-    mockHydrateWorkspace.mockReturnValueOnce({ id: "ws-2" });
-
-    render(
-      <LoginPage onSuccess={onSuccess} lastWorkspaceId="ws-2" />,
-    );
-
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(/email/i), "test@example.com");
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/check your email/i),
-      ).toBeInTheDocument();
-    });
-
-    const otpInput = getOTPInput();
-    await user.type(otpInput, "123456");
-
-    await waitFor(() => {
-      expect(mockHydrateWorkspace).toHaveBeenCalledWith(
-        [{ id: "ws-1" }, { id: "ws-2" }],
-        "ws-2",
-      );
-    });
-  });
 });
 
 // ---------------------------------------------------------------------------

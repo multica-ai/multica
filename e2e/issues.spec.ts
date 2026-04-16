@@ -65,8 +65,10 @@ test.describe("Issues", () => {
     // Reload to see the new issue
     await page.reload();
 
-    // Navigate to the issue detail
-    const issueLink = page.locator(`a[href="/issues/${issue.id}"]`);
+    // Navigate to the issue detail. Use a suffix match so the selector works
+    // whether the href is legacy `/issues/{id}` or URL-refactored
+    // `/{slug}/issues/{id}`.
+    const issueLink = page.locator(`a[href$="/issues/${issue.id}"]`);
     await expect(issueLink).toBeVisible({ timeout: 5000 });
     await issueLink.click();
 

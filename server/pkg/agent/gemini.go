@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -31,9 +32,10 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildGeminiArgs(prompt, opts)
+	args := buildGeminiArgs(prompt, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
+	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -239,7 +241,15 @@ type geminiModelStats struct {
 //	-o stream-json        streaming NDJSON output for live events
 //	-m <model>            optional model override
 //	-r <session>          resume a previous session (if provided)
-func buildGeminiArgs(prompt string, opts ExecOptions) []string {
+// geminiBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args.
+var geminiBlockedArgs = map[string]blockedArgMode{
+	"-p":     blockedWithValue,  // non-interactive prompt
+	"--yolo": blockedStandalone, // auto-approve tool use
+	"-o":     blockedWithValue,  // stream-json output format
+}
+
+func buildGeminiArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
 		"--yolo",
@@ -251,5 +261,6 @@ func buildGeminiArgs(prompt string, opts ExecOptions) []string {
 	if opts.ResumeSessionID != "" {
 		args = append(args, "-r", opts.ResumeSessionID)
 	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, geminiBlockedArgs, logger)...)
 	return args
 }

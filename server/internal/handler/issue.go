@@ -917,7 +917,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
 
-	// Only ready issues in todo are enqueued for agents.
+	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
@@ -1112,12 +1112,21 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
 
-	// Reconcile task queue when assignee changes (not on status changes —
-	// agents manage issue status themselves via the CLI).
+	// Reconcile task queue when assignee changes.
 	if assigneeChanged {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+	}
+
+	// Trigger the assigned agent when a member moves an issue out of backlog.
+	// Backlog acts as a parking lot — moving to an active status signals the
+	// issue is ready for work.
+	if statusChanged && !assigneeChanged && actorType == "member" &&
+		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
 	}
@@ -1163,12 +1172,15 @@ func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, 
 	return false, "cannot assign to private agent"
 }
 
-// shouldEnqueueAgentTask returns true when an issue assignment should trigger
-// the assigned agent. No status gate — assignment is an explicit human action,
-// so it should trigger regardless of issue status (e.g. assigning an agent to
-// a done issue to fix a discovered problem).
-// All trigger types (on_assign, on_comment, on_mention) are always enabled.
+// shouldEnqueueAgentTask returns true when an issue creation or assignment
+// should trigger the assigned agent. Backlog issues are skipped — backlog
+// acts as a parking lot where issues can be pre-assigned without immediately
+// triggering execution. Moving out of backlog is handled separately in
+// UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
+	if issue.Status == "backlog" {
+		return false
+	}
 	return h.isAgentAssigneeReady(ctx, issue)
 }
 
@@ -1416,6 +1428,14 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			}
+		}
+
+		// Trigger agent when moving out of backlog (batch).
+		if statusChanged && !assigneeChanged && actorType == "member" &&
+			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 			}
 		}

@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+// openclawBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args.
+var openclawBlockedArgs = map[string]blockedArgMode{
+	"--local":      blockedStandalone, // local mode for daemon execution
+	"--json":       blockedStandalone, // JSON output for daemon communication
+	"--session-id": blockedWithValue,  // managed by daemon for session resumption
+	"--message":    blockedWithValue,  // prompt is set by daemon
+}
+
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
 // --output-format stream-json --yes` and reading streaming NDJSON events from
 // stdout — similar to the opencode backend.
@@ -47,9 +56,11 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, b.cfg.Logger)...)
 	args = append(args, "--message", prompt)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
+	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

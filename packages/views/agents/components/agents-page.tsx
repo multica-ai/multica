@@ -18,6 +18,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { PageHeader } from "../../layout/page-header";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentListItem } from "./agent-list-item";
 import { AgentDetail } from "./agent-detail";
@@ -140,28 +141,28 @@ export function AgentsPage() {
       <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
         {/* Left column — agent list */}
         <div className="overflow-y-auto h-full border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
+          <PageHeader className="justify-between">
             <h1 className="text-sm font-semibold">Agents</h1>
             <div className="flex items-center gap-1">
               {archivedCount > 0 && (
                 <Button
                   variant={showArchived ? "secondary" : "ghost"}
-                  size="icon-xs"
+                  size="icon-sm"
                   onClick={() => setShowArchived(!showArchived)}
                   title={showArchived ? "Show active agents" : "Show archived agents"}
                 >
-                  <Archive className="h-4 w-4 text-muted-foreground" />
+                  <Archive className="text-muted-foreground" />
                 </Button>
               )}
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 onClick={() => setShowCreate(true)}
               >
-                <Plus className="h-4 w-4 text-muted-foreground" />
+                <Plus className="text-muted-foreground" />
               </Button>
             </div>
-          </div>
+          </PageHeader>
           {filteredAgents.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />

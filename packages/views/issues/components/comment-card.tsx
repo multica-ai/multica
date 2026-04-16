@@ -223,7 +223,7 @@ function CommentRow({
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon-xs" className="text-muted-foreground">
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               }
@@ -434,7 +434,7 @@ function CommentCard({
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="ghost" size="icon-xs" className="text-muted-foreground">
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   }
