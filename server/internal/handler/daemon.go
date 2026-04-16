@@ -3,12 +3,15 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -519,12 +522,128 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// ---------------------------------------------------------------------------
+// UploadTaskArtifact — POST /api/daemon/tasks/{taskId}/artifacts
+// Accepts a multipart file upload from the daemon, stores it in S3,
+// and creates an attachment record linked to the task's issue.
+// Returns the attachment ID for later linking to a comment.
+// ---------------------------------------------------------------------------
+
+const maxArtifactUploadSize = 10 << 20 // 10 MB
+
+func (h *Handler) UploadTaskArtifact(w http.ResponseWriter, r *http.Request) {
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "file storage not configured")
+		return
+	}
+
+	// Artifact uploads must come from the daemon, not regular users.
+	// Without this check, workspace members could spoof agent-attributed uploads.
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) == "" {
+		writeError(w, http.StatusForbidden, "daemon token required")
+		return
+	}
+
+	taskID := chi.URLParam(r, "taskId")
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	if !task.IssueID.Valid {
+		writeError(w, http.StatusBadRequest, "task has no associated issue")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactUploadSize)
+	if err := r.ParseMultipartForm(maxArtifactUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("missing file field: %v", err))
+		return
+	}
+	defer file.Close()
+
+	// Enforce file-type allowlist for artifact uploads.
+	ext := strings.ToLower(path.Ext(header.Filename))
+	allowedArtifactExts := map[string]bool{
+		".md": true, ".csv": true, ".json": true,
+		".txt": true, ".pdf": true, ".xlsx": true,
+	}
+	if !allowedArtifactExts[ext] {
+		writeError(w, http.StatusBadRequest, "file type not allowed")
+		return
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+
+	contentType := r.FormValue("content_type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	key := id.String() + path.Ext(header.Filename)
+
+	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
+	if err != nil {
+		slog.Error("artifact upload to S3 failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "upload failed")
+		return
+	}
+
+	// Resolve workspace ID from the task's issue.
+	issue, err := h.Queries.GetIssue(r.Context(), task.IssueID)
+	if err != nil {
+		h.Storage.Delete(r.Context(), key)
+		slog.Error("artifact upload: failed to get issue", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	att, err := h.Queries.CreateAttachment(r.Context(), db.CreateAttachmentParams{
+		ID:           pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID:  issue.WorkspaceID,
+		IssueID:      task.IssueID,
+		UploaderType: "agent",
+		UploaderID:   task.AgentID,
+		Filename:     header.Filename,
+		Url:          link,
+		ContentType:  contentType,
+		SizeBytes:    int64(len(data)),
+	})
+	if err != nil {
+		// Clean up the uploaded blob to avoid orphaned objects in storage.
+		h.Storage.Delete(r.Context(), key)
+		slog.Error("artifact upload: failed to create attachment record", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create attachment")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id": uuidToString(att.ID),
+	})
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	PRURL       string   `json:"pr_url"`
+	Output      string   `json:"output"`
+	SessionID   string   `json:"session_id"`    // Claude session ID for future resumption
+	WorkDir     string   `json:"work_dir"`      // working directory used during execution
+	ArtifactIDs []string `json:"artifact_ids"`  // attachment IDs from artifact uploads
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {

@@ -107,18 +107,25 @@ const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
 UPDATE attachment
 SET comment_id = $1
 WHERE issue_id = $2
+  AND workspace_id = $3
   AND comment_id IS NULL
-  AND id = ANY($3::uuid[])
+  AND id = ANY($4::uuid[])
 `
 
 type LinkAttachmentsToCommentParams struct {
-	CommentID pgtype.UUID   `json:"comment_id"`
-	IssueID   pgtype.UUID   `json:"issue_id"`
-	Column3   []pgtype.UUID `json:"column_3"`
+	CommentID   pgtype.UUID   `json:"comment_id"`
+	IssueID     pgtype.UUID   `json:"issue_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Column4     []pgtype.UUID `json:"column_4"`
 }
 
 func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) error {
-	_, err := q.db.Exec(ctx, linkAttachmentsToComment, arg.CommentID, arg.IssueID, arg.Column3)
+	_, err := q.db.Exec(ctx, linkAttachmentsToComment,
+		arg.CommentID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.Column4,
+	)
 	return err
 }
 

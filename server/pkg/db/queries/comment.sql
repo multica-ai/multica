@@ -53,5 +53,15 @@ SELECT EXISTS (
       AND created_at >= @since
 ) AS commented;
 
+-- name: GetLatestAgentComment :one
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND author_type = 'agent'
+  AND author_id = @author_id
+  AND created_at >= @since
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: DeleteComment :exec
 DELETE FROM comment WHERE id = $1;

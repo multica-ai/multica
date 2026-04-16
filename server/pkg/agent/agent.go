@@ -70,6 +70,13 @@ type TokenUsage struct {
 	CacheWriteTokens int64
 }
 
+// Artifact is a file extracted from the sandbox's /workspace/output/ directory.
+type Artifact struct {
+	Filename    string // base filename (e.g. "report.md")
+	Data        []byte // file contents
+	ContentType string // MIME type derived from extension
+}
+
 // Result is the final outcome after an agent session completes.
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout"
@@ -78,6 +85,7 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	Artifacts  []Artifact            // files extracted from /workspace/output/
 }
 
 // Config configures a Backend instance.

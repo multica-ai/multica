@@ -38,7 +38,7 @@ type Config struct {
 	DaytonaAPIURL      string                // Optional: custom Daytona API URL
 	EmbeddedModel      string                // Default model for embedded agent
 	EmbeddedMaxTurns   int                   // Default max turns for embedded agent
-	OpenRouterAPIKey   string                // Fallback: OpenRouter key for free models
+	FallbackAPIKey     string                // Fallback: Google AI Studio API key for Gemini
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -263,7 +263,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		DaytonaAPIURL:      strings.TrimSpace(os.Getenv("DAYTONA_API_URL")),
 		EmbeddedModel:      envOrDefault("MULTICA_EMBEDDED_MODEL", "auto-fastest"),
 		EmbeddedMaxTurns:   embeddedMaxTurns,
-		OpenRouterAPIKey:   strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
+		FallbackAPIKey:     strings.TrimSpace(os.Getenv("GOOGLE_AI_API_KEY")),
 		WorkspacesRoot:     workspacesRoot,
 		KeepEnvAfterTask:   keepEnv,
 		GCEnabled:          gcEnabled,

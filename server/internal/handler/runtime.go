@@ -145,7 +145,7 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.Queries.ListRuntimeUsage(r.Context(), db.ListRuntimeUsageParams{
 		RuntimeID: parseUUID(runtimeID),
-		Since:     since,
+		Date:      since,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")

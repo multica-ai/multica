@@ -198,6 +198,188 @@ func TestLineBuffer_ToolOutputFallback(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// detectContentType tests
+// ---------------------------------------------------------------------------
+
+func TestDetectContentType(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		data     []byte
+		want     string
+	}{
+		// Extension override map
+		{"markdown", "report.md", []byte("# Hello"), "text/markdown"},
+		{"csv", "data.csv", []byte("a,b,c"), "text/csv"},
+		{"json", "config.json", []byte(`{"key":"value"}`), "application/json"},
+		{"svg", "icon.svg", []byte("<svg></svg>"), "image/svg+xml"},
+
+		// Standard mime package
+		{"pdf", "doc.pdf", []byte("%PDF-1.4"), "application/pdf"},
+		{"txt", "notes.txt", []byte("plain text"), "text/plain; charset=utf-8"},
+		{"html", "page.html", []byte("<html></html>"), "text/html; charset=utf-8"},
+
+		// Case insensitivity
+		{"uppercase ext", "REPORT.MD", []byte("# Title"), "text/markdown"},
+		{"mixed case", "Data.CSV", []byte("x,y"), "text/csv"},
+
+		// Fallback to content sniffing (no extension)
+		{"no extension html", "file", []byte("<html><body>hi</body></html>"), "text/html; charset=utf-8"},
+		{"no extension binary", "file", []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, "image/png"},
+
+		// Known extension via mime package (not in our override map)
+		{"xyz chemical", "data.xyz", []byte("just plain text here"), "chemical/x-xyz"},
+		// Truly unknown extension — falls through to content sniffing
+		{"unknown ext text", "data.zzz123", []byte("just plain text here"), "text/plain; charset=utf-8"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectContentType(tt.filename, tt.data)
+			if got != tt.want {
+				t.Errorf("detectContentType(%q) = %q, want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractArtifacts_Constants(t *testing.T) {
+	// Verify constants are sensible
+	if maxArtifactSize != 5<<20 {
+		t.Errorf("maxArtifactSize = %d, want %d (5MB)", maxArtifactSize, 5<<20)
+	}
+	if maxTotalArtifacts != 20<<20 {
+		t.Errorf("maxTotalArtifacts = %d, want %d (20MB)", maxTotalArtifacts, 20<<20)
+	}
+	if artifactOutputDir != "/workspace/output/" {
+		t.Errorf("artifactOutputDir = %q, want %q", artifactOutputDir, "/workspace/output/")
+	}
+}
+
+func TestBuildEntrypointScript_ContainsGemini(t *testing.T) {
+	script := buildEntrypointScript("test prompt", "auto-fastest", 10, "", "test-api-key")
+	if !strings.Contains(script, "gemini-2.5-flash") {
+		t.Error("entrypoint script should contain gemini-2.5-flash model")
+	}
+	if !strings.Contains(script, "generativelanguage.googleapis.com") {
+		t.Error("entrypoint script should contain Google AI Studio base URL")
+	}
+	if !strings.Contains(script, "test-api-key") {
+		t.Error("entrypoint script should contain the injected API key")
+	}
+	if !strings.Contains(script, "--output-format stream-json") {
+		t.Error("entrypoint script should pass --output-format stream-json to oh")
+	}
+	if !strings.Contains(script, "--api-format openai") {
+		t.Error("entrypoint script should pass --api-format openai to oh")
+	}
+	// Verify write_file compliance instructions are in the prompt
+	if !strings.Contains(script, "MUST be write_file") {
+		t.Error("entrypoint script should contain write_file compliance instruction")
+	}
+	// Verify search proxy is started
+	if !strings.Contains(script, "search-proxy.py") {
+		t.Error("entrypoint script should start the search proxy")
+	}
+	if !strings.Contains(script, "localhost:8888") {
+		t.Error("entrypoint script should reference search proxy URL")
+	}
+}
+
+func TestBuildEntrypointScript_NoAPIKey(t *testing.T) {
+	script := buildEntrypointScript("test prompt", "auto-fastest", 10, "", "")
+	// With no API key, OPENAI_API_KEY should be empty (OH will fail at startup)
+	if !strings.Contains(script, `OPENAI_API_KEY=''`) {
+		t.Error("entrypoint script without API key should have empty OPENAI_API_KEY")
+	}
+	// Should still reference Gemini base URL (just with empty key)
+	if !strings.Contains(script, "generativelanguage.googleapis.com") {
+		t.Error("entrypoint script should always contain Google AI Studio base URL")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sanitizeFilename tests
+// ---------------------------------------------------------------------------
+
+func TestSanitizeFilename(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{"simple", "report.md", "report.md", true},
+		{"with spaces", "my report.md", "my report.md", true},
+		{"path traversal", "../../etc/passwd", "", false},
+		{"path traversal subtle", "foo/../../../etc/shadow", "", false},
+		{"absolute path", "/etc/passwd", "", false},
+		{"null byte", "file\x00.md", "", false},
+		{"control chars", "file\x01\x02.md", "", false},
+		{"directory slash", "subdir/file.md", "", false},
+		{"backslash", "sub\\file.md", "", false},
+		{"dot dot", "..", "", false},
+		{"single dot", ".", "", false},
+		{"empty", "", "", false},
+		{"leading dot", ".hidden", ".hidden", true},
+		{"unicode", "报告.md", "报告.md", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := sanitizeFilename(tt.input)
+			if ok != tt.ok {
+				t.Errorf("sanitizeFilename(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Errorf("sanitizeFilename(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isAllowedFileType tests
+// ---------------------------------------------------------------------------
+
+func TestIsAllowedFileType(t *testing.T) {
+	tests := []struct {
+		filename string
+		allowed  bool
+	}{
+		{"report.md", true},
+		{"data.csv", true},
+		{"config.json", true},
+		{"notes.txt", true},
+		{"doc.pdf", true},
+		{"sheet.xlsx", true},
+		{"REPORT.MD", true},   // case insensitive
+		{"data.CSV", true},
+		{"script.sh", false},
+		{"binary.exe", false},
+		{"app.bin", false},
+		{"image.png", false},
+		{"archive.zip", false},
+		{"noextension", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			if got := isAllowedFileType(tt.filename); got != tt.allowed {
+				t.Errorf("isAllowedFileType(%q) = %v, want %v", tt.filename, got, tt.allowed)
+			}
+		})
+	}
+}
+
+func TestBuildEntrypointScript_SystemPrompt(t *testing.T) {
+	script := buildEntrypointScript("test prompt", "auto-fastest", 10, "Be helpful", "key")
+	if !strings.Contains(script, "ADDITIONAL INSTRUCTIONS: Be helpful") {
+		t.Error("entrypoint script should include system prompt")
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		input string

@@ -22,7 +22,7 @@ func TestDeniedToolsEnforcement(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("DAYTONA_API_KEY not set")
 	}
-	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
+	fallbackKey := os.Getenv("GOOGLE_AI_API_KEY")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -44,8 +44,8 @@ func TestDeniedToolsEnforcement(t *testing.T) {
 		"TERM":                   "dumb",
 		"OPENHARNESS_CONFIG_DIR": "/etc/multica-agent",
 	}
-	if openrouterKey != "" {
-		envVars["OPENROUTER_API_KEY"] = openrouterKey
+	if fallbackKey != "" {
+		envVars["FALLBACK_API_KEY"] = fallbackKey
 	}
 
 	t.Log("Creating sandbox...")

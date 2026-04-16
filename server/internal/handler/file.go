@@ -347,15 +347,16 @@ func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, worksp
 
 // linkAttachmentsByIDs links the given attachment IDs to a comment.
 // Only updates attachments that belong to the same issue and have no comment_id yet.
-func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []string) {
+func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID, workspaceID pgtype.UUID, ids []string) {
 	uuids := make([]pgtype.UUID, len(ids))
 	for i, id := range ids {
 		uuids[i] = parseUUID(id)
 	}
 	if err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
-		CommentID: commentID,
-		IssueID:   issueID,
-		Column3:   uuids,
+		CommentID:   commentID,
+		IssueID:     issueID,
+		WorkspaceID: workspaceID,
+		Column4:     uuids,
 	}); err != nil {
 		slog.Error("failed to link attachments to comment", "error", err)
 	}

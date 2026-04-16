@@ -239,7 +239,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Link uploaded attachments to this comment.
 	if len(req.AttachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, req.AttachmentIDs)
+		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, issue.WorkspaceID, req.AttachmentIDs)
 	}
 
 	// Fetch linked attachments so the response includes them.

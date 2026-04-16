@@ -101,11 +101,11 @@ ORDER BY date DESC
 
 type ListRuntimeUsageParams struct {
 	RuntimeID pgtype.UUID `json:"runtime_id"`
-	Since     pgtype.Date `json:"since"`
+	Date      pgtype.Date `json:"date"`
 }
 
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]RuntimeUsage, error) {
-	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Since)
+	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Date)
 	if err != nil {
 		return nil, err
 	}

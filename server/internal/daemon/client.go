@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -99,7 +100,54 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
+// UploadArtifact uploads a single artifact file to the server and returns the attachment ID.
+func (c *Client) UploadArtifact(ctx context.Context, taskID, filename, contentType string, data []byte) (string, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", fmt.Errorf("write file data: %w", err)
+	}
+	if contentType != "" {
+		if err := writer.WriteField("content_type", contentType); err != nil {
+			return "", fmt.Errorf("write content_type field: %w", err)
+		}
+	}
+	writer.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+fmt.Sprintf("/api/daemon/tasks/%s/artifacts", taskID), &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", &requestError{Method: "POST", Path: fmt.Sprintf("/api/daemon/tasks/%s/artifacts", taskID), StatusCode: resp.StatusCode, Body: string(body)}
+	}
+
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	return result.ID, nil
+}
+
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, artifactIDs []string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -109,6 +157,9 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if len(artifactIDs) > 0 {
+		body["artifact_ids"] = artifactIDs
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
 }

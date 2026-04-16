@@ -35,8 +35,9 @@ WHERE comment_id = $1;
 UPDATE attachment
 SET comment_id = $1
 WHERE issue_id = $2
+  AND workspace_id = $3
   AND comment_id IS NULL
-  AND id = ANY($3::uuid[]);
+  AND id = ANY($4::uuid[]);
 
 -- name: LinkAttachmentsToIssue :exec
 UPDATE attachment

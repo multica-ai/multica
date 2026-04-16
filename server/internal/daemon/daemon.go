@@ -63,7 +63,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 			DaytonaAPIURL:    cfg.DaytonaAPIURL,
 			DefaultModel:     cfg.EmbeddedModel,
 			DefaultMaxTurns:  cfg.EmbeddedMaxTurns,
-			OpenRouterAPIKey: cfg.OpenRouterAPIKey,
+			FallbackAPIKey:   cfg.FallbackAPIKey,
 		}, logger)
 		if err != nil {
 			logger.Warn("failed to initialize sandbox manager — embedded runtime disabled", "error", err)
@@ -929,7 +929,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir, result.ArtifactIDs); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error())); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
@@ -1015,16 +1015,32 @@ func (d *Daemon) runEmbeddedTask(ctx context.Context, task Task, taskLog *slog.L
 		})
 	}
 
+	// Upload extracted artifacts to server and collect attachment IDs.
+	var artifactIDs []string
+	if result.Status == "completed" && len(result.Artifacts) > 0 {
+		taskLog.Info("uploading artifacts", "count", len(result.Artifacts))
+		for _, art := range result.Artifacts {
+			id, err := d.client.UploadArtifact(ctx, task.ID, art.Filename, art.ContentType, art.Data)
+			if err != nil {
+				taskLog.Warn("failed to upload artifact", "filename", art.Filename, "error", err)
+				continue
+			}
+			artifactIDs = append(artifactIDs, id)
+			taskLog.Info("artifact uploaded", "filename", art.Filename, "attachment_id", id)
+		}
+	}
+
 	switch result.Status {
 	case "completed":
 		if result.Output == "" {
 			return TaskResult{}, fmt.Errorf("embedded agent returned empty output")
 		}
 		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			Usage:     usageEntries,
+			Status:      "completed",
+			Comment:     result.Output,
+			SessionID:   result.SessionID,
+			Usage:       usageEntries,
+			ArtifactIDs: artifactIDs,
 		}, nil
 	case "timeout":
 		return TaskResult{}, fmt.Errorf("embedded agent timed out: %s", result.Error)

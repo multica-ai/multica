@@ -71,12 +71,13 @@ type TaskUsageEntry struct {
 
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status     string           `json:"status"`
-	Comment    string           `json:"comment"`
-	BranchName string           `json:"branch_name,omitempty"`
-	EnvType    string           `json:"env_type,omitempty"`
-	SessionID  string           `json:"session_id,omitempty"` // Claude session ID for future resumption
-	WorkDir    string           `json:"work_dir,omitempty"`   // working directory used during execution
-	EnvRoot    string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
-	Usage      []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	Status      string           `json:"status"`
+	Comment     string           `json:"comment"`
+	BranchName  string           `json:"branch_name,omitempty"`
+	EnvType     string           `json:"env_type,omitempty"`
+	SessionID   string           `json:"session_id,omitempty"` // Claude session ID for future resumption
+	WorkDir     string           `json:"work_dir,omitempty"`   // working directory used during execution
+	EnvRoot     string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
+	Usage       []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	ArtifactIDs []string         `json:"-"`                    // attachment IDs from artifact upload (not sent to server directly)
 }

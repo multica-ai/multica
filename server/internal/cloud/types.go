@@ -8,7 +8,7 @@ type SandboxConfig struct {
 	DaytonaAPIURL    string        // Optional: custom Daytona API URL (SDK default if empty)
 	DefaultModel     string        // Default LLM model (default: "auto-fastest")
 	DefaultMaxTurns  int           // Default max agent turns (default: 25)
-	OpenRouterAPIKey string        // Fallback: OpenRouter key for free models when ModelRelay fails
+	FallbackAPIKey   string        // Fallback: Google AI Studio API key when ModelRelay fails
 	ImageTimeout     time.Duration // Timeout for sandbox image build (default: 8min)
 }
 
