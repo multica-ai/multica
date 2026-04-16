@@ -1386,11 +1386,18 @@ var blockedEnvKeys = map[string]struct{}{
 	"DYLD_INSERT_LIBRARIES": {}, "DYLD_LIBRARY_PATH": {},
 	"NODE_OPTIONS": {}, "NODE_PATH": {},
 	"PYTHONPATH": {}, "PYTHONSTARTUP": {},
+	"RUBYOPT": {}, "PERL5OPT": {},
+	"JAVA_TOOL_OPTIONS": {}, "_JAVA_OPTIONS": {},
+
+	// Shell init-time code execution
+	"BASH_ENV": {}, "ENV": {}, "ZDOTDIR": {},
 
 	// Proxy / TLS hijacking
 	"HTTP_PROXY": {}, "HTTPS_PROXY": {}, "ALL_PROXY": {}, "NO_PROXY": {},
 	"SSL_CERT_FILE": {}, "SSL_CERT_DIR": {},
+	"CURL_CA_BUNDLE": {}, "REQUESTS_CA_BUNDLE": {},
 	"NODE_TLS_REJECT_UNAUTHORIZED": {},
+	"NODE_EXTRA_CA_CERTS": {},
 
 	// Git-driven command execution
 	"GIT_SSH_COMMAND": {}, "GIT_TERMINAL_PROMPT": {},
