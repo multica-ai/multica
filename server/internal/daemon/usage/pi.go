@@ -6,158 +6,121 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
-// scanPi reads Pi JSONL session files from
-// ~/.pi/sessions/*.jsonl
-// and extracts token usage from agent_end events.
+// scanPi reads Pi session JSONL logs produced by the multica daemon and
+// extracts token usage from assistant `message` events.
 //
-// Pi logs session events as JSONL. Token usage appears in:
-//   - "agent_end" events with a "usage" field containing cumulative totals
+// The agent backend writes every run's session file into
+// ~/.multica/pi-sessions/ (see agent.PiSessionDir). Pi appends events to
+// the file as it runs; each assistant `message` event carries cumulative
+// usage for that turn in the shape:
+//
+//	{"type":"message","timestamp":"...",
+//	 "message":{"role":"assistant","model":"...",
+//	            "usage":{"input":N,"output":N,"cacheRead":N,"cacheWrite":N,...}}}
 func (s *Scanner) scanPi() []Record {
-	root := piSessionRoot()
-	if root == "" {
+	root, err := agent.PiSessionDir()
+	if err != nil || root == "" {
+		return nil
+	}
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		return nil
 	}
 
-	pattern := filepath.Join(root, "*.jsonl")
-	files, err := filepath.Glob(pattern)
+	files, err := filepath.Glob(filepath.Join(root, "*.jsonl"))
 	if err != nil {
 		s.logger.Debug("pi glob error", "error", err)
 		return nil
 	}
 
-	var allRecords []Record
+	var records []Record
 	for _, f := range files {
-		record := s.parsePiFile(f)
-		if record != nil {
-			allRecords = append(allRecords, *record)
-		}
+		records = append(records, s.parsePiFile(f)...)
 	}
-
-	return mergeRecords(allRecords)
+	return mergeRecords(records)
 }
 
-// piSessionRoot returns the Pi sessions directory.
-func piSessionRoot() string {
-	if piHome := os.Getenv("PI_HOME"); piHome != "" {
-		dir := filepath.Join(piHome, "sessions")
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
-		}
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	candidates := []string{
-		filepath.Join(home, ".pi", "sessions"),
-		filepath.Join(home, ".local", "share", "pi", "sessions"),
-		filepath.Join(home, ".config", "pi", "sessions"),
-	}
-	for _, dir := range candidates {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
-		}
-	}
-	return ""
-}
-
-// piLine represents a line in a Pi session JSONL file.
-type piLine struct {
+type piSessionLine struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
-	Usage     *struct {
-		Model             string `json:"model"`
-		InputTokens       int64  `json:"input_tokens"`
-		OutputTokens      int64  `json:"output_tokens"`
-		CachedInputTokens int64  `json:"cached_input_tokens"`
-	} `json:"usage"`
+	Message   *struct {
+		Role  string `json:"role"`
+		Model string `json:"model"`
+		Usage *struct {
+			Input      int64 `json:"input"`
+			Output     int64 `json:"output"`
+			CacheRead  int64 `json:"cacheRead"`
+			CacheWrite int64 `json:"cacheWrite"`
+		} `json:"usage"`
+	} `json:"message"`
 }
 
-// parsePiFile extracts the final token usage from a Pi session file.
-// Returns nil if no usage data found.
-func (s *Scanner) parsePiFile(path string) *Record {
+// parsePiFile walks a single session file and emits one Record per
+// assistant message with non-zero usage. Each assistant message carries
+// the cost for that specific turn (not cumulative), so they can be
+// summed by mergeRecords downstream.
+func (s *Scanner) parsePiFile(path string) []Record {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
 
-	var lastUsage *struct {
-		Model             string `json:"model"`
-		InputTokens       int64  `json:"input_tokens"`
-		OutputTokens      int64  `json:"output_tokens"`
-		CachedInputTokens int64  `json:"cached_input_tokens"`
-	}
-	var lastTimestamp string
-
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 256*1024), 8*1024*1024)
 
+	var records []Record
 	for scanner.Scan() {
 		line := scanner.Bytes()
-
-		// Fast pre-filter.
-		if !bytesContains(line, `"usage"`) && !bytesContains(line, `"input_tokens"`) {
+		if !bytesContains(line, `"usage"`) {
 			continue
 		}
-
-		var entry piLine
+		var entry piSessionLine
 		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
-
-		// Only extract usage from agent_end events (cumulative totals).
-		if entry.Type != "agent_end" {
+		if entry.Type != "message" || entry.Message == nil || entry.Message.Usage == nil {
 			continue
 		}
-		if entry.Usage == nil {
+		if entry.Message.Role != "assistant" {
+			continue
+		}
+		u := entry.Message.Usage
+		if u.Input == 0 && u.Output == 0 && u.CacheRead == 0 && u.CacheWrite == 0 {
 			continue
 		}
 
-		lastUsage = entry.Usage
+		date := ""
 		if entry.Timestamp != "" {
-			lastTimestamp = entry.Timestamp
+			if ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp); err == nil {
+				date = ts.Local().Format("2006-01-02")
+			}
 		}
-	}
-
-	if lastUsage == nil {
-		return nil
-	}
-	if lastUsage.InputTokens == 0 && lastUsage.OutputTokens == 0 {
-		return nil
-	}
-
-	var date string
-	if lastTimestamp != "" {
-		if ts, err := time.Parse(time.RFC3339Nano, lastTimestamp); err == nil {
-			date = ts.Local().Format("2006-01-02")
-		} else if ts, err := time.Parse(time.RFC3339, lastTimestamp); err == nil {
-			date = ts.Local().Format("2006-01-02")
-		}
-	}
-	if date == "" {
-		if info, err := os.Stat(path); err == nil {
+		if date == "" {
+			info, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
 			date = info.ModTime().Local().Format("2006-01-02")
-		} else {
-			return nil
 		}
-	}
 
-	model := lastUsage.Model
-	if model == "" {
-		model = "unknown"
-	}
+		model := entry.Message.Model
+		if model == "" {
+			model = "unknown"
+		}
 
-	return &Record{
-		Date:            date,
-		Provider:        "pi",
-		Model:           model,
-		InputTokens:     lastUsage.InputTokens,
-		OutputTokens:    lastUsage.OutputTokens,
-		CacheReadTokens: lastUsage.CachedInputTokens,
+		records = append(records, Record{
+			Date:             date,
+			Provider:         "pi",
+			Model:            model,
+			InputTokens:      u.Input,
+			OutputTokens:     u.Output,
+			CacheReadTokens:  u.CacheRead,
+			CacheWriteTokens: u.CacheWrite,
+		})
 	}
+	return records
 }
