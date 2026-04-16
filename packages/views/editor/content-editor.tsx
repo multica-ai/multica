@@ -112,6 +112,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
     const prevContentRef = useRef(defaultValue);
+    const lastEmittedRef = useRef<string | null>(null);
 
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
@@ -127,6 +128,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       editable,
+      onCreate: ({ editor: ed }) => {
+        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown());
+      },
       content: defaultValue ? preprocessMarkdown(defaultValue) : "",
       contentType: defaultValue ? "markdown" : undefined,
       extensions: createEditorExtensions({
@@ -141,7 +145,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (!onUpdateRef.current) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
-          onUpdateRef.current?.(stripBlobUrls(ed.getMarkdown()));
+          const md = stripBlobUrls(ed.getMarkdown());
+          if (md === lastEmittedRef.current) return;
+          lastEmittedRef.current = md;
+          onUpdateRef.current?.(md);
         }, debounceMs);
       },
       onBlur: () => {
