@@ -71,12 +71,12 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
 
-	// Fail orphaned tasks (dispatched/running) whose runtimes just went offline.
+	// Cancel orphaned tasks (dispatched/running) whose runtimes just went offline.
 	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx)
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
 	} else if len(failedTasks) > 0 {
-		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
+		slog.Info("runtime sweeper: cancelled orphaned tasks", "count", len(failedTasks))
 		broadcastFailedTasks(ctx, queries, bus, failedTasks)
 	}
 
@@ -154,7 +154,7 @@ type failedTask struct {
 	IssueID pgtype.UUID
 }
 
-// broadcastFailedTasks publishes task:failed events with the correct WorkspaceID
+// broadcastFailedTasks publishes task:cancelled events with the correct WorkspaceID
 // and reconciles agent status for all affected agents.
 func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.Bus, tasks any) {
 	var items []failedTask
