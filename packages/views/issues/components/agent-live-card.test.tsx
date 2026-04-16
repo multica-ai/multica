@@ -121,6 +121,20 @@ describe("TaskRunEntry retry button", () => {
     expect(screen.queryByText("Retry")).not.toBeInTheDocument();
   });
 
+  it("hides retry button when active task exists on issue", async () => {
+    const failedTask = makeTask({ id: "task-1", status: "failed" });
+    const runningTask = makeTask({ id: "task-2", status: "running", error: null });
+    mockListTasksByIssue.mockResolvedValue([runningTask, failedTask]);
+
+    render(<TaskRunHistory issueId="issue-1" />);
+    await waitFor(() => expect(screen.getByText(/Execution history/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText(/Execution history/));
+
+    // Failed task is visible but Retry button is hidden (active task running)
+    await waitFor(() => expect(screen.getByText("failed")).toBeInTheDocument());
+    expect(screen.queryByText("Retry")).not.toBeInTheDocument();
+  });
+
   it("hides retry button when task was already retried", async () => {
     const originalTask = makeTask({ id: "task-1", status: "failed" });
     const retryTask = makeTask({ id: "task-2", status: "completed", error: null, retried_from_id: "task-1" });
@@ -172,7 +186,25 @@ describe("TaskRunEntry retry button", () => {
     await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
   });
 
-  it("shows toast on retry failure", async () => {
+  it("shows user-friendly toast for closed issue", async () => {
+    const { toast } = await import("sonner");
+    const failedTask = makeTask({ status: "failed" });
+    mockListTasksByIssue.mockResolvedValue([failedTask]);
+    mockRetryTask.mockRejectedValue(new Error("cannot retry: issue is closed"));
+
+    render(<TaskRunHistory issueId="issue-1" />);
+    await waitFor(() => expect(screen.getByText(/Execution history/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText(/Execution history/));
+
+    await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "This issue is closed — reopen it to retry"
+    ));
+  });
+
+  it("shows user-friendly toast for active task conflict", async () => {
     const { toast } = await import("sonner");
     const failedTask = makeTask({ status: "failed" });
     mockListTasksByIssue.mockResolvedValue([failedTask]);
@@ -185,6 +217,8 @@ describe("TaskRunEntry retry button", () => {
     await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Retry"));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("an active task already exists for this issue"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "A task is already running — wait for it to finish"
+    ));
   });
 });

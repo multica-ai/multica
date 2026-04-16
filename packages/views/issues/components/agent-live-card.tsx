@@ -480,6 +480,17 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
     }, [issueId]),
   );
 
+  // Refresh when a new task is dispatched (retry creates a task with
+  // retried_from_id — re-fetching hides the Retry button on the original).
+  useWSEvent(
+    "task:dispatch",
+    useCallback((payload: unknown) => {
+      const p = payload as { issue_id?: string };
+      if (p.issue_id !== issueId) return;
+      api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
+    }, [issueId]),
+  );
+
   const completedTasks = tasks.filter((t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled");
   if (completedTasks.length === 0) return null;
 
@@ -532,7 +543,7 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
   const isRetryable = task.status === "failed" || task.status === "cancelled";
   const alreadyRetried = retried || allTasks.some((t) => t.retried_from_id === task.id);
   const hasActiveTask = allTasks.some((t) => t.status === "queued" || t.status === "dispatched" || t.status === "running");
-  const showRetryButton = isRetryable && !alreadyRetried;
+  const showRetryButton = isRetryable && !alreadyRetried && !hasActiveTask;
 
   const handleRetry = useCallback(async () => {
     if (retrying || alreadyRetried) return;
@@ -542,7 +553,13 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
       setRetried(true);
       onRetried();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to retry task";
+      const raw = e instanceof Error ? e.message : "Failed to retry task";
+      // Translate backend errors into user-friendly messages.
+      const msg = raw.includes("issue is closed")
+        ? "This issue is closed — reopen it to retry"
+        : raw.includes("active task")
+          ? "A task is already running — wait for it to finish"
+          : raw;
       toast.error(msg);
       setRetrying(false);
     }
@@ -567,10 +584,10 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
           <span
             role="button"
             tabIndex={0}
-            onClick={(e) => { e.stopPropagation(); if (!(retrying || hasActiveTask)) handleRetry(); }}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (!(retrying || hasActiveTask)) handleRetry(); } }}
-            className={cn("ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer", (retrying || hasActiveTask) && "opacity-50 pointer-events-none")}
-            title={hasActiveTask ? "A task is already running on this issue" : "Retry this task"}
+            onClick={(e) => { e.stopPropagation(); if (!retrying) handleRetry(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (!retrying) handleRetry(); } }}
+            className={cn("ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer", retrying && "opacity-50 pointer-events-none")}
+            title="Retry this task"
           >
             {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
             <span>{retrying ? "Retrying..." : "Retry"}</span>
