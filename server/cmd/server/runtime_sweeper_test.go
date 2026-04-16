@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -484,4 +486,54 @@ func unhex(c byte) byte {
 		return c - 'A' + 10
 	}
 	return 0
+}
+
+// TestCancelTasksForIssue_ReconcileAgentStatus verifies that CancelTasksForIssue
+// cancels tasks and calls ReconcileAgentStatus for each affected agent.
+// Regression test: the old code only cancelled tasks but never called ReconcileAgentStatus,
+// leaving agents stuck at status="working" indefinitely after issue deletion.
+func TestCancelTasksForIssue_ReconcileAgentStatus(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	queries := db.New(testPool)
+	bus := events.New()
+	hub := realtime.NewHub()
+	taskSvc := service.NewTaskService(queries, hub, bus)
+
+	// Capture agent:status events — ReconcileAgentStatus publishes these.
+	var statusEvents []events.Event
+	var mu sync.Mutex
+	bus.Subscribe("agent:status", func(e events.Event) {
+		mu.Lock()
+		statusEvents = append(statusEvents, e)
+		mu.Unlock()
+	})
+
+	ctx := context.Background()
+	if err := taskSvc.CancelTasksForIssue(ctx, parseUUID(issueID)); err != nil {
+		t.Fatalf("CancelTasksForIssue: %v", err)
+	}
+
+	// Verify the task was actually cancelled in the DB.
+	var taskStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskStatus); err != nil {
+		t.Fatalf("query task status: %v", err)
+	}
+	if taskStatus != "cancelled" {
+		t.Fatalf("expected task status 'cancelled', got %q", taskStatus)
+	}
+
+	// Verify ReconcileAgentStatus was called: it always publishes an agent:status
+	// event regardless of the final status value.
+	mu.Lock()
+	n := len(statusEvents)
+	mu.Unlock()
+	if n == 0 {
+		t.Fatalf("expected agent:status event for agent %s — ReconcileAgentStatus was not called (old bug: CancelTasksForIssue skipped reconciliation)", agentID)
+	}
 }

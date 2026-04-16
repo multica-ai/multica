@@ -67,6 +67,12 @@ UPDATE agent_task_queue
 SET status = 'cancelled'
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
 
+-- name: CancelAgentTasksByIssueReturning :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING id, agent_id;
+
 -- name: CancelAgentTasksByAgent :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'

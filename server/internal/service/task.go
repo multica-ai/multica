@@ -138,9 +138,22 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	return task, nil
 }
 
-// CancelTasksForIssue cancels all active tasks for an issue.
+// CancelTasksForIssue cancels all active tasks for an issue and reconciles
+// the status of every affected agent so they return to idle.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
-	return s.Queries.CancelAgentTasksByIssue(ctx, issueID)
+	tasks, err := s.Queries.CancelAgentTasksByIssueReturning(ctx, issueID)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool)
+	for _, t := range tasks {
+		key := t.AgentID.String()
+		if !seen[key] {
+			seen[key] = true
+			s.ReconcileAgentStatus(ctx, t.AgentID)
+		}
+	}
+	return nil
 }
 
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
