@@ -78,9 +78,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
-		// resultUsage holds authoritative usage from "result" events (session totals).
-		// We only use this for the final Result to avoid double-counting with
-		// per-message usage reported in "assistant" or "step_finish" events.
+		// stepUsage accumulates per-step token counts from "step_finish" events.
+		// resultUsage holds authoritative session totals from "result" events.
+		// If the result event includes usage, we use resultUsage exclusively;
+		// otherwise we fall back to stepUsage.
+		stepUsage := make(map[string]TokenUsage)
 		resultUsage := make(map[string]TokenUsage)
 		hasResultUsage := false
 
@@ -168,20 +170,26 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 
 			case "step_finish":
-				if evt.Part != nil && !hasResultUsage {
+				if evt.Part != nil {
 					var part cursorStepFinishPart
 					_ = json.Unmarshal(evt.Part, &part)
 					model := evt.Model
 					if model == "" {
 						model = "cursor"
 					}
-					u := resultUsage[model]
+					u := stepUsage[model]
 					u.InputTokens += int64(part.Tokens.Input)
 					u.OutputTokens += int64(part.Tokens.Output)
 					u.CacheReadTokens += int64(part.Tokens.Cache.Read)
-					resultUsage[model] = u
+					stepUsage[model] = u
 				}
 			}
+		}
+
+		// Use result usage if available (session totals); otherwise fall back
+		// to accumulated step_finish usage.
+		if !hasResultUsage {
+			resultUsage = stepUsage
 		}
 
 		exitErr := cmd.Wait()
