@@ -303,7 +303,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ca = []byte("[]")
 	}
 
-	agent, err := h.Queries.UpsertAgent(r.Context(), db.UpsertAgentParams{
+	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
 		Description:        req.Description,
@@ -319,6 +319,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 	})
 	if err != nil {
+		// FIX(PR-3): unique constraint on (workspace_id, name) — return a clear
+		// conflict error instead of a generic 500 so the UI can show the right message.
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "an agent named \""+req.Name+"\" already exists in this workspace")
+			return
+		}
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
