@@ -268,7 +268,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
             <div {...descDropZoneProps} className="relative flex-1 min-h-0 overflow-y-auto px-5">
               <ContentEditor
                 ref={descEditorRef}
-                defaultValue={draft.description}
+                defaultValue={(data?.description as string) || draft.description}
                 placeholder="Add description..."
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}

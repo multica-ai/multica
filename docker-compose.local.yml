@@ -1,0 +1,59 @@
+# Local-dev Docker Compose — reuses the host's existing PostgreSQL
+# (e.g. an already-running `unitesync-postgres` container) instead of
+# starting a new pgvector container that would collide on port 5432.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up -d --build
+#   docker compose -f docker-compose.local.yml logs -f
+#   docker compose -f docker-compose.local.yml down
+#
+# Frontend: http://localhost:3000
+# Backend:  http://localhost:8080
+#
+# Assumes:
+#   - Host PostgreSQL is reachable on localhost:5432 with a `multica` database.
+#   - Migrations have been applied (e.g. `cd server && go run ./cmd/migrate up`).
+#   - .env has POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB pointing at it.
+
+name: multica-local
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    extra_hosts:
+      # Lets the container reach the host-bound Postgres at host.docker.internal:5432
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - backend_uploads:/app/data/uploads
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-multica}?sslmode=disable
+      PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-local-dev}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        REMOTE_API_URL: http://backend:8080
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      HOSTNAME: "0.0.0.0"
+
+volumes:
+  backend_uploads:

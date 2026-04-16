@@ -11,6 +11,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { api } from "@multica/core/api";
 import type { Workspace, WorkspaceRepo } from "@multica/core/types";
 
@@ -20,6 +21,10 @@ export function RepositoriesTab() {
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: projects = [] } = useQuery({
+    ...projectListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
 
   const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
   const [saving, setSaving] = useState(false);
@@ -59,6 +64,10 @@ export function RepositoriesTab() {
     setRepos(repos.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   };
 
+  const handleRepoProjectChange = (index: number, projectId: string) => {
+    setRepos(repos.map((r, i) => (i === index ? { ...r, project_id: projectId || null } : r)));
+  };
+
   if (!workspace) return null;
 
   return (
@@ -91,6 +100,25 @@ export function RepositoriesTab() {
                     placeholder="Description (e.g. Go backend + Next.js frontend)"
                     className="text-sm"
                   />
+                  <Input
+                    type="text"
+                    value={repo.local_path ?? ""}
+                    onChange={(e) => handleRepoChange(index, "local_path", e.target.value)}
+                    disabled={!canManageWorkspace}
+                    placeholder="Local path (e.g. /Users/you/code/project-name)"
+                    className="text-sm font-mono"
+                  />
+                  <select
+                    value={repo.project_id ?? ""}
+                    onChange={(e) => handleRepoProjectChange(index, e.target.value)}
+                    disabled={!canManageWorkspace}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm text-foreground disabled:opacity-60"
+                  >
+                    <option value="">No project</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                  </select>
                 </div>
                 {canManageWorkspace && (
                   <Button

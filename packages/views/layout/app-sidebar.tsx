@@ -75,8 +75,29 @@ import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
-import type { PinnedItem } from "@multica/core/types";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { useCreateIssue } from "@multica/core/issues/mutations";
+import type { PinnedItem, Project, WorkspaceRepo } from "@multica/core/types";
 import { useLogout } from "../auth";
+
+function repoShortName(repo: WorkspaceRepo): string {
+  if (repo.local_path) {
+    const parts = repo.local_path.split("/").filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last) return last;
+  }
+  const trimmed = (repo.url ?? "").trim().replace(/\.git$/i, "");
+  const parts = trimmed.split("/").filter(Boolean);
+  return parts[parts.length - 1] || repo.url || "repo";
+}
+
+function repoDescriptionTemplate(repo: WorkspaceRepo): string {
+  const name = repoShortName(repo);
+  const lines: string[] = [];
+  if (repo.local_path) lines.push(`Local path: \`${repo.local_path}\``);
+  if (repo.url) lines.push(`Git: ${repo.url}`);
+  return `Repository: **${name}**\n${lines.join("\n")}\n\n`;
+}
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -181,6 +202,166 @@ function SortablePinItem({ pin, href, pathname, onUnpin }: { pin: PinnedItem; hr
   );
 }
 
+function ProjectSidebarRow({
+  project,
+  href,
+  isActive,
+  repos,
+}: {
+  project: Project;
+  href: string;
+  isActive: boolean;
+  repos: WorkspaceRepo[];
+}) {
+  const createIssue = useCreateIssue();
+
+  const openProjectModal = () => {
+    useModalStore.getState().open("create-issue", { project_id: project.id });
+  };
+
+  const openRepoModal = (repo: WorkspaceRepo) => {
+    useModalStore.getState().open("create-issue", {
+      project_id: project.id,
+      description: repoDescriptionTemplate(repo),
+    });
+  };
+
+  const createRepoIssueQuick = (repo: WorkspaceRepo, title: string) => {
+    createIssue.mutate({
+      title,
+      project_id: project.id,
+      description: repoDescriptionTemplate(repo),
+    });
+  };
+
+  return (
+    <Collapsible defaultOpen>
+      <SidebarMenuItem className="group/proj">
+        <SidebarMenuButton
+          size="sm"
+          isActive={isActive}
+          render={<AppLink href={href} />}
+          className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+        >
+          <CollapsibleTrigger
+            className="flex size-3.5 shrink-0 items-center justify-center rounded-sm hover:bg-sidebar-accent"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          >
+            <ChevronRight className="!size-3 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/proj:rotate-90" />
+          </CollapsibleTrigger>
+          {project.icon ? (
+            <span className="flex size-3.5 shrink-0 items-center justify-center text-xs leading-none">{project.icon}</span>
+          ) : (
+            <FolderKanban className="!size-3.5 shrink-0" />
+          )}
+          <span className="min-w-0 flex-1 truncate">{project.title}</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={<span role="button" />}
+              className="hidden size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/proj:flex hover:text-foreground hover:bg-sidebar-accent"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openProjectModal();
+              }}
+            >
+              <Plus className="size-3" />
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}>New issue in {project.title}</TooltipContent>
+          </Tooltip>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+      <CollapsibleContent>
+        <SidebarMenu className="gap-0.5 ml-5 border-l border-sidebar-border pl-1 mt-0.5">
+          {repos.length === 0 ? (
+            <li className="px-2 py-1 text-[10px] text-muted-foreground italic">No repos — assign in Settings</li>
+          ) : (
+            repos.map((repo) => (
+              <RepoSidebarRow
+                key={repo.url || repo.local_path || `repo-${project.id}`}
+                repo={repo}
+                onOpenModal={() => openRepoModal(repo)}
+                onQuickCreate={(title) => createRepoIssueQuick(repo, title)}
+                isSubmitting={createIssue.isPending}
+              />
+            ))
+          )}
+        </SidebarMenu>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function RepoSidebarRow({
+  repo,
+  onOpenModal,
+  onQuickCreate,
+  isSubmitting,
+}: {
+  repo: WorkspaceRepo;
+  onOpenModal: () => void;
+  onQuickCreate: (title: string) => void;
+  isSubmitting: boolean;
+}) {
+  const [quickTitle, setQuickTitle] = React.useState("");
+  const name = repoShortName(repo);
+
+  const submit = () => {
+    const t = quickTitle.trim();
+    if (!t || isSubmitting) return;
+    onQuickCreate(t);
+    setQuickTitle("");
+  };
+
+  return (
+    <SidebarMenuItem className="group/repo">
+      <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent/70">
+        <span className="size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+        <span className="min-w-0 flex-1 truncate" title={repo.url}>{name}</span>
+        <Tooltip>
+          <TooltipTrigger
+            render={<span role="button" />}
+            className="hidden size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/repo:flex hover:text-foreground hover:bg-sidebar-accent"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenModal();
+            }}
+          >
+            <Plus className="size-3" />
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={4}>New issue in {name}</TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="ml-3 mr-1 hidden group-hover/repo:block focus-within:!block">
+        <div className="flex items-center gap-1 rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs hover:border-border focus-within:border-border focus-within:bg-background">
+          <Plus className="size-3 shrink-0 text-muted-foreground" />
+          <input
+            type="text"
+            value={quickTitle}
+            onChange={(e) => setQuickTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submit();
+              } else if (e.key === "Escape") {
+                e.currentTarget.blur();
+                setQuickTitle("");
+              }
+            }}
+            placeholder={`Quick add in ${name}…`}
+            disabled={isSubmitting}
+            className="min-w-0 flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-60"
+          />
+        </div>
+      </div>
+    </SidebarMenuItem>
+  );
+}
+
 interface AppSidebarProps {
   /** Rendered above SidebarHeader (e.g. desktop traffic light spacer) */
   topSlot?: React.ReactNode;
@@ -217,6 +398,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });
+  const { data: projects = [] } = useQuery({
+    ...projectListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const workspaceRepos = workspace?.repos ?? [];
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -502,6 +688,30 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+
+          {projects.length > 0 && (
+            <SidebarGroup className="group/projects">
+              <SidebarGroupLabel>
+                <span>Projects</span>
+                <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/projects:opacity-100">
+                  {projects.length}
+                </span>
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu className="gap-0.5">
+                  {projects.map((proj) => (
+                    <ProjectSidebarRow
+                      key={proj.id}
+                      project={proj}
+                      href={p.projectDetail(proj.id)}
+                      isActive={pathname === p.projectDetail(proj.id)}
+                      repos={workspaceRepos.filter((r) => r.project_id === proj.id)}
+                    />
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
 
           <SidebarGroup>
             <SidebarGroupLabel>Configure</SidebarGroupLabel>

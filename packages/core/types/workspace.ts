@@ -3,6 +3,8 @@ export type MemberRole = "owner" | "admin" | "member";
 export interface WorkspaceRepo {
   url: string;
   description: string;
+  project_id?: string | null;
+  local_path?: string | null;
 }
 
 export interface Workspace {
