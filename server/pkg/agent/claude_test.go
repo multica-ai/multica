@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 )
@@ -221,9 +222,9 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	t.Parallel()
 
 	blocked := map[string]blockedArgMode{
-		"--output-format":  blockedWithValue,
+		"--output-format":   blockedWithValue,
 		"--permission-mode": blockedWithValue,
-		"-p":               blockedStandalone,
+		"-p":                blockedStandalone,
 	}
 	logger := slog.Default()
 
@@ -406,6 +407,62 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	env := buildEnv(nil)
 	if len(env) == 0 {
 		t.Fatal("expected at least system env vars")
+	}
+}
+
+func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
+	args := buildClaudeArgs(ExecOptions{
+		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
+	}, slog.Default())
+
+	for i, a := range args {
+		if a == "--mcp-config" {
+			t.Fatalf("--mcp-config should be blocked from custom_args, found at index %d: %v", i, args)
+		}
+		if a == "/tmp/evil.json" {
+			t.Fatalf("--mcp-config value should be consumed when blocking, but found it at index %d: %v", i, args)
+		}
+	}
+
+	// Non-blocked args should still pass through.
+	foundModel := false
+	for i, a := range args {
+		if a == "--model" && i+1 < len(args) && args[i+1] == "o3" {
+			foundModel = true
+		}
+	}
+	if !foundModel {
+		t.Fatalf("expected --model o3 in args after blocking --mcp-config: %v", args)
+	}
+}
+
+func TestWriteMcpConfigToTemp(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"mcpServers":{"test":{"command":"echo","args":["hello"]}}}`)
+	path, err := writeMcpConfigToTemp(raw)
+	if err != nil {
+		t.Fatalf("writeMcpConfigToTemp: %v", err)
+	}
+
+	// File should exist and contain exactly the raw JSON.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read temp file %s: %v", path, err)
+	}
+	if !bytes.Equal(data, []byte(raw)) {
+		t.Fatalf("expected %s, got %s", raw, data)
+	}
+
+	// Cleanup should remove the file.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected temp file to be removed, but it still exists")
 	}
 }
 

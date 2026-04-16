@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,7 +28,7 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
-	reposVersion    string             // stored for future use: skip refresh when version unchanged
+	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
@@ -1006,8 +1007,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	taskStart := time.Now()
 
 	var customArgs []string
+	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
+		mcpConfig = task.Agent.McpConfig
 	}
 	execOpts := agent.ExecOptions{
 		Cwd:             env.WorkDir,
@@ -1015,6 +1018,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 		CustomArgs:      customArgs,
+		McpConfig:       mcpConfig,
 	}
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
