@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -25,8 +26,9 @@ type ExecOptions struct {
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration
-	ResumeSessionID string   // if non-empty, resume a previous agent session
-	CustomArgs      []string // additional CLI arguments appended to the agent command
+	ResumeSessionID string          // if non-empty, resume a previous agent session
+	CustomArgs      []string        // additional CLI arguments appended to the agent command
+	McpConfig       json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 }
 
 // Session represents a running agent execution.

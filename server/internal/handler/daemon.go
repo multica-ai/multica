@@ -476,6 +476,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
+		var mcpConfig json.RawMessage
+		if agent.McpConfig != nil {
+			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
@@ -483,6 +487,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Skills:       skills,
 			CustomEnv:    customEnv,
 			CustomArgs:   customArgs,
+			McpConfig:    mcpConfig,
 		}
 	}
 
