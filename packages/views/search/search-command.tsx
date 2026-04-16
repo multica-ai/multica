@@ -281,7 +281,9 @@ export function SearchCommand() {
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
+    // No query: surface the whole Commands list so users can discover what's
+    // available without having to guess keywords (Linear/Raycast pattern).
+    if (!q) return commands;
     return commands.filter(
       (c) =>
         c.label.toLowerCase().includes(q) ||
@@ -670,9 +672,8 @@ export function SearchCommand() {
             )}
 
             {!isLoading && !query.trim() && recentIssues.length === 0 && (
-              <div className="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
-                <span>Type to search issues and projects...</span>
-                <span className="text-xs">Press <kbd className="rounded bg-muted px-1.5 py-0.5 font-medium">⌘K</kbd> to open this anytime</span>
+              <div className="px-5 py-4 text-center text-xs text-muted-foreground">
+                Type to search issues and projects
               </div>
             )}
           </CommandPrimitive.List>

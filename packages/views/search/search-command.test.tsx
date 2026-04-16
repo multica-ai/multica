@@ -161,12 +161,19 @@ describe("SearchCommand", () => {
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
   });
 
-  it("does not show pages when no query is entered", () => {
+  it("shows Commands by default but hides Pages and Switch Workspace until query", () => {
     render(<SearchCommand />);
 
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
-    expect(screen.queryByText("Commands")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch Workspace")).not.toBeInTheDocument();
+    // Commands surface by default for discoverability.
+    expect(screen.getByText("Commands")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "New Project" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
   });
 
   it("filters navigation pages by query", async () => {
