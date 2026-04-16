@@ -73,6 +73,16 @@ function HermesLogo({ className }: { className: string }) {
   );
 }
 
+// Ollama — official llama silhouette, monochrome, sourced from
+// github.com/ollama/ollama brand assets (logo.svg, simplified path).
+function OllamaLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M7.755 0c-.704.014-1.396.293-1.94.84-.96.962-1.244 2.376-.92 3.673-.747.59-1.318 1.43-1.61 2.413-.291.984-.281 2.025.013 2.99-.83.83-1.298 1.96-1.298 3.135 0 1.077.394 2.114 1.105 2.917-.214.787-.211 1.62.011 2.405-.222.785-.225 1.62-.011 2.407-.711.802-1.105 1.84-1.105 2.916 0 .073.002.145.005.218H22.99c.003-.073.005-.145.005-.218 0-1.076-.394-2.114-1.105-2.916.222-.787.219-1.62-.011-2.407.222-.786.225-1.618.011-2.405.711-.803 1.105-1.84 1.105-2.917 0-1.175-.468-2.305-1.298-3.135.294-.965.304-2.006.013-2.99-.292-.984-.863-1.823-1.61-2.413.324-1.297.04-2.711-.92-3.673-1.087-1.092-2.795-1.122-3.91-.114-.997-.585-2.215-.59-3.218-.012-1.003-.578-2.221-.573-3.218.012C9.71.297 8.86-.012 8 0a2.92 2.92 0 0 0-.245 0Z" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -91,6 +101,8 @@ export function ProviderLogo({
       return <OpenClawLogo className={className} />;
     case "hermes":
       return <HermesLogo className={className} />;
+    case "ollama":
+      return <OllamaLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

@@ -1,13 +1,17 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 const (
@@ -20,8 +24,9 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
+	ollamaProbeTimeout           = 2 * time.Second
 )
 
 // Config holds all daemon configuration.
@@ -33,7 +38,7 @@ type Config struct {
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini
+	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini, ollama
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -120,8 +125,42 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_GEMINI_MODEL")),
 		}
 	}
+
+	// Ollama is HTTP-based, not a CLI — probe the /api/tags endpoint
+	// rather than looking for a binary on PATH. The resolved base URL is
+	// stored in AgentEntry.Path and read back by the ollama backend.
+	ollamaHost := strings.TrimRight(envOrDefault("MULTICA_OLLAMA_HOST", agent.DefaultOllamaHost), "/")
+	ollamaModel := strings.TrimSpace(os.Getenv("MULTICA_OLLAMA_MODEL"))
+	if ollamaModel != "" && probeOllamaReachable(ollamaHost) {
+		agents["ollama"] = AgentEntry{
+			Path:  ollamaHost,
+			Model: ollamaModel,
+		}
+		// Best-effort capability check — warn if the model doesn't
+		// advertise tool support. Don't block registration: the user
+		// may intentionally want a chat-only model, and an /api/show
+		// failure shouldn't stop the daemon from starting. Scope the
+		// cancel to the narrowest block so it matches the pattern in
+		// probeOllamaReachable rather than hanging around for the rest
+		// of LoadConfig.
+		capCtx, capCancel := context.WithTimeout(context.Background(), ollamaProbeTimeout)
+		supports, capErr := agent.OllamaModelSupportsTools(capCtx, ollamaHost, ollamaModel)
+		capCancel()
+		if capErr == nil && !supports {
+			fmt.Fprintf(os.Stderr,
+				"WARNING: Ollama model %q does not declare 'tools' capability. "+
+					"Issue-assignment tasks will degrade to text-only responses. "+
+					"Use a tool-capable model (e.g. gemma4:latest, qwen2.5-coder:1.5b, llama3.1).\n",
+				ollamaModel)
+		}
+	}
+
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, openclaw, hermes, or gemini and ensure it is on PATH")
+		return Config{}, fmt.Errorf(
+			"no agent runtime available: install claude/codex/opencode/openclaw/hermes/gemini on PATH, " +
+				"or set MULTICA_OLLAMA_MODEL with a reachable Ollama server " +
+				"(MULTICA_OLLAMA_HOST, default " + agent.DefaultOllamaHost + ")",
+		)
 	}
 
 	// Host info
@@ -277,4 +316,25 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// probeOllamaReachable returns true if an Ollama server responds 2xx to
+// GET {baseURL}/api/tags within ollamaProbeTimeout. The call is cheap
+// (lists local model tags) and exists on every Ollama version.
+func probeOllamaReachable(baseURL string) bool {
+	if baseURL == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ollamaProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/tags", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }

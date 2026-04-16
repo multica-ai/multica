@@ -15,13 +15,16 @@ import (
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
+// For Ollama:   writes {workDir}/AGENTS.md  (Ollama has no native config file convention;
+//                                            kept for parity so a human inspecting the
+//                                            workdir sees the same context)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
 	content := buildMetaSkillContent(provider, ctx)
 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "opencode", "openclaw":
+	case "codex", "opencode", "openclaw", "ollama":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)

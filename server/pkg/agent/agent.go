@@ -83,13 +83,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, opencode, openclaw, hermes, or gemini)
+	ExecutablePath string            // path to CLI binary (claude, codex, opencode, openclaw, hermes, gemini), or base URL for HTTP-based providers (ollama)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "opencode", "openclaw", "hermes", "gemini".
+// Supported types: "claude", "codex", "opencode", "openclaw", "hermes", "gemini", "ollama".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -108,12 +108,22 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &hermesBackend{cfg: cfg}, nil
 	case "gemini":
 		return &geminiBackend{cfg: cfg}, nil
+	case "ollama":
+		return &ollamaBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw, hermes, gemini)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, openclaw, hermes, gemini, ollama)", agentType)
 	}
 }
 
-// DetectVersion runs the agent CLI with --version and returns the output.
-func DetectVersion(ctx context.Context, executablePath string) (string, error) {
+// DetectVersion returns the version string for the given agent.
+//
+// For CLI-based providers (claude, codex, opencode, openclaw, hermes, gemini)
+// this runs `<executablePath> --version`. For HTTP-based providers (ollama)
+// the executablePath is the base URL and version is fetched via the
+// provider's HTTP API.
+func DetectVersion(ctx context.Context, agentType, executablePath string) (string, error) {
+	if agentType == "ollama" {
+		return detectOllamaVersion(ctx, executablePath)
+	}
 	return detectCLIVersion(ctx, executablePath)
 }
