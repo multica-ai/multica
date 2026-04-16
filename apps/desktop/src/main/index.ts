@@ -131,8 +131,25 @@ if (!gotTheLock) {
       optimizer.watchWindowShortcuts(window);
     });
 
-    // IPC: open URL in default browser (used by renderer for Google login)
+    // IPC: open URL in default browser (used by renderer for Google login).
+    // Restrict to http/https so the renderer can't dispatch arbitrary OS
+    // protocol handlers (file://, smb://, ms-msdt:, vscode://, ...) which
+    // become a concern under this app's intentional webSecurity: false +
+    // sandbox: false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        console.warn("[security] blocked openExternal: invalid URL");
+        return;
+      }
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        console.warn(
+          `[security] blocked openExternal: scheme=${parsed.protocol}`,
+        );
+        return;
+      }
       return shell.openExternal(url);
     });
 
