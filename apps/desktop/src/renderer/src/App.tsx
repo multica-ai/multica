@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
-import { workspaceKeys } from "@multica/core/workspace/queries";
+import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -68,6 +68,28 @@ function AppContent() {
       }
     })();
   }, [user]);
+
+  // When the user creates their first workspace, the daemon may have been
+  // running in an idle state (post daemon.go bootstrap fix: zero workspaces
+  // no longer aborts Run) or may have been started before the workspace
+  // existed. Either way, workspaceSyncLoop's next tick is up to 30s away —
+  // restart the daemon now so the new workspace is picked up immediately.
+  const { data: workspaces } = useQuery({
+    ...workspaceListOptions(),
+    enabled: !!user,
+  });
+  const wsCount = workspaces?.length ?? 0;
+  const prevCountRef = useRef(0);
+  useEffect(() => {
+    if (!user) {
+      prevCountRef.current = 0;
+      return;
+    }
+    if (prevCountRef.current === 0 && wsCount >= 1) {
+      void window.daemonAPI.restart();
+    }
+    prevCountRef.current = wsCount;
+  }, [user, wsCount]);
 
   if (isLoading || bootstrapping) {
     return (

@@ -35,7 +35,7 @@ export function RedirectIfAuthenticated() {
     if (isLoading || !user || !list) return;
     const [first] = list;
     if (!first) {
-      router.replace(paths.onboarding());
+      router.replace(paths.newWorkspace());
       return;
     }
     router.replace(paths.workspace(first.slug).issues());

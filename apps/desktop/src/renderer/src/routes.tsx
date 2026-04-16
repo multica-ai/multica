@@ -113,7 +113,7 @@ function IndexRedirect() {
   if (firstWorkspace) {
     return <Navigate to={paths.workspace(firstWorkspace.slug).issues()} replace />;
   }
-  return <Navigate to={paths.onboarding()} replace />;
+  return <Navigate to={paths.newWorkspace()} replace />;
 }
 
 function InviteRoute() {

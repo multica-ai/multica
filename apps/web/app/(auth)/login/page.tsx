@@ -39,7 +39,7 @@ function LoginPageContent() {
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
     const [first] = list;
     router.replace(
-      first ? paths.workspace(first.slug).issues() : paths.onboarding(),
+      first ? paths.workspace(first.slug).issues() : paths.newWorkspace(),
     );
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, qc]);
 
@@ -53,7 +53,7 @@ function LoginPageContent() {
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
     const [first] = list;
     router.push(
-      first ? paths.workspace(first.slug).issues() : paths.onboarding(),
+      first ? paths.workspace(first.slug).issues() : paths.newWorkspace(),
     );
   };
 

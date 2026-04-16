@@ -10,13 +10,14 @@ import { defaultStorage } from "../platform/storage";
 
 // Paths that should not be persisted as "last visited":
 //  - Auth flows (/login, /signup, /logout)
-//  - Pre-workspace routes (/onboarding, /auth/, /invite/)
+//  - Pre-workspace routes (/onboarding, /new-workspace, /auth/, /invite/)
 //  - Pair flow (/pair/)
 const EXCLUDED_PREFIXES = [
   "/login",
   "/signup",
   "/logout",
   "/onboarding",
+  "/new-workspace",
   "/auth/",
   "/invite/",
   "/pair/",

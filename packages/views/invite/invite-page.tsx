@@ -34,7 +34,7 @@ export function InvitePage({ invitationId }: InvitePageProps) {
   // page is a pre-workspace global route so we can't rely on WorkspaceSlugProvider.
   const { data: wsList = [] } = useQuery(workspaceListOptions());
   const fallbackDest =
-    wsList[0] ? paths.workspace(wsList[0].slug).issues() : paths.onboarding();
+    wsList[0] ? paths.workspace(wsList[0].slug).issues() : paths.newWorkspace();
 
   const handleAccept = async () => {
     setAccepting(true);

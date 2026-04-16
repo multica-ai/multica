@@ -70,7 +70,7 @@ function CallbackContent() {
           const [first] = wsList;
           const defaultDest = first
             ? paths.workspace(first.slug).issues()
-            : paths.onboarding();
+            : paths.newWorkspace();
           router.push(nextUrl || defaultDest);
         })
         .catch((err) => {

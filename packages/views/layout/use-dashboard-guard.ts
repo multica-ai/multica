@@ -41,7 +41,7 @@ export function useDashboardGuard() {
     // Wait for workspace list to settle before deciding "no workspace".
     if (!workspaceListFetched) return;
     if (!workspace) {
-      replace(paths.onboarding());
+      replace(paths.newWorkspace());
     }
   }, [user, isLoading, workspaceListFetched, workspace, replace]);
 

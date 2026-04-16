@@ -271,7 +271,7 @@ export function useRealtimeSync(
         staleTime: 0,
       });
       const next = wsList.find((w) => w.id !== lostWsId);
-      const target = next ? paths.workspace(next.slug).issues() : paths.onboarding();
+      const target = next ? paths.workspace(next.slug).issues() : paths.newWorkspace();
       if (typeof window !== "undefined") {
         window.location.assign(target);
       }

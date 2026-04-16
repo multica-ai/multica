@@ -125,13 +125,13 @@ func waitForOnboarding(cmd *cobra.Command, client *cli.APIClient) ([]struct {
 		return nil, nil
 	}
 
-	onboardingURL := appURL + "/onboarding"
+	createWorkspaceURL := appURL + "/new-workspace"
 
-	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening onboarding in your browser...")
-	if err := openBrowser(onboardingURL); err != nil {
+	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening workspace creation in your browser...")
+	if err := openBrowser(createWorkspaceURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
 	}
-	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n", onboardingURL)
+	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n", createWorkspaceURL)
 	fmt.Fprintln(os.Stderr, "\nWaiting for workspace creation...")
 
 	// Poll until a workspace appears or timeout (5 minutes).

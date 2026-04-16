@@ -57,7 +57,7 @@ export function WorkspaceTab() {
     const remaining = wsList.filter((w) => w.id !== workspace?.id);
     const next = remaining[0];
     navigation.push(
-      next ? paths.workspace(next.slug).issues() : paths.onboarding(),
+      next ? paths.workspace(next.slug).issues() : paths.newWorkspace(),
     );
   };
 
