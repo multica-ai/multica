@@ -147,12 +147,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 
 	// Host info
 	host, err := os.Hostname()
-	if err != nil || strings.TrimSpace(host) == "" {
-		host = "local-machine"
+	if err != nil {
+		host = ""
 	}
 	// Normalize mDNS suffix so daemons started via different methods
 	// (e.g. CLI vs desktop app) always register under the same hostname.
 	host = strings.TrimSuffix(host, ".local")
+	if strings.TrimSpace(host) == "" {
+		host = "local-machine"
+	}
 
 	// Durations: override > env > default
 	pollInterval, err := durationFromEnv("MULTICA_DAEMON_POLL_INTERVAL", DefaultPollInterval)
