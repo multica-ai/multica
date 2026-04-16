@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -34,9 +35,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildCursorArgs(prompt, opts)
+	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
+	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 20 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -61,14 +63,15 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	resCh := make(chan Result, 1)
 
 	go func() {
-		<-runCtx.Done()
-		_ = stdout.Close()
-	}()
-
-	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+
+		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		go func() {
+			<-runCtx.Done()
+			_ = stdout.Close()
+		}()
 
 		startTime := time.Now()
 		var output strings.Builder
@@ -371,12 +374,21 @@ func cursorErrorText(evt *cursorStreamEvent) string {
 	return ""
 }
 
+// cursorBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args. Overriding these would break
+// the daemon↔cursor-agent communication protocol.
+var cursorBlockedArgs = map[string]blockedArgMode{
+	"-p":              blockedStandalone, // prompt via stdin
+	"--output-format": blockedWithValue,  // stream-json protocol
+	"--yolo":          blockedStandalone, // auto-approval for autonomous operation
+}
+
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
 // Usage: cursor-agent chat -p <prompt> --output-format stream-json
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
-func buildCursorArgs(prompt string, opts ExecOptions) []string {
+func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"chat",
 		"-p", prompt,
@@ -389,8 +401,15 @@ func buildCursorArgs(prompt string, opts ExecOptions) []string {
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
+	if opts.SystemPrompt != "" {
+		args = append(args, "--system-prompt", opts.SystemPrompt)
+	}
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
+	}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, cursorBlockedArgs, logger)...)
 	return args
 }
