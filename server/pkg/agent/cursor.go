@@ -401,12 +401,8 @@ func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--system-prompt", opts.SystemPrompt)
-	}
-	if opts.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
-	}
+	// NOTE: cursor-agent CLI does not support --system-prompt or --max-turns.
+	// Instructions are injected via AGENTS.md and .cursor/skills/ files instead.
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}

@@ -74,29 +74,23 @@ func TestBuildCursorArgsMinimal(t *testing.T) {
 	}
 }
 
-func TestBuildCursorArgsSystemPromptAndMaxTurns(t *testing.T) {
+func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
 	t.Parallel()
 
+	// cursor-agent CLI does not support --system-prompt or --max-turns;
+	// verify they are NOT emitted even when set in ExecOptions.
 	args := buildCursorArgs("task", ExecOptions{
 		SystemPrompt: "You are helpful",
 		MaxTurns:     5,
 	}, slog.Default())
 
-	hasSystemPrompt := false
-	hasMaxTurns := false
-	for i, a := range args {
-		if a == "--system-prompt" && i+1 < len(args) && args[i+1] == "You are helpful" {
-			hasSystemPrompt = true
+	for _, a := range args {
+		if a == "--system-prompt" {
+			t.Fatalf("unexpected --system-prompt in args: %v", args)
 		}
-		if a == "--max-turns" && i+1 < len(args) && args[i+1] == "5" {
-			hasMaxTurns = true
+		if a == "--max-turns" {
+			t.Fatalf("unexpected --max-turns in args: %v", args)
 		}
-	}
-	if !hasSystemPrompt {
-		t.Fatalf("expected --system-prompt, got %v", args)
-	}
-	if !hasMaxTurns {
-		t.Fatalf("expected --max-turns 5, got %v", args)
 	}
 }
 
