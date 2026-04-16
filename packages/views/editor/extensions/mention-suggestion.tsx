@@ -14,6 +14,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { api } from "@multica/core/api";
 import type { Issue, ListIssuesResponse, MemberWithUser, Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -169,12 +170,15 @@ function MentionRow({
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   if (item.type === "issue") {
+    // Visually dim closed issues (done/cancelled) so they're distinguishable
+    // from active ones in the suggestion list — they're still selectable.
+    const isClosed = item.status === "done" || item.status === "cancelled";
     return (
       <button
         ref={buttonRef}
         className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
-        }`}
+        } ${isClosed ? "opacity-60" : ""}`}
         onClick={onSelect}
       >
         {item.status && (
@@ -182,7 +186,11 @@ function MentionRow({
         )}
         <span className="shrink-0 text-muted-foreground">{item.label}</span>
         {item.description && (
-          <span className="truncate text-muted-foreground">{item.description}</span>
+          <span
+            className={`truncate text-muted-foreground ${isClosed ? "line-through" : ""}`}
+          >
+            {item.description}
+          </span>
         )}
       </button>
     );
@@ -213,21 +221,72 @@ function MentionRow({
 // Suggestion config factory
 // ---------------------------------------------------------------------------
 
+// Module-scoped state coordinates debounce/abort across successive items()
+// calls so that only the latest query's server-side issue search resolves.
+let issueSearchSeq = 0;
+let issueSearchAbort: AbortController | null = null;
+
+function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">): MentionItem {
+  return {
+    id: i.id,
+    label: i.identifier,
+    type: "issue" as const,
+    description: i.title,
+    status: i.status as IssueStatus,
+  };
+}
+
+async function searchIssueMentions(
+  qc: QueryClient,
+  wsId: string,
+  q: string,
+): Promise<MentionItem[]> {
+  // Each call supersedes the previous one — bump the seq and abort any
+  // in-flight fetch so a stale response can't overwrite newer suggestions.
+  if (issueSearchAbort) issueSearchAbort.abort();
+  const seq = ++issueSearchSeq;
+
+  // Empty query: surface recently-touched cached issues (instant, no fetch)
+  if (q === "") {
+    const cached: Issue[] =
+      qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId))?.issues ?? [];
+    return cached.slice(0, 10).map(issueToMention);
+  }
+
+  // Server-side search includes done/cancelled via include_closed=true,
+  // so done issues are findable even when not in the local cache.
+  // Debounce: skip the fetch if a newer keystroke arrives within 150ms.
+  await new Promise((r) => setTimeout(r, 150));
+  if (seq !== issueSearchSeq) return [];
+
+  const controller = new AbortController();
+  issueSearchAbort = controller;
+  try {
+    const res = await api.searchIssues({
+      q,
+      limit: 10,
+      include_closed: true,
+      signal: controller.signal,
+    });
+    if (seq !== issueSearchSeq) return [];
+    return res.issues.map(issueToMention);
+  } catch {
+    return [];
+  }
+}
+
 export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
   return {
-    items: ({ query }) => {
+    items: async ({ query }) => {
       // Read workspace id imperatively because this runs in TipTap factory scope
       // (outside React render). getCurrentWsId() is the non-React
       // singleton set by the URL-driven workspace layout.
       const wsId = getCurrentWsId();
       const members: MemberWithUser[] = wsId ? qc.getQueryData(workspaceKeys.members(wsId)) ?? [] : [];
       const agents: Agent[] = wsId ? qc.getQueryData(workspaceKeys.agents(wsId)) ?? [] : [];
-      const issues: Issue[] = wsId
-        ? qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId))?.issues ?? []
-        : [];
 
       const q = query.toLowerCase();
 
@@ -249,21 +308,9 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         .filter((a) => !a.archived_at && a.name.toLowerCase().includes(q))
         .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
-      const issueItems: MentionItem[] = issues
-        .filter(
-          (i) =>
-            i.identifier.toLowerCase().includes(q) ||
-            i.title.toLowerCase().includes(q),
-        )
-        .map((i) => ({
-          id: i.id,
-          label: i.identifier,
-          type: "issue" as const,
-          description: i.title,
-          status: i.status as IssueStatus,
-        }));
+      const issueItems = wsId ? await searchIssueMentions(qc, wsId, q) : [];
 
-      return [...allItem, ...memberItems, ...agentItems, ...issueItems].slice(0, 10);
+      return [...allItem, ...memberItems, ...agentItems, ...issueItems].slice(0, 15);
     },
 
     render: () => {
