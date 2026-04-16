@@ -4,8 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Clock,
+  Copy,
+  Link2,
   Loader2,
   MessageSquare,
+  Plus,
   SearchIcon,
   Inbox,
   CircleUser,
@@ -17,17 +20,21 @@ import {
   Sun,
   BookOpenText,
   Settings,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { paths, useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
+import { useModalStore } from "@multica/core/modals";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { StatusIcon } from "../issues/components";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
@@ -112,33 +119,14 @@ const navPages: NavPage[] = [
 
 type ThemeValue = "light" | "dark" | "system";
 
-interface ThemeAction {
-  value: ThemeValue;
+interface CommandItem {
+  key: string;
   label: string;
   icon: LucideIcon;
   keywords: string[];
+  trailing?: React.ReactNode;
+  onSelect: () => void;
 }
-
-const themeActions: ThemeAction[] = [
-  {
-    value: "light",
-    label: "Switch to Light Theme",
-    icon: Sun,
-    keywords: ["light", "theme", "appearance", "mode", "bright"],
-  },
-  {
-    value: "dark",
-    label: "Switch to Dark Theme",
-    icon: Moon,
-    keywords: ["dark", "theme", "appearance", "mode", "night"],
-  },
-  {
-    value: "system",
-    label: "Use System Theme",
-    icon: Monitor,
-    keywords: ["system", "theme", "appearance", "mode", "auto"],
-  },
-];
 
 interface SearchResults {
   issues: SearchIssueResult[];
@@ -146,7 +134,7 @@ interface SearchResults {
 }
 
 export function SearchCommand() {
-  const { push } = useNavigation();
+  const { push, pathname, getShareableUrl } = useNavigation();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
   const recentItems = useRecentIssuesStore((s) => s.items);
@@ -154,6 +142,8 @@ export function SearchCommand() {
   const p: WorkspacePaths = useWorkspacePaths();
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { theme, setTheme } = useTheme();
+  const currentWorkspace = useCurrentWorkspace();
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
 
   const recentIssues = useMemo(() => {
     const issueMap = new Map(allIssues.map((i) => [i.id, i]));
@@ -179,15 +169,141 @@ export function SearchCommand() {
     );
   }, [query]);
 
-  const filteredThemeActions = useMemo(() => {
+  // Detect if current route is an issue detail page — /{slug}/issues/{id}.
+  // Falls back to null on any other route; used to gate issue-specific commands.
+  const currentIssue = useMemo(() => {
+    const match = pathname.match(/\/issues\/([^/]+)$/);
+    const raw = match?.[1];
+    if (!raw) return null;
+    const id = decodeURIComponent(raw);
+    return allIssues.find((i) => i.id === id) ?? null;
+  }, [pathname, allIssues]);
+
+  const commands = useMemo<CommandItem[]>(() => {
+    const activeThemeCheck = (value: ThemeValue) =>
+      theme === value ? (
+        <Check
+          aria-label="Current theme"
+          className="ml-auto size-4 shrink-0 text-muted-foreground"
+        />
+      ) : undefined;
+
+    const items: CommandItem[] = [
+      {
+        key: "new-issue",
+        label: "New Issue",
+        icon: Plus,
+        keywords: ["new", "issue", "create", "add"],
+        onSelect: () => {
+          useModalStore.getState().open("create-issue");
+          setOpen(false);
+        },
+      },
+      {
+        key: "new-project",
+        label: "New Project",
+        icon: Plus,
+        keywords: ["new", "project", "create", "add"],
+        onSelect: () => {
+          useModalStore.getState().open("create-project");
+          setOpen(false);
+        },
+      },
+    ];
+
+    if (currentIssue) {
+      const identifier = currentIssue.identifier;
+      items.push(
+        {
+          key: "copy-issue-link",
+          label: "Copy Issue Link",
+          icon: Link2,
+          keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
+          onSelect: () => {
+            const url = getShareableUrl ? getShareableUrl(pathname) : window.location.href;
+            void navigator.clipboard.writeText(url);
+            toast.success("Link copied");
+            setOpen(false);
+          },
+        },
+        {
+          key: "copy-issue-identifier",
+          label: `Copy Identifier (${identifier})`,
+          icon: Copy,
+          keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
+          onSelect: () => {
+            void navigator.clipboard.writeText(identifier);
+            toast.success(`Copied ${identifier}`);
+            setOpen(false);
+          },
+        },
+      );
+    }
+
+    items.push(
+      {
+        key: "theme-light",
+        label: "Switch to Light Theme",
+        icon: Sun,
+        keywords: ["light", "theme", "appearance", "mode", "bright"],
+        trailing: activeThemeCheck("light"),
+        onSelect: () => {
+          setTheme("light");
+          setOpen(false);
+        },
+      },
+      {
+        key: "theme-dark",
+        label: "Switch to Dark Theme",
+        icon: Moon,
+        keywords: ["dark", "theme", "appearance", "mode", "night"],
+        trailing: activeThemeCheck("dark"),
+        onSelect: () => {
+          setTheme("dark");
+          setOpen(false);
+        },
+      },
+      {
+        key: "theme-system",
+        label: "Use System Theme",
+        icon: Monitor,
+        keywords: ["system", "theme", "appearance", "mode", "auto"],
+        trailing: activeThemeCheck("system"),
+        onSelect: () => {
+          setTheme("system");
+          setOpen(false);
+        },
+      },
+    );
+
+    return items;
+  }, [currentIssue, getShareableUrl, pathname, setOpen, setTheme, theme]);
+
+  const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return themeActions.filter(
-      (action) =>
-        action.label.toLowerCase().includes(q) ||
-        action.keywords.some((kw) => kw.includes(q)),
+    return commands.filter(
+      (c) =>
+        c.label.toLowerCase().includes(q) ||
+        c.keywords.some((kw) => kw.includes(q)),
     );
-  }, [query]);
+  }, [commands, query]);
+
+  // Only show workspaces different from the current one, and only after the
+  // user types >=2 chars — one char would match everything (e.g. "w").
+  const filteredWorkspaces = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const others = workspaces.filter((w) => w.id !== currentWorkspace?.id);
+    const wantsAll =
+      q.length >= 2 && ("workspace".startsWith(q) || "switch".startsWith(q));
+    return others.filter(
+      (w) =>
+        wantsAll ||
+        w.name.toLowerCase().includes(q) ||
+        w.slug.toLowerCase().includes(q),
+    );
+  }, [workspaces, currentWorkspace?.id, query]);
 
   const hasResults = results.issues.length > 0 || results.projects.length > 0;
 
@@ -307,12 +423,12 @@ export function SearchCommand() {
     [push, setOpen, p],
   );
 
-  const handleThemeSelect = useCallback(
-    (value: ThemeValue) => {
-      setTheme(value);
+  const handleSwitchWorkspace = useCallback(
+    (slug: string) => {
+      push(paths.workspace(slug).issues());
       setOpen(false);
     },
-    [setTheme, setOpen],
+    [push, setOpen],
   );
 
   return (
@@ -370,34 +486,51 @@ export function SearchCommand() {
               </CommandPrimitive.Group>
             )}
 
-            {/* Actions section — theme toggles, only shown when query matches */}
-            {filteredThemeActions.length > 0 && (
+            {/* Commands section — New Issue / New Project / Copy link / Theme, only shown when query matches */}
+            {filteredCommands.length > 0 && (
               <CommandPrimitive.Group className="p-2">
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  Actions
+                  Commands
                 </div>
-                {filteredThemeActions.map((action) => {
-                  const active = theme === action.value;
-                  return (
-                    <CommandPrimitive.Item
-                      key={action.value}
-                      value={`action:theme:${action.value}`}
-                      onSelect={() => handleThemeSelect(action.value)}
-                      className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                    >
-                      <action.icon className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate">
-                        <HighlightText text={action.label} query={query} />
-                      </span>
-                      {active && (
-                        <Check
-                          aria-label="Current theme"
-                          className="ml-auto size-4 shrink-0 text-muted-foreground"
-                        />
-                      )}
-                    </CommandPrimitive.Item>
-                  );
-                })}
+                {filteredCommands.map((cmd) => (
+                  <CommandPrimitive.Item
+                    key={cmd.key}
+                    value={`command:${cmd.key}`}
+                    onSelect={cmd.onSelect}
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <cmd.icon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">
+                      <HighlightText text={cmd.label} query={query} />
+                    </span>
+                    {cmd.trailing}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {/* Workspaces section — switch to a different workspace, only shown when query matches */}
+            {filteredWorkspaces.length > 0 && (
+              <CommandPrimitive.Group className="p-2">
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  Switch Workspace
+                </div>
+                {filteredWorkspaces.map((ws) => (
+                  <CommandPrimitive.Item
+                    key={ws.id}
+                    value={`workspace:${ws.id}`}
+                    onSelect={() => handleSwitchWorkspace(ws.slug)}
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <Building2 className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">
+                      <HighlightText text={ws.name} query={query} />
+                    </span>
+                    <span className="ml-auto text-xs text-muted-foreground truncate">
+                      {ws.slug}
+                    </span>
+                  </CommandPrimitive.Item>
+                ))}
               </CommandPrimitive.Group>
             )}
 
@@ -411,7 +544,8 @@ export function SearchCommand() {
               query.trim() &&
               !hasResults &&
               filteredPages.length === 0 &&
-              filteredThemeActions.length === 0 && (
+              filteredCommands.length === 0 &&
+              filteredWorkspaces.length === 0 && (
                 <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
                   No results found.
                 </CommandPrimitive.Empty>
