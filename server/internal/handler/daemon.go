@@ -1033,11 +1033,16 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetIssueGCCheck returns minimal issue info needed by the daemon GC loop.
+// Gated on workspace access so a daemon token scoped to workspace A cannot
+// read issue metadata from workspace B via UUID enumeration.
 func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "issueId")
 	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
