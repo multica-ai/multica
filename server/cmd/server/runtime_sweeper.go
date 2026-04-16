@@ -51,7 +51,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 }
 
 // sweepStaleRuntimes marks runtimes offline if they haven't heartbeated,
-// then fails any tasks belonging to those offline runtimes.
+// then cancels any tasks belonging to those offline runtimes.
 func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, staleThresholdSeconds)
 	if err != nil {
@@ -125,7 +125,7 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	}
 }
 
-// sweepStaleTasks fails tasks stuck in dispatched/running for too long,
+// sweepStaleTasks cancels tasks stuck in dispatched/running for too long,
 // even when the runtime is still online. This handles cases where:
 // - The agent process hangs and the daemon is still heartbeating
 // - The daemon failed to report task completion/failure
