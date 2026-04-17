@@ -15,6 +15,9 @@ import (
 )
 
 // connectTestPool connects to the worktree DB. Test is skipped if unreachable.
+// Registers t.Cleanup(pool.Close) so the pool stays open for any other
+// cleanups registered later (workspace DELETE etc.) — t.Cleanup runs LIFO,
+// so registering pool.Close FIRST means it runs LAST.
 func connectTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dbURL := os.Getenv("DATABASE_URL")
@@ -25,6 +28,7 @@ func connectTestPool(t *testing.T) *pgxpool.Pool {
 	if err != nil || pool.Ping(context.Background()) != nil {
 		t.Skip("database not reachable")
 	}
+	t.Cleanup(pool.Close)
 	return pool
 }
 
@@ -55,7 +59,6 @@ func mustPGUUID(t *testing.T, s string) pgtype.UUID {
 
 func TestInitialSync_LabelsAndMembers(t *testing.T) {
 	pool := connectTestPool(t)
-	defer pool.Close()
 	wsID := makeWorkspace(t, pool)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +108,6 @@ func TestInitialSync_LabelsAndMembers(t *testing.T) {
 
 func TestInitialSync_IssuesNotesAwards(t *testing.T) {
 	pool := connectTestPool(t)
-	defer pool.Close()
 	wsID := makeWorkspace(t, pool)
 
 	// Insert a runtime + agent NAMED "builder" so the agent::builder label resolves.
@@ -193,7 +195,6 @@ func TestInitialSync_IssuesNotesAwards(t *testing.T) {
 
 func TestInitialSync_PopulatesHumanNotesAndAwards(t *testing.T) {
 	pool := connectTestPool(t)
-	defer pool.Close()
 	wsID := makeWorkspace(t, pool)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -244,18 +245,27 @@ func TestInitialSync_PopulatesHumanNotesAndAwards(t *testing.T) {
 		t.Fatalf("GetIssueByGitlabIID: %v", err)
 	}
 
+	// pgtype.UUID parameter binding to raw pool.QueryRow doesn't always bind
+	// the way you'd expect — convert to the string form so PG sees a regular
+	// uuid literal.
+	issueIDStr := uuidString(row.ID)
+
 	var commentCount int
-	pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM comment WHERE issue_id = $1 AND gitlab_note_id = 100 AND gitlab_author_user_id = 555 AND author_type IS NULL`,
-		row.ID).Scan(&commentCount)
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM comment WHERE issue_id = $1::uuid AND gitlab_note_id = 100 AND gitlab_author_user_id = 555 AND author_type IS NULL`,
+		issueIDStr).Scan(&commentCount); err != nil {
+		t.Fatalf("count comment: %v", err)
+	}
 	if commentCount != 1 {
 		t.Errorf("expected 1 human comment cached, got %d", commentCount)
 	}
 
 	var awardCount int
-	pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM issue_reaction WHERE issue_id = $1 AND gitlab_award_id = 200 AND gitlab_actor_user_id = 555 AND actor_type IS NULL`,
-		row.ID).Scan(&awardCount)
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM issue_reaction WHERE issue_id = $1::uuid AND gitlab_award_id = 200 AND gitlab_actor_user_id = 555 AND actor_type IS NULL`,
+		issueIDStr).Scan(&awardCount); err != nil {
+		t.Fatalf("count award: %v", err)
+	}
 	if awardCount != 1 {
 		t.Errorf("expected 1 award cached, got %d", awardCount)
 	}
@@ -263,7 +273,6 @@ func TestInitialSync_PopulatesHumanNotesAndAwards(t *testing.T) {
 
 func TestInitialSync_TransitionsStatusToConnected(t *testing.T) {
 	pool := connectTestPool(t)
-	defer pool.Close()
 	wsID := makeWorkspace(t, pool)
 
 	// Insert a connection row in 'connecting' state.
@@ -314,7 +323,6 @@ func TestInitialSync_TransitionsStatusToConnected(t *testing.T) {
 
 func TestInitialSync_TransitionsStatusToErrorOnFailure(t *testing.T) {
 	pool := connectTestPool(t)
-	defer pool.Close()
 	wsID := makeWorkspace(t, pool)
 
 	pool.Exec(context.Background(), `
