@@ -138,6 +138,11 @@ func syncAllIssues(ctx context.Context, deps SyncDeps, in RunInitialSyncInput, w
 		labelIDByName[l.Name] = l.GitlabLabelID
 	}
 
+	// Cancel sibling workers on first error so a sync against a revoked PAT
+	// doesn't hammer GitLab with thousands of identical 401s before reporting.
+	syncCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	const maxConcurrent = 5
 	sem := make(chan struct{}, maxConcurrent)
 	errs := make(chan error, len(issues))
@@ -145,13 +150,22 @@ func syncAllIssues(ctx context.Context, deps SyncDeps, in RunInitialSyncInput, w
 
 	for _, issue := range issues {
 		issue := issue
+		// Stop launching new workers if we've already cancelled.
+		if syncCtx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := syncOneIssue(ctx, deps, in, wsUUID, issue, agentMap, labelIDByName); err != nil {
+			// Bail early if a sibling already failed and cancelled the context.
+			if syncCtx.Err() != nil {
+				return
+			}
+			if err := syncOneIssue(syncCtx, deps, in, wsUUID, issue, agentMap, labelIDByName); err != nil {
 				errs <- fmt.Errorf("issue iid=%d: %w", issue.IID, err)
+				cancel() // signal siblings to stop
 			}
 		}()
 	}
