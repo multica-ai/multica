@@ -1692,31 +1692,90 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	return true
 }
 
+// cleanupAndDeleteIssueRow performs the Multica-side cleanup for a deleted
+// issue: cancels agent tasks, fails autopilot runs, removes the cache row,
+// then deletes S3 attachments. Shared between the legacy DeleteIssue path and
+// the GitLab write-through branch — the write-through calls GitLab first,
+// then calls this to tear down the local state.
+func (h *Handler) cleanupAndDeleteIssueRow(ctx context.Context, issue db.Issue) error {
+	h.TaskService.CancelTasksForIssue(ctx, issue.ID)
+	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
+	h.Queries.FailAutopilotRunsByIssue(ctx, issue.ID)
+
+	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
+
+	if err := h.Queries.DeleteIssue(ctx, issue.ID); err != nil {
+		return err
+	}
+
+	h.deleteS3Objects(ctx, attachmentURLs)
+	return nil
+}
+
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
 		return
 	}
+	userID := requestUserID(r)
+	workspaceID := uuidToString(issue.WorkspaceID)
 
-	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
-	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// DELETE the GitLab issue first, then tear down the cache row. On a
+	// GitLab-connected workspace the write-through is AUTHORITATIVE — on
+	// GitLab error we return 502 and never fall back to legacy (that would
+	// leave GitLab and the cache diverged).
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
+		if wsErr == nil {
+			// Defensive: a cache row on a GitLab-connected workspace that
+			// lacks GitLab identifiers is a bug upstream of this handler.
+			// Refuse rather than silently fall through.
+			if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
+				slog.Error("gitlab-connected workspace issue missing gitlab identifiers",
+					"issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "issue is missing gitlab identifiers")
+				return
+			}
 
-	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
 
-	err := h.Queries.DeleteIssue(r.Context(), parseUUID(id))
-	if err != nil {
+			if err := h.Gitlab.DeleteIssue(r.Context(), token, issue.GitlabProjectID.Int64, int(issue.GitlabIid.Int32)); err != nil {
+				slog.Error("gitlab delete issue", "error", err, "issue_id", uuidToString(issue.ID))
+				writeError(w, http.StatusBadGateway, "gitlab delete issue failed")
+				return
+			}
+
+			if err := h.cleanupAndDeleteIssueRow(r.Context(), issue); err != nil {
+				slog.Error("cleanup issue row after gitlab delete", "error", err, "issue_id", uuidToString(issue.ID))
+				writeError(w, http.StatusInternalServerError, "failed to delete issue")
+				return
+			}
+
+			h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": id})
+			slog.Info("issue deleted (gitlab write-through)", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// else: not connected → fall through to legacy
+	}
+
+	if err := h.cleanupAndDeleteIssueRow(r.Context(), issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
-	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": id})
-	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", uuidToString(issue.WorkspaceID))...)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": id})
+	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 	w.WriteHeader(http.StatusNoContent)
 }
 

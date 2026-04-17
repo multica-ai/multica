@@ -747,6 +747,120 @@ func TestUpdateIssue_WriteThroughErrorReturnsNonZeroStatus(t *testing.T) {
 	}
 }
 
+// TestDeleteIssue_WriteThroughSendsDELETE verifies that when a GitLab-connected
+// workspace receives a DELETE for an issue, the handler sends
+// DELETE /api/v4/projects/:id/issues/:iid with the service token and then
+// removes the cache row.
+func TestDeleteIssue_WriteThroughSendsDELETE(t *testing.T) {
+	ctx := context.Background()
+	var capturedMethod, capturedPath, capturedToken string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedToken = r.Header.Get("PRIVATE-TOKEN")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 1003, 'T', '', 'todo', 'none', 301, 42, 9101, '2026-04-17T12:00:00Z', 'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/"+issueID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.DeleteIssue(rec, req)
+
+	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if capturedMethod != http.MethodDelete {
+		t.Errorf("method = %s, want DELETE", capturedMethod)
+	}
+	if capturedPath != "/api/v4/projects/42/issues/301" {
+		t.Errorf("path = %s, want /api/v4/projects/42/issues/301", capturedPath)
+	}
+	if capturedToken == "" {
+		t.Errorf("PRIVATE-TOKEN header missing")
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue WHERE id = $1::uuid`, issueID).Scan(&count); err != nil {
+		t.Fatalf("count cache: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("issue row not deleted, count = %d", count)
+	}
+}
+
+// TestDeleteIssue_WriteThroughErrorPreservesCache verifies the authoritative
+// guarantee: on GitLab failure the handler returns a non-2xx status AND the
+// cache row remains intact (no fallback to legacy direct-DB delete).
+func TestDeleteIssue_WriteThroughErrorPreservesCache(t *testing.T) {
+	ctx := context.Background()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 1004, 'T', '', 'todo', 'none', 302, 42, 9102, '2026-04-17T12:00:00Z', 'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/"+issueID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.DeleteIssue(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("status = %d, want >=400, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue WHERE id = $1::uuid`, issueID).Scan(&count); err != nil {
+		t.Fatalf("count cache: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("cache was mutated on GitLab failure, count = %d", count)
+	}
+}
+
 func TestBatchResult_ShapeAndJSON(t *testing.T) {
 	r := BatchWriteResult{
 		Succeeded: []BatchSucceeded{{ID: "abc", Issue: nil}},
