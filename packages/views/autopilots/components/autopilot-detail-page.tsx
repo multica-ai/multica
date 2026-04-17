@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Zap, Play, Pause, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -20,6 +20,7 @@ import { PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import {
@@ -420,9 +421,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     }
   };
 
-  const handleToggleStatus = () => {
-    const newStatus = autopilot.status === "active" ? "paused" : "active";
-    updateAutopilot.mutate({ id: autopilotId, status: newStatus });
+  const handleToggleStatus = (checked: boolean) => {
+    updateAutopilot.mutate({ id: autopilotId, status: checked ? "active" : "paused" });
   };
 
   return (
@@ -435,26 +435,28 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </AppLink>
           <span className="text-muted-foreground">/</span>
           <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
-          <span className={cn(
-            "ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium",
-            autopilot.status === "active" ? "bg-emerald-500/10 text-emerald-500" :
-            autopilot.status === "paused" ? "bg-amber-500/10 text-amber-500" :
-            "bg-muted text-muted-foreground",
-          )}>
-            {autopilot.status}
-          </span>
+          <div className="ml-1 flex items-center gap-1.5">
+            <Switch
+              size="sm"
+              checked={autopilot.status === "active"}
+              onCheckedChange={handleToggleStatus}
+              disabled={autopilot.status === "archived"}
+              aria-label={autopilot.status === "active" ? "Pause autopilot" : "Activate autopilot"}
+            />
+            <span className={cn(
+              "text-xs font-medium capitalize",
+              autopilot.status === "active" ? "text-emerald-500" :
+              autopilot.status === "paused" ? "text-amber-500" :
+              "text-muted-foreground",
+            )}>
+              {autopilot.status}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
             Edit
-          </Button>
-          <Button size="sm" variant="outline" onClick={handleToggleStatus}>
-            {autopilot.status === "active" ? (
-              <><Pause className="h-3.5 w-3.5 mr-1" /> Pause</>
-            ) : (
-              <><Play className="h-3.5 w-3.5 mr-1" /> Activate</>
-            )}
           </Button>
           <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
             <Play className="h-3.5 w-3.5 mr-1" />
