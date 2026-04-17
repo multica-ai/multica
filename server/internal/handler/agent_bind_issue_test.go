@@ -72,18 +72,6 @@ func mustCreateIssueForWorkspace(t *testing.T, title string) string {
 	return issueID
 }
 
-func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
-	t.Helper()
-	ctx := context.Background()
-	raw, err := json.Marshal(repos)
-	if err != nil {
-		t.Fatalf("marshal workspace repos: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET repos = $2 WHERE id = $1`, testWorkspaceID, raw); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
-	}
-}
-
 func mustCreateTaskForAgent(t *testing.T, agentID string, runtimeID string, status string, issueID *string) string {
 	t.Helper()
 	ctx := context.Background()
