@@ -13,6 +13,7 @@ import type {
   CreateAgentRequest,
   UpdateAgentRequest,
   AgentTask,
+  AgentExternalSession,
   AgentRuntime,
   InboxItem,
   IssueSubscriber,
@@ -472,6 +473,42 @@ export class ApiClient {
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/agents/${agentId}/tasks`);
+  }
+
+  async listAgentExternalSessions(
+    agentId: string,
+    params?: { days?: number },
+  ): Promise<AgentExternalSession[]> {
+    const query = new URLSearchParams();
+    if (params?.days) query.set("days", String(params.days));
+    return this.fetch(`/api/agents/${agentId}/external-sessions?${query}`);
+  }
+
+  async resumeAgentTask(agentId: string, taskId: string): Promise<AgentTask> {
+    return this.fetch(`/api/agents/${agentId}/tasks/${taskId}/resume`, {
+      method: "POST",
+    });
+  }
+
+  async resumeAgentExternalSession(
+    agentId: string,
+    data: { session_id: string; work_dir?: string; issue_id?: string; priority?: number },
+  ): Promise<AgentTask> {
+    return this.fetch(`/api/agents/${agentId}/resume-session`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async bindAgentTaskIssue(
+    agentId: string,
+    taskId: string,
+    issueId: string,
+  ): Promise<AgentTask> {
+    return this.fetch(`/api/agents/${agentId}/tasks/${taskId}/bind-issue`, {
+      method: "POST",
+      body: JSON.stringify({ issue_id: issueId }),
+    });
   }
 
   async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
