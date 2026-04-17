@@ -14,7 +14,7 @@ import (
 const createAttachment = `-- name: CreateAttachment :one
 INSERT INTO attachment (id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
 VALUES ($1, $2, $9, $10, $3, $4, $5, $6, $7, $8)
-RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at
+RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, gitlab_upload_url
 `
 
 type CreateAttachmentParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 		&i.ContentType,
 		&i.SizeBytes,
 		&i.CreatedAt,
+		&i.GitlabUploadUrl,
 	)
 	return i, err
 }
@@ -75,7 +76,7 @@ func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentPara
 }
 
 const getAttachment = `-- name: GetAttachment :one
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, gitlab_upload_url FROM attachment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -99,6 +100,7 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (A
 		&i.ContentType,
 		&i.SizeBytes,
 		&i.CreatedAt,
+		&i.GitlabUploadUrl,
 	)
 	return i, err
 }
@@ -193,7 +195,7 @@ func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issue
 }
 
 const listAttachmentsByComment = `-- name: ListAttachmentsByComment :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, gitlab_upload_url FROM attachment
 WHERE comment_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -224,6 +226,7 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 			&i.ContentType,
 			&i.SizeBytes,
 			&i.CreatedAt,
+			&i.GitlabUploadUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -236,7 +239,7 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 }
 
 const listAttachmentsByCommentIDs = `-- name: ListAttachmentsByCommentIDs :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, gitlab_upload_url FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -267,6 +270,7 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 			&i.ContentType,
 			&i.SizeBytes,
 			&i.CreatedAt,
+			&i.GitlabUploadUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -279,7 +283,7 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 }
 
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, gitlab_upload_url FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -310,6 +314,7 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 			&i.ContentType,
 			&i.SizeBytes,
 			&i.CreatedAt,
+			&i.GitlabUploadUrl,
 		); err != nil {
 			return nil, err
 		}

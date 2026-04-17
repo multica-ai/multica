@@ -15,7 +15,7 @@ const addIssueReaction = `-- name: AddIssueReaction :one
 INSERT INTO issue_reaction (issue_id, workspace_id, actor_type, actor_id, emoji)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (issue_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = issue_reaction.created_at
-RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at
+RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at
 `
 
 type AddIssueReactionParams struct {
@@ -43,12 +43,14 @@ func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionPara
 		&i.ActorID,
 		&i.Emoji,
 		&i.CreatedAt,
+		&i.GitlabAwardID,
+		&i.ExternalUpdatedAt,
 	)
 	return i, err
 }
 
 const listIssueReactions = `-- name: ListIssueReactions :many
-SELECT id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at FROM issue_reaction
+SELECT id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at FROM issue_reaction
 WHERE issue_id = $1
 ORDER BY created_at ASC
 `
@@ -70,6 +72,8 @@ func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) (
 			&i.ActorID,
 			&i.Emoji,
 			&i.CreatedAt,
+			&i.GitlabAwardID,
+			&i.ExternalUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
