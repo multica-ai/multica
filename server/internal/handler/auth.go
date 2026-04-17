@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -82,6 +83,11 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, 
 		if !isNotFound(err) {
 			return db.User{}, err
 		}
+		// Only new accounts are subject to the signup policy; returning users
+		// always sign in successfully (see isSignupAllowed).
+		if !isSignupAllowed(email) {
+			return db.User{}, errSignupDisabled
+		}
 		name := email
 		if at := strings.Index(email, "@"); at > 0 {
 			name = email[:at]
@@ -97,6 +103,9 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, 
 	return user, nil
 }
 
+// signupDisabledMessage is the user-facing reason for a blocked registration.
+const signupDisabledMessage = "registration is disabled for this email on this instance"
+
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	var req SendCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -108,6 +117,16 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	if email == "" {
 		writeError(w, http.StatusBadRequest, "email is required")
 		return
+	}
+
+	// Early-reject registrations that are blocked by the self-hosted signup
+	// policy, but only when no account exists yet — existing users must still
+	// be able to request codes to sign in.
+	if _, err := h.Queries.GetUserByEmail(r.Context(), email); err != nil {
+		if isNotFound(err) && !isSignupAllowed(email) {
+			writeError(w, http.StatusForbidden, signupDisabledMessage)
+			return
+		}
 	}
 
 	// Rate limit: max 1 code per 60 seconds per email
@@ -180,6 +199,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		if errors.Is(err, errSignupDisabled) {
+			writeError(w, http.StatusForbidden, signupDisabledMessage)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
@@ -336,6 +359,10 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		if errors.Is(err, errSignupDisabled) {
+			writeError(w, http.StatusForbidden, signupDisabledMessage)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
