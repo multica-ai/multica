@@ -21,7 +21,7 @@ INSERT INTO workspace_gitlab_connection (
     connection_status
 )
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at
+RETURNING workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at, last_webhook_received_at
 `
 
 type CreateWorkspaceGitlabConnectionParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) CreateWorkspaceGitlabConnection(ctx context.Context, arg Creat
 		&i.StatusMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastWebhookReceivedAt,
 	)
 	return i, err
 }
@@ -125,7 +126,7 @@ func (q *Queries) GetUserGitlabConnection(ctx context.Context, arg GetUserGitlab
 }
 
 const getWorkspaceGitlabConnection = `-- name: GetWorkspaceGitlabConnection :one
-SELECT workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at FROM workspace_gitlab_connection
+SELECT workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at, last_webhook_received_at FROM workspace_gitlab_connection
 WHERE workspace_id = $1
 `
 
@@ -145,6 +146,7 @@ func (q *Queries) GetWorkspaceGitlabConnection(ctx context.Context, workspaceID 
 		&i.StatusMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastWebhookReceivedAt,
 	)
 	return i, err
 }

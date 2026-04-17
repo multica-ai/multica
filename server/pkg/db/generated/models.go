@@ -236,6 +236,18 @@ type GitlabProjectMember struct {
 	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
 }
 
+type GitlabWebhookEvent struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	EventType       string             `json:"event_type"`
+	ObjectID        int64              `json:"object_id"`
+	GitlabUpdatedAt pgtype.Timestamptz `json:"gitlab_updated_at"`
+	PayloadHash     []byte             `json:"payload_hash"`
+	Payload         []byte             `json:"payload"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt     pgtype.Timestamptz `json:"processed_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -477,6 +489,7 @@ type WorkspaceGitlabConnection struct {
 	StatusMessage         pgtype.Text        `json:"status_message"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	LastWebhookReceivedAt pgtype.Timestamptz `json:"last_webhook_received_at"`
 }
 
 type WorkspaceInvitation struct {
