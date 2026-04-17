@@ -1123,10 +1123,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Trigger the assigned agent when a member moves an issue out of backlog.
-	// Backlog acts as a parking lot — moving to an active status signals the
-	// issue is ready for work.
-	if statusChanged && !assigneeChanged && actorType == "member" &&
+	// Trigger the assigned agent when anyone (member or another agent) moves an
+	// issue out of backlog. Skip only when the assignee agent moves its own issue
+	// to prevent self-loops.
+	isSelfActor := actorType == "agent" && issue.AssigneeType.String == "agent" && uuidToString(issue.AssigneeID) == actorID
+	if statusChanged && !assigneeChanged && !isSelfActor &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
@@ -1431,8 +1432,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Trigger agent when moving out of backlog (batch).
-		if statusChanged && !assigneeChanged && actorType == "member" &&
+		// Trigger agent when moving out of backlog (batch). Skip self-actor to prevent loops.
+		isSelfActorBatch := actorType == "agent" && issue.AssigneeType.String == "agent" && uuidToString(issue.AssigneeID) == actorID
+		if statusChanged && !assigneeChanged && !isSelfActorBatch &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
