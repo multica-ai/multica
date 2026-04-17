@@ -3,20 +3,35 @@
 /**
  * EditorBubbleMenu — floating formatting toolbar for text selection.
  *
- * Uses Tiptap's native <BubbleMenu> component which has battle-tested
- * focus management (preventHide flag, relatedTarget checks, mousedown
- * capture). We only add scroll-container visibility detection on top,
- * because the plugin's hide middleware can't detect nested scroll
- * container clipping (virtual element has no contextElement).
+ * Positioned with @floating-ui/dom (computePosition + autoUpdate) and
+ * portaled to document.body via createPortal. This escapes ALL overflow
+ * containers in the ancestor chain (Card overflow:hidden, scrollable
+ * containers, etc.) while autoUpdate monitors every ancestor scroll
+ * container to keep the menu anchored to the selection.
+ *
+ * Key design decisions:
+ * - contextElement on the virtual reference tells Floating UI where to
+ *   find scroll ancestors, enabling the hide middleware to detect
+ *   nested scroll container clipping.
+ * - visibility:hidden (not display:none) keeps the element measurable
+ *   so computePosition can size it correctly on first show.
+ * - onMouseDown preventDefault on the portal root prevents all clicks
+ *   inside the menu from stealing focus from the editor.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { BubbleMenu } from "@tiptap/react/menus";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  computePosition,
+  offset,
+  flip,
+  shift,
+  hide,
+  autoUpdate,
+} from "@floating-ui/dom";
 import { useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
+import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
-import type { EditorState } from "@tiptap/pm/state";
-import type { EditorView } from "@tiptap/pm/view";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -55,26 +70,14 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shouldShowBubbleMenu({
-  editor,
-  view,
-  state,
-  from,
-  to,
-}: {
-  editor: Editor;
-  view: EditorView;
-  state: EditorState;
-  oldState?: EditorState;
-  from: number;
-  to: number;
-}) {
+function shouldShowBubbleMenu(editor: Editor): boolean {
   if (!editor.isEditable) return false;
-  if (state.selection.empty) return false;
-  if (!state.doc.textBetween(from, to).trim().length) return false;
-  if (state.selection instanceof NodeSelection) return false;
-  if (!view.hasFocus()) return false;
-  const $from = state.doc.resolve(from);
+  const { selection } = editor.state;
+  if (selection.empty) return false;
+  const { from, to } = selection;
+  if (!editor.state.doc.textBetween(from, to).trim().length) return false;
+  if (selection instanceof NodeSelection) return false;
+  const $from = editor.state.doc.resolve(from);
   if ($from.parent.type.name === "codeBlock") return false;
   return true;
 }
@@ -82,17 +85,6 @@ function shouldShowBubbleMenu({
 const isMac =
   typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 const mod = isMac ? "\u2318" : "Ctrl";
-
-/** Walk up from `el` to find the nearest ancestor with overflow: auto/scroll. */
-function getScrollParent(el: HTMLElement): HTMLElement | Window {
-  let parent = el.parentElement;
-  while (parent) {
-    const style = getComputedStyle(parent);
-    if (/(auto|scroll)/.test(style.overflow + style.overflowY)) return parent;
-    parent = parent.parentElement;
-  }
-  return window;
-}
 
 // ---------------------------------------------------------------------------
 // Mark Toggle Button
@@ -353,17 +345,16 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
 }
 
 // ---------------------------------------------------------------------------
-// Main Bubble Menu — native Tiptap <BubbleMenu>
+// Main Bubble Menu — @floating-ui/dom + portal to body
 // ---------------------------------------------------------------------------
 
 function EditorBubbleMenu({ editor }: { editor: Editor }) {
+  const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"toolbar" | "link-edit">("toolbar");
-  const [scrollTarget, setScrollTarget] = useState<HTMLElement | Window>(window);
-  const menuElRef = useRef<HTMLDivElement>(null);
+  const floatingRef = useRef<HTMLDivElement>(null);
 
   // Precise subscription to formatting state — only re-renders when these
-  // values actually change, replacing direct editor.isActive() calls that
-  // relied on the parent re-rendering on every transaction.
+  // values actually change, not on every transaction.
   const fmt = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -381,110 +372,106 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
     }),
   });
 
-  // Find the real scroll container once the editor view is ready.
-  // editor.view.dom throws if the view hasn't been mounted yet or has been
-  // destroyed — the Proxy only stubs state/isDestroyed, everything else throws.
-  // This race happens on fast page transitions in Desktop (Inbox switching)
-  // because useEditor delays destruction via setTimeout(..., 1) for StrictMode
-  // survival (TipTap issue #7346).
+  // Virtual reference that tracks the text selection.
+  // contextElement tells autoUpdate/hide where to find scroll ancestors.
+  const virtualRef = useMemo(
+    () => ({
+      getBoundingClientRect: () => {
+        if (editor.isDestroyed) return new DOMRect();
+        const { from, to } = editor.state.selection;
+        return posToDOMRect(editor.view, from, to);
+      },
+      contextElement: editor.view.dom,
+    }),
+    [editor],
+  );
+
+  // Show/hide based on selection state
   useEffect(() => {
-    const detect = () => {
-      if (!editor.isInitialized) return; // view not ready yet
-      setScrollTarget(getScrollParent(editor.view.dom));
+    const onTransaction = () => {
+      if (!editor.isInitialized) return;
+      setVisible(shouldShowBubbleMenu(editor));
     };
-    detect();
-    editor.on("create", detect);
-    return () => { editor.off("create", detect); };
+    editor.on("transaction", onTransaction);
+    return () => { editor.off("transaction", onTransaction); };
   }, [editor]);
 
-  // Hide when the selection scrolls outside the scroll container's
-  // visible area. The plugin's hide middleware can't detect this because
-  // its virtual reference element has no contextElement — Floating UI
-  // only checks viewport bounds. We use `display` (not managed by the
-  // plugin) as an additive visibility layer.
-  const scrollHiddenRef = useRef(false);
-  const [, forceRender] = useState(0);
+  // Hide on blur — debounced to allow focus to settle (e.g. clicking menu)
   useEffect(() => {
-    if (scrollTarget === window) return;
-    const el = scrollTarget as HTMLElement;
+    const onBlur = () => {
+      setTimeout(() => {
+        if (editor.isDestroyed) return;
+        const el = floatingRef.current;
+        if (el && el.contains(document.activeElement)) return;
+        if (editor.view.hasFocus()) return;
+        setVisible(false);
+      }, 0);
+    };
+    editor.on("blur", onBlur);
+    return () => { editor.off("blur", onBlur); };
+  }, [editor]);
 
-    const onScroll = () => {
-      if (editor.state.selection.empty) {
-        if (scrollHiddenRef.current) {
-          scrollHiddenRef.current = false;
-          forceRender((n) => n + 1);
-        }
-        return;
-      }
-      // editor.view.coordsAtPos throws if the view has been destroyed
-      // during a fast unmount race (same Proxy guard as view.dom above).
-      let coords: { top: number };
-      try {
-        coords = editor.view.coordsAtPos(editor.state.selection.from);
-      } catch {
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const visible = coords.top >= rect.top && coords.top <= rect.bottom;
-      if (scrollHiddenRef.current !== !visible) {
-        scrollHiddenRef.current = !visible;
-        forceRender((n) => n + 1);
-      }
+  // Position the floating element with autoUpdate when visible
+  useEffect(() => {
+    const el = floatingRef.current;
+    if (!visible || !el || !editor.isInitialized) return;
+
+    const updatePosition = () => {
+      computePosition(virtualRef, el, {
+        strategy: "fixed",
+        placement: "top",
+        middleware: [offset(8), flip(), shift({ padding: 8 }), hide()],
+      }).then(({ x, y, middlewareData }) => {
+        if (!el.isConnected) return;
+        const hidden = middlewareData.hide?.referenceHidden;
+        el.style.visibility = hidden ? "hidden" : "visible";
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+      });
     };
 
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [editor, scrollTarget]);
+    // autoUpdate monitors all scroll ancestors (via contextElement),
+    // resize, and animation frames — no manual scroll listener needed.
+    const cleanup = autoUpdate(virtualRef, el, updatePosition);
+    return cleanup;
+  }, [visible, editor, virtualRef]);
 
-  // Reset scroll-hidden and mode when selection changes
+  // Close on outside click
   useEffect(() => {
-    const handler = () => {
-      setMode("toolbar");
-      if (scrollHiddenRef.current) {
-        scrollHiddenRef.current = false;
-        forceRender((n) => n + 1);
-      }
+    if (!visible) return;
+    const handle = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (editor.view.dom.contains(target)) return;
+      if (floatingRef.current?.contains(target)) return;
+      setVisible(false);
     };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [visible, editor]);
+
+  // Reset mode on selection change
+  useEffect(() => {
+    const handler = () => setMode("toolbar");
     editor.on("selectionUpdate", handler);
     return () => { editor.off("selectionUpdate", handler); };
   }, [editor]);
 
-  // Refocus editor when Base UI dropdown closes
+  // Refocus editor when Popover closes
   const handleMenuOpenChange = useCallback(
     (open: boolean) => { if (!open) editor.commands.focus(); },
     [editor],
   );
 
   return (
-    <BubbleMenu
-      ref={menuElRef}
-      editor={editor}
-      shouldShow={shouldShowBubbleMenu}
-      updateDelay={0}
+    <div
+      ref={floatingRef}
       style={{
+        position: "fixed",
         zIndex: 50,
-        display: scrollHiddenRef.current ? "none" : undefined,
+        width: "max-content",
+        visibility: visible ? "visible" : "hidden",
       }}
-      options={{
-        strategy: "fixed",
-        placement: "top",
-        offset: 8,
-        flip: true,
-        shift: { padding: 8 },
-        hide: true,
-        scrollTarget,
-        // Tiptap's React wrapper initialises the menu element with
-        // position:absolute, but computePosition (called right after
-        // show()) needs position:fixed so that getOffsetParent returns
-        // the viewport instead of a positioned ancestor. Without this,
-        // the first positioning computes coordinates relative to the
-        // wrong containing block and the menu flies off-screen.
-        onShow: () => {
-          if (menuElRef.current) {
-            menuElRef.current.style.position = "fixed";
-          }
-        },
-      }}
+      onMouseDown={(e) => e.preventDefault()}
     >
       {mode === "link-edit" ? (
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
@@ -518,7 +505,7 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
           </div>
         </TooltipProvider>
       )}
-    </BubbleMenu>
+    </div>
   );
 }
 

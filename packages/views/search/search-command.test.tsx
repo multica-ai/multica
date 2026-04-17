@@ -161,19 +161,21 @@ describe("SearchCommand", () => {
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
   });
 
-  it("shows Commands by default but hides Pages and Switch Workspace until query", () => {
+  it("shows only New Issue by default and hides Pages / Switch Workspace / low-frequency commands until query", () => {
     render(<SearchCommand />);
 
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch Workspace")).not.toBeInTheDocument();
-    // Commands surface by default for discoverability.
+    // Only the primary creation action surfaces on empty query; everything
+    // else (theme, copy, New Project) must be revealed by typing.
     expect(screen.getByText("Commands")).toBeInTheDocument();
     expect(
       screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText((_, el) => el?.textContent === "New Project" && el?.tagName === "SPAN"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("New Project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Switch to Light Theme")).not.toBeInTheDocument();
+    expect(screen.queryByText("Switch to Dark Theme")).not.toBeInTheDocument();
+    expect(screen.queryByText("Use System Theme")).not.toBeInTheDocument();
   });
 
   it("filters navigation pages by query", async () => {

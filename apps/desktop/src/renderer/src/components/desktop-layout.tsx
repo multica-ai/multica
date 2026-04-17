@@ -18,6 +18,7 @@ import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { DesktopNavigationProvider } from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
+import { WindowOverlay } from "./window-overlay";
 
 function SidebarTopBar() {
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
@@ -113,7 +114,8 @@ export function DesktopShell() {
           mount WorkspaceRouteLayout, which calls setCurrentWorkspace()
           to populate the slug. The sidebar gates on slug being present
           to avoid the useRequiredWorkspaceSlug throw. Zero-workspace
-          users are routed to /workspaces/new by IndexRedirect. */}
+          users see the window-level overlay (new-workspace flow)
+          triggered by IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <div className="flex h-screen">
           <SidebarProvider className="flex-1">
@@ -132,6 +134,7 @@ export function DesktopShell() {
         </div>
         {slug && <ModalRegistry />}
         {slug && <SearchCommand />}
+        <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>
   );

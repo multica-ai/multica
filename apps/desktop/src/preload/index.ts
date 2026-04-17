@@ -11,6 +11,15 @@ const desktopAPI = {
       ipcRenderer.removeListener("auth:token", handler);
     };
   },
+  /** Listen for invitation IDs delivered via deep link */
+  onInviteOpen: (callback: (invitationId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, invitationId: string) =>
+      callback(invitationId);
+    ipcRenderer.on("invite:open", handler);
+    return () => {
+      ipcRenderer.removeListener("invite:open", handler);
+    };
+  },
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */

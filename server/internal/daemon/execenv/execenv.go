@@ -20,11 +20,12 @@ type RepoContextForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string           // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string           // workspace UUID — tasks are grouped under this
-	TaskID         string           // task UUID — used for directory name
-	AgentName      string           // for git branch naming only
-	Provider       string           // agent provider ("claude", "codex") — determines skill injection paths
+	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID    string            // workspace UUID — tasks are grouped under this
+	TaskID         string            // task UUID — used for directory name
+	AgentName      string            // for git branch naming only
+	Provider       string            // agent provider ("claude", "codex") — determines skill injection paths
+	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -110,7 +111,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHome(codexHome, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if len(params.Task.AgentSkills) > 0 {
@@ -127,7 +128,11 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
 // Returns nil if the workdir does not exist (caller should fall back to Prepare).
-func Reuse(workDir, provider string, task TaskContextForEnv, logger *slog.Logger) *Environment {
+//
+// codexVersion is the detected Codex CLI version, used (only when provider is
+// "codex") to pick the right sandbox policy for the per-task config.toml.
+// Pass an empty string when the version is unknown.
+func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(workDir); err != nil {
 		return nil
 	}
@@ -144,11 +149,11 @@ func Reuse(workDir, provider string, task TaskContextForEnv, logger *slog.Logger
 	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
-	// lives alongside the workdir. Re-run prepareCodexHome to ensure config
-	// (especially network access) is up to date.
+	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure
+	// config (especially sandbox/network access) is up to date.
 	if provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHome(codexHome, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: codexVersion}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome

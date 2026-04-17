@@ -281,9 +281,10 @@ export function SearchCommand() {
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // No query: surface the whole Commands list so users can discover what's
-    // available without having to guess keywords (Linear/Raycast pattern).
-    if (!q) return commands;
+    // No query: only surface the primary creation action. Other commands
+    // (theme switches, copy actions, New Project) are revealed as the user
+    // types, leaving the empty-state space to Recent.
+    if (!q) return commands.filter((c) => c.key === "new-issue");
     return commands.filter(
       (c) =>
         c.label.toLowerCase().includes(q) ||

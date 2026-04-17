@@ -280,6 +280,31 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.2.5",
+        date: "2026-04-17",
+        title: "CLI Autopilot, Cmd+K & Daemon Identity",
+        changes: [],
+        features: [
+          "CLI `autopilot` commands for managing scheduled and triggered automations",
+          "CLI `issue subscriber` commands for subscription management",
+          "Cmd+K palette extended — theme toggle, quick new issue/project, copy link, switch workspace",
+          "Project and sub-issue progress as optional card properties on the issue list",
+          "Persistent daemon UUID identity — CLI and desktop share one daemon across restarts and machine moves",
+          "Sole-owner workspace leave preflight check",
+          "Persist comment collapse state across sessions",
+        ],
+        fixes: [
+          "Agents now triggered on comments regardless of issue status",
+          "Codex sandbox config fixed for macOS network access",
+          "Editor bubble menu rewritten with @floating-ui/dom for reliable scroll hiding",
+          "Autopilot creator automatically subscribed to autopilot-created issues",
+          "Autopilot workspace ID correctly resolved for run-only tasks",
+          "Desktop restricts `shell.openExternal` to http/https schemes (security)",
+          "Duplicate agent names return 409 instead of silently failing",
+          "New tabs in desktop inherit current workspace",
+        ],
+      },
+      {
         version: "0.2.1",
         date: "2026-04-16",
         title: "New Agent Runtimes",

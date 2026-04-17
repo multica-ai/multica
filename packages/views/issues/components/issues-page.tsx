@@ -103,19 +103,35 @@ export function IssuesPage() {
           <Skeleton className="h-5 w-5 rounded" />
           <Skeleton className="h-4 w-32" />
         </div>
-        <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
-          <Skeleton className="h-5 w-24" />
-          <Skeleton className="h-8 w-24" />
+        <div className="flex h-12 shrink-0 items-center justify-between px-4">
+          <div className="flex items-center gap-1">
+            <Skeleton className="h-8 w-14 rounded-md" />
+            <Skeleton className="h-8 w-20 rounded-md" />
+            <Skeleton className="h-8 w-16 rounded-md" />
+          </div>
+          <div className="flex items-center gap-1">
+            <Skeleton className="h-8 w-8 rounded-md" />
+            <Skeleton className="h-8 w-8 rounded-md" />
+            <Skeleton className="h-8 w-8 rounded-md" />
+          </div>
         </div>
-        <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-24 w-full rounded-lg" />
-              <Skeleton className="h-24 w-full rounded-lg" />
-            </div>
-          ))}
-        </div>
+        {viewMode === "list" ? (
+          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-24 w-full rounded-lg" />
+                <Skeleton className="h-24 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
