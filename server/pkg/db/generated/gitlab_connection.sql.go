@@ -227,6 +227,25 @@ func (q *Queries) UpdateWorkspaceGitlabSyncCursor(ctx context.Context, arg Updat
 	return err
 }
 
+const updateWorkspaceGitlabWebhook = `-- name: UpdateWorkspaceGitlabWebhook :exec
+UPDATE workspace_gitlab_connection
+SET webhook_secret    = $2,
+    webhook_gitlab_id = $3,
+    updated_at        = now()
+WHERE workspace_id = $1
+`
+
+type UpdateWorkspaceGitlabWebhookParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	WebhookSecret   pgtype.Text `json:"webhook_secret"`
+	WebhookGitlabID pgtype.Int8 `json:"webhook_gitlab_id"`
+}
+
+func (q *Queries) UpdateWorkspaceGitlabWebhook(ctx context.Context, arg UpdateWorkspaceGitlabWebhookParams) error {
+	_, err := q.db.Exec(ctx, updateWorkspaceGitlabWebhook, arg.WorkspaceID, arg.WebhookSecret, arg.WebhookGitlabID)
+	return err
+}
+
 const upsertUserGitlabConnection = `-- name: UpsertUserGitlabConnection :one
 INSERT INTO user_gitlab_connection (
     user_id,

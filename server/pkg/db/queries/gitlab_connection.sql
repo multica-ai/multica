@@ -67,3 +67,10 @@ UPDATE workspace_gitlab_connection
 SET last_sync_cursor = $2,
     updated_at = now()
 WHERE workspace_id = $1;
+
+-- name: UpdateWorkspaceGitlabWebhook :exec
+UPDATE workspace_gitlab_connection
+SET webhook_secret    = $2,
+    webhook_gitlab_id = $3,
+    updated_at        = now()
+WHERE workspace_id = $1;

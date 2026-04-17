@@ -59,6 +59,10 @@ type Handler struct {
 	// (e.g. the gitlab initial-sync goroutine spawned by ConnectGitlabWorkspace)
 	// derive their context from this so shutdown stops them cleanly.
 	BaseCtx context.Context
+
+	// PublicURL is the externally-reachable base URL of this Multica server,
+	// used to build the gitlab webhook URL. Empty disables webhook registration.
+	PublicURL string
 }
 
 func New(
@@ -103,6 +107,12 @@ func New(
 // can leave it nil — workers fall back to context.Background().
 func (h *Handler) SetBaseCtx(ctx context.Context) {
 	h.BaseCtx = ctx
+}
+
+// SetPublicURL wires the public base URL. Called once from main.go after
+// server boot.
+func (h *Handler) SetPublicURL(url string) {
+	h.PublicURL = url
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

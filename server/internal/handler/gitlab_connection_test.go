@@ -73,6 +73,10 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 			w.Write([]byte(`[]`))
 		case "/api/v4/projects/42/issues":
 			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/hooks":
+			if r.Method == http.MethodPost {
+				w.Write([]byte(`{"id":11,"url":"x"}`))
+			}
 		default:
 			// Unexpected paths from the sync goroutine should not fail the test,
 			// but log them for debugging.
@@ -141,6 +145,10 @@ func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
 			w.Write([]byte(`[]`))
 		case "/api/v4/projects/42/issues":
 			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/hooks":
+			if r.Method == http.MethodPost {
+				w.Write([]byte(`{"id":11,"url":"x"}`))
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -215,6 +223,10 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 			w.Write([]byte(`[]`))
 		case "/api/v4/projects/1/issues":
 			w.Write([]byte(`[]`))
+		case "/api/v4/projects/1/hooks":
+			if r.Method == http.MethodPost {
+				w.Write([]byte(`{"id":11,"url":"x"}`))
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -332,6 +344,10 @@ func TestConnectGitlabWorkspace_AlreadyConnectedReturns409(t *testing.T) {
 			w.Write([]byte(`[]`))
 		case "/api/v4/projects/42/issues":
 			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/hooks":
+			if r.Method == http.MethodPost {
+				w.Write([]byte(`{"id":11,"url":"x"}`))
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -386,6 +402,10 @@ func TestDisconnectGitlabWorkspace_TruncatesCache(t *testing.T) {
 			w.Write([]byte(`[]`))
 		case "/api/v4/projects/1/issues":
 			w.Write([]byte(`[]`))
+		case "/api/v4/projects/1/hooks":
+			if r.Method == http.MethodPost {
+				w.Write([]byte(`{"id":11,"url":"x"}`))
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -506,6 +526,54 @@ func TestGitlabConnectedWorkspace_CommentWriteReturns501(t *testing.T) {
 				t.Fatalf("%s status = %d, want 501; body = %s", tc.name, rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestDisconnectGitlabWorkspace_DeletesGitlabHook(t *testing.T) {
+	var hookDeleteHit bool
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && r.URL.Path == "/api/v4/projects/7/hooks/11" {
+			hookDeleteHit = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v4/user":
+			w.Write([]byte(`{"id":1,"username":"svc"}`))
+		case "/api/v4/projects/7":
+			w.Write([]byte(`{"id":7,"path_with_namespace":"g/a"}`))
+		default:
+			w.Write([]byte(`[]`))
+		}
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	// Seed a row WITH webhook_gitlab_id = 11 + an encrypted token.
+	encrypted, _ := h.Secrets.Encrypt([]byte("glpat-x"))
+	testPool.Exec(context.Background(), `
+		INSERT INTO workspace_gitlab_connection (
+			workspace_id, gitlab_project_id, gitlab_project_path,
+			service_token_encrypted, service_token_user_id,
+			webhook_secret, webhook_gitlab_id, connection_status
+		) VALUES ($1, 7, 'g/a', $2, 1, 'wh-secret', 11, 'connected')
+	`, testWorkspaceID, encrypted)
+	defer h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/", nil)
+	delReq.Header.Set("X-User-ID", testUserID)
+	delReq = withURLParam(delReq, "id", testWorkspaceID)
+	rr := httptest.NewRecorder()
+	h.DisconnectGitlabWorkspace(rr, delReq)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if !hookDeleteHit {
+		t.Errorf("DeleteProjectHook was not called")
 	}
 }
 

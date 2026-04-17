@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/gitlab"
@@ -140,6 +143,41 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 				"error", err,
 				"workspace_id", wsID,
 				"project_id", projectID)
+			return
+		}
+
+		// After successful sync: register the webhook.
+		secret, err := generateWebhookSecret()
+		if err != nil {
+			slog.Error("generate webhook secret", "error", err)
+			return
+		}
+		if h.PublicURL == "" {
+			slog.Warn("MULTICA_PUBLIC_URL not configured; skipping webhook registration. Cache will go stale until reconnect.",
+				"workspace_id", wsID)
+			return
+		}
+		hook, err := h.Gitlab.CreateProjectHook(syncCtx, token, projectID, gitlab.CreateProjectHookInput{
+			URL:                      h.PublicURL + "/api/gitlab/webhook",
+			Token:                    secret,
+			IssuesEvents:             true,
+			ConfidentialIssuesEvents: true,
+			NoteEvents:               true,
+			ConfidentialNoteEvents:   true,
+			EmojiEvents:              true,
+			LabelEvents:              true,
+			EnableSSLVerification:    true,
+		})
+		if err != nil {
+			slog.Error("create project hook", "error", err, "workspace_id", wsID)
+			return
+		}
+		if err := h.Queries.UpdateWorkspaceGitlabWebhook(syncCtx, db.UpdateWorkspaceGitlabWebhookParams{
+			WorkspaceID:     parseUUID(wsID),
+			WebhookSecret:   pgtype.Text{String: secret, Valid: true},
+			WebhookGitlabID: pgtype.Int8{Int64: hook.ID, Valid: true},
+		}); err != nil {
+			slog.Error("save webhook fields", "error", err, "workspace_id", wsID)
 		}
 	}(req.Token, project.ID, workspaceID)
 
@@ -164,6 +202,24 @@ func (h *Handler) DisconnectGitlabWorkspace(w http.ResponseWriter, r *http.Reque
 	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
 		return
 	}
+
+	// Best-effort: remove the webhook from GitLab so it stops sending us
+	// deliveries for a workspace we're about to forget. Failures are logged
+	// but don't block the local cleanup — if GitLab is unreachable, the hook
+	// stays orphaned and the next admin can clean it up by hand.
+	if existing, err := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID)); err == nil {
+		if existing.WebhookGitlabID.Valid && existing.ServiceTokenEncrypted != nil && h.Secrets != nil {
+			token, err := h.Secrets.Decrypt(existing.ServiceTokenEncrypted)
+			if err != nil {
+				slog.Warn("decrypt service token for hook deletion", "error", err)
+			} else {
+				if err := h.Gitlab.DeleteProjectHook(r.Context(), string(token), existing.GitlabProjectID, existing.WebhookGitlabID.Int64); err != nil {
+					slog.Warn("delete gitlab project hook", "error", err)
+				}
+			}
+		}
+	}
+
 	// Cascade-truncate the cache before removing the connection row.
 	// The cache rows are derived from GitLab; once disconnected, they're
 	// unreachable garbage. Inside a transaction so partial failure doesn't
@@ -238,4 +294,14 @@ func (h *Handler) GetGitlabWorkspaceConnection(w http.ResponseWriter, r *http.Re
 		ConnectionStatus:   row.ConnectionStatus,
 		StatusMessage:      statusMessage,
 	})
+}
+
+// generateWebhookSecret returns a 32-byte random hex string suitable for
+// the X-Gitlab-Token header. 64 chars of entropy is overkill but cheap.
+func generateWebhookSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := cryptorand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
