@@ -1,4 +1,4 @@
-.PHONY: dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down selfhost selfhost-stop
+.PHONY: dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down generate-secrets-key selfhost selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -92,6 +92,7 @@ setup:
 	@echo "==> Installing dependencies..."
 	pnpm install
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@$(MAKE) generate-secrets-key
 	@echo "==> Running migrations..."
 	cd server && go run ./cmd/migrate up
 	@echo ""
@@ -135,6 +136,13 @@ db-up:
 
 db-down:
 	@$(COMPOSE) down
+
+generate-secrets-key:
+	@if ! grep -q '^MULTICA_SECRETS_KEY=' .env 2>/dev/null; then \
+		key=$$(head -c 32 /dev/urandom | base64) ; \
+		echo "MULTICA_SECRETS_KEY=$$key" >> .env ; \
+		echo "generated MULTICA_SECRETS_KEY in .env" ; \
+	fi
 
 worktree-env:
 	@bash scripts/init-worktree-env.sh .env.worktree
