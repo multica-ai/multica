@@ -555,8 +555,8 @@ function TaskRunEntry({ task, allTasks, onRetried }: { task: AgentTask; allTasks
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Failed to retry task";
       // Translate backend errors into user-friendly messages.
-      const msg = raw.includes("issue is closed")
-        ? "This issue is closed — reopen it to retry"
+      const msg = raw.includes("issue is done") || raw.includes("issue is closed")
+        ? "This issue is marked as done — change its status to retry"
         : raw.includes("active task")
           ? "A task is already running — wait for it to finish"
           : raw;

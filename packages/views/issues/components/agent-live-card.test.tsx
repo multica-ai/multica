@@ -190,7 +190,7 @@ describe("TaskRunEntry retry button", () => {
     const { toast } = await import("sonner");
     const failedTask = makeTask({ status: "failed" });
     mockListTasksByIssue.mockResolvedValue([failedTask]);
-    mockRetryTask.mockRejectedValue(new Error("cannot retry: issue is closed"));
+    mockRetryTask.mockRejectedValue(new Error("cannot retry: issue is done"));
 
     render(<TaskRunHistory issueId="issue-1" />);
     await waitFor(() => expect(screen.getByText(/Execution history/)).toBeInTheDocument());
@@ -200,7 +200,7 @@ describe("TaskRunEntry retry button", () => {
     fireEvent.click(screen.getByText("Retry"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
-      "This issue is closed — reopen it to retry"
+      "This issue is marked as done — change its status to retry"
     ));
   });
 

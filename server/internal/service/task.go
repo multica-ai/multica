@@ -26,7 +26,7 @@ var (
 	ErrTaskNotRetryable = errors.New("task is not retryable: only failed or cancelled tasks can be retried")
 	ErrAlreadyRetried  = errors.New("task has already been retried")
 	ErrActiveTaskExists = errors.New("an active task already exists for this issue")
-	ErrIssueClosed     = errors.New("cannot retry: issue is closed")
+	ErrIssueClosed     = errors.New("cannot retry: issue is done")
 )
 
 type TaskService struct {
