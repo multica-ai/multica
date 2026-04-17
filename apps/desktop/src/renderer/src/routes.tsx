@@ -132,6 +132,10 @@ export const appRoutes: RouteObject[] = [
                   },
                 ]}
                 extraWorkspaceTabs={
+                  // VITE_* envs are inlined into the renderer bundle at build
+                  // time. Flipping this flag requires repackaging the desktop
+                  // app — unlike the server-side MULTICA_GITLAB_ENABLED, which
+                  // can be toggled by a restart.
                   import.meta.env.VITE_GITLAB_ENABLED === "true"
                     ? [
                         {
