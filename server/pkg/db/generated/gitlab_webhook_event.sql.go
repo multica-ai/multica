@@ -12,9 +12,12 @@ import (
 )
 
 const claimNextWebhookEvent = `-- name: ClaimNextWebhookEvent :one
-SELECT id, workspace_id, event_type, object_id, gitlab_updated_at, payload
+SELECT id, workspace_id, event_type, object_id, gitlab_updated_at, payload, failure_count
 FROM gitlab_webhook_event
 WHERE processed_at IS NULL
+  AND failure_count < 10
+  AND (last_attempt_at IS NULL
+       OR last_attempt_at < now() - (failure_count * interval '5 seconds'))
 ORDER BY received_at
 LIMIT 1
 FOR UPDATE SKIP LOCKED
@@ -27,11 +30,14 @@ type ClaimNextWebhookEventRow struct {
 	ObjectID        int64              `json:"object_id"`
 	GitlabUpdatedAt pgtype.Timestamptz `json:"gitlab_updated_at"`
 	Payload         []byte             `json:"payload"`
+	FailureCount    int32              `json:"failure_count"`
 }
 
-// Pulls the oldest unprocessed event and locks it for the calling
-// transaction. Other workers SKIP LOCKED rows, giving us a simple
-// N-worker pool without coordination state.
+// Pulls the oldest unprocessed event whose backoff window has elapsed.
+// Events that have failed too many times (>= 10) are skipped — they're
+// effectively dead-lettered (still in the table, but never re-claimed).
+// Backoff is exponential in failure_count seconds, capped by the SKIP
+// LOCKED claim itself.
 func (q *Queries) ClaimNextWebhookEvent(ctx context.Context) (ClaimNextWebhookEventRow, error) {
 	row := q.db.QueryRow(ctx, claimNextWebhookEvent)
 	var i ClaimNextWebhookEventRow
@@ -42,6 +48,7 @@ func (q *Queries) ClaimNextWebhookEvent(ctx context.Context) (ClaimNextWebhookEv
 		&i.ObjectID,
 		&i.GitlabUpdatedAt,
 		&i.Payload,
+		&i.FailureCount,
 	)
 	return i, err
 }
@@ -122,6 +129,26 @@ WHERE id = $1
 
 func (q *Queries) MarkWebhookEventProcessed(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markWebhookEventProcessed, id)
+	return err
+}
+
+const recordWebhookEventFailure = `-- name: RecordWebhookEventFailure :exec
+UPDATE gitlab_webhook_event
+SET failure_count = failure_count + 1,
+    last_attempt_at = now(),
+    last_error = $2
+WHERE id = $1
+`
+
+type RecordWebhookEventFailureParams struct {
+	ID        pgtype.UUID `json:"id"`
+	LastError pgtype.Text `json:"last_error"`
+}
+
+// Increments failure_count + records the error message + bumps last_attempt_at
+// so the backoff filter delays the next retry.
+func (q *Queries) RecordWebhookEventFailure(ctx context.Context, arg RecordWebhookEventFailureParams) error {
+	_, err := q.db.Exec(ctx, recordWebhookEventFailure, arg.ID, arg.LastError)
 	return err
 }
 

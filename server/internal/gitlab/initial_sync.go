@@ -2,12 +2,14 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	gitlabapi "github.com/multica-ai/multica/server/pkg/gitlab"
@@ -191,7 +193,17 @@ func syncOneIssue(
 
 	row, err := deps.Queries.UpsertIssueFromGitlab(ctx, buildUpsertIssueParams(wsUUID, in.ProjectID, issue, values))
 	if err != nil {
-		return fmt.Errorf("upsert issue: %w", err)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("upsert issue: %w", err)
+		}
+		// Skipped because existing row is newer; fetch for label work below.
+		row, err = deps.Queries.GetIssueByGitlabIID(ctx, db.GetIssueByGitlabIIDParams{
+			WorkspaceID: wsUUID,
+			GitlabIid:   pgtype.Int4{Int32: int32(issue.IID), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("re-fetch after skipped upsert: %w", err)
+		}
 	}
 
 	// Replace label associations.
@@ -296,6 +308,7 @@ func buildUpsertIssueParams(wsUUID pgtype.UUID, projectID int64, issue gitlabapi
 		WorkspaceID:       wsUUID,
 		GitlabIid:         pgtype.Int4{Int32: int32(issue.IID), Valid: true},
 		GitlabProjectID:   pgtype.Int8{Int64: projectID, Valid: true},
+		GitlabIssueID:     pgtype.Int8{Int64: issue.ID, Valid: issue.ID != 0},
 		Title:             values.Title,
 		Description:       desc,
 		Status:            values.Status,

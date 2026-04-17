@@ -105,8 +105,54 @@ func (q *Queries) GetGitlabLabelByName(ctx context.Context, arg GetGitlabLabelBy
 	return i, err
 }
 
+const getIssueByGitlabID = `-- name: GetIssueByGitlabID :one
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+WHERE workspace_id = $1 AND gitlab_issue_id = $2
+`
+
+type GetIssueByGitlabIDParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	GitlabIssueID pgtype.Int8 `json:"gitlab_issue_id"`
+}
+
+// GitLab's Emoji Hook payload uses awardable_id which is the GLOBAL issue
+// id (not the per-project IID). This query resolves an emoji event's
+// awardable_id back to the cached issue row.
+func (q *Queries) GetIssueByGitlabID(ctx context.Context, arg GetIssueByGitlabIDParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueByGitlabID, arg.WorkspaceID, arg.GitlabIssueID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.GitlabIid,
+		&i.GitlabProjectID,
+		&i.ExternalUpdatedAt,
+		&i.GitlabIssueID,
+	)
+	return i, err
+}
+
 const getIssueByGitlabIID = `-- name: GetIssueByGitlabIID :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE workspace_id = $1 AND gitlab_iid = $2
 `
 
@@ -143,6 +189,7 @@ func (q *Queries) GetIssueByGitlabIID(ctx context.Context, arg GetIssueByGitlabI
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
+		&i.GitlabIssueID,
 	)
 	return i, err
 }
@@ -417,6 +464,7 @@ INSERT INTO issue (
     workspace_id,
     gitlab_iid,
     gitlab_project_id,
+    gitlab_issue_id,
     title,
     description,
     status,
@@ -428,7 +476,7 @@ INSERT INTO issue (
     due_date,
     external_updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
@@ -436,16 +484,21 @@ ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SE
     priority = EXCLUDED.priority,
     assignee_type = EXCLUDED.assignee_type,
     assignee_id = EXCLUDED.assignee_id,
+    gitlab_project_id = EXCLUDED.gitlab_project_id,
+    gitlab_issue_id = EXCLUDED.gitlab_issue_id,
     due_date = EXCLUDED.due_date,
     external_updated_at = EXCLUDED.external_updated_at,
     updated_at = now()
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at
+WHERE issue.external_updated_at IS NULL
+   OR issue.external_updated_at < EXCLUDED.external_updated_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
 `
 
 type UpsertIssueFromGitlabParams struct {
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
 	GitlabIid         pgtype.Int4        `json:"gitlab_iid"`
 	GitlabProjectID   pgtype.Int8        `json:"gitlab_project_id"`
+	GitlabIssueID     pgtype.Int8        `json:"gitlab_issue_id"`
 	Title             string             `json:"title"`
 	Description       pgtype.Text        `json:"description"`
 	Status            string             `json:"status"`
@@ -464,6 +517,7 @@ func (q *Queries) UpsertIssueFromGitlab(ctx context.Context, arg UpsertIssueFrom
 		arg.WorkspaceID,
 		arg.GitlabIid,
 		arg.GitlabProjectID,
+		arg.GitlabIssueID,
 		arg.Title,
 		arg.Description,
 		arg.Status,
@@ -501,6 +555,7 @@ func (q *Queries) UpsertIssueFromGitlab(ctx context.Context, arg UpsertIssueFrom
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
+		&i.GitlabIssueID,
 	)
 	return i, err
 }

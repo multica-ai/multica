@@ -2,10 +2,12 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	gitlabapi "github.com/multica-ai/multica/server/pkg/gitlab"
@@ -105,7 +107,11 @@ func (r *Reconciler) reconcileOne(ctx context.Context, conn db.WorkspaceGitlabCo
 	for _, issue := range issues {
 		values := TranslateIssue(issue, &TranslateContext{AgentBySlug: agentMap})
 		if _, err := r.queries.UpsertIssueFromGitlab(ctx, buildUpsertIssueParams(conn.WorkspaceID, conn.GitlabProjectID, issue, values)); err != nil {
-			return fmt.Errorf("upsert iid=%d: %w", issue.IID, err)
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("upsert iid=%d: %w", issue.IID, err)
+			}
+			// Skipped (existing newer) — don't include in maxSeen advance below.
+			continue
 		}
 		if t, err := time.Parse(time.RFC3339, issue.UpdatedAt); err == nil && t.After(maxSeen) {
 			maxSeen = t

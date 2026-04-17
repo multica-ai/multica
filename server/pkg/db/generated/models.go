@@ -246,6 +246,9 @@ type GitlabWebhookEvent struct {
 	Payload         []byte             `json:"payload"`
 	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
 	ProcessedAt     pgtype.Timestamptz `json:"processed_at"`
+	FailureCount    int32              `json:"failure_count"`
+	LastAttemptAt   pgtype.Timestamptz `json:"last_attempt_at"`
+	LastError       pgtype.Text        `json:"last_error"`
 }
 
 type InboxItem struct {
@@ -291,6 +294,7 @@ type Issue struct {
 	GitlabIid          pgtype.Int4        `json:"gitlab_iid"`
 	GitlabProjectID    pgtype.Int8        `json:"gitlab_project_id"`
 	ExternalUpdatedAt  pgtype.Timestamptz `json:"external_updated_at"`
+	GitlabIssueID      pgtype.Int8        `json:"gitlab_issue_id"`
 }
 
 type IssueDependency struct {

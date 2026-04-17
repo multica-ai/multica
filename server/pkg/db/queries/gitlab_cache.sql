@@ -75,6 +75,7 @@ INSERT INTO issue (
     workspace_id,
     gitlab_iid,
     gitlab_project_id,
+    gitlab_issue_id,
     title,
     description,
     status,
@@ -86,7 +87,7 @@ INSERT INTO issue (
     due_date,
     external_updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
@@ -94,14 +95,25 @@ ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SE
     priority = EXCLUDED.priority,
     assignee_type = EXCLUDED.assignee_type,
     assignee_id = EXCLUDED.assignee_id,
+    gitlab_project_id = EXCLUDED.gitlab_project_id,
+    gitlab_issue_id = EXCLUDED.gitlab_issue_id,
     due_date = EXCLUDED.due_date,
     external_updated_at = EXCLUDED.external_updated_at,
     updated_at = now()
+WHERE issue.external_updated_at IS NULL
+   OR issue.external_updated_at < EXCLUDED.external_updated_at
 RETURNING *;
 
 -- name: GetIssueByGitlabIID :one
 SELECT * FROM issue
 WHERE workspace_id = $1 AND gitlab_iid = $2;
+
+-- name: GetIssueByGitlabID :one
+-- GitLab's Emoji Hook payload uses awardable_id which is the GLOBAL issue
+-- id (not the per-project IID). This query resolves an emoji event's
+-- awardable_id back to the cached issue row.
+SELECT * FROM issue
+WHERE workspace_id = $1 AND gitlab_issue_id = $2;
 
 -- name: DeleteWorkspaceCachedIssues :exec
 DELETE FROM issue WHERE workspace_id = $1 AND gitlab_iid IS NOT NULL;
