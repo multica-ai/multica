@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -198,6 +199,22 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	}
 
 	return "agent", agentID
+}
+
+// buildAgentUUIDSlugMap returns a map of agent UUID → slug for every agent
+// in the workspace. Slugs are derived from agent.Name (lowercased, spaces
+// → hyphens). Same convention as Phase 2a's read-side buildAgentSlugMap.
+func (h *Handler) buildAgentUUIDSlugMap(ctx context.Context, workspaceID pgtype.UUID) (map[string]string, error) {
+	rows, err := h.Queries.ListAgents(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, row := range rows {
+		slug := strings.ToLower(strings.ReplaceAll(row.Name, " ", "-"))
+		out[uuidToString(row.ID)] = slug
+	}
+	return out, nil
 }
 
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {

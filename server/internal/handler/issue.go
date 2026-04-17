@@ -15,8 +15,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	gitlabapi "github.com/multica-ai/multica/server/pkg/gitlab"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -845,6 +847,114 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
+	// Phase 3a write-through: when the workspace has a GitLab connection,
+	// create the issue in GitLab first, then upsert the cache row from the
+	// returned representation. Falls through to legacy direct-DB path when
+	// no connection exists.
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		wsConn, err := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+		if err == nil {
+			actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+			token, _, err := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if err != nil {
+				slog.Error("resolve gitlab token", "error", err)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
+
+			agentSlugMap, err := h.buildAgentUUIDSlugMap(r.Context(), parseUUID(workspaceID))
+			if err != nil {
+				slog.Error("agent slug map", "error", err)
+				writeError(w, http.StatusInternalServerError, "build agent map failed")
+				return
+			}
+
+			var assigneeTypeStr, assigneeIDStr string
+			if req.AssigneeType != nil {
+				assigneeTypeStr = *req.AssigneeType
+			}
+			if req.AssigneeID != nil {
+				assigneeIDStr = *req.AssigneeID
+			}
+			var descStr string
+			if req.Description != nil {
+				descStr = *req.Description
+			}
+			glInput := gitlabsync.BuildCreateIssueInput(gitlabsync.CreateIssueRequest{
+				Title:        req.Title,
+				Description:  descStr,
+				Status:       status,
+				Priority:     priority,
+				AssigneeType: assigneeTypeStr,
+				AssigneeID:   assigneeIDStr,
+			}, agentSlugMap)
+
+			glIssue, err := h.Gitlab.CreateIssue(r.Context(), token, wsConn.GitlabProjectID, glInput)
+			if err != nil {
+				slog.Error("gitlab create issue", "error", err)
+				writeError(w, http.StatusBadGateway, "gitlab create issue failed")
+				return
+			}
+
+			// Build the inverse slug→uuid map for the read-side translator.
+			agentByLabel := make(map[string]string, len(agentSlugMap))
+			for uuid, slug := range agentSlugMap {
+				agentByLabel[slug] = uuid
+			}
+			values := gitlabsync.TranslateIssue(*glIssue, &gitlabsync.TranslateContext{AgentBySlug: agentByLabel})
+
+			// Atomically increment the workspace issue counter and cache the GitLab row.
+			glTx, err := h.TxStarter.Begin(r.Context())
+			if err != nil {
+				slog.Error("begin gitlab write-through tx", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to create issue")
+				return
+			}
+			defer glTx.Rollback(r.Context())
+
+			qtxGL := h.Queries.WithTx(glTx)
+			issueNumber, err := qtxGL.IncrementIssueCounter(r.Context(), parseUUID(workspaceID))
+			if err != nil {
+				slog.Error("increment issue counter (gitlab)", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to create issue")
+				return
+			}
+
+			cacheRow, err := qtxGL.UpsertIssueFromGitlab(r.Context(), buildUpsertParamsFromCreate(parseUUID(workspaceID), wsConn.GitlabProjectID, *glIssue, values))
+			if err != nil {
+				slog.Error("upsert gitlab cache row", "error", err)
+				writeError(w, http.StatusInternalServerError, "cache upsert failed")
+				return
+			}
+
+			// Set the workspace-scoped issue number (UpsertIssueFromGitlab always
+			// inserts 0 by default; we update it here within the same transaction).
+			if _, err := glTx.Exec(r.Context(),
+				`UPDATE issue SET number = $1 WHERE id = $2`,
+				issueNumber, cacheRow.ID,
+			); err != nil {
+				slog.Error("set issue number (gitlab)", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to create issue")
+				return
+			}
+			cacheRow.Number = issueNumber
+
+			if err := glTx.Commit(r.Context()); err != nil {
+				slog.Error("commit gitlab write-through tx", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to create issue")
+				return
+			}
+
+			prefix := h.getIssuePrefix(r.Context(), cacheRow.WorkspaceID)
+			resp := issueToResponse(cacheRow, prefix)
+			h.publish(protocol.EventIssueCreated, workspaceID, actorType, actorID, map[string]any{"issue": resp})
+			writeJSON(w, http.StatusCreated, resp)
+			return
+		}
+		// err != nil → fall through to legacy path (most likely pgx.ErrNoRows
+		// for non-connected workspaces).
+	}
+
 	// Use a transaction to atomically increment the workspace issue counter
 	// and create the issue with the assigned number.
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -925,6 +1035,43 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// buildUpsertParamsFromCreate converts a GitLab issue + translated IssueValues
+// into the sqlc UpsertIssueFromGitlab params. Used by the Phase 3a write-through path.
+func buildUpsertParamsFromCreate(wsUUID pgtype.UUID, projectID int64, issue gitlabapi.Issue, values gitlabsync.IssueValues) db.UpsertIssueFromGitlabParams {
+	var assigneeType pgtype.Text
+	var assigneeID pgtype.UUID
+	if values.AssigneeType != "" {
+		assigneeType = pgtype.Text{String: values.AssigneeType, Valid: true}
+		_ = assigneeID.Scan(values.AssigneeID)
+	}
+	desc := pgtype.Text{}
+	if values.Description != "" {
+		desc = pgtype.Text{String: values.Description, Valid: true}
+	}
+	extUpdated := pgtype.Timestamptz{}
+	if values.UpdatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, values.UpdatedAt); err == nil {
+			extUpdated = pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+	return db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: int32(issue.IID), Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: projectID, Valid: true},
+		GitlabIssueID:     pgtype.Int8{Int64: issue.ID, Valid: issue.ID != 0},
+		Title:             values.Title,
+		Description:       desc,
+		Status:            values.Status,
+		Priority:          values.Priority,
+		AssigneeType:      assigneeType,
+		AssigneeID:        assigneeID,
+		CreatorType:       pgtype.Text{}, // Phase 3b backfill
+		CreatorID:         pgtype.UUID{},
+		DueDate:           pgtype.Timestamptz{},
+		ExternalUpdatedAt: extUpdated,
+	}
 }
 
 type UpdateIssueRequest struct {
