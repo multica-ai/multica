@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -265,11 +267,33 @@ type CreateAgentRequest struct {
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 }
 
+func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(payload, dst); err != nil {
+		return nil, err
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		raw = map[string]json.RawMessage{}
+	}
+
+	return raw, nil
+}
+
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
 	var req CreateAgentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -319,8 +343,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var mc []byte
-	if req.McpConfig != nil {
-		mc = []byte(req.McpConfig)
+	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
+		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
@@ -440,7 +464,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateAgentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -472,8 +497,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		ca, _ := json.Marshal(*req.CustomArgs)
 		params.CustomArgs = ca
 	}
-	if req.McpConfig != nil && string(*req.McpConfig) != "null" {
-		params.McpConfig = []byte(*req.McpConfig)
+	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
+	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
+	if hasMcpConfig && !shouldClearMcpConfig {
+		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 	if req.RuntimeID != nil {
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
@@ -497,7 +524,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
 	}
 
-	agent, err := h.Queries.UpdateAgent(r.Context(), params)
+	agent, err = h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
@@ -506,7 +533,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// mcp_config: null in the request means explicitly clear the field.
 	// COALESCE in UpdateAgent cannot set a column to NULL, so we use a dedicated query.
-	if req.McpConfig != nil && string(*req.McpConfig) == "null" {
+	if shouldClearMcpConfig {
 		agent, err = h.Queries.ClearAgentMcpConfig(r.Context(), parseUUID(id))
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
