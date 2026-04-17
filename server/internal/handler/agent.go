@@ -1032,35 +1032,6 @@ func (h *Handler) ensureWorkspaceHasRepos(ctx context.Context, workspaceID pgtyp
 	return fmt.Errorf("workspace has no repositories configured; attach at least one repository in Settings > Repositories before continuing")
 }
 
-func parseWorkspaceRepos(raw []byte) []RepoData {
-	if len(raw) == 0 {
-		return []RepoData{}
-	}
-
-	var repos []RepoData
-	if err := json.Unmarshal(raw, &repos); err != nil {
-		return []RepoData{}
-	}
-
-	normalized := make([]RepoData, 0, len(repos))
-	seen := make(map[string]struct{}, len(repos))
-	for _, repo := range repos {
-		url := strings.TrimSpace(repo.URL)
-		if url == "" {
-			continue
-		}
-		if _, exists := seen[url]; exists {
-			continue
-		}
-		seen[url] = struct{}{}
-		normalized = append(normalized, RepoData{
-			URL:         url,
-			Description: strings.TrimSpace(repo.Description),
-		})
-	}
-	return normalized
-}
-
 func (h *Handler) BindAgentTaskIssue(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "id")
 	taskID := chi.URLParam(r, "taskId")
