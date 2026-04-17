@@ -63,7 +63,11 @@
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
-    "./platform": "./platform/index.ts"
+    "./platform": "./platform/index.ts",
+    "./gitlab": "./gitlab/index.ts",
+    "./gitlab/types": "./gitlab/types.ts",
+    "./gitlab/queries": "./gitlab/queries.ts",
+    "./gitlab/mutations": "./gitlab/mutations.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
@@ -75,7 +79,12 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "react-dom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
