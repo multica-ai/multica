@@ -52,12 +52,15 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+
+	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
+	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 }
 
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
-	return &Daemon{
+	d := &Daemon{
 		cfg:           cfg,
 		client:        NewClient(cfg.ServerBaseURL),
 		repoCache:     repocache.New(cacheRoot, logger),
@@ -66,6 +69,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeIndex:  make(map[string]Runtime),
 		agentVersions: make(map[string]string),
 	}
+	d.runner = taskRunnerFunc(d.runTask)
+	d.cancelPollInterval = 5 * time.Second
+	return d
 }
 
 // setAgentVersion records the detected CLI version for an agent provider so
@@ -802,10 +808,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	// Poll for cancellation every 5 seconds while the task is running.
+	// Poll for cancellation while the task is running.
+	// Interval is d.cancelPollInterval (default 5s set by New(), reduced in tests).
+	// Guard against zero — time.NewTicker(0) panics.
+	pollInterval := d.cancelPollInterval
+	if pollInterval == 0 {
+		pollInterval = 5 * time.Second
+	}
 	cancelledByPoll := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -822,7 +834,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	}()
 
-	result, err := d.runTask(runCtx, task, provider, taskLog)
+	result, err := d.runner.run(runCtx, task, provider, taskLog)
+
+	// Always report usage before any early return — the agent accumulates tokens
+	// whether the task completes, errors, or is cancelled mid-run by the poll goroutine.
+	if len(result.Usage) > 0 {
+		if err := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); err != nil {
+			taskLog.Warn("report task usage failed", "error", err)
+		}
+	}
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -848,13 +868,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); err == nil && status == "cancelled" {
 		taskLog.Info("task cancelled during execution, discarding result")
 		return
-	}
-
-	// Report usage independently so it's captured even for failed/blocked tasks.
-	if len(result.Usage) > 0 {
-		if err := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); err != nil {
-			taskLog.Warn("report task usage failed", "error", err)
-		}
 	}
 
 	switch result.Status {
