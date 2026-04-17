@@ -241,11 +241,19 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
-		s, _ := json.Marshal(req.Settings)
+		s, err := json.Marshal(req.Settings)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid settings payload")
+			return
+		}
 		params.Settings = s
 	}
 	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
+		reposJSON, err := json.Marshal(req.Repos)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid repos payload")
+			return
+		}
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
