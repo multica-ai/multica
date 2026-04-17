@@ -216,3 +216,169 @@ func TestBuildCreateIssueInput_PriorityNoneOmitted(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildUpdateIssueInput(t *testing.T) {
+	agentSlugByUUID := map[string]string{
+		"11111111-1111-1111-1111-111111111111": "builder",
+		"22222222-2222-2222-2222-222222222222": "reviewer",
+	}
+
+	statusClosed := "done"
+	statusOpen := "in_progress"
+	statusCancelled := "cancelled"
+	prioHigh := "high"
+	prioNone := "none"
+	titleNew := "new title"
+	descNew := "new desc"
+	due := "2026-05-01"
+
+	type oldSnap struct {
+		status       string
+		priority     string
+		assigneeType string
+		assigneeUUID string
+	}
+	cases := []struct {
+		name          string
+		old           oldSnap
+		req           UpdateIssueRequest
+		wantAddLabels []string
+		wantRemove    []string
+		wantTitle     *string
+		wantDesc      *string
+		wantDue       *string
+		wantState     *string
+	}{
+		{
+			name:          "title-only",
+			old:           oldSnap{status: "todo", priority: "none"},
+			req:           UpdateIssueRequest{Title: &titleNew},
+			wantTitle:     &titleNew,
+			wantAddLabels: nil,
+			wantRemove:    nil,
+		},
+		{
+			name:          "status transition in_progress → done closes",
+			old:           oldSnap{status: "in_progress", priority: "none"},
+			req:           UpdateIssueRequest{Status: &statusClosed},
+			wantAddLabels: []string{"status::done"},
+			wantRemove:    []string{"status::in_progress"},
+			wantState:     strPtr("close"),
+		},
+		{
+			name:          "status transition done → in_progress reopens",
+			old:           oldSnap{status: "done", priority: "none"},
+			req:           UpdateIssueRequest{Status: &statusOpen},
+			wantAddLabels: []string{"status::in_progress"},
+			wantRemove:    []string{"status::done"},
+			wantState:     strPtr("reopen"),
+		},
+		{
+			name:          "status cancelled closes",
+			old:           oldSnap{status: "todo", priority: "none"},
+			req:           UpdateIssueRequest{Status: &statusCancelled},
+			wantAddLabels: []string{"status::cancelled"},
+			wantRemove:    []string{"status::todo"},
+			wantState:     strPtr("close"),
+		},
+		{
+			name:          "priority none → high",
+			old:           oldSnap{status: "todo", priority: "none"},
+			req:           UpdateIssueRequest{Priority: &prioHigh},
+			wantAddLabels: []string{"priority::high"},
+			wantRemove:    nil,
+		},
+		{
+			name:          "priority high → none removes without adding",
+			old:           oldSnap{status: "todo", priority: "high"},
+			req:           UpdateIssueRequest{Priority: &prioNone},
+			wantAddLabels: nil,
+			wantRemove:    []string{"priority::high"},
+		},
+		{
+			name:          "agent assignee change",
+			old:           oldSnap{status: "todo", priority: "none", assigneeType: "agent", assigneeUUID: "11111111-1111-1111-1111-111111111111"},
+			req:           UpdateIssueRequest{AssigneeType: strPtr("agent"), AssigneeID: strPtr("22222222-2222-2222-2222-222222222222")},
+			wantAddLabels: []string{"agent::reviewer"},
+			wantRemove:    []string{"agent::builder"},
+		},
+		{
+			name:          "clear agent assignee",
+			old:           oldSnap{status: "todo", priority: "none", assigneeType: "agent", assigneeUUID: "11111111-1111-1111-1111-111111111111"},
+			req:           UpdateIssueRequest{AssigneeType: strPtr(""), AssigneeID: strPtr("")},
+			wantAddLabels: nil,
+			wantRemove:    []string{"agent::builder"},
+		},
+		{
+			name:          "switch from agent to member removes agent label",
+			old:           oldSnap{status: "todo", priority: "none", assigneeType: "agent", assigneeUUID: "11111111-1111-1111-1111-111111111111"},
+			req:           UpdateIssueRequest{AssigneeType: strPtr("member"), AssigneeID: strPtr("99999999-9999-9999-9999-999999999999")},
+			wantAddLabels: nil,
+			wantRemove:    []string{"agent::builder"},
+		},
+		{
+			name:     "description + due date pass through",
+			old:      oldSnap{status: "todo", priority: "none"},
+			req:      UpdateIssueRequest{Description: &descNew, DueDate: &due},
+			wantDesc: &descNew,
+			wantDue:  &due,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildUpdateIssueInput(
+				OldIssueSnapshot{
+					Status:       tc.old.status,
+					Priority:     tc.old.priority,
+					AssigneeType: tc.old.assigneeType,
+					AssigneeUUID: tc.old.assigneeUUID,
+				},
+				tc.req,
+				agentSlugByUUID,
+			)
+			if !strSliceEq(got.AddLabels, tc.wantAddLabels) {
+				t.Errorf("AddLabels = %v, want %v", got.AddLabels, tc.wantAddLabels)
+			}
+			if !strSliceEq(got.RemoveLabels, tc.wantRemove) {
+				t.Errorf("RemoveLabels = %v, want %v", got.RemoveLabels, tc.wantRemove)
+			}
+			if !strPtrEq(got.Title, tc.wantTitle) {
+				t.Errorf("Title = %v, want %v", got.Title, tc.wantTitle)
+			}
+			if !strPtrEq(got.Description, tc.wantDesc) {
+				t.Errorf("Description = %v, want %v", got.Description, tc.wantDesc)
+			}
+			if !strPtrEq(got.DueDate, tc.wantDue) {
+				t.Errorf("DueDate = %v, want %v", got.DueDate, tc.wantDue)
+			}
+			if !strPtrEq(got.StateEvent, tc.wantState) {
+				t.Errorf("StateEvent = %v, want %v", got.StateEvent, tc.wantState)
+			}
+		})
+	}
+}
+
+func strPtr(v string) *string { return &v }
+
+func strSliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func strPtrEq(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}

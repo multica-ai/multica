@@ -195,3 +195,98 @@ func BuildCreateIssueInput(req CreateIssueRequest, agentSlugByUUID map[string]st
 		DueDate:     req.DueDate,
 	}
 }
+
+// UpdateIssueRequest is the translator-facing input for PATCH /api/issues/{id}.
+// Fields are pointers so the translator can distinguish "not in request"
+// (nil) from "cleared" (pointer to zero value).
+type UpdateIssueRequest struct {
+	Title        *string
+	Description  *string
+	Status       *string
+	Priority     *string
+	AssigneeType *string // "agent", "member", or "" to clear
+	AssigneeID   *string // UUID string, or "" to clear
+	DueDate      *string
+}
+
+// OldIssueSnapshot is the view of the cache row's current state needed to
+// compute a label diff. The handler populates this from the cache row before
+// calling the translator.
+type OldIssueSnapshot struct {
+	Status       string
+	Priority     string
+	AssigneeType string
+	AssigneeUUID string // UUID string; empty if unassigned or member (member-assignees are cache-only in Phase 3b)
+}
+
+// BuildUpdateIssueInput diffs the old cache state against the PATCH request
+// and emits the GitLab-side update payload — add/remove labels for status,
+// priority, and agent-assignee changes; state_event for close/reopen; plus
+// pass-through of title/description/due_date when present.
+func BuildUpdateIssueInput(old OldIssueSnapshot, req UpdateIssueRequest, agentSlugByUUID map[string]string) gitlabapi.UpdateIssueInput {
+	out := gitlabapi.UpdateIssueInput{
+		Title:       req.Title,
+		Description: req.Description,
+		DueDate:     req.DueDate,
+	}
+
+	// Status transitions.
+	if req.Status != nil && *req.Status != old.Status {
+		out.RemoveLabels = append(out.RemoveLabels, "status::"+old.Status)
+		out.AddLabels = append(out.AddLabels, "status::"+*req.Status)
+		wasClosed := old.Status == "done" || old.Status == "cancelled"
+		isClosed := *req.Status == "done" || *req.Status == "cancelled"
+		switch {
+		case !wasClosed && isClosed:
+			ev := "close"
+			out.StateEvent = &ev
+		case wasClosed && !isClosed:
+			ev := "reopen"
+			out.StateEvent = &ev
+		}
+	}
+
+	// Priority transitions. "none" means no label.
+	if req.Priority != nil && *req.Priority != old.Priority {
+		if old.Priority != "none" && old.Priority != "" {
+			out.RemoveLabels = append(out.RemoveLabels, "priority::"+old.Priority)
+		}
+		if *req.Priority != "none" {
+			out.AddLabels = append(out.AddLabels, "priority::"+*req.Priority)
+		}
+	}
+
+	// Agent assignee transitions. Any change away from the current agent
+	// assignee removes the current agent::<slug> label. A new agent assignee
+	// adds agent::<new-slug>. Member assignees and unassignment just remove.
+	oldAgentSlug := ""
+	if old.AssigneeType == "agent" && old.AssigneeUUID != "" {
+		oldAgentSlug = agentSlugByUUID[old.AssigneeUUID]
+	}
+	if req.AssigneeType != nil || req.AssigneeID != nil {
+		newType := old.AssigneeType
+		if req.AssigneeType != nil {
+			newType = *req.AssigneeType
+		}
+		newID := old.AssigneeUUID
+		if req.AssigneeID != nil {
+			newID = *req.AssigneeID
+		}
+
+		newAgentSlug := ""
+		if newType == "agent" && newID != "" {
+			newAgentSlug = agentSlugByUUID[newID]
+		}
+
+		if oldAgentSlug != newAgentSlug {
+			if oldAgentSlug != "" {
+				out.RemoveLabels = append(out.RemoveLabels, "agent::"+oldAgentSlug)
+			}
+			if newAgentSlug != "" {
+				out.AddLabels = append(out.AddLabels, "agent::"+newAgentSlug)
+			}
+		}
+	}
+
+	return out
+}
