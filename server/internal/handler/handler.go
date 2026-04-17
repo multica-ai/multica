@@ -121,8 +121,8 @@ func (h *Handler) SetPublicURL(url string) {
 	h.PublicURL = url
 }
 
-// SetGitlabResolver wires the per-request token resolver. Called once from
-// main.go after server boot.
+// SetGitlabResolver wires the per-request token resolver. Called once by
+// NewRouter when GitLab is enabled, before any routes are registered.
 func (h *Handler) SetGitlabResolver(r *gitlabsync.Resolver) {
 	h.GitlabResolver = r
 }
