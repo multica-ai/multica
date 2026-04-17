@@ -270,7 +270,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 					r.Get("/children", h.ListChildIssues)
 
 					// Writes — gated until Phase 3b migrates them.
-					r.With(gw).Put("/", h.UpdateIssue)
+					r.Put("/", h.UpdateIssue)
 					r.With(gw).Delete("/", h.DeleteIssue)
 					r.With(gw).Post("/comments", h.CreateComment)
 					r.With(gw).Post("/subscribe", h.SubscribeToIssue)
