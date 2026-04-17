@@ -6,6 +6,7 @@ import type { Agent, AgentTask } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink } from "../../../navigation";
@@ -15,6 +16,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
 
   useEffect(() => {
@@ -127,22 +129,14 @@ export function TasksTab({ agent }: { agent: Agent }) {
               </>
             );
 
-            if (issue) {
-              return (
-                <AppLink
-                  key={task.id}
-                  href={`/issues/${issue.id}`}
-                  className={`${rowClassName} text-foreground no-underline hover:no-underline`}
-                >
-                  {content}
-                </AppLink>
-              );
-            }
-
             return (
-              <div key={task.id} className={rowClassName}>
+              <AppLink
+                key={task.id}
+                href={paths.issueDetail(task.issue_id)}
+                className={`${rowClassName} text-foreground no-underline hover:no-underline`}
+              >
                 {content}
-              </div>
+              </AppLink>
             );
           })}
         </div>
