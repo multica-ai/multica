@@ -190,3 +190,73 @@ func TestInitialSync_IssuesNotesAwards(t *testing.T) {
 		t.Errorf("assignee_type = %+v, want agent", row.AssigneeType)
 	}
 }
+
+func TestInitialSync_PopulatesHumanNotesAndAwards(t *testing.T) {
+	pool := connectTestPool(t)
+	defer pool.Close()
+	wsID := makeWorkspace(t, pool)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v4/projects/9/labels" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode([]gitlabapi.Label{})
+		case r.URL.Path == "/api/v4/projects/9/labels" && r.Method == http.MethodPost:
+			w.Write([]byte(`{"id":1}`))
+		case r.URL.Path == "/api/v4/projects/9/members/all":
+			json.NewEncoder(w).Encode([]gitlabapi.ProjectMember{})
+		case r.URL.Path == "/api/v4/projects/9/issues":
+			json.NewEncoder(w).Encode([]gitlabapi.Issue{
+				{ID: 2001, IID: 7, Title: "human-only", State: "opened", Labels: []string{}, UpdatedAt: "2026-04-17T12:00:00Z"},
+			})
+		case r.URL.Path == "/api/v4/projects/9/issues/7/notes":
+			json.NewEncoder(w).Encode([]gitlabapi.Note{
+				{ID: 100, Body: "Looks good!", System: false,
+					Author:    gitlabapi.User{ID: 555, Username: "alice"},
+					UpdatedAt: "2026-04-17T12:01:00Z"},
+			})
+		case r.URL.Path == "/api/v4/projects/9/issues/7/award_emoji":
+			json.NewEncoder(w).Encode([]gitlabapi.AwardEmoji{
+				{ID: 200, Name: "thumbsup",
+					User:      gitlabapi.User{ID: 555, Username: "alice"},
+					UpdatedAt: "2026-04-17T12:02:00Z"},
+			})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	queries := db.New(pool)
+	deps := SyncDeps{Queries: queries, Client: gitlabapi.NewClient(srv.URL, srv.Client())}
+	if err := RunInitialSync(context.Background(), deps, RunInitialSyncInput{
+		WorkspaceID: wsID, ProjectID: 9, Token: "tok",
+	}); err != nil {
+		t.Fatalf("RunInitialSync: %v", err)
+	}
+
+	// Find the synced issue, then verify its comment + reaction.
+	row, err := queries.GetIssueByGitlabIID(context.Background(), db.GetIssueByGitlabIIDParams{
+		WorkspaceID: mustPGUUID(t, wsID),
+		GitlabIid:   pgtype.Int4{Int32: 7, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetIssueByGitlabIID: %v", err)
+	}
+
+	var commentCount int
+	pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM comment WHERE issue_id = $1 AND gitlab_note_id = 100 AND gitlab_author_user_id = 555 AND author_type IS NULL`,
+		row.ID).Scan(&commentCount)
+	if commentCount != 1 {
+		t.Errorf("expected 1 human comment cached, got %d", commentCount)
+	}
+
+	var awardCount int
+	pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM issue_reaction WHERE issue_id = $1 AND gitlab_award_id = 200 AND gitlab_actor_user_id = 555 AND actor_type IS NULL`,
+		row.ID).Scan(&awardCount)
+	if awardCount != 1 {
+		t.Errorf("expected 1 award cached, got %d", awardCount)
+	}
+}

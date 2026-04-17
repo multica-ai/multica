@@ -93,7 +93,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 		"issue_title":         issueTitle,
 		"issue_status":        issueStatus,
 		"comment_id":          uuidToString(comment.ID),
-		"comment_author_type": comment.AuthorType,
+		"comment_author_type": comment.AuthorType.String,
 		"comment_author_id":   uuidToString(comment.AuthorID),
 	})
 	writeJSON(w, http.StatusCreated, resp)

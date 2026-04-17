@@ -127,17 +127,17 @@ func TestIsReplyToMemberThread(t *testing.T) {
 	h := &Handler{}
 	issue := issueWithAgentAssignee()
 
-	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
-	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	memberParent := &db.Comment{AuthorType: testText("member"), AuthorID: testUUID(memberID), Content: "plain thread starter"}
+	agentParent := &db.Comment{AuthorType: testText("agent"), AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
 	// Member-started thread root that @mentions the assignee agent.
 	memberParentMentioningAssignee := &db.Comment{
-		AuthorType: "member",
+		AuthorType: testText("member"),
 		AuthorID:   testUUID(memberID),
 		Content:    fmt.Sprintf("[@Agent](mention://agent/%s) can you look at this?", agentAssigneeID),
 	}
 	// Member-started thread root that @mentions a non-assignee agent.
 	memberParentMentioningOther := &db.Comment{
-		AuthorType: "member",
+		AuthorType: testText("member"),
 		AuthorID:   testUUID(memberID),
 		Content:    fmt.Sprintf("[@Other](mention://agent/%s) what do you think?", otherAgentID),
 	}
@@ -222,10 +222,10 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 	h := &Handler{}
 	issue := issueWithAgentAssignee()
 
-	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
-	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	memberParent := &db.Comment{AuthorType: testText("member"), AuthorID: testUUID(memberID), Content: "plain thread starter"}
+	agentParent := &db.Comment{AuthorType: testText("agent"), AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
 	memberParentMentioningAssignee := &db.Comment{
-		AuthorType: "member",
+		AuthorType: testText("member"),
 		AuthorID:   testUUID(memberID),
 		Content:    fmt.Sprintf("[@Agent](mention://agent/%s) help me", agentAssigneeID),
 	}

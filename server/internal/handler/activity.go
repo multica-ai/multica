@@ -96,7 +96,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		timeline = append(timeline, TimelineEntry{
 			Type:        "comment",
 			ID:          cid,
-			ActorType:   c.AuthorType,
+			ActorType:   c.AuthorType.String,
 			ActorID:     uuidToString(c.AuthorID),
 			Content:     &content,
 			CommentType: &commentType,

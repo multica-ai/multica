@@ -597,7 +597,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issueID,
 		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "agent",
+		AuthorType:  pgtype.Text{String: "agent", Valid: true},
 		AuthorID:    agentID,
 		Content:     content,
 		Type:        commentType,

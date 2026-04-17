@@ -180,53 +180,67 @@ func syncOneIssue(
 		}
 	}
 
-	// Notes: only upsert agent-authored notes for now.
-	// The comment table requires author_type IN ('member', 'agent') NOT NULL and
-	// author_id NOT NULL. Human notes from GitLab have no resolved Multica
-	// member_id yet (Phase 3 will add user_gitlab_connection lookup), so we
-	// skip them rather than violate the CHECK constraint.
+	// Notes — sync all of them. Agent-prefixed notes get author_type='agent'
+	// + a resolved Multica agent UUID. Other notes (human, system) leave
+	// Multica author refs NULL and rely on gitlab_author_user_id for display.
 	notes, err := deps.Client.ListNotes(ctx, in.Token, in.ProjectID, issue.IID)
 	if err != nil {
 		return fmt.Errorf("list notes: %w", err)
 	}
 	for _, n := range notes {
 		nv := TranslateNote(n)
-		// AuthorType is a plain string in the params struct (NOT pgtype.Text).
-		if nv.AuthorType != "agent" {
-			continue // skip unresolved / human notes
-		}
-		uuidStr, ok := agentMap[nv.AuthorSlug]
-		if !ok {
-			continue // agent slug not found in this workspace
-		}
+		var authorType pgtype.Text
 		var authorID pgtype.UUID
-		_ = authorID.Scan(uuidStr)
+		if nv.AuthorType == "agent" {
+			if uuidStr, ok := agentMap[nv.AuthorSlug]; ok {
+				authorType = pgtype.Text{String: "agent", Valid: true}
+				_ = authorID.Scan(uuidStr)
+			}
+		}
+		var glUser pgtype.Int8
+		if nv.GitlabUserID != 0 {
+			glUser = pgtype.Int8{Int64: nv.GitlabUserID, Valid: true}
+		}
 		if _, err := deps.Queries.UpsertCommentFromGitlab(ctx, db.UpsertCommentFromGitlabParams{
-			WorkspaceID:       wsUUID,
-			IssueID:           row.ID,
-			AuthorType:        "agent",
-			AuthorID:          authorID,
-			Content:           nv.Body, // column is content, not body
-			Type:              nv.Type,
-			GitlabNoteID:      pgtype.Int8{Int64: n.ID, Valid: true},
-			ExternalUpdatedAt: parseTS(nv.UpdatedAt),
+			WorkspaceID:        wsUUID,
+			IssueID:            row.ID,
+			AuthorType:         authorType,
+			AuthorID:           authorID,
+			GitlabAuthorUserID: glUser,
+			Content:            nv.Body,
+			Type:               nv.Type,
+			GitlabNoteID:       pgtype.Int8{Int64: n.ID, Valid: true},
+			ExternalUpdatedAt:  parseTS(nv.UpdatedAt),
 		}); err != nil {
 			return fmt.Errorf("upsert note %d: %w", n.ID, err)
 		}
 	}
 
-	// Awards: only upsert if actor can be resolved.
-	// issue_reaction.actor_type is NOT NULL CHECK ('member', 'agent').
-	// Phase 3 will resolve human awards via user_gitlab_connection.
+	// Awards — sync all. Multica actor refs NULL until Phase 3 wires
+	// gitlab user → multica member; gitlab_actor_user_id always populated.
 	awards, err := deps.Client.ListAwardEmoji(ctx, in.Token, in.ProjectID, issue.IID)
 	if err != nil {
 		return fmt.Errorf("list awards: %w", err)
 	}
-	// NOTE: To upsert awards we need a resolved actor_type + actor_id.
-	// The issue_reaction table requires actor_type IN ('member','agent')
-	// NOT NULL. Without user_gitlab_connection we cannot resolve human
-	// reactor IDs, so we skip all awards in Phase 2a.
-	_ = awards
+	for _, a := range awards {
+		av := TranslateAward(a)
+		var glUser pgtype.Int8
+		if av.GitlabUserID != 0 {
+			glUser = pgtype.Int8{Int64: av.GitlabUserID, Valid: true}
+		}
+		if _, err := deps.Queries.UpsertIssueReactionFromGitlab(ctx, db.UpsertIssueReactionFromGitlabParams{
+			WorkspaceID:       wsUUID,
+			IssueID:           row.ID,
+			ActorType:         pgtype.Text{},
+			ActorID:           pgtype.UUID{},
+			GitlabActorUserID: glUser,
+			Emoji:             av.Emoji,
+			GitlabAwardID:     pgtype.Int8{Int64: a.ID, Valid: true},
+			ExternalUpdatedAt: parseTS(av.UpdatedAt),
+		}); err != nil {
+			return fmt.Errorf("upsert award %d: %w", a.ID, err)
+		}
+	}
 
 	return nil
 }

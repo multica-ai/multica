@@ -42,7 +42,7 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 	return CommentResponse{
 		ID:          uuidToString(c.ID),
 		IssueID:     uuidToString(c.IssueID),
-		AuthorType:  c.AuthorType,
+		AuthorType:  c.AuthorType.String,
 		AuthorID:    uuidToString(c.AuthorID),
 		Content:     c.Content,
 		Type:        c.Type,
@@ -225,7 +225,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  authorType,
+		AuthorType:  pgtype.Text{String: authorType, Valid: true},
 		AuthorID:    parseUUID(authorID),
 		Content:     req.Content,
 		Type:        req.Type,
@@ -331,7 +331,7 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 	if parent == nil {
 		return false // Not a reply — normal top-level comment
 	}
-	if parent.AuthorType != "member" {
+	if parent.AuthorType.String != "member" {
 		return false // Thread started by an agent — allow trigger
 	}
 	// Thread was started by a member. Suppress on_comment unless the reply
@@ -456,7 +456,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	isAuthor := existing.AuthorType == actorType && uuidToString(existing.AuthorID) == actorID
+	isAuthor := existing.AuthorType.String == actorType && uuidToString(existing.AuthorID) == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	if !isAuthor && !isAdmin {
 		writeError(w, http.StatusForbidden, "only comment author or admin can edit")
@@ -523,7 +523,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	isAuthor := comment.AuthorType == actorType && uuidToString(comment.AuthorID) == actorID
+	isAuthor := comment.AuthorType.String == actorType && uuidToString(comment.AuthorID) == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	if !isAuthor && !isAdmin {
 		writeError(w, http.StatusForbidden, "only comment author or admin can delete")

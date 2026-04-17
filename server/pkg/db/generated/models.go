@@ -173,18 +173,19 @@ type ChatSession struct {
 }
 
 type Comment struct {
-	ID                pgtype.UUID        `json:"id"`
-	IssueID           pgtype.UUID        `json:"issue_id"`
-	AuthorType        string             `json:"author_type"`
-	AuthorID          pgtype.UUID        `json:"author_id"`
-	Content           string             `json:"content"`
-	Type              string             `json:"type"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	ParentID          pgtype.UUID        `json:"parent_id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	GitlabNoteID      pgtype.Int8        `json:"gitlab_note_id"`
-	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	AuthorType         pgtype.Text        `json:"author_type"`
+	AuthorID           pgtype.UUID        `json:"author_id"`
+	Content            string             `json:"content"`
+	Type               string             `json:"type"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ParentID           pgtype.UUID        `json:"parent_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	GitlabNoteID       pgtype.Int8        `json:"gitlab_note_id"`
+	ExternalUpdatedAt  pgtype.Timestamptz `json:"external_updated_at"`
+	GitlabAuthorUserID pgtype.Int8        `json:"gitlab_author_user_id"`
 }
 
 type CommentReaction struct {
@@ -310,12 +311,13 @@ type IssueReaction struct {
 	ID                pgtype.UUID        `json:"id"`
 	IssueID           pgtype.UUID        `json:"issue_id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	ActorType         string             `json:"actor_type"`
+	ActorType         pgtype.Text        `json:"actor_type"`
 	ActorID           pgtype.UUID        `json:"actor_id"`
 	Emoji             string             `json:"emoji"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	GitlabAwardID     pgtype.Int8        `json:"gitlab_award_id"`
 	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+	GitlabActorUserID pgtype.Int8        `json:"gitlab_actor_user_id"`
 }
 
 type IssueSubscriber struct {

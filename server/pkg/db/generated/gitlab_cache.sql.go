@@ -237,42 +237,51 @@ func (q *Queries) ListIssueGitlabLabels(ctx context.Context, issueID pgtype.UUID
 const upsertCommentFromGitlab = `-- name: UpsertCommentFromGitlab :one
 
 INSERT INTO comment (
-    issue_id,
     workspace_id,
+    issue_id,
     author_type,
     author_id,
+    gitlab_author_user_id,
     content,
     type,
     gitlab_note_id,
     external_updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (gitlab_note_id) WHERE gitlab_note_id IS NOT NULL DO UPDATE SET
     content = EXCLUDED.content,
     type = EXCLUDED.type,
+    author_type = EXCLUDED.author_type,
+    author_id = EXCLUDED.author_id,
+    gitlab_author_user_id = EXCLUDED.gitlab_author_user_id,
     external_updated_at = EXCLUDED.external_updated_at,
     updated_at = now()
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, gitlab_note_id, external_updated_at
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, gitlab_note_id, external_updated_at, gitlab_author_user_id
 `
 
 type UpsertCommentFromGitlabParams struct {
-	IssueID           pgtype.UUID        `json:"issue_id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	AuthorType        string             `json:"author_type"`
-	AuthorID          pgtype.UUID        `json:"author_id"`
-	Content           string             `json:"content"`
-	Type              string             `json:"type"`
-	GitlabNoteID      pgtype.Int8        `json:"gitlab_note_id"`
-	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	AuthorType         pgtype.Text        `json:"author_type"`
+	AuthorID           pgtype.UUID        `json:"author_id"`
+	GitlabAuthorUserID pgtype.Int8        `json:"gitlab_author_user_id"`
+	Content            string             `json:"content"`
+	Type               string             `json:"type"`
+	GitlabNoteID       pgtype.Int8        `json:"gitlab_note_id"`
+	ExternalUpdatedAt  pgtype.Timestamptz `json:"external_updated_at"`
 }
 
 // comment cache upserts ----------------------------------------------------
+// Multica author refs are nullable: synced rows from human GitLab users have
+// no Multica mapping yet (Phase 3 backfills via user_gitlab_connection).
+// gitlab_author_user_id is always populated so the UI can render "by @user".
 func (q *Queries) UpsertCommentFromGitlab(ctx context.Context, arg UpsertCommentFromGitlabParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, upsertCommentFromGitlab,
-		arg.IssueID,
 		arg.WorkspaceID,
+		arg.IssueID,
 		arg.AuthorType,
 		arg.AuthorID,
+		arg.GitlabAuthorUserID,
 		arg.Content,
 		arg.Type,
 		arg.GitlabNoteID,
@@ -292,6 +301,7 @@ func (q *Queries) UpsertCommentFromGitlab(ctx context.Context, arg UpsertComment
 		&i.WorkspaceID,
 		&i.GitlabNoteID,
 		&i.ExternalUpdatedAt,
+		&i.GitlabAuthorUserID,
 	)
 	return i, err
 }
@@ -483,38 +493,46 @@ func (q *Queries) UpsertIssueFromGitlab(ctx context.Context, arg UpsertIssueFrom
 const upsertIssueReactionFromGitlab = `-- name: UpsertIssueReactionFromGitlab :one
 
 INSERT INTO issue_reaction (
-    issue_id,
     workspace_id,
+    issue_id,
     actor_type,
     actor_id,
+    gitlab_actor_user_id,
     emoji,
     gitlab_award_id,
     external_updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (gitlab_award_id) WHERE gitlab_award_id IS NOT NULL DO UPDATE SET
     emoji = EXCLUDED.emoji,
+    actor_type = EXCLUDED.actor_type,
+    actor_id = EXCLUDED.actor_id,
+    gitlab_actor_user_id = EXCLUDED.gitlab_actor_user_id,
     external_updated_at = EXCLUDED.external_updated_at
-RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at
+RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at, gitlab_actor_user_id
 `
 
 type UpsertIssueReactionFromGitlabParams struct {
-	IssueID           pgtype.UUID        `json:"issue_id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	ActorType         string             `json:"actor_type"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	ActorType         pgtype.Text        `json:"actor_type"`
 	ActorID           pgtype.UUID        `json:"actor_id"`
+	GitlabActorUserID pgtype.Int8        `json:"gitlab_actor_user_id"`
 	Emoji             string             `json:"emoji"`
 	GitlabAwardID     pgtype.Int8        `json:"gitlab_award_id"`
 	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
 }
 
 // issue_reaction cache upserts --------------------------------------------
+// Same pattern as UpsertCommentFromGitlab: Multica actor refs nullable,
+// gitlab_actor_user_id always populated.
 func (q *Queries) UpsertIssueReactionFromGitlab(ctx context.Context, arg UpsertIssueReactionFromGitlabParams) (IssueReaction, error) {
 	row := q.db.QueryRow(ctx, upsertIssueReactionFromGitlab,
-		arg.IssueID,
 		arg.WorkspaceID,
+		arg.IssueID,
 		arg.ActorType,
 		arg.ActorID,
+		arg.GitlabActorUserID,
 		arg.Emoji,
 		arg.GitlabAwardID,
 		arg.ExternalUpdatedAt,
@@ -530,6 +548,7 @@ func (q *Queries) UpsertIssueReactionFromGitlab(ctx context.Context, arg UpsertI
 		&i.CreatedAt,
 		&i.GitlabAwardID,
 		&i.ExternalUpdatedAt,
+		&i.GitlabActorUserID,
 	)
 	return i, err
 }

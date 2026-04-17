@@ -105,20 +105,27 @@ DELETE FROM issue WHERE workspace_id = $1 AND gitlab_iid IS NOT NULL;
 -- comment cache upserts ----------------------------------------------------
 
 -- name: UpsertCommentFromGitlab :one
+-- Multica author refs are nullable: synced rows from human GitLab users have
+-- no Multica mapping yet (Phase 3 backfills via user_gitlab_connection).
+-- gitlab_author_user_id is always populated so the UI can render "by @user".
 INSERT INTO comment (
-    issue_id,
     workspace_id,
+    issue_id,
     author_type,
     author_id,
+    gitlab_author_user_id,
     content,
     type,
     gitlab_note_id,
     external_updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (gitlab_note_id) WHERE gitlab_note_id IS NOT NULL DO UPDATE SET
     content = EXCLUDED.content,
     type = EXCLUDED.type,
+    author_type = EXCLUDED.author_type,
+    author_id = EXCLUDED.author_id,
+    gitlab_author_user_id = EXCLUDED.gitlab_author_user_id,
     external_updated_at = EXCLUDED.external_updated_at,
     updated_at = now()
 RETURNING *;
@@ -126,17 +133,23 @@ RETURNING *;
 -- issue_reaction cache upserts --------------------------------------------
 
 -- name: UpsertIssueReactionFromGitlab :one
+-- Same pattern as UpsertCommentFromGitlab: Multica actor refs nullable,
+-- gitlab_actor_user_id always populated.
 INSERT INTO issue_reaction (
-    issue_id,
     workspace_id,
+    issue_id,
     actor_type,
     actor_id,
+    gitlab_actor_user_id,
     emoji,
     gitlab_award_id,
     external_updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (gitlab_award_id) WHERE gitlab_award_id IS NOT NULL DO UPDATE SET
     emoji = EXCLUDED.emoji,
+    actor_type = EXCLUDED.actor_type,
+    actor_id = EXCLUDED.actor_id,
+    gitlab_actor_user_id = EXCLUDED.gitlab_actor_user_id,
     external_updated_at = EXCLUDED.external_updated_at
 RETURNING *;
