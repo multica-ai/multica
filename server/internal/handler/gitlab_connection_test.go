@@ -366,6 +366,66 @@ func TestConnectGitlabWorkspace_AlreadyConnectedReturns409(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func TestDisconnectGitlabWorkspace_TruncatesCache(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v4/user":
+			w.Write([]byte(`{"id":1,"username":"svc"}`))
+		case "/api/v4/projects/1":
+			w.Write([]byte(`{"id":1,"path_with_namespace":"g/a"}`))
+		case "/api/v4/projects/1/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/1/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/1/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	// Connect, then wait for sync to finish so we have a baseline state.
+	body, _ := json.Marshal(map[string]string{"project": "1", "token": "glpat-x"})
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "id", testWorkspaceID)
+	h.ConnectGitlabWorkspace(httptest.NewRecorder(), req)
+	time.Sleep(150 * time.Millisecond)
+
+	// Insert a synthetic cached row so we have something to delete.
+	h.Queries.UpsertGitlabLabel(context.Background(), db.UpsertGitlabLabelParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		GitlabLabelID: 9999,
+		Name:          "synthetic-test-label",
+		Color:         "#000",
+	})
+
+	// Disconnect.
+	delReq := httptest.NewRequest(http.MethodDelete, "/", nil)
+	delReq.Header.Set("X-User-ID", testUserID)
+	delReq = withURLParam(delReq, "id", testWorkspaceID)
+	rr := httptest.NewRecorder()
+	h.DisconnectGitlabWorkspace(rr, delReq)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Cache should be empty.
+	labels, _ := h.Queries.ListGitlabLabels(context.Background(), parseUUID(testWorkspaceID))
+	if len(labels) != 0 {
+		t.Errorf("expected cache truncated, found %d labels", len(labels))
+	}
+}
+
 // M1: feature-flag gate returns 404 from each of the three handlers.
 func TestGitlabHandlers_DisabledReturns404(t *testing.T) {
 	h := buildHandlerGitlabDisabled(t)

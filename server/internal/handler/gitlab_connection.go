@@ -141,8 +141,8 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// DisconnectGitlabWorkspace removes the workspace's GitLab connection.
-// Note: Phase 2 will extend this to also delete the webhook in GitLab.
+// DisconnectGitlabWorkspace removes the workspace's GitLab connection and
+// cascade-truncates all derived cache rows inside a single transaction.
 func (h *Handler) DisconnectGitlabWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !h.GitlabEnabled {
 		writeError(w, http.StatusNotFound, "gitlab integration disabled")
@@ -152,9 +152,42 @@ func (h *Handler) DisconnectGitlabWorkspace(w http.ResponseWriter, r *http.Reque
 	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
 		return
 	}
-	if err := h.Queries.DeleteWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID)); err != nil {
+	// Cascade-truncate the cache before removing the connection row.
+	// The cache rows are derived from GitLab; once disconnected, they're
+	// unreachable garbage. Inside a transaction so partial failure doesn't
+	// leave orphan rows.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Error("begin tx for cache truncate", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	wsUUID := parseUUID(workspaceID)
+	if err := qtx.DeleteWorkspaceCachedIssues(r.Context(), wsUUID); err != nil {
+		slog.Error("delete cached issues failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	if err := qtx.DeleteWorkspaceGitlabLabels(r.Context(), wsUUID); err != nil {
+		slog.Error("delete cached labels failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	if err := qtx.DeleteWorkspaceGitlabMembers(r.Context(), wsUUID); err != nil {
+		slog.Error("delete cached members failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	if err := qtx.DeleteWorkspaceGitlabConnection(r.Context(), wsUUID); err != nil {
 		slog.Error("delete workspace_gitlab_connection failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to disconnect")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("commit cache truncate", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
