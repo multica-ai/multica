@@ -1006,3 +1006,91 @@ func TestBatchUpdateIssues_AllSuccessReturns200(t *testing.T) {
 		t.Errorf("failed = %+v, want empty on all-success", result.Failed)
 	}
 }
+
+// TestBatchDeleteIssues_ContinueOnError verifies that when one item's GitLab
+// DELETE fails (403), the handler records the failure but continues to process
+// the remaining items. Returns HTTP 207 Multi-Status because results are mixed.
+// The failed item's cache row MUST remain intact (authoritative guarantee),
+// while the succeeded item's cache row is gone.
+func TestBatchDeleteIssues_ContinueOnError(t *testing.T) {
+	ctx := context.Background()
+
+	var gitlabCalls int
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gitlabCalls++
+		// The "bad" issue is keyed by its GitLab IID in the path (501).
+		if strings.Contains(r.URL.Path, "/issues/501") {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"forbidden"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	goodID := uuid.New().String()
+	badID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 2101, 'A', '', 'todo', 'none', 500, 42, 9500, '2026-04-17T12:00:00Z', 'member', $3::uuid, 0),
+		        ($4::uuid, $2::uuid, 2102, 'B', '', 'todo', 'none', 501, 42, 9501, '2026-04-17T12:00:00Z', 'member', $3::uuid, 0)`,
+		goodID, testWorkspaceID, testUserID, badID); err != nil {
+		t.Fatalf("seed issues: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM issue WHERE id IN ($1::uuid, $2::uuid)`, goodID, badID)
+	})
+
+	body := fmt.Sprintf(`{"issue_ids":["%s","%s"]}`, goodID, badID)
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/batch-delete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rec := httptest.NewRecorder()
+
+	h.BatchDeleteIssues(rec, req)
+
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207, body = %s", rec.Code, rec.Body.String())
+	}
+	var result BatchWriteResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(result.Succeeded) != 1 || result.Succeeded[0].ID != goodID {
+		t.Errorf("succeeded = %+v, want 1 item with id=%s", result.Succeeded, goodID)
+	}
+	if len(result.Failed) != 1 || result.Failed[0].ID != badID {
+		t.Errorf("failed = %+v, want 1 item with id=%s", result.Failed, badID)
+	}
+	if len(result.Failed) == 1 && result.Failed[0].ErrorCode != "GITLAB_403" {
+		t.Errorf("error_code = %s, want GITLAB_403", result.Failed[0].ErrorCode)
+	}
+	if gitlabCalls != 2 {
+		t.Errorf("gitlab call count = %d, want 2 (both items attempted)", gitlabCalls)
+	}
+
+	// Good should be gone, bad should remain (authoritative guarantee).
+	var goodCount, badCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue WHERE id = $1::uuid`, goodID).Scan(&goodCount); err != nil {
+		t.Fatalf("count good: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue WHERE id = $1::uuid`, badID).Scan(&badCount); err != nil {
+		t.Fatalf("count bad: %v", err)
+	}
+	if goodCount != 0 {
+		t.Errorf("good issue not deleted, count = %d", goodCount)
+	}
+	if badCount != 1 {
+		t.Errorf("bad issue unexpectedly deleted, count = %d", badCount)
+	}
+}

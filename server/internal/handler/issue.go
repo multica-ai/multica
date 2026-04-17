@@ -1824,6 +1824,61 @@ func (h *Handler) cleanupAndDeleteIssueRow(ctx context.Context, issue db.Issue) 
 	return nil
 }
 
+// deleteSingleIssueWriteThrough executes the Phase 3b DELETE write-through
+// for a single issue: DELETE /projects/:id/issues/:iid on GitLab, then
+// cleanupAndDeleteIssueRow for the local state. Used by both DeleteIssue
+// (direct handler) and BatchDeleteIssues (loops over this). Callers
+// pre-resolve wsConn/token once per request to avoid redundant work.
+//
+// On error returns a *writeThroughError with a status hint that the direct
+// handler maps to an HTTP status. The batch handler ignores the status
+// hint and classifies the error via classifyBatchError, which keys off
+// the embedded error message (the GitLab client preserves "(403)" /
+// "(404)" / "(429)" etc. in the error string).
+func (h *Handler) deleteSingleIssueWriteThrough(
+	ctx context.Context,
+	issue db.Issue,
+	actorType, actorID, workspaceID string,
+	wsConn db.WorkspaceGitlabConnection,
+	token string,
+) error {
+	_ = wsConn // kept in signature so callers document that they've resolved it
+	_ = actorID
+	_ = actorType
+
+	// Defensive: a cache row on a GitLab-connected workspace that lacks
+	// GitLab identifiers is a bug upstream of this handler. Refuse the
+	// write-through rather than silently fall through.
+	if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
+		slog.Error("gitlab-connected workspace issue missing gitlab identifiers",
+			"issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)
+		return &writeThroughError{
+			status: http.StatusBadGateway,
+			msg:    "issue is missing gitlab identifiers",
+		}
+	}
+
+	if err := h.Gitlab.DeleteIssue(ctx, token, issue.GitlabProjectID.Int64, int(issue.GitlabIid.Int32)); err != nil {
+		slog.Error("gitlab delete issue", "error", err, "issue_id", uuidToString(issue.ID))
+		return &writeThroughError{
+			status: http.StatusBadGateway,
+			msg:    "gitlab delete issue failed",
+			err:    err,
+		}
+	}
+
+	if err := h.cleanupAndDeleteIssueRow(ctx, issue); err != nil {
+		slog.Error("cleanup issue row after gitlab delete", "error", err, "issue_id", uuidToString(issue.ID))
+		return &writeThroughError{
+			status: http.StatusInternalServerError,
+			msg:    "failed to delete issue",
+			err:    err,
+		}
+	}
+
+	return nil
+}
+
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -1839,18 +1894,8 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// GitLab error we return 502 and never fall back to legacy (that would
 	// leave GitLab and the cache diverged).
 	if h.GitlabEnabled && h.GitlabResolver != nil {
-		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
+		wsConn, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
 		if wsErr == nil {
-			// Defensive: a cache row on a GitLab-connected workspace that
-			// lacks GitLab identifiers is a bug upstream of this handler.
-			// Refuse rather than silently fall through.
-			if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
-				slog.Error("gitlab-connected workspace issue missing gitlab identifiers",
-					"issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)
-				writeError(w, http.StatusBadGateway, "issue is missing gitlab identifiers")
-				return
-			}
-
 			actorType, actorID := h.resolveActor(r, userID, workspaceID)
 			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
 			if tokErr != nil {
@@ -1859,15 +1904,8 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			if err := h.Gitlab.DeleteIssue(r.Context(), token, issue.GitlabProjectID.Int64, int(issue.GitlabIid.Int32)); err != nil {
-				slog.Error("gitlab delete issue", "error", err, "issue_id", uuidToString(issue.ID))
-				writeError(w, http.StatusBadGateway, "gitlab delete issue failed")
-				return
-			}
-
-			if err := h.cleanupAndDeleteIssueRow(r.Context(), issue); err != nil {
-				slog.Error("cleanup issue row after gitlab delete", "error", err, "issue_id", uuidToString(issue.ID))
-				writeError(w, http.StatusInternalServerError, "failed to delete issue")
+			if err := h.deleteSingleIssueWriteThrough(r.Context(), issue, actorType, actorID, workspaceID, wsConn, token); err != nil {
+				writeError(w, writeThroughStatus(err), err.Error())
 				return
 			}
 
@@ -2236,6 +2274,79 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// loop over each issue, attempting the DELETE write-through per item with
+	// continue-on-error semantics. Returns BatchWriteResult with 207 when
+	// mixed success/failure, 200 when all-success or all-failure. Non-
+	// connected workspaces fall through to the legacy direct-DB batch path.
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		wsConn, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+		if wsErr == nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token for batch delete", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
+
+			result := BatchWriteResult{
+				Succeeded: []BatchSucceeded{},
+				Failed:    []BatchFailed{},
+			}
+
+			for _, issueID := range req.IssueIDs {
+				issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          parseUUID(issueID),
+					WorkspaceID: parseUUID(workspaceID),
+				})
+				if err != nil {
+					code, msg := classifyBatchError(err)
+					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
+					continue
+				}
+
+				if perr := h.deleteSingleIssueWriteThrough(r.Context(), issue, actorType, actorID, workspaceID, wsConn, token); perr != nil {
+					code, msg := classifyBatchError(perr)
+					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
+					continue
+				}
+
+				h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})
+				result.Succeeded = append(result.Succeeded, BatchSucceeded{ID: issueID})
+			}
+
+			// 207 when mixed; 200 when all-success OR all-failure (client
+			// inspects the lists either way).
+			status := http.StatusOK
+			if len(result.Failed) > 0 && len(result.Succeeded) > 0 {
+				status = http.StatusMultiStatus
+			}
+			slog.Info("batch delete issues (gitlab write-through)",
+				append(logger.RequestAttrs(r),
+					"succeeded", len(result.Succeeded),
+					"failed", len(result.Failed))...)
+			writeJSON(w, status, result)
+			return
+		}
+		// wsErr != nil → fall through to legacy path (non-connected workspace).
+	}
+
+	h.legacyBatchDeleteIssues(w, r, req, userID, workspaceID)
+}
+
+// legacyBatchDeleteIssues is the pre-Phase-3b batch delete behavior,
+// preserved verbatim for workspaces without a GitLab connection. Called by
+// BatchDeleteIssues after it determines the workspace is unconnected.
+// Body decode + auth + workspace resolution happen once in the caller,
+// so this function receives them as arguments.
+func (h *Handler) legacyBatchDeleteIssues(
+	w http.ResponseWriter,
+	r *http.Request,
+	req BatchDeleteIssuesRequest,
+	userID, workspaceID string,
+) {
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
