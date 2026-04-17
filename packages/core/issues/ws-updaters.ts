@@ -33,11 +33,16 @@ export function onIssueUpdated(
   // the parent issue page).
   const listData = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
-  const parentId =
-    issue.parent_issue_id ??
+  const cachedParentId =
     detailData?.parent_issue_id ??
     listData?.issues.find((i) => i.id === issue.id)?.parent_issue_id ??
     null;
+  // When an issue is re-parented, both the old and new parents' children
+  // lists must be refreshed, not just one.
+  const newParentId =
+    issue.parent_issue_id !== undefined
+      ? issue.parent_issue_id
+      : cachedParentId;
 
   qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
     if (!old) return old;
@@ -62,10 +67,25 @@ export function onIssueUpdated(
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
     old ? { ...old, ...issue } : old,
   );
-  if (parentId) {
-    qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
+  if (newParentId) {
+    qc.setQueryData<Issue[]>(issueKeys.children(wsId, newParentId), (old) =>
       old?.map((c) => (c.id === issue.id ? { ...c, ...issue } : c)),
     );
+  }
+  // If the issue was re-parented, invalidate both parents so the old parent
+  // drops the stale child and the new parent picks it up.
+  if (
+    cachedParentId &&
+    newParentId !== cachedParentId
+  ) {
+    qc.invalidateQueries({
+      queryKey: issueKeys.children(wsId, cachedParentId),
+    });
+    if (newParentId) {
+      qc.invalidateQueries({
+        queryKey: issueKeys.children(wsId, newParentId),
+      });
+    }
   }
 }
 
