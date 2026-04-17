@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/gitlab"
 )
@@ -94,6 +97,7 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 		GitlabProjectPath:     project.PathWithNamespace,
 		ServiceTokenEncrypted: encrypted,
 		ServiceTokenUserID:    user.ID,
+		ConnectionStatus:      "connecting",
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -104,6 +108,28 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to persist connection")
 		return
 	}
+
+	// Dispatch initial sync in the background. The goroutine flips the
+	// connection_status to 'connected' (or 'error' with a message) when done.
+	// Use a fresh context — the request context will be cancelled before the
+	// sync finishes.
+	go func(token string, projectID int64, wsID string) {
+		syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := gitlabsync.RunInitialSync(syncCtx, gitlabsync.SyncDeps{
+			Queries: h.Queries,
+			Client:  h.Gitlab,
+		}, gitlabsync.RunInitialSyncInput{
+			WorkspaceID: wsID,
+			ProjectID:   projectID,
+			Token:       token,
+		}); err != nil {
+			slog.Error("initial gitlab sync failed",
+				"error", err,
+				"workspace_id", wsID,
+				"project_id", projectID)
+		}
+	}(req.Token, project.ID, workspaceID)
 
 	writeJSON(w, http.StatusOK, gitlabConnectionResponse{
 		WorkspaceID:          uuidToString(row.WorkspaceID),

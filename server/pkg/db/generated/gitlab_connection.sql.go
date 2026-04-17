@@ -20,7 +20,7 @@ INSERT INTO workspace_gitlab_connection (
     service_token_user_id,
     connection_status
 )
-VALUES ($1, $2, $3, $4, $5, 'connected')
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at
 `
 
@@ -30,6 +30,7 @@ type CreateWorkspaceGitlabConnectionParams struct {
 	GitlabProjectPath     string      `json:"gitlab_project_path"`
 	ServiceTokenEncrypted []byte      `json:"service_token_encrypted"`
 	ServiceTokenUserID    int64       `json:"service_token_user_id"`
+	ConnectionStatus      string      `json:"connection_status"`
 }
 
 func (q *Queries) CreateWorkspaceGitlabConnection(ctx context.Context, arg CreateWorkspaceGitlabConnectionParams) (WorkspaceGitlabConnection, error) {
@@ -39,6 +40,7 @@ func (q *Queries) CreateWorkspaceGitlabConnection(ctx context.Context, arg Creat
 		arg.GitlabProjectPath,
 		arg.ServiceTokenEncrypted,
 		arg.ServiceTokenUserID,
+		arg.ConnectionStatus,
 	)
 	var i WorkspaceGitlabConnection
 	err := row.Scan(

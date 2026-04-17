@@ -7,7 +7,7 @@ INSERT INTO workspace_gitlab_connection (
     service_token_user_id,
     connection_status
 )
-VALUES ($1, $2, $3, $4, $5, 'connected')
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetWorkspaceGitlabConnection :one

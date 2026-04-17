@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -60,8 +61,19 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 			w.Write([]byte(`{"id": 555, "username": "svc-bot", "name": "Service Bot"}`))
 		case "/api/v4/projects/42":
 			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		case "/api/v4/projects/42/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/42/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/issues":
+			w.Write([]byte(`[]`))
 		default:
-			t.Errorf("unexpected path: %s", r.URL.Path)
+			// Unexpected paths from the sync goroutine should not fail the test,
+			// but log them for debugging.
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
@@ -91,12 +103,19 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 	if got["gitlab_project_path"] != "team/app" {
 		t.Errorf("gitlab_project_path = %v", got["gitlab_project_path"])
 	}
+	// Immediate response status is 'connecting'; sync goroutine flips to 'connected'.
+	if got["connection_status"] != "connecting" {
+		t.Errorf("connection_status = %v, want 'connecting'", got["connection_status"])
+	}
 	if _, hasTok := got["service_token_encrypted"]; hasTok {
 		t.Errorf("response leaks service_token_encrypted field: %+v", got)
 	}
 	if _, hasTok := got["pat_encrypted"]; hasTok {
 		t.Errorf("response leaks pat_encrypted field: %+v", got)
 	}
+
+	// Wait for sync goroutine to settle before cleanup.
+	time.Sleep(100 * time.Millisecond)
 
 	// Clean up.
 	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
@@ -110,6 +129,18 @@ func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
 			w.Write([]byte(`{"id": 555, "username": "svc-bot"}`))
 		case "/api/v4/projects/42":
 			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		case "/api/v4/projects/42/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/42/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fake.Close()
@@ -140,6 +171,9 @@ func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 
+	// Wait for sync goroutine to settle before cleanup.
+	time.Sleep(100 * time.Millisecond)
+
 	// Clean up.
 	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
 }
@@ -169,6 +203,18 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 			w.Write([]byte(`{"id": 1, "username": "svc"}`))
 		case "/api/v4/projects/1":
 			w.Write([]byte(`{"id": 1, "path_with_namespace": "g/a"}`))
+		case "/api/v4/projects/1/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/1/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/1/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fake.Close()
@@ -203,6 +249,9 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 	if rr2.Code != http.StatusNotFound {
 		t.Fatalf("after delete, GET should 404, got %d", rr2.Code)
 	}
+
+	// Wait for any sync goroutine to settle before the next test can run.
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestConnectGitlabWorkspace_BadToken(t *testing.T) {
@@ -271,6 +320,18 @@ func TestConnectGitlabWorkspace_AlreadyConnectedReturns409(t *testing.T) {
 			w.Write([]byte(`{"id": 555, "username": "svc-bot"}`))
 		case "/api/v4/projects/42":
 			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		case "/api/v4/projects/42/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/42/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fake.Close()
@@ -300,6 +361,9 @@ func TestConnectGitlabWorkspace_AlreadyConnectedReturns409(t *testing.T) {
 	if rr2.Code != http.StatusConflict {
 		t.Fatalf("second connect status = %d, want 409; body = %s", rr2.Code, rr2.Body.String())
 	}
+
+	// Wait for sync goroutine from the first connect to settle.
+	time.Sleep(100 * time.Millisecond)
 }
 
 // M1: feature-flag gate returns 404 from each of the three handlers.
