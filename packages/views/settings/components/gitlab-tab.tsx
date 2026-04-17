@@ -93,7 +93,9 @@ export function GitlabTab() {
       </div>
       {connectMu.isError ? (
         <div className="text-destructive text-sm">
-          {(connectMu.error as Error).message || "Connection failed"}
+          {connectMu.error instanceof ApiError
+            ? connectMu.error.message
+            : "Connection failed"}
         </div>
       ) : null}
       <Button type="submit" disabled={connectMu.isPending || !project || !token}>

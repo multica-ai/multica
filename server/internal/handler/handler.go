@@ -46,9 +46,14 @@ type Handler struct {
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
-	Secrets          *secrets.Cipher
-	Gitlab           *gitlab.Client
-	GitlabEnabled    bool
+	// Secrets and Gitlab are always non-nil when GitlabEnabled is true.
+	// When GitlabEnabled is false they may be nil — every gitlab handler must
+	// gate on `if !h.GitlabEnabled { return 404 }` before touching either,
+	// otherwise the handler will nil-panic on a request from a misconfigured
+	// or test environment.
+	Secrets       *secrets.Cipher
+	Gitlab        *gitlab.Client
+	GitlabEnabled bool
 }
 
 func New(

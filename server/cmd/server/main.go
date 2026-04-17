@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -32,7 +33,9 @@ func main() {
 		slog.Warn("RESEND_API_KEY is not set — email verification codes will be printed to the log instead of emailed.")
 	}
 
-	gitlabEnabled := os.Getenv("MULTICA_GITLAB_ENABLED") == "true"
+	// strconv.ParseBool accepts 1/t/T/TRUE/true/True (and the false equivalents),
+	// so operators don't get caught out by writing TRUE/yes/1 in their env file.
+	gitlabEnabled, _ := strconv.ParseBool(os.Getenv("MULTICA_GITLAB_ENABLED"))
 	gitlabClient := gitlab.NewClient(gitlab.DefaultBaseURL, &http.Client{Timeout: 30 * time.Second})
 
 	secretsCipher, sErr := secrets.Load()
