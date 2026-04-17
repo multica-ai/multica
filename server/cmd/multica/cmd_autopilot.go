@@ -110,7 +110,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
 	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as task prompt)")
 	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID) — required")
-	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
+	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue (required). run_only is not yet supported end-to-end.")
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode)")
@@ -123,7 +123,7 @@ func init() {
 	autopilotUpdateCmd.Flags().String("project", "", "New project ID (use empty string to clear)")
 	autopilotUpdateCmd.Flags().String("priority", "", "New priority")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
-	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
+	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -255,10 +255,14 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	}
 	mode, _ := cmd.Flags().GetString("mode")
 	if mode == "" {
-		return fmt.Errorf("--mode is required (create_issue or run_only)")
+		return fmt.Errorf("--mode is required (create_issue)")
 	}
-	if mode != "create_issue" && mode != "run_only" {
-		return fmt.Errorf("--mode must be create_issue or run_only")
+	// run_only is a valid value server-side but the dispatch path is not wired
+	// end-to-end (daemon /start resolves workspace only via issue/chat, and the
+	// agent prompt expects an issue ID). Keep the CLI to create_issue until the
+	// server path is fixed to avoid shipping a mode that returns 404 on start.
+	if mode != "create_issue" {
+		return fmt.Errorf("--mode must be create_issue (run_only is not yet supported end-to-end)")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -345,8 +349,8 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("mode") {
 		v, _ := cmd.Flags().GetString("mode")
-		if v != "create_issue" && v != "run_only" {
-			return fmt.Errorf("--mode must be create_issue or run_only")
+		if v != "create_issue" {
+			return fmt.Errorf("--mode must be create_issue (run_only is not yet supported end-to-end)")
 		}
 		body["execution_mode"] = v
 	}
