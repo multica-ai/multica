@@ -20,9 +20,22 @@ import { ApiError } from "@multica/core/api";
 
 export function GitlabTab() {
   const wsId = useWorkspaceId();
-  const { data, error, isLoading } = useWorkspaceGitlabConnection(wsId);
-  const connectMu = useConnectWorkspaceGitlabMutation(wsId);
-  const disconnectMu = useDisconnectWorkspaceGitlabMutation(wsId);
+
+  return (
+    <div className="space-y-6">
+      <WorkspaceGitlabSection workspaceId={wsId} />
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Your personal GitLab connection</h3>
+        <UserGitlabSection workspaceId={wsId} />
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceGitlabSection({ workspaceId }: { workspaceId: string }) {
+  const { data, error, isLoading } = useWorkspaceGitlabConnection(workspaceId);
+  const connectMu = useConnectWorkspaceGitlabMutation(workspaceId);
+  const disconnectMu = useDisconnectWorkspaceGitlabMutation(workspaceId);
 
   const [project, setProject] = useState("");
   const [token, setToken] = useState("");
@@ -38,32 +51,26 @@ export function GitlabTab() {
 
   if (data && data.connection_status === "connected") {
     return (
-      <div className="space-y-6">
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">GitLab</h2>
-          <Card>
-            <CardContent className="space-y-3 pt-6">
-              <div>
-                <span className="text-muted-foreground">Project: </span>
-                <span className="font-medium">{data.gitlab_project_path}</span>
-              </div>
-              <div className="text-muted-foreground text-sm">
-                Service account user id: {data.service_token_user_id}
-              </div>
-              <Button
-                variant="destructive"
-                disabled={disconnectMu.isPending}
-                onClick={() => disconnectMu.mutate()}
-              >
-                {disconnectMu.isPending ? "Disconnecting…" : "Disconnect"}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Your personal GitLab connection</h3>
-          <UserGitlabSection workspaceId={wsId} />
-        </div>
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold">GitLab</h2>
+        <Card>
+          <CardContent className="space-y-3 pt-6">
+            <div>
+              <span className="text-muted-foreground">Project: </span>
+              <span className="font-medium">{data.gitlab_project_path}</span>
+            </div>
+            <div className="text-muted-foreground text-sm">
+              Service account user id: {data.service_token_user_id}
+            </div>
+            <Button
+              variant="destructive"
+              disabled={disconnectMu.isPending}
+              onClick={() => disconnectMu.mutate()}
+            >
+              {disconnectMu.isPending ? "Disconnecting…" : "Disconnect"}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
