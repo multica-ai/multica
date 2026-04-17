@@ -67,7 +67,7 @@ func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request
 		return db.AgentTaskQueue{}, false
 	}
 
-	wsID := h.resolveTaskWorkspaceID(r, task)
+	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" {
 		writeError(w, http.StatusNotFound, "task not found")
 		return db.AgentTaskQueue{}, false
@@ -94,21 +94,6 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	}
 	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
 	return err == nil
-}
-
-// resolveTaskWorkspaceID derives the workspace ID from a task's issue or chat session.
-func (h *Handler) resolveTaskWorkspaceID(r *http.Request, task db.AgentTaskQueue) string {
-	if task.IssueID.Valid {
-		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-			return uuidToString(issue.WorkspaceID)
-		}
-	}
-	if task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			return uuidToString(cs.WorkspaceID)
-		}
-	}
-	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,7 +1042,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Verify the task belongs to the caller's workspace.
-	wsID := h.resolveTaskWorkspaceID(r, task)
+	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" || wsID != middleware.WorkspaceIDFromContext(r.Context()) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return

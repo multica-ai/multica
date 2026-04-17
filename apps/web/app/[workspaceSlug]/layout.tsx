@@ -8,6 +8,7 @@ import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { NoAccessPage } from "@multica/views/workspace/no-access-page";
+import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 
 export default function WorkspaceLayout({
@@ -60,11 +61,17 @@ export default function WorkspaceLayout({
   // and we just need to hold null briefly.
   const hasBeenSeen = useWorkspaceSeen(workspaceSlug, !!workspace);
 
-  if (isAuthLoading) return null;
+  const loadingIndicator = (
+    <div className="flex h-svh items-center justify-center">
+      <MulticaIcon className="size-6 animate-pulse" />
+    </div>
+  );
+
+  if (isAuthLoading) return loadingIndicator;
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.
-  if (!listFetched) return null;
+  if (!listFetched) return loadingIndicator;
   if (!workspace) {
     // If we've resolved this slug before in this session, it was just
     // removed from our list (deleted/left/evicted). A navigate is almost

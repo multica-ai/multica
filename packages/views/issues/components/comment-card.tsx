@@ -98,9 +98,24 @@ function DeleteCommentDialog({
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   if (!attachments?.length) return null;
-  // Skip attachments whose URL is already referenced in the markdown content
+  // Skip attachments whose URL is already referenced in the markdown content,
+  // and duplicates of the same file (same name/type/size) that are referenced.
   const standalone = content
-    ? attachments.filter((a) => !content.includes(a.url))
+    ? attachments.filter((a) => {
+        if (content.includes(a.url)) return false;
+        // Dedup: if another attachment with the same file identity is already
+        // inline in the content, this is a duplicate upload — skip it.
+        const hasSiblingInContent = attachments.some(
+          (other) =>
+            other.id !== a.id &&
+            other.filename === a.filename &&
+            other.content_type === a.content_type &&
+            other.size_bytes === a.size_bytes &&
+            content.includes(other.url),
+        );
+        if (hasSiblingInContent) return false;
+        return true;
+      })
     : attachments;
   if (!standalone.length) return null;
 

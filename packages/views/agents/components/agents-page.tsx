@@ -24,11 +24,10 @@ import { AgentListItem } from "./agent-list-item";
 import { AgentDetail } from "./agent-detail";
 
 export function AgentsPage() {
-  const isLoading = useAuthStore((s) => s.isLoading);
   const currentUser = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: agents = [], isLoading } = useQuery(agentListOptions(wsId));
   const [selectedId, setSelectedId] = useState<string>("");
   const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);

@@ -162,7 +162,7 @@ When the two apps need different behavior for the same concept (e.g., different 
 When adding a new page or feature:
 
 1. **New page component** → add to `packages/views/<domain>/`. Never import from `next/*` or `react-router-dom`.
-2. **Wire it in both apps** → add a route in `apps/web/app/` (Next.js page file) AND in the desktop router.
+2. **Wire it in both apps** → add a route in `apps/web/app/` (Next.js page file) AND in the desktop router. **Exception**: pre-workspace transition flows (create workspace, accept invite) are NOT routes on desktop — they're `WindowOverlay` state. See *Desktop-specific Rules → Route categories*.
 3. **Navigation** → use `useNavigation().push()` or `<AppLink>`. Never use framework-specific link/router APIs in shared code.
 4. **Shared guards/providers** → use `DashboardGuard` from `packages/views/layout/`. Don't create separate guard logic per app.
 5. **Platform-specific UI** → if a feature is web-only or desktop-only, keep it in the respective app. Use props slots (`extra`, `topSlot`) on shared layout components to inject platform-specific UI.
@@ -175,6 +175,70 @@ Both apps share the same CSS foundation from `packages/ui/styles/`.
 - **Design tokens** → use semantic tokens (`bg-background`, `text-muted-foreground`). Never use hardcoded Tailwind colors (`text-red-500`, `bg-gray-100`).
 - **Shared styles** → `packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
 - **`@source` directives** → both apps scan shared packages so Tailwind sees all class names.
+
+## Desktop-specific Rules
+
+These rules apply to `apps/desktop/` only. Web has different constraints (URL bar, SSR, no tabs) and doesn't share these concerns. Every rule in this section was added after a concrete bug — treat them as enforced, not suggestions.
+
+### Route categories
+
+Every path in the desktop app falls into exactly one category. Choosing the wrong one reproduces bugs we've already fixed.
+
+- **Session routes** — workspace-scoped pages (`/:slug/issues`, `/:slug/settings`). Rendered by the per-tab memory router under `WorkspaceRouteLayout`. These are legitimate tab destinations.
+- **Transition flows** — pre-workspace / one-shot actions (create workspace, accept invite). **NOT routes.** They live as `WindowOverlay` state, dispatched when the navigation adapter sees `push('/workspaces/new')` or `push('/invite/<id>')`. The shared view (`NewWorkspacePage`, `InvitePage`) is the content; the overlay wrapper supplies platform chrome.
+- **Error / stale states** — "workspace not available", tabs pointing at a revoked workspace. **NOT pages.** `WorkspaceRouteLayout` auto-heals by dropping the stale tab group from the store; the user never lands on an explicit error screen. Web keeps `NoAccessPage` (shareable URL makes the error state meaningful); desktop has no URL bar so stale = heal silently.
+
+**Adding a new pre-workspace flow on desktop**: register a new `WindowOverlay` type in `stores/window-overlay-store.ts`. Do NOT add it to `routes.tsx`. If a shared view needs the flow on both platforms, add the route on web (`apps/web/app/(auth)/...`) AND the overlay type on desktop — the shared view component is identical.
+
+### Workspace identity singleton
+
+`setCurrentWorkspace(slug, uuid)` in `@multica/core/platform` is the single source of truth for "which workspace is active right now". Three consumers depend on it:
+
+1. API client's `X-Workspace-Slug` header.
+2. Zustand per-workspace storage namespace.
+3. Chrome gating (`{slug && <AppSidebar />}` on desktop, similar on web).
+
+Normally set by `WorkspaceRouteLayout` when its route mounts. Critically: **unmount does NOT clear it.** Any code that leaves workspace context (leave workspace, delete workspace, force navigation to overlay) must call `setCurrentWorkspace(null, null)` explicitly — otherwise the realtime `workspace:deleted` handler races the mutation, chrome gating stays truthy while the workspace is gone from cache, and `useWorkspaceId` throws.
+
+### Workspace destructive operations
+
+Leave / Delete workspace flows must follow this order:
+
+1. Read destination from cached workspace list (no extra fetch).
+2. `setCurrentWorkspace(null, null)`.
+3. `navigation.push(destination)` — switch to next workspace or open new-workspace overlay.
+4. THEN `await mutation.mutateAsync(workspaceId)`.
+
+Reversing step 4 with steps 1–3 (mutate first, navigate after) causes a three-way race between the mutation's `onSettled` invalidate, the explicit `navigateAway`, and the realtime handler's `relocateAfterWorkspaceLoss` — all refetching the same `workspaces` query concurrently. One gets cancelled, bubbles as `CancelledError`, and triggers `window.location.assign` → full renderer reload / white screen.
+
+### Tab isolation
+
+Tabs are grouped per workspace in `stores/tab-store.ts`. The TabBar shows only the active workspace's tabs; cross-workspace tab leakage is impossible by construction (no flat global tabs array).
+
+Cross-workspace `push(path)` is detected by the navigation adapter (`platform/navigation.tsx`) and translated into `switchWorkspace(slug, targetPath)` — NOT a navigation within the current tab's router. Don't bypass the adapter; always go through `useNavigation()` from shared code.
+
+### Drag region (macOS window-move)
+
+Every full-window desktop view (login, overlay, any page that covers the native title bar) needs a top drag strip so users can move the window. On macOS the traffic lights are hidden via `useImmersiveMode` in overlay-style contexts, so the drag strip also gives back that corner for pointer-drag.
+
+**Pattern**: flex child at top, not absolute overlay.
+
+```tsx
+<div className="fixed inset-0 z-50 flex flex-col bg-background">
+  <div className="h-12 shrink-0" style={{ WebkitAppRegion: "drag" }} />
+  <div className="flex-1 overflow-auto" style={{ WebkitAppRegion: "no-drag" }}>
+    {/* page content — interactive elements need their own "no-drag" */}
+  </div>
+</div>
+```
+
+Why flex, not absolute: the absolute-strip + `z-index` approach relies on stacking-context hit-testing, which isn't reliable for `-webkit-app-region`. A real flex row with no siblings at that pixel is unambiguous. Height matches `MainTopBar` (48px / `h-12`) for consistency.
+
+Canonical examples: `components/window-overlay.tsx`, `pages/login.tsx`.
+
+### UX vs platform chrome
+
+UX affordances (Back button, Log out button, welcome copy, invite card) belong in `packages/views/` so web and desktop render identical content. Platform chrome (drag strip, `useImmersiveMode`, tab system interaction, traffic-light accommodation) lives in desktop-only code. Violating this split always produces platform divergence — if a button exists on desktop but not on web for the same flow, it's a signal the UX escaped into platform code.
 
 ## UI/UX Rules
 

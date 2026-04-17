@@ -132,6 +132,18 @@ export async function uploadAndInsertFile(
   }
 }
 
+/** Deduplicate files from the same paste/drop event.
+ *  macOS/Chrome can put the same file in the FileList twice. */
+function dedupFiles(files: FileList): File[] {
+  const seen = new Set<string>();
+  return Array.from(files).filter((file) => {
+    const key = `${file.name}\0${file.size}\0${file.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function createFileUploadExtension(
   onUploadFileRef: React.RefObject<((file: File) => Promise<UploadResult | null>) | undefined>,
 ) {
@@ -143,7 +155,7 @@ export function createFileUploadExtension(
       const handleFiles = async (files: FileList) => {
         const handler = onUploadFileRef.current;
         if (!handler) return false;
-        for (const file of Array.from(files)) {
+        for (const file of dedupFiles(files)) {
           await uploadAndInsertFile(editor, file, handler);
         }
         return true;
@@ -170,10 +182,10 @@ export function createFileUploadExtension(
               // Only the first file uses the drop position; subsequent files
               // append to the end to avoid stale position issues.
               const dropPos = view.posAtCoords({ left: dragEvent.clientX, top: dragEvent.clientY });
-              const fileArray = Array.from(files);
-              for (let i = 0; i < fileArray.length; i++) {
+              const unique = dedupFiles(files);
+              for (let i = 0; i < unique.length; i++) {
                 const insertPos = i === 0 ? dropPos?.pos : undefined;
-                uploadAndInsertFile(editor, fileArray[i]!, handler, insertPos);
+                uploadAndInsertFile(editor, unique[i]!, handler, insertPos);
               }
               return true;
             },

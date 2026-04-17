@@ -3,6 +3,8 @@ import { ElectronAPI } from "@electron-toolkit/preload";
 interface DesktopAPI {
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
+  /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
+  onInviteOpen: (callback: (invitationId: string) => void) => () => void;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
