@@ -55,7 +55,9 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCipher *secrets.Cipher, gitlabClient *gitlab.Client, gitlabEnabled bool) chi.Router {
+// serverCtx is cancelled when the server begins shutting down; long-lived background
+// workers (e.g. the gitlab initial-sync goroutine) inherit it so they stop cleanly.
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCipher *secrets.Cipher, gitlabClient *gitlab.Client, gitlabEnabled bool, serverCtx context.Context) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -73,6 +75,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, secretsCipher, gitlabClient, gitlabEnabled)
+	h.SetBaseCtx(serverCtx)
 
 	r := chi.NewRouter()
 
@@ -219,6 +222,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
+				r.Use(middleware.GitlabWritesBlocked(queries))
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/", h.ListIssues)
@@ -293,6 +297,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
+				r.Use(middleware.GitlabWritesBlocked(queries))
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
 				r.Post("/reactions", h.AddReaction)

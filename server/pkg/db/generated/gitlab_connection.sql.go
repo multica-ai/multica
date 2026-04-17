@@ -20,7 +20,7 @@ INSERT INTO workspace_gitlab_connection (
     service_token_user_id,
     connection_status
 )
-VALUES ($1, $2, $3, $4, $5, 'connected')
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at
 `
 
@@ -30,6 +30,7 @@ type CreateWorkspaceGitlabConnectionParams struct {
 	GitlabProjectPath     string      `json:"gitlab_project_path"`
 	ServiceTokenEncrypted []byte      `json:"service_token_encrypted"`
 	ServiceTokenUserID    int64       `json:"service_token_user_id"`
+	ConnectionStatus      string      `json:"connection_status"`
 }
 
 func (q *Queries) CreateWorkspaceGitlabConnection(ctx context.Context, arg CreateWorkspaceGitlabConnectionParams) (WorkspaceGitlabConnection, error) {
@@ -39,6 +40,7 @@ func (q *Queries) CreateWorkspaceGitlabConnection(ctx context.Context, arg Creat
 		arg.GitlabProjectPath,
 		arg.ServiceTokenEncrypted,
 		arg.ServiceTokenUserID,
+		arg.ConnectionStatus,
 	)
 	var i WorkspaceGitlabConnection
 	err := row.Scan(
@@ -56,6 +58,21 @@ func (q *Queries) CreateWorkspaceGitlabConnection(ctx context.Context, arg Creat
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteStaleConnectingGitlabConnection = `-- name: DeleteStaleConnectingGitlabConnection :exec
+DELETE FROM workspace_gitlab_connection
+WHERE workspace_id = $1
+  AND connection_status = 'connecting'
+  AND updated_at < now() - interval '10 minutes'
+`
+
+// Heals rows left in 'connecting' state by a server that died mid-sync.
+// A row is considered stale if it's been 'connecting' for longer than the
+// sync timeout (10 minutes is the timeout we set in the goroutine).
+func (q *Queries) DeleteStaleConnectingGitlabConnection(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteStaleConnectingGitlabConnection, workspaceID)
+	return err
 }
 
 const deleteUserGitlabConnection = `-- name: DeleteUserGitlabConnection :exec
@@ -130,6 +147,25 @@ func (q *Queries) GetWorkspaceGitlabConnection(ctx context.Context, workspaceID 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateWorkspaceGitlabConnectionStatus = `-- name: UpdateWorkspaceGitlabConnectionStatus :exec
+UPDATE workspace_gitlab_connection
+SET connection_status = $2,
+    status_message    = $3,
+    updated_at        = now()
+WHERE workspace_id = $1
+`
+
+type UpdateWorkspaceGitlabConnectionStatusParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ConnectionStatus string      `json:"connection_status"`
+	StatusMessage    pgtype.Text `json:"status_message"`
+}
+
+func (q *Queries) UpdateWorkspaceGitlabConnectionStatus(ctx context.Context, arg UpdateWorkspaceGitlabConnectionStatusParams) error {
+	_, err := q.db.Exec(ctx, updateWorkspaceGitlabConnectionStatus, arg.WorkspaceID, arg.ConnectionStatus, arg.StatusMessage)
+	return err
 }
 
 const upsertUserGitlabConnection = `-- name: UpsertUserGitlabConnection :one

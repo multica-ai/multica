@@ -86,17 +86,18 @@ type AgentTaskQueue struct {
 }
 
 type Attachment struct {
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	IssueID      pgtype.UUID        `json:"issue_id"`
-	CommentID    pgtype.UUID        `json:"comment_id"`
-	UploaderType string             `json:"uploader_type"`
-	UploaderID   pgtype.UUID        `json:"uploader_id"`
-	Filename     string             `json:"filename"`
-	Url          string             `json:"url"`
-	ContentType  string             `json:"content_type"`
-	SizeBytes    int64              `json:"size_bytes"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	CommentID       pgtype.UUID        `json:"comment_id"`
+	UploaderType    string             `json:"uploader_type"`
+	UploaderID      pgtype.UUID        `json:"uploader_id"`
+	Filename        string             `json:"filename"`
+	Url             string             `json:"url"`
+	ContentType     string             `json:"content_type"`
+	SizeBytes       int64              `json:"size_bytes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	GitlabUploadUrl pgtype.Text        `json:"gitlab_upload_url"`
 }
 
 type Autopilot struct {
@@ -172,16 +173,19 @@ type ChatSession struct {
 }
 
 type Comment struct {
-	ID          pgtype.UUID        `json:"id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	AuthorType  string             `json:"author_type"`
-	AuthorID    pgtype.UUID        `json:"author_id"`
-	Content     string             `json:"content"`
-	Type        string             `json:"type"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	ParentID    pgtype.UUID        `json:"parent_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ID                 pgtype.UUID        `json:"id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	AuthorType         pgtype.Text        `json:"author_type"`
+	AuthorID           pgtype.UUID        `json:"author_id"`
+	Content            string             `json:"content"`
+	Type               string             `json:"type"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ParentID           pgtype.UUID        `json:"parent_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	GitlabNoteID       pgtype.Int8        `json:"gitlab_note_id"`
+	ExternalUpdatedAt  pgtype.Timestamptz `json:"external_updated_at"`
+	GitlabAuthorUserID pgtype.Int8        `json:"gitlab_author_user_id"`
 }
 
 type CommentReaction struct {
@@ -214,6 +218,24 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type GitlabLabel struct {
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	GitlabLabelID     int64              `json:"gitlab_label_id"`
+	Name              string             `json:"name"`
+	Color             string             `json:"color"`
+	Description       string             `json:"description"`
+	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+}
+
+type GitlabProjectMember struct {
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	GitlabUserID      int64              `json:"gitlab_user_id"`
+	Username          string             `json:"username"`
+	Name              string             `json:"name"`
+	AvatarUrl         string             `json:"avatar_url"`
+	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -241,7 +263,7 @@ type Issue struct {
 	Priority           string             `json:"priority"`
 	AssigneeType       pgtype.Text        `json:"assignee_type"`
 	AssigneeID         pgtype.UUID        `json:"assignee_id"`
-	CreatorType        string             `json:"creator_type"`
+	CreatorType        pgtype.Text        `json:"creator_type"`
 	CreatorID          pgtype.UUID        `json:"creator_id"`
 	ParentIssueID      pgtype.UUID        `json:"parent_issue_id"`
 	AcceptanceCriteria []byte             `json:"acceptance_criteria"`
@@ -254,6 +276,9 @@ type Issue struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
+	GitlabIid          pgtype.Int4        `json:"gitlab_iid"`
+	GitlabProjectID    pgtype.Int8        `json:"gitlab_project_id"`
+	ExternalUpdatedAt  pgtype.Timestamptz `json:"external_updated_at"`
 }
 
 type IssueDependency struct {
@@ -263,6 +288,12 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueGitlabLabel struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	GitlabLabelID int64       `json:"gitlab_label_id"`
+}
+
 type IssueLabel struct {
 	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
@@ -270,14 +301,23 @@ type IssueLabel struct {
 	Color       string      `json:"color"`
 }
 
+type IssuePosition struct {
+	WorkspaceID pgtype.UUID    `json:"workspace_id"`
+	GitlabIid   int32          `json:"gitlab_iid"`
+	Position    pgtype.Numeric `json:"position"`
+}
+
 type IssueReaction struct {
-	ID          pgtype.UUID        `json:"id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ActorType   string             `json:"actor_type"`
-	ActorID     pgtype.UUID        `json:"actor_id"`
-	Emoji       string             `json:"emoji"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ActorType         pgtype.Text        `json:"actor_type"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	Emoji             string             `json:"emoji"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	GitlabAwardID     pgtype.Int8        `json:"gitlab_award_id"`
+	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+	GitlabActorUserID pgtype.Int8        `json:"gitlab_actor_user_id"`
 }
 
 type IssueSubscriber struct {

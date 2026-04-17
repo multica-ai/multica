@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/gitlab"
 )
@@ -40,6 +43,12 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 	}
 	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
 		return
+	}
+
+	// Heal stale 'connecting' rows from a server that died mid-sync.
+	if err := h.Queries.DeleteStaleConnectingGitlabConnection(r.Context(), parseUUID(workspaceID)); err != nil {
+		slog.Warn("heal stale connecting row failed", "error", err)
+		// Non-fatal — proceed; if the row genuinely conflicts we'll get 409 below.
 	}
 
 	var req connectGitlabRequest
@@ -94,6 +103,7 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 		GitlabProjectPath:     project.PathWithNamespace,
 		ServiceTokenEncrypted: encrypted,
 		ServiceTokenUserID:    user.ID,
+		ConnectionStatus:      "connecting",
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -105,6 +115,34 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Dispatch initial sync in the background. The goroutine flips the
+	// connection_status to 'connected' (or 'error' with a message) when done.
+	// Use a fresh context — the request context will be cancelled before the
+	// sync finishes.
+	go func(token string, projectID int64, wsID string) {
+		parent := h.BaseCtx
+		if parent == nil {
+			// Tests/embedded uses without explicit lifecycle ctx fall back to
+			// background so behavior matches Phase 2a's pre-shutdown plumbing.
+			parent = context.Background()
+		}
+		syncCtx, cancel := context.WithTimeout(parent, 10*time.Minute)
+		defer cancel()
+		if err := gitlabsync.RunInitialSync(syncCtx, gitlabsync.SyncDeps{
+			Queries: h.Queries,
+			Client:  h.Gitlab,
+		}, gitlabsync.RunInitialSyncInput{
+			WorkspaceID: wsID,
+			ProjectID:   projectID,
+			Token:       token,
+		}); err != nil {
+			slog.Error("initial gitlab sync failed",
+				"error", err,
+				"workspace_id", wsID,
+				"project_id", projectID)
+		}
+	}(req.Token, project.ID, workspaceID)
+
 	writeJSON(w, http.StatusOK, gitlabConnectionResponse{
 		WorkspaceID:          uuidToString(row.WorkspaceID),
 		GitlabProjectID:      row.GitlabProjectID,
@@ -115,8 +153,8 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// DisconnectGitlabWorkspace removes the workspace's GitLab connection.
-// Note: Phase 2 will extend this to also delete the webhook in GitLab.
+// DisconnectGitlabWorkspace removes the workspace's GitLab connection and
+// cascade-truncates all derived cache rows inside a single transaction.
 func (h *Handler) DisconnectGitlabWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !h.GitlabEnabled {
 		writeError(w, http.StatusNotFound, "gitlab integration disabled")
@@ -126,9 +164,42 @@ func (h *Handler) DisconnectGitlabWorkspace(w http.ResponseWriter, r *http.Reque
 	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
 		return
 	}
-	if err := h.Queries.DeleteWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID)); err != nil {
+	// Cascade-truncate the cache before removing the connection row.
+	// The cache rows are derived from GitLab; once disconnected, they're
+	// unreachable garbage. Inside a transaction so partial failure doesn't
+	// leave orphan rows.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Error("begin tx for cache truncate", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	wsUUID := parseUUID(workspaceID)
+	if err := qtx.DeleteWorkspaceCachedIssues(r.Context(), wsUUID); err != nil {
+		slog.Error("delete cached issues failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	if err := qtx.DeleteWorkspaceGitlabLabels(r.Context(), wsUUID); err != nil {
+		slog.Error("delete cached labels failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	if err := qtx.DeleteWorkspaceGitlabMembers(r.Context(), wsUUID); err != nil {
+		slog.Error("delete cached members failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
+		return
+	}
+	if err := qtx.DeleteWorkspaceGitlabConnection(r.Context(), wsUUID); err != nil {
 		slog.Error("delete workspace_gitlab_connection failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to disconnect")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("commit cache truncate", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear cache")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

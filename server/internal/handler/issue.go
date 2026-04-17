@@ -57,7 +57,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
 		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
+		CreatorType:   i.CreatorType.String,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
@@ -81,7 +81,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
 		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
+		CreatorType:   i.CreatorType.String,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
@@ -104,7 +104,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
 		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
+		CreatorType:   i.CreatorType.String,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
@@ -873,7 +873,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Priority:           priority,
 		AssigneeType:       assigneeType,
 		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
+		CreatorType:        pgtype.Text{String: creatorType, Valid: creatorType != ""},
 		CreatorID:          parseUUID(actualCreatorID),
 		ParentIssueID:      parentIssueID,
 		Position:           0,
@@ -1080,6 +1080,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
+	// .String returns "" for both Valid=false (NULL) cases, so two unassigned
+	// rows compare equal — intended.
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status

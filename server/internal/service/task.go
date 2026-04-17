@@ -592,12 +592,22 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			parentID = parent.ParentID
 		}
 	}
+	// Phase 2a known limitation: agent comments written here land only in
+	// Multica's local DB. If the workspace has a gitlab connection, this
+	// silently diverges from GitLab until Phase 3 wires write-through.
+	if _, err := s.Queries.GetWorkspaceGitlabConnection(ctx, issue.WorkspaceID); err == nil {
+		slog.Warn("agent comment written to multica-only; will not appear in connected GitLab project until Phase 3 ships",
+			"workspace_id", util.UUIDToString(issue.WorkspaceID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(agentID))
+	}
+
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issueID,
 		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "agent",
+		AuthorType:  pgtype.Text{String: "agent", Valid: true},
 		AuthorID:    agentID,
 		Content:     content,
 		Type:        commentType,

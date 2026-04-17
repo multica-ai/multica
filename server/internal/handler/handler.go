@@ -54,6 +54,11 @@ type Handler struct {
 	Secrets       *secrets.Cipher
 	Gitlab        *gitlab.Client
 	GitlabEnabled bool
+
+	// BaseCtx is cancelled at server shutdown. Long-lived background workers
+	// (e.g. the gitlab initial-sync goroutine spawned by ConnectGitlabWorkspace)
+	// derive their context from this so shutdown stops them cleanly.
+	BaseCtx context.Context
 }
 
 func New(
@@ -91,6 +96,13 @@ func New(
 		Gitlab:           gitlabClient,
 		GitlabEnabled:    gitlabEnabled,
 	}
+}
+
+// SetBaseCtx wires a server-lifecycle context into the Handler. Called once
+// from main.go after server boot. Tests that don't need shutdown plumbing
+// can leave it nil — workers fall back to context.Background().
+func (h *Handler) SetBaseCtx(ctx context.Context) {
+	h.BaseCtx = ctx
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

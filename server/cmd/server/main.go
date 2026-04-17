@@ -94,7 +94,9 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
-	r := NewRouter(pool, hub, bus, secretsCipher, gitlabClient, gitlabEnabled)
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+	r := NewRouter(pool, hub, bus, secretsCipher, gitlabClient, gitlabEnabled, serverCtx)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -126,6 +128,7 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server")
+	cancelServer() // tell the gitlab sync goroutine to stop
 	sweepCancel()
 	autopilotCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

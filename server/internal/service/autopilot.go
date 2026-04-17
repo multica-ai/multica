@@ -120,7 +120,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		Priority:      ap.Priority,
 		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:    ap.AssigneeID,
-		CreatorType:   ap.CreatedByType,
+		CreatorType:   pgtype.Text{String: ap.CreatedByType, Valid: ap.CreatedByType != ""},
 		CreatorID:     ap.CreatedByID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,

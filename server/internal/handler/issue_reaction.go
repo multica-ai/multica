@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -24,7 +25,7 @@ func issueReactionToResponse(r db.IssueReaction) IssueReactionResponse {
 	return IssueReactionResponse{
 		ID:        uuidToString(r.ID),
 		IssueID:   uuidToString(r.IssueID),
-		ActorType: r.ActorType,
+		ActorType: r.ActorType.String,
 		ActorID:   uuidToString(r.ActorID),
 		Emoji:     r.Emoji,
 		CreatedAt: timestampToString(r.CreatedAt),
@@ -61,7 +62,7 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 	reaction, err := h.Queries.AddIssueReaction(r.Context(), db.AddIssueReactionParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		ActorType:   actorType,
+		ActorType:   pgtype.Text{String: actorType, Valid: true},
 		ActorID:     parseUUID(actorID),
 		Emoji:       req.Emoji,
 	})
@@ -112,7 +113,7 @@ func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.Queries.RemoveIssueReaction(r.Context(), db.RemoveIssueReactionParams{
 		IssueID:   issue.ID,
-		ActorType: actorType,
+		ActorType: pgtype.Text{String: actorType, Valid: true},
 		ActorID:   parseUUID(actorID),
 		Emoji:     req.Emoji,
 	}); err != nil {

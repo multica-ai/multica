@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -60,8 +63,19 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 			w.Write([]byte(`{"id": 555, "username": "svc-bot", "name": "Service Bot"}`))
 		case "/api/v4/projects/42":
 			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		case "/api/v4/projects/42/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/42/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/issues":
+			w.Write([]byte(`[]`))
 		default:
-			t.Errorf("unexpected path: %s", r.URL.Path)
+			// Unexpected paths from the sync goroutine should not fail the test,
+			// but log them for debugging.
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
@@ -91,12 +105,19 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 	if got["gitlab_project_path"] != "team/app" {
 		t.Errorf("gitlab_project_path = %v", got["gitlab_project_path"])
 	}
+	// Immediate response status is 'connecting'; sync goroutine flips to 'connected'.
+	if got["connection_status"] != "connecting" {
+		t.Errorf("connection_status = %v, want 'connecting'", got["connection_status"])
+	}
 	if _, hasTok := got["service_token_encrypted"]; hasTok {
 		t.Errorf("response leaks service_token_encrypted field: %+v", got)
 	}
 	if _, hasTok := got["pat_encrypted"]; hasTok {
 		t.Errorf("response leaks pat_encrypted field: %+v", got)
 	}
+
+	// Wait for sync goroutine to settle before cleanup.
+	time.Sleep(100 * time.Millisecond)
 
 	// Clean up.
 	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
@@ -110,6 +131,18 @@ func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
 			w.Write([]byte(`{"id": 555, "username": "svc-bot"}`))
 		case "/api/v4/projects/42":
 			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		case "/api/v4/projects/42/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/42/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fake.Close()
@@ -140,6 +173,9 @@ func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 
+	// Wait for sync goroutine to settle before cleanup.
+	time.Sleep(100 * time.Millisecond)
+
 	// Clean up.
 	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
 }
@@ -169,6 +205,18 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 			w.Write([]byte(`{"id": 1, "username": "svc"}`))
 		case "/api/v4/projects/1":
 			w.Write([]byte(`{"id": 1, "path_with_namespace": "g/a"}`))
+		case "/api/v4/projects/1/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/1/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/1/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fake.Close()
@@ -203,6 +251,9 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 	if rr2.Code != http.StatusNotFound {
 		t.Fatalf("after delete, GET should 404, got %d", rr2.Code)
 	}
+
+	// Wait for any sync goroutine to settle before the next test can run.
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestConnectGitlabWorkspace_BadToken(t *testing.T) {
@@ -271,6 +322,18 @@ func TestConnectGitlabWorkspace_AlreadyConnectedReturns409(t *testing.T) {
 			w.Write([]byte(`{"id": 555, "username": "svc-bot"}`))
 		case "/api/v4/projects/42":
 			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		case "/api/v4/projects/42/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/42/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/42/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fake.Close()
@@ -299,6 +362,150 @@ func TestConnectGitlabWorkspace_AlreadyConnectedReturns409(t *testing.T) {
 	h.ConnectGitlabWorkspace(rr2, req2)
 	if rr2.Code != http.StatusConflict {
 		t.Fatalf("second connect status = %d, want 409; body = %s", rr2.Code, rr2.Body.String())
+	}
+
+	// Wait for sync goroutine from the first connect to settle.
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestDisconnectGitlabWorkspace_TruncatesCache(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v4/user":
+			w.Write([]byte(`{"id":1,"username":"svc"}`))
+		case "/api/v4/projects/1":
+			w.Write([]byte(`{"id":1,"path_with_namespace":"g/a"}`))
+		case "/api/v4/projects/1/labels":
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`[]`))
+			} else {
+				w.Write([]byte(`{"id":1,"name":"x","color":"#000"}`))
+			}
+		case "/api/v4/projects/1/members/all":
+			w.Write([]byte(`[]`))
+		case "/api/v4/projects/1/issues":
+			w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	// Connect, then wait for sync to finish so we have a baseline state.
+	body, _ := json.Marshal(map[string]string{"project": "1", "token": "glpat-x"})
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "id", testWorkspaceID)
+	h.ConnectGitlabWorkspace(httptest.NewRecorder(), req)
+	time.Sleep(150 * time.Millisecond)
+
+	// Insert a synthetic cached row so we have something to delete.
+	h.Queries.UpsertGitlabLabel(context.Background(), db.UpsertGitlabLabelParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		GitlabLabelID: 9999,
+		Name:          "synthetic-test-label",
+		Color:         "#000",
+	})
+
+	// Disconnect.
+	delReq := httptest.NewRequest(http.MethodDelete, "/", nil)
+	delReq.Header.Set("X-User-ID", testUserID)
+	delReq = withURLParam(delReq, "id", testWorkspaceID)
+	rr := httptest.NewRecorder()
+	h.DisconnectGitlabWorkspace(rr, delReq)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Cache should be empty.
+	labels, _ := h.Queries.ListGitlabLabels(context.Background(), parseUUID(testWorkspaceID))
+	if len(labels) != 0 {
+		t.Errorf("expected cache truncated, found %d labels", len(labels))
+	}
+}
+
+func TestGitlabConnectedWorkspace_WriteReturns501(t *testing.T) {
+	h := buildHandlerWithGitlab(t, "http://unused")
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	h.Queries.CreateWorkspaceGitlabConnection(context.Background(), db.CreateWorkspaceGitlabConnectionParams{
+		WorkspaceID:           parseUUID(testWorkspaceID),
+		GitlabProjectID:       42,
+		GitlabProjectPath:     "team/app",
+		ServiceTokenEncrypted: []byte("x"),
+		ServiceTokenUserID:    1,
+		ConnectionStatus:      "connected",
+	})
+	defer h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	// Build a tiny router that mounts CreateIssue under the middleware.
+	r := chi.NewRouter()
+	r.Route("/api/workspaces/{id}/issues", func(r chi.Router) {
+		r.Use(middleware.GitlabWritesBlocked(h.Queries))
+		r.Post("/", h.CreateIssue)
+	})
+
+	body, _ := json.Marshal(map[string]any{"title": "Test", "status": "todo", "priority": "medium"})
+	req := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/workspaces/%s/issues/", testWorkspaceID), bytes.NewReader(body))
+	req.Header.Set("X-User-ID", testUserID)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// I-1 fix: comment write routes also need the 501 stopgap.
+// The /api/comments/{commentId} subrouter doesn't carry a workspace ID in
+// its URL — the middleware falls back to the X-Workspace-ID header (set by
+// the workspace-scoped middleware groups in the real router).
+func TestGitlabConnectedWorkspace_CommentWriteReturns501(t *testing.T) {
+	h := buildHandlerWithGitlab(t, "http://unused")
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	h.Queries.CreateWorkspaceGitlabConnection(context.Background(), db.CreateWorkspaceGitlabConnectionParams{
+		WorkspaceID:           parseUUID(testWorkspaceID),
+		GitlabProjectID:       42,
+		GitlabProjectPath:     "team/app",
+		ServiceTokenEncrypted: []byte("x"),
+		ServiceTokenUserID:    1,
+		ConnectionStatus:      "connected",
+	})
+	defer h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	r := chi.NewRouter()
+	r.Route("/api/comments/{commentId}", func(r chi.Router) {
+		r.Use(middleware.GitlabWritesBlocked(h.Queries))
+		r.Put("/", h.UpdateComment)
+		r.Delete("/", h.DeleteComment)
+		r.Post("/reactions", h.AddReaction)
+		r.Delete("/reactions", h.RemoveReaction)
+	})
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"update", http.MethodPut, "/api/comments/00000000-0000-0000-0000-000000000000/", `{"content":"x"}`},
+		{"delete", http.MethodDelete, "/api/comments/00000000-0000-0000-0000-000000000000/", ``},
+		{"add reaction", http.MethodPost, "/api/comments/00000000-0000-0000-0000-000000000000/reactions", `{"emoji":"thumbsup"}`},
+		{"remove reaction", http.MethodDelete, "/api/comments/00000000-0000-0000-0000-000000000000/reactions", `{"emoji":"thumbsup"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("X-User-ID", testUserID)
+			req.Header.Set("X-Workspace-ID", testWorkspaceID)
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, req)
+			if rr.Code != http.StatusNotImplemented {
+				t.Fatalf("%s status = %d, want 501; body = %s", tc.name, rr.Code, rr.Body.String())
+			}
+		})
 	}
 }
 
