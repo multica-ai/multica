@@ -1329,6 +1329,216 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// PATCH the GitLab issue first, then reconcile the cache row from the
+	// returned representation. On a GitLab-connected workspace the
+	// write-through is AUTHORITATIVE — on GitLab error we return 502 and
+	// never fall back to the legacy direct-DB path (that would produce
+	// orphaned cache rows).
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), prevIssue.WorkspaceID)
+		if wsErr == nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
+
+			agentSlugByUUID, agentErr := h.buildAgentUUIDSlugMap(r.Context(), prevIssue.WorkspaceID)
+			if agentErr != nil {
+				slog.Error("build agent slug map", "error", agentErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusInternalServerError, "build agent map failed")
+				return
+			}
+
+			oldSnap := gitlabsync.OldIssueSnapshot{
+				Status:       prevIssue.Status,
+				Priority:     prevIssue.Priority,
+				AssigneeType: prevIssue.AssigneeType.String,
+				AssigneeUUID: uuidToString(prevIssue.AssigneeID),
+			}
+			glInput := gitlabsync.BuildUpdateIssueInput(oldSnap, gitlabsync.UpdateIssueRequest{
+				Title:        req.Title,
+				Description:  req.Description,
+				Status:       req.Status,
+				Priority:     req.Priority,
+				AssigneeType: req.AssigneeType,
+				AssigneeID:   req.AssigneeID,
+				DueDate:      req.DueDate,
+			}, agentSlugByUUID)
+
+			if !prevIssue.GitlabIid.Valid || !prevIssue.GitlabProjectID.Valid {
+				// Defensive: a cache row on a GitLab-connected workspace that
+				// lacks GitLab identifiers is a bug upstream of this handler.
+				// Refuse the write-through rather than silently fall through.
+				slog.Error("gitlab-connected workspace issue missing gitlab identifiers",
+					"issue_id", uuidToString(prevIssue.ID), "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "issue is missing gitlab identifiers")
+				return
+			}
+			glIssue, glErr := h.Gitlab.UpdateIssue(r.Context(), token, prevIssue.GitlabProjectID.Int64, int(prevIssue.GitlabIid.Int32), glInput)
+			if glErr != nil {
+				slog.Error("gitlab update issue", "error", glErr, "issue_id", uuidToString(prevIssue.ID))
+				writeError(w, http.StatusBadGateway, "gitlab update issue failed")
+				return
+			}
+
+			// Translate the GitLab response → cache values.
+			agentByLabel := make(map[string]string, len(agentSlugByUUID))
+			for uuidStr, slug := range agentSlugByUUID {
+				agentByLabel[slug] = uuidStr
+			}
+			values := gitlabsync.TranslateIssue(*glIssue, &gitlabsync.TranslateContext{AgentBySlug: agentByLabel})
+
+			glTx, txErr := h.TxStarter.Begin(r.Context())
+			if txErr != nil {
+				slog.Error("begin gitlab update-through tx", "error", txErr)
+				writeError(w, http.StatusInternalServerError, "failed to update issue")
+				return
+			}
+			defer glTx.Rollback(r.Context())
+			qtxGL := h.Queries.WithTx(glTx)
+
+			cacheRow, upErr := qtxGL.UpsertIssueFromGitlab(r.Context(),
+				buildUpsertParamsFromCreate(prevIssue.WorkspaceID, prevIssue.GitlabProjectID.Int64, *glIssue, values))
+			if upErr != nil && !errors.Is(upErr, pgx.ErrNoRows) {
+				slog.Error("upsert gitlab cache row on update", "error", upErr)
+				writeError(w, http.StatusInternalServerError, "cache upsert failed")
+				return
+			}
+			if errors.Is(upErr, pgx.ErrNoRows) {
+				// Clobber guard rejected the upsert (cache row's
+				// external_updated_at is already >= GitLab's updated_at). A
+				// concurrent webhook superseded us — keep the current cache
+				// row as-is and just apply any Multica-native patches below.
+				cacheRow = prevIssue
+			}
+
+			// Apply Multica-native fields that GitLab doesn't track. Pre-fill
+			// the bare-narg slots (assignee_*, due_date, parent_issue_id,
+			// project_id) from cacheRow so we don't overwrite anything we
+			// aren't explicitly changing.
+			updParams := db.UpdateIssueParams{
+				ID:            cacheRow.ID,
+				AssigneeType:  cacheRow.AssigneeType,
+				AssigneeID:    cacheRow.AssigneeID,
+				DueDate:       cacheRow.DueDate,
+				ParentIssueID: cacheRow.ParentIssueID,
+				ProjectID:     cacheRow.ProjectID,
+			}
+			touched := false
+			if _, ok := rawFields["parent_issue_id"]; ok {
+				if req.ParentIssueID != nil {
+					updParams.ParentIssueID = parseUUID(*req.ParentIssueID)
+				} else {
+					updParams.ParentIssueID = pgtype.UUID{Valid: false}
+				}
+				touched = true
+			}
+			if _, ok := rawFields["project_id"]; ok {
+				if req.ProjectID != nil {
+					updParams.ProjectID = parseUUID(*req.ProjectID)
+				} else {
+					updParams.ProjectID = pgtype.UUID{Valid: false}
+				}
+				touched = true
+			}
+			// Member assignees are cache-only in Phase 3b (no GitLab user
+			// mapping yet — the translator currently drops member assignees
+			// from the GitLab payload). Apply them directly to the cache.
+			if req.AssigneeType != nil && *req.AssigneeType == "member" {
+				updParams.AssigneeType = pgtype.Text{String: "member", Valid: true}
+				if req.AssigneeID != nil {
+					updParams.AssigneeID = parseUUID(*req.AssigneeID)
+				} else {
+					updParams.AssigneeID = pgtype.UUID{Valid: false}
+				}
+				touched = true
+			}
+			if touched {
+				updated, updErr := qtxGL.UpdateIssue(r.Context(), updParams)
+				if updErr != nil {
+					slog.Error("patch native fields on gitlab cache row", "error", updErr)
+					writeError(w, http.StatusInternalServerError, "failed to update issue")
+					return
+				}
+				cacheRow = updated
+			}
+
+			if err := glTx.Commit(r.Context()); err != nil {
+				slog.Error("commit gitlab update-through tx", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to update issue")
+				return
+			}
+
+			prefix := h.getIssuePrefix(r.Context(), cacheRow.WorkspaceID)
+			resp := issueToResponse(cacheRow, prefix)
+
+			// Detect side-effect-relevant changes by comparing the post-commit
+			// cache row to prevIssue. Using the cache row (not the request) is
+			// deliberate — the clobber-guard branch means the request may not
+			// have been applied, and we don't want to enqueue agent tasks for
+			// changes that didn't stick.
+			assigneeChanged := prevIssue.AssigneeType.String != cacheRow.AssigneeType.String ||
+				uuidToString(prevIssue.AssigneeID) != uuidToString(cacheRow.AssigneeID)
+			statusChanged := prevIssue.Status != cacheRow.Status
+			priorityChanged := prevIssue.Priority != cacheRow.Priority
+			descriptionChanged := textToPtr(prevIssue.Description) != resp.Description
+			titleChanged := prevIssue.Title != cacheRow.Title
+			prevDueDate := timestampToPtr(prevIssue.DueDate)
+			dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
+				(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
+
+			h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+				"issue":               resp,
+				"assignee_changed":    assigneeChanged,
+				"status_changed":      statusChanged,
+				"priority_changed":    priorityChanged,
+				"due_date_changed":    dueDateChanged,
+				"description_changed": descriptionChanged,
+				"title_changed":       titleChanged,
+				"prev_title":          prevIssue.Title,
+				"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
+				"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
+				"prev_status":         prevIssue.Status,
+				"prev_priority":       prevIssue.Priority,
+				"prev_due_date":       prevDueDate,
+				"prev_description":    textToPtr(prevIssue.Description),
+				"creator_type":        prevIssue.CreatorType,
+				"creator_id":          uuidToString(prevIssue.CreatorID),
+			})
+
+			// Reconcile task queue when assignee changes (matches legacy).
+			if assigneeChanged {
+				h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
+				if h.shouldEnqueueAgentTask(r.Context(), cacheRow) {
+					h.TaskService.EnqueueTaskForIssue(r.Context(), cacheRow)
+				}
+			}
+
+			// Trigger the assigned agent when a member moves an issue out of
+			// backlog (matches legacy).
+			if statusChanged && !assigneeChanged && actorType == "member" &&
+				prevIssue.Status == "backlog" && cacheRow.Status != "done" && cacheRow.Status != "cancelled" {
+				if h.isAgentAssigneeReady(r.Context(), cacheRow) {
+					h.TaskService.EnqueueTaskForIssue(r.Context(), cacheRow)
+				}
+			}
+
+			// Cancel active tasks on user-initiated cancellation (matches legacy).
+			if statusChanged && cacheRow.Status == "cancelled" {
+				h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
+			}
+
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		// wsErr != nil → fall through to legacy path (most likely
+		// pgx.ErrNoRows for non-connected workspaces).
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)

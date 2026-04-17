@@ -607,6 +607,146 @@ func TestCreateIssue_LegacyPathWhenNoGitlabConnection(t *testing.T) {
 	}
 }
 
+// TestUpdateIssue_WriteThroughStatusChangeSendsLabelDiff verifies that when a
+// GitLab-connected workspace receives a PATCH that changes status, the handler
+// computes the label diff + state_event via BuildUpdateIssueInput and sends
+// the correct PUT /projects/:id/issues/:iid request to GitLab, then reflects
+// the result in the cache row.
+func TestUpdateIssue_WriteThroughStatusChangeSendsLabelDiff(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedAddLabels, capturedRemoveLabels, capturedStateEvent string
+	var capturedMethod, capturedPath string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if s, ok := body["add_labels"].(string); ok {
+			capturedAddLabels = s
+		}
+		if s, ok := body["remove_labels"].(string); ok {
+			capturedRemoveLabels = s
+		}
+		if s, ok := body["state_event"].(string); ok {
+			capturedStateEvent = s
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":9001,"iid":200,"title":"T","state":"closed","updated_at":"2026-04-17T13:00:00Z","labels":["status::done"]}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 1001, 'T', '', 'in_progress', 'none', 200, 42, 9001, '2026-04-17T12:00:00Z', 'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(`{"status":"done"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if capturedMethod != http.MethodPut {
+		t.Errorf("method = %s, want PUT", capturedMethod)
+	}
+	if capturedPath != "/api/v4/projects/42/issues/200" {
+		t.Errorf("path = %s, want /api/v4/projects/42/issues/200", capturedPath)
+	}
+	if capturedAddLabels != "status::done" {
+		t.Errorf("add_labels = %q, want status::done", capturedAddLabels)
+	}
+	if capturedRemoveLabels != "status::in_progress" {
+		t.Errorf("remove_labels = %q, want status::in_progress", capturedRemoveLabels)
+	}
+	if capturedStateEvent != "close" {
+		t.Errorf("state_event = %q, want close", capturedStateEvent)
+	}
+
+	var cachedStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1::uuid`, issueID).Scan(&cachedStatus); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if cachedStatus != "done" {
+		t.Errorf("cached status = %s, want done", cachedStatus)
+	}
+}
+
+// TestUpdateIssue_WriteThroughErrorReturnsNonZeroStatus verifies the
+// authoritative-write-through guarantee: on GitLab failure, the handler
+// returns a non-2xx status AND the cache row is untouched (no fallback to
+// legacy direct-DB write).
+func TestUpdateIssue_WriteThroughErrorReturnsNonZeroStatus(t *testing.T) {
+	ctx := context.Background()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 1002, 'T', '', 'in_progress', 'none', 201, 42, 9002, '2026-04-17T12:00:00Z', 'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(`{"status":"done"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("status = %d, want >=400, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var cachedStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1::uuid`, issueID).Scan(&cachedStatus); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if cachedStatus != "in_progress" {
+		t.Errorf("cache was touched: status = %s, want in_progress", cachedStatus)
+	}
+}
+
 func TestBatchResult_ShapeAndJSON(t *testing.T) {
 	r := BatchWriteResult{
 		Succeeded: []BatchSucceeded{{ID: "abc", Issue: nil}},
