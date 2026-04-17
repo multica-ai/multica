@@ -41,6 +41,10 @@ func NewResolver(queries resolverQueries, decrypt TokenDecrypter) *Resolver {
 //   - actorType="member", no PAT             → workspace service PAT, "service"
 //   - actorType="agent"                      → workspace service PAT, "service"
 //
+// Any other actorType returns an error — an unknown actor type (e.g. an
+// empty string or a typo) must NOT silently fall back to the service PAT,
+// because that would misattribute writes to the service account.
+//
 // Returns an error when the workspace itself has no GitLab connection
 // (writes shouldn't have been routed here in that case).
 func (r *Resolver) ResolveTokenForWrite(ctx context.Context, workspaceID, actorType, actorID string) (token string, source string, err error) {
@@ -56,7 +60,8 @@ func (r *Resolver) ResolveTokenForWrite(ctx context.Context, workspaceID, actorT
 		return "", "", fmt.Errorf("resolver: workspace lookup: %w", err)
 	}
 
-	if actorType == "member" {
+	switch actorType {
+	case "member":
 		userUUID, err := pgUUID(actorID)
 		if err == nil {
 			userConn, err := r.queries.GetUserGitlabConnection(ctx, db.GetUserGitlabConnectionParams{
@@ -75,6 +80,10 @@ func (r *Resolver) ResolveTokenForWrite(ctx context.Context, workspaceID, actorT
 			}
 			// no user PAT → fall through to service PAT
 		}
+	case "agent":
+		// Agents don't have GitLab identities; always use the service PAT.
+	default:
+		return "", "", fmt.Errorf("resolver: unknown actor type %q", actorType)
 	}
 
 	token, err = r.decrypt(ctx, wsConn.ServiceTokenEncrypted)

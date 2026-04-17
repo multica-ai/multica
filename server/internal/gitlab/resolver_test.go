@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -114,5 +115,45 @@ func TestResolveTokenForWrite_NoWorkspaceConnection(t *testing.T) {
 	_, _, err := r.ResolveTokenForWrite(context.Background(), validUUID, "member", validUUID)
 	if err == nil {
 		t.Fatalf("expected error when workspace has no connection")
+	}
+}
+
+// Use distinct UUIDs for workspace and user to keep this test independent
+// of Minor M2's rename of validUUID → workspaceUUID/userUUID.
+const (
+	rejectWorkspaceUUID = "00000000-0000-0000-0000-00000000aaaa"
+	rejectUserUUID      = "00000000-0000-0000-0000-00000000bbbb"
+)
+
+func TestResolveTokenForWrite_RejectsUnknownActorType(t *testing.T) {
+	q := &fakeResolverQueries{
+		workspaceConn: &db.WorkspaceGitlabConnection{
+			ServiceTokenEncrypted: []byte("svc"),
+		},
+		userConn: &db.UserGitlabConnection{
+			PatEncrypted: []byte("usr"),
+			GitlabUserID: 100,
+		},
+	}
+	r := NewResolver(q, stubDecrypt("dec"))
+
+	cases := []struct {
+		name      string
+		actorType string
+	}{
+		{name: "empty", actorType: ""},
+		{name: "typo", actorType: "manager"},
+		{name: "unknown", actorType: "unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := r.ResolveTokenForWrite(context.Background(), rejectWorkspaceUUID, tc.actorType, rejectUserUUID)
+			if err == nil {
+				t.Fatalf("expected error for actorType %q, got nil", tc.actorType)
+			}
+			if !strings.Contains(err.Error(), "unknown actor type") {
+				t.Errorf("error = %q, want to contain %q", err.Error(), "unknown actor type")
+			}
+		})
 	}
 }
