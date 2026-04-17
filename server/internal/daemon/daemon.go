@@ -23,6 +23,20 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+// taskRunner executes a single agent task and returns the result.
+// Extracted as an interface so tests can inject a fake without spawning real
+// agent processes, while keeping test scaffolding out of the production struct.
+type taskRunner interface {
+	run(ctx context.Context, task Task, provider string, log *slog.Logger) (TaskResult, error)
+}
+
+// taskRunnerFunc adapts a plain function to the taskRunner interface.
+type taskRunnerFunc func(context.Context, Task, string, *slog.Logger) (TaskResult, error)
+
+func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, log *slog.Logger) (TaskResult, error) {
+	return f(ctx, task, provider, log)
+}
+
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
 	workspaceID     string

@@ -668,9 +668,10 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	if usageIdx == -1 {
 		t.Fatalf("ReportTaskUsage was never called on poll-cancelled path (order: %v) — tokens lost", order)
 	}
-	// usage is reported after the runner unblocks (which is after runCtx is cancelled
-	// by the poll goroutine), so usage must come after poll-status in the call order.
+	// poll-status must precede usage: poll fires → runCtx cancelled → runner unblocks → usage flushed.
+	// If usage comes first, usage was reported before the runner was interrupted, which is impossible
+	// given that the runner blocks on runCtx.Done().
 	if usageIdx < pollStatusIdx {
-		t.Fatalf("usage reported before poll-status (order: %v) — unexpected ordering", order)
+		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
 	}
 }
