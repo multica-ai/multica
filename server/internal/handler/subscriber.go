@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,69 @@ func subscriberToResponse(s db.IssueSubscriber) SubscriberResponse {
 		Reason:    s.Reason,
 		CreatedAt: timestampToString(s.CreatedAt),
 	}
+}
+
+type issueSubscriberRequest struct {
+	UserID   *string `json:"user_id"`
+	UserType *string `json:"user_type"`
+}
+
+func (h *Handler) resolveIssueSubscriberTarget(w http.ResponseWriter, r *http.Request, workspaceID string) (string, string, bool) {
+	callerID, ok := requireUserID(w, r)
+	if !ok {
+		return "", "", false
+	}
+
+	targetUserID := callerID
+	targetUserType := "member"
+
+	var req issueSubscriberRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return "", "", false
+		}
+	}
+
+	if req.UserID != nil && *req.UserID != "" {
+		targetUserID = *req.UserID
+	}
+	if req.UserType != nil && *req.UserType != "" {
+		targetUserType = *req.UserType
+	}
+
+	switch targetUserType {
+	case "member":
+		if targetUserID != callerID {
+			if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "issue not found", "owner", "admin"); !ok {
+				return "", "", false
+			}
+		}
+		if _, err := h.getWorkspaceMember(r.Context(), targetUserID, workspaceID); err != nil {
+			writeError(w, http.StatusNotFound, "subscriber target not found")
+			return "", "", false
+		}
+	case "agent":
+		if req.UserID == nil || *req.UserID == "" {
+			writeError(w, http.StatusBadRequest, "user_id is required for agent subscribers")
+			return "", "", false
+		}
+		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "issue not found", "owner", "admin"); !ok {
+			return "", "", false
+		}
+		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          parseUUID(targetUserID),
+			WorkspaceID: parseUUID(workspaceID),
+		}); err != nil {
+			writeError(w, http.StatusNotFound, "subscriber target not found")
+			return "", "", false
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "invalid user_type")
+		return "", "", false
+	}
+
+	return targetUserType, targetUserID, true
 }
 
 // ListIssueSubscribers returns all subscribers for an issue.
@@ -59,21 +123,10 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default to current user as member; allow specifying another user/agent
-	targetUserID := requestUserID(r)
-	targetUserType := "member"
-	var req struct {
-		UserID   *string `json:"user_id"`
-		UserType *string `json:"user_type"`
-	}
-	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
-	}
-	if req.UserID != nil && *req.UserID != "" {
-		targetUserID = *req.UserID
-	}
-	if req.UserType != nil && *req.UserType != "" {
-		targetUserType = *req.UserType
+	workspaceID := uuidToString(issue.WorkspaceID)
+	targetUserType, targetUserID, ok := h.resolveIssueSubscriberTarget(w, r, workspaceID)
+	if !ok {
+		return
 	}
 
 	workspaceID := uuidToString(issue.WorkspaceID)
@@ -114,20 +167,10 @@ func (h *Handler) UnsubscribeFromIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetUserID := requestUserID(r)
-	targetUserType := "member"
-	var req struct {
-		UserID   *string `json:"user_id"`
-		UserType *string `json:"user_type"`
-	}
-	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
-	}
-	if req.UserID != nil && *req.UserID != "" {
-		targetUserID = *req.UserID
-	}
-	if req.UserType != nil && *req.UserType != "" {
-		targetUserType = *req.UserType
+	workspaceID := uuidToString(issue.WorkspaceID)
+	targetUserType, targetUserID, ok := h.resolveIssueSubscriberTarget(w, r, workspaceID)
+	if !ok {
+		return
 	}
 
 	workspaceID := uuidToString(issue.WorkspaceID)
