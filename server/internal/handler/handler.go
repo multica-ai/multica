@@ -79,6 +79,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+func writeErrorWithCode(w http.ResponseWriter, status int, code string, msg string) {
+	payload := map[string]string{"error": msg}
+	if code != "" {
+		payload["code"] = code
+	}
+	writeJSON(w, status, payload)
+}
+
 // Thin wrappers around util functions (preserve existing handler code unchanged).
 func parseUUID(s string) pgtype.UUID                { return util.ParseUUID(s) }
 func uuidToString(u pgtype.UUID) string             { return util.UUIDToString(u) }

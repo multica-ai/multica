@@ -15,6 +15,9 @@ func BuildPrompt(task Task) string {
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task)
 	}
+	if strings.TrimSpace(task.IssueID) == "" {
+		return buildManualResumePrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
@@ -43,5 +46,14 @@ func buildChatPrompt(task Task) string {
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	return b.String()
+}
+
+func buildManualResumePrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	b.WriteString("This run was started from a concrete resumable Codex session.\n")
+	b.WriteString("Resume the previous conversation context and continue the work from where it stopped.\n")
+	b.WriteString("Start by checking the current repository state (`git status`, changed files), then proceed.\n")
 	return b.String()
 }

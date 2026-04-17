@@ -39,6 +39,7 @@ services:
       - "${PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      - ${MULTICA_HOST_CODEX_HOME:-/home/jacob/.codex}:/codex-host:ro
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
@@ -57,6 +58,7 @@ services:
       CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      MULTICA_CODEX_SESSIONS_ROOT: ${MULTICA_CODEX_SESSIONS_ROOT:-/codex-host/sessions}
     restart: unless-stopped
 
   frontend:

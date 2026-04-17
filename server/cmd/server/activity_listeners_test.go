@@ -156,7 +156,7 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":  true,
+			"assignee_changed":   true,
 			"prev_assignee_type": (*string)(nil),
 			"prev_assignee_id":   (*string)(nil),
 		},
@@ -333,6 +333,7 @@ func TestActivityTaskFailed(t *testing.T) {
 			"agent_id": agentID,
 			"issue_id": issueID,
 			"status":   "failed",
+			"error":    "task timed out while waiting for codex response",
 		},
 	})
 
@@ -342,5 +343,19 @@ func TestActivityTaskFailed(t *testing.T) {
 	}
 	if activities[0].Action != "task_failed" {
 		t.Fatalf("expected action 'task_failed', got %q", activities[0].Action)
+	}
+
+	var details map[string]string
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal details: %v", err)
+	}
+	if details["task_id"] != "00000000-0000-0000-0000-000000000002" {
+		t.Fatalf("expected task_id in details, got %q", details["task_id"])
+	}
+	if details["status"] != "failed" {
+		t.Fatalf("expected status failed in details, got %q", details["status"])
+	}
+	if details["error"] != "task timed out while waiting for codex response" {
+		t.Fatalf("expected task error in details, got %q", details["error"])
 	}
 }

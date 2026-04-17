@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -17,7 +18,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -54,6 +54,46 @@ func priorityLabel(p string) string {
 }
 
 var emptyDetails = []byte("{}")
+
+const maxTaskFailureSummaryLength = 240
+
+func trimTaskFailureSummary(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if len(s) <= maxTaskFailureSummaryLength {
+		return s
+	}
+	return strings.TrimSpace(s[:maxTaskFailureSummaryLength-3]) + "..."
+}
+
+func classifyTaskFailure(raw string) string {
+	msg := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case msg == "":
+		return ""
+	case strings.Contains(msg, "permission denied"),
+		strings.Contains(msg, "operation not permitted"),
+		strings.Contains(msg, "root permission"):
+		return "permission"
+	case strings.Contains(msg, "no repositories"),
+		strings.Contains(msg, "repos: []"),
+		strings.Contains(msg, "no attached repository"):
+		return "workspace_repos_missing"
+	case strings.Contains(msg, "timed out"),
+		strings.Contains(msg, "deadline exceeded"),
+		strings.Contains(msg, "context cancelled"),
+		strings.Contains(msg, "context canceled"):
+		return "timeout"
+	case strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "connection reset"),
+		strings.Contains(msg, "network"):
+		return "network"
+	default:
+		return "unknown"
+	}
+}
 
 // parseMentions extracts mentions from markdown content.
 // Delegates to the shared util.ParseMentions and converts to the local type.
@@ -641,8 +681,12 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
+		taskID, _ := payload["task_id"].(string)
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		status, _ := payload["status"].(string)
+		taskError, _ := payload["error"].(string)
+		taskError = trimTaskFailureSummary(taskError)
 		if issueID == "" {
 			return
 		}
@@ -658,6 +702,31 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			exclude[agentID] = true
 		}
 
+		detailsMap := map[string]string{}
+		if taskID != "" {
+			detailsMap["task_id"] = taskID
+		}
+		if status != "" {
+			detailsMap["task_status"] = status
+		}
+		if taskError != "" {
+			detailsMap["task_error"] = taskError
+			if kind := classifyTaskFailure(taskError); kind != "" {
+				detailsMap["error_kind"] = kind
+			}
+		}
+		details := emptyDetails
+		if len(detailsMap) > 0 {
+			if encoded, err := json.Marshal(detailsMap); err == nil {
+				details = encoded
+			}
+		}
+
+		body := ""
+		if taskError != "" {
+			body = "Task failed: " + taskError
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
@@ -666,8 +735,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				ActorID:     agentID,
 			},
 			exclude, "task_failed", "action_required",
-			issue.Title, "",
-			emptyDetails)
+			issue.Title, body,
+			details)
 	})
 }
 

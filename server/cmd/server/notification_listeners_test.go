@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -419,8 +421,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
@@ -535,6 +537,7 @@ func TestNotification_TaskFailed(t *testing.T) {
 			"agent_id": agentID,
 			"issue_id": issueID,
 			"status":   "failed",
+			"error":    "task timed out while waiting for codex response",
 		},
 	})
 
@@ -547,6 +550,66 @@ func TestNotification_TaskFailed(t *testing.T) {
 	}
 	if creatorItems[0].Severity != "action_required" {
 		t.Fatalf("expected severity 'action_required', got %q", creatorItems[0].Severity)
+	}
+	if !creatorItems[0].Body.Valid || creatorItems[0].Body.String == "" {
+		t.Fatalf("expected non-empty task_failed body, got %+v", creatorItems[0].Body)
+	}
+	if creatorItems[0].Body.String != "Task failed: task timed out while waiting for codex response" {
+		t.Fatalf("unexpected task_failed body %q", creatorItems[0].Body.String)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(creatorItems[0].Details, &details); err != nil {
+		t.Fatalf("unmarshal task_failed details: %v", err)
+	}
+	if details["task_id"] != "00000000-0000-0000-0000-bbbbbbbbbbbb" {
+		t.Fatalf("expected task_id in details, got %q", details["task_id"])
+	}
+	if details["task_status"] != "failed" {
+		t.Fatalf("expected task_status failed, got %q", details["task_status"])
+	}
+	if details["task_error"] != "task timed out while waiting for codex response" {
+		t.Fatalf("expected task_error in details, got %q", details["task_error"])
+	}
+	if details["error_kind"] != "timeout" {
+		t.Fatalf("expected error_kind timeout, got %q", details["error_kind"])
+	}
+}
+
+func TestClassifyTaskFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty", raw: "   ", want: ""},
+		{name: "permission denied", raw: "operation not permitted", want: "permission"},
+		{name: "repos missing", raw: "workspace reports repos: []", want: "workspace_repos_missing"},
+		{name: "timeout", raw: "ping context cancelled while waiting for result", want: "timeout"},
+		{name: "network", raw: "dial tcp: connection refused", want: "network"},
+		{name: "unknown", raw: "unexpected runner panic", want: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyTaskFailure(tt.raw); got != tt.want {
+				t.Fatalf("classifyTaskFailure(%q): expected %q, got %q", tt.raw, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestTrimTaskFailureSummary(t *testing.T) {
+	if got := trimTaskFailureSummary("   short message   "); got != "short message" {
+		t.Fatalf("trimTaskFailureSummary short message: expected %q, got %q", "short message", got)
+	}
+
+	long := strings.Repeat("x", maxTaskFailureSummaryLength+20)
+	got := trimTaskFailureSummary(long)
+	if len(got) != maxTaskFailureSummaryLength {
+		t.Fatalf("trimTaskFailureSummary length: expected %d, got %d", maxTaskFailureSummaryLength, len(got))
+	}
+	if got[len(got)-3:] != "..." {
+		t.Fatalf("trimTaskFailureSummary: expected trailing ellipsis, got %q", got)
 	}
 }
 
