@@ -56,3 +56,48 @@ func TestClient_Parses404AsErrNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestClient_ArrayShapedErrorMessageJoined(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		// GitLab validation-error shape.
+		w.Write([]byte(`{"message": ["title can't be blank", "iid is invalid"]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	err := c.get(context.Background(), "tok", "/x", nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want *APIError", err)
+	}
+	if apiErr.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("StatusCode = %d, want 422", apiErr.StatusCode)
+	}
+	want := "title can't be blank; iid is invalid"
+	if apiErr.Message != want {
+		t.Errorf("Message = %q, want %q", apiErr.Message, want)
+	}
+}
+
+func TestClient_MissingMessageFallsBackToBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		// No `message` field at all.
+		w.Write([]byte(`{"error": "bad request"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	err := c.get(context.Background(), "tok", "/x", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want *APIError", err)
+	}
+	if apiErr.Message != `{"error": "bad request"}` {
+		t.Errorf("Message = %q, want raw body", apiErr.Message)
+	}
+}

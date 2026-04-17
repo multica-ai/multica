@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const DefaultBaseURL = "https://gitlab.com"
@@ -72,8 +73,8 @@ func (c *Client) do(ctx context.Context, method, token, path string, body, out a
 		Message any `json:"message"`
 	}
 	_ = json.Unmarshal(respBody, &parsed)
-	msg := fmt.Sprintf("%v", parsed.Message)
-	if msg == "<nil>" || msg == "" {
+	msg := formatGitlabMessage(parsed.Message)
+	if msg == "" {
 		msg = string(respBody)
 	}
 
@@ -86,5 +87,26 @@ func (c *Client) do(ctx context.Context, method, token, path string, body, out a
 		return fmt.Errorf("%w: %s", ErrNotFound, msg)
 	default:
 		return &APIError{StatusCode: resp.StatusCode, Message: msg}
+	}
+}
+
+// formatGitlabMessage normalizes the `message` field of GitLab REST error
+// responses to a human-readable string. The field is returned as either a
+// plain string or an array of strings (for validation errors); we join the
+// latter with "; ". Unknown shapes or nil yield "".
+func formatGitlabMessage(m any) string {
+	switch v := m.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			parts = append(parts, fmt.Sprintf("%v", item))
+		}
+		return strings.Join(parts, "; ")
+	default:
+		return ""
 	}
 }
