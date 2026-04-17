@@ -158,7 +158,7 @@ export function LoginPage({
     async (e?: React.FormEvent) => {
       e?.preventDefault();
       if (!email) {
-        setError("Email is required");
+        setError("请输入邮箱地址");
         return;
       }
       setLoading(true);
@@ -172,7 +172,7 @@ export function LoginPage({
         setError(
           err instanceof Error
             ? err.message
-            : "Failed to send code. Make sure the server is running.",
+            : "发送验证码失败，请确保服务器正在运行。",
         );
       } finally {
         setLoading(false);
@@ -208,7 +208,7 @@ export function LoginPage({
         onSuccess();
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Invalid or expired code",
+          err instanceof Error ? err.message : "验证码无效或已过期",
         );
         setCode("");
         setLoading(false);
@@ -225,7 +225,7 @@ export function LoginPage({
       setCooldown(60);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to resend code",
+        err instanceof Error ? err.message : "重新发送验证码失败",
       );
     }
   };
@@ -251,7 +251,7 @@ export function LoginPage({
       onTokenObtained?.();
       redirectToCliCallback(cliCallback.url, token, cliCallback.state);
     } catch {
-      setError("Failed to authorize CLI. Please log in again.");
+      setError("CLI 授权失败，请重新登录。");
       setExistingUser(null);
       setStep("email");
       setLoading(false);
@@ -286,13 +286,13 @@ export function LoginPage({
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             {logo && <div className="mx-auto mb-4">{logo}</div>}
-            <CardTitle className="text-2xl">Authorize CLI</CardTitle>
+            <CardTitle className="text-2xl">授权 CLI</CardTitle>
             <CardDescription>
-              Allow the CLI to access Multica as{" "}
+              允许 CLI 以{" "}
               <span className="font-medium text-foreground">
                 {existingUser.email}
               </span>
-              ?
+              {" "}的身份访问 Multica？
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -302,7 +302,7 @@ export function LoginPage({
               className="w-full"
               size="lg"
             >
-              {loading ? "Authorizing..." : "Authorize"}
+              {loading ? "授权中..." : "授权"}
             </Button>
             <Button
               variant="ghost"
@@ -312,7 +312,7 @@ export function LoginPage({
                 setStep("email");
               }}
             >
-              Use a different account
+              使用其他账户
             </Button>
           </CardContent>
         </Card>
@@ -330,9 +330,9 @@ export function LoginPage({
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             {logo && <div className="mx-auto mb-4">{logo}</div>}
-            <CardTitle className="text-2xl">Check your email</CardTitle>
+            <CardTitle className="text-2xl">查收邮件</CardTitle>
             <CardDescription>
-              We sent a verification code to{" "}
+              我们已将验证码发送至{" "}
               <span className="font-medium text-foreground">{email}</span>
             </CardDescription>
           </CardHeader>
@@ -365,7 +365,7 @@ export function LoginPage({
                 disabled={cooldown > 0}
                 className="text-primary underline-offset-4 hover:underline disabled:text-muted-foreground disabled:no-underline disabled:cursor-not-allowed"
               >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+                {cooldown > 0 ? `${cooldown}s 后重新发送` : "重新发送验证码"}
               </button>
             </div>
           </CardContent>
@@ -380,7 +380,7 @@ export function LoginPage({
                 setError("");
               }}
             >
-              Back
+              返回
             </Button>
           </CardFooter>
         </Card>
@@ -397,15 +397,15 @@ export function LoginPage({
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           {logo && <div className="mx-auto mb-4">{logo}</div>}
-          <CardTitle className="text-2xl">Sign in to Multica</CardTitle>
+          <CardTitle className="text-2xl">登录 Multica</CardTitle>
           <CardDescription>
-            Enter your email to get a login code
+            输入您的邮箱以获取登录验证码
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="login-email">Email</Label>
+              <Label htmlFor="login-email">邮箱</Label>
               <Input
                 id="login-email"
                 type="email"
@@ -429,7 +429,7 @@ export function LoginPage({
             size="lg"
             disabled={!email || loading}
           >
-            {loading ? "Sending code..." : "Continue"}
+            {loading ? "发送中..." : "继续"}
           </Button>
           {(google || onGoogleLogin) && (
             <>
@@ -438,7 +438,7 @@ export function LoginPage({
                   <span className="w-full border-t" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">or</span>
+                  <span className="bg-card px-2 text-muted-foreground">或</span>
                 </div>
               </div>
               <Button
@@ -467,7 +467,7 @@ export function LoginPage({
                     fill="#EA4335"
                   />
                 </svg>
-                Continue with Google
+                使用 Google 账户继续
               </Button>
             </>
           )}

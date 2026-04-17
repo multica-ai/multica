@@ -87,7 +87,7 @@ function CreateSkillDialog({
       await onImport(importUrl.trim());
       onClose();
     } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed");
+      setImportError(err instanceof Error ? err.message : "导入失败");
       setLoading(false);
     }
   };
@@ -96,9 +96,9 @@ function CreateSkillDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Workspace Skill</DialogTitle>
+          <DialogTitle>添加工作区技能</DialogTitle>
           <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh. Workspace skills are shared with your team and automatically injected into agent runs.
+            创建新技能或从 ClawHub / Skills.sh 导入。工作区技能与团队共享，并自动注入智能体运行环境。
           </DialogDescription>
         </DialogHeader>
 
@@ -106,34 +106,34 @@ function CreateSkillDialog({
           <TabsList className="w-full">
             <TabsTrigger value="create" className="flex-1">
               <Plus className="mr-1.5 h-3 w-3" />
-              Create
+              创建
             </TabsTrigger>
             <TabsTrigger value="import" className="flex-1">
               <Download className="mr-1.5 h-3 w-3" />
-              Import
+              导入
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="create" className="space-y-4 mt-4 min-h-[180px]">
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label className="text-xs text-muted-foreground">名称</Label>
               <Input
                 autoFocus
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Code Review, Bug Triage"
+                placeholder="例如：代码审核、问题分类"
                 className="mt-1"
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Label className="text-xs text-muted-foreground">描述</Label>
               <Input
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Brief description of what this skill does"
+                placeholder="简要描述此技能的功能"
                 className="mt-1"
               />
             </div>
@@ -141,13 +141,13 @@ function CreateSkillDialog({
 
           <TabsContent value="import" className="space-y-4 mt-4 min-h-[180px]">
             <div>
-              <Label className="text-xs text-muted-foreground">Skill URL</Label>
+              <Label className="text-xs text-muted-foreground">技能 URL</Label>
               <Input
                 autoFocus
                 type="text"
                 value={importUrl}
                 onChange={(e) => { setImportUrl(e.target.value); setImportError(""); }}
-                placeholder="Paste a skill URL..."
+                placeholder="粘贴技能 URL..."
                 className="mt-1"
                 onKeyDown={(e) => e.key === "Enter" && handleImport()}
               />
@@ -155,7 +155,7 @@ function CreateSkillDialog({
 
             {/* Supported sources — highlight on detection */}
             <div>
-              <p className="text-xs text-muted-foreground mb-2">Supported sources</p>
+              <p className="text-xs text-muted-foreground mb-2">支持的来源</p>
               <div className="grid grid-cols-2 gap-2">
                 <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
                   detectedSource === "clawhub"
@@ -190,23 +190,23 @@ function CreateSkillDialog({
         </Tabs>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>取消</Button>
           {tab === "create" ? (
             <Button onClick={handleCreate} disabled={loading || !name.trim()}>
-              {loading ? "Creating..." : "Create"}
+              {loading ? "创建中..." : "创建"}
             </Button>
           ) : (
             <Button onClick={handleImport} disabled={loading || !importUrl.trim()}>
               {loading ? (
                 detectedSource === "clawhub"
-                  ? "Importing from ClawHub..."
+                  ? "从 ClawHub 导入中..."
                   : detectedSource === "skills.sh"
-                    ? "Importing from Skills.sh..."
-                    : "Importing..."
+                    ? "从 Skills.sh 导入中..."
+                    : "导入中..."
               ) : (
                 <>
                   <Download className="mr-1.5 h-3 w-3" />
-                  Import
+                  导入
                 </>
               )}
             </Button>
@@ -250,7 +250,7 @@ function SkillListItem({
       </div>
       {(skill.files?.length ?? 0) > 0 && (
         <Badge variant="secondary">
-          {skill.files.length} file{skill.files.length !== 1 ? "s" : ""}
+          {skill.files.length} 个文件
         </Badge>
       )}
     </button>
@@ -296,19 +296,19 @@ function AddFileDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">Add File</DialogTitle>
+          <DialogTitle className="text-sm font-semibold">添加文件</DialogTitle>
           <DialogDescription className="text-xs">
-            Add a supporting file to this skill.
+            为此技能添加附属文件。
           </DialogDescription>
         </DialogHeader>
         <div>
-          <Label className="text-xs text-muted-foreground">File Path</Label>
+          <Label className="text-xs text-muted-foreground">文件路径</Label>
           <Input
             autoFocus
             type="text"
             value={path}
             onChange={(e) => setPath(e.target.value)}
-            placeholder="e.g. templates/review.md"
+            placeholder="例如：templates/review.md"
             className="mt-1 font-mono text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && path.trim() && !duplicate) {
@@ -318,16 +318,16 @@ function AddFileDialog({
             }}
           />
           {duplicate && (
-            <p className="mt-1 text-xs text-destructive">File already exists</p>
+            <p className="mt-1 text-xs text-destructive">文件已存在</p>
           )}
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>取消</Button>
           <Button
             disabled={!path.trim() || duplicate}
             onClick={() => { onAdd(path.trim()); onClose(); }}
           >
-            Add
+            添加
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -377,7 +377,7 @@ function SkillDetail({
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
       setFiles((full.files ?? []).map((f) => ({ path: f.path, content: f.content })));
     }).catch((e) => {
-      toast.error(e instanceof Error ? e.message : "Failed to load skill files");
+      toast.error(e instanceof Error ? e.message : "加载技能文件失败");
     }).finally(() => setLoadingFiles(false));
   }, [skill.id, qc, wsId]);
 
@@ -446,14 +446,14 @@ function SkillDetail({
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="h-8 text-sm font-medium"
-              placeholder="Skill name"
+              placeholder="技能名称"
             />
             <Input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="h-8 text-sm"
-              placeholder="Description"
+              placeholder="描述"
             />
           </div>
         </div>
@@ -461,7 +461,7 @@ function SkillDetail({
           {isDirty && (
             <Button onClick={handleSave} disabled={saving || !name.trim()} size="xs">
               <Save className="h-3 w-3" />
-              {saving ? "Saving..." : "Save"}
+              {saving ? "保存中..." : "保存"}
             </Button>
           )}
           <Tooltip>
@@ -477,7 +477,7 @@ function SkillDetail({
                 </Button>
               }
             />
-            <TooltipContent>Delete skill</TooltipContent>
+            <TooltipContent>删除技能</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -488,7 +488,7 @@ function SkillDetail({
         <div className="w-52 shrink-0 border-r flex flex-col">
           <div className="flex h-10 items-center justify-between border-b px-3">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Files
+              文件
             </span>
             <div className="flex items-center gap-1">
               <Tooltip>
@@ -504,7 +504,7 @@ function SkillDetail({
                     </Button>
                   }
                 />
-                <TooltipContent>Add file</TooltipContent>
+                <TooltipContent>添加文件</TooltipContent>
               </Tooltip>
               {selectedPath !== SKILL_MD && (
                 <Tooltip>
@@ -520,7 +520,7 @@ function SkillDetail({
                       </Button>
                     }
                   />
-                  <TooltipContent>Delete file</TooltipContent>
+                  <TooltipContent>删除文件</TooltipContent>
                 </Tooltip>
               )}
             </div>
@@ -581,15 +581,15 @@ function SkillDetail({
                 <AlertCircle className="h-5 w-5 text-destructive" />
               </div>
               <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-sm font-semibold">Delete skill?</DialogTitle>
+                <DialogTitle className="text-sm font-semibold">删除技能？</DialogTitle>
                 <DialogDescription className="text-xs">
-                  This will permanently delete &quot;{skill.name}&quot; and remove it from all agents.
+                  将永久删除"{skill.name}"并从所有智能体中移除。
                 </DialogDescription>
               </DialogHeader>
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-                Cancel
+                取消
               </Button>
               <Button
                 variant="destructive"
@@ -598,7 +598,7 @@ function SkillDetail({
                   onDelete(skill.id);
                 }}
               >
-                Delete
+                删除
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -632,23 +632,23 @@ export default function SkillsPage() {
     const skill = await api.createSkill(data);
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     setSelectedId(skill.id);
-    toast.success("Skill created");
+    toast.success("技能已创建");
   };
 
   const handleImport = async (url: string) => {
     const skill = await api.importSkill({ url });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     setSelectedId(skill.id);
-    toast.success("Skill imported");
+    toast.success("技能已导入");
   };
 
   const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
     try {
       await api.updateSkill(id, data);
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      toast.success("Skill saved");
+      toast.success("技能已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save skill");
+      toast.error(e instanceof Error ? e.message : "保存技能失败");
       throw e;
     }
   };
@@ -661,9 +661,9 @@ export default function SkillsPage() {
         setSelectedId(remaining[0]?.id ?? "");
       }
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      toast.success("Skill deleted");
+      toast.success("技能已删除");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete skill");
+      toast.error(e instanceof Error ? e.message : "删除技能失败");
     }
   };
 
@@ -724,7 +724,7 @@ export default function SkillsPage() {
         {/* Left column — skill list */}
         <div className="overflow-y-auto h-full border-r">
           <PageHeader className="justify-between">
-            <h1 className="text-sm font-semibold">Skills</h1>
+            <h1 className="text-sm font-semibold">技能</h1>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -737,15 +737,15 @@ export default function SkillsPage() {
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">Create skill</TooltipContent>
+              <TooltipContent side="bottom">创建技能</TooltipContent>
             </Tooltip>
           </PageHeader>
           {skills.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Sparkles className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No workspace skills yet</p>
+              <p className="mt-3 text-sm text-muted-foreground">暂无工作区技能</p>
               <p className="mt-1 text-xs text-muted-foreground text-center max-w-[280px]">
-                Workspace skills are shared across your team and injected into agent runs. Skills already installed in your local runtime are used automatically.
+                工作区技能在团队内共享，并自动注入智能体运行环境。本地运行时已安装的技能会自动使用。
               </p>
               <Button
                 onClick={() => setShowCreate(true)}
@@ -753,7 +753,7 @@ export default function SkillsPage() {
                 className="mt-3"
               >
                 <Plus className="h-3 w-3" />
-                Create Skill
+                创建技能
               </Button>
             </div>
           ) : (
@@ -786,9 +786,9 @@ export default function SkillsPage() {
           ) : (
             <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
               <Sparkles className="h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm">Select a skill to view details</p>
+              <p className="mt-3 text-sm">选择一个技能查看详情</p>
               <p className="mt-1 text-xs text-center max-w-[260px]">
-                Workspace skills supplement your local skills and are shared across the team.
+                工作区技能是本地技能的补充，在团队内共享。
               </p>
               <Button
                 onClick={() => setShowCreate(true)}
@@ -796,7 +796,7 @@ export default function SkillsPage() {
                 className="mt-3"
               >
                 <Plus className="h-3 w-3" />
-                Create Skill
+                创建技能
               </Button>
             </div>
           )}

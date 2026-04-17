@@ -75,9 +75,9 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(src);
-      toast.success("Link copied");
+      toast.success("链接已复制");
     } catch {
-      toast.error("Failed to copy link");
+      toast.error("复制链接失败");
     }
   };
 
@@ -104,16 +104,16 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={handleView} title="View image">
+            <button type="button" onClick={handleView} title="查看图片">
               <Maximize2 className="size-3.5" />
             </button>
-            <button type="button" onClick={handleDownload} title="Download">
+            <button type="button" onClick={handleDownload} title="下载">
               <Download className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={handleCopyLink}
-              title="Copy link"
+              title="复制链接"
             >
               <LinkIcon className="size-3.5" />
             </button>
@@ -121,7 +121,7 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
               <button
                 type="button"
                 onClick={() => deleteNode()}
-                title="Delete"
+                title="删除"
               >
                 <Trash2 className="size-3.5" />
               </button>

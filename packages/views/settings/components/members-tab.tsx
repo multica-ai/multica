@@ -44,9 +44,9 @@ import { memberListOptions, invitationListOptions, workspaceKeys } from "@multic
 import { api } from "@multica/core/api";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
-  owner: { label: "Owner", icon: Crown, description: "Full access, manage all settings" },
-  admin: { label: "Admin", icon: Shield, description: "Manage members and settings" },
-  member: { label: "Member", icon: User, description: "Create and work on issues" },
+  owner: { label: "所有者", icon: Crown, description: "完整访问权限，管理所有设置" },
+  admin: { label: "管理员", icon: Shield, description: "管理成员和设置" },
+  member: { label: "成员", icon: User, description: "创建和处理任务" },
 };
 
 function MemberRow({
@@ -93,7 +93,7 @@ function MemberRow({
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Shield className="h-3.5 w-3.5" />
-                  Change role
+                  更改角色
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-auto">
                   {(Object.entries(roleConfig) as [MemberRole, (typeof roleConfig)[MemberRole]][]).map(
@@ -126,7 +126,7 @@ function MemberRow({
             {canRemove && (
               <DropdownMenuItem variant="destructive" onClick={onRemove}>
                 <UserMinus className="h-3.5 w-3.5" />
-                Remove from workspace
+                从工作区移除
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
@@ -162,7 +162,7 @@ function InvitationRow({
         <div className="text-sm font-medium truncate">{invitation.invitee_email}</div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="h-3 w-3" />
-          <span>Pending</span>
+          <span>待处理</span>
         </div>
       </div>
       {canManage && (
@@ -171,7 +171,7 @@ function InvitationRow({
           size="icon-sm"
           disabled={busy}
           onClick={onRevoke}
-          title="Revoke invitation"
+          title="撤销邀请"
         >
           <X className="h-4 w-4 text-muted-foreground" />
         </Button>
@@ -218,9 +218,9 @@ export function MembersTab() {
       setInviteEmail("");
       setInviteRole("member");
       qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-      toast.success("Invitation sent");
+      toast.success("邀请已发送");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to send invitation");
+      toast.error(e instanceof Error ? e.message : "发送邀请失败");
     } finally {
       setInviteLoading(false);
     }
@@ -229,17 +229,17 @@ export function MembersTab() {
   const handleRevokeInvitation = (invitation: Invitation) => {
     if (!workspace) return;
     setConfirmAction({
-      title: "Revoke invitation",
-      description: `Revoke the invitation to ${invitation.invitee_email}? They will no longer be able to join this workspace.`,
+      title: "撤销邀请",
+      description: `撤销发给 ${invitation.invitee_email} 的邀请？对方将无法再加入该工作区。`,
       variant: "destructive",
       onConfirm: async () => {
         setInvitationActionId(invitation.id);
         try {
           await api.revokeInvitation(workspace.id, invitation.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-          toast.success("Invitation revoked");
+          toast.success("邀请已撤销");
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to revoke invitation");
+          toast.error(e instanceof Error ? e.message : "撤销邀请失败");
         } finally {
           setInvitationActionId(null);
         }
@@ -253,9 +253,9 @@ export function MembersTab() {
     try {
       await api.updateMember(workspace.id, memberId, { role });
       qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-      toast.success("Role updated");
+      toast.success("角色已更新");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update member");
+      toast.error(e instanceof Error ? e.message : "更新成员失败");
     } finally {
       setMemberActionId(null);
     }
@@ -264,17 +264,17 @@ export function MembersTab() {
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
     setConfirmAction({
-      title: `Remove ${member.name}`,
-      description: `Remove ${member.name} from ${workspace.name}? They will lose access to this workspace.`,
+      title: `移除 ${member.name}`,
+      description: `将 ${member.name} 从 ${workspace.name} 中移除？对方将失去对该工作区的访问权限。`,
       variant: "destructive",
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {
           await api.deleteMember(workspace.id, member.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          toast.success("Member removed");
+          toast.success("成员已移除");
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to remove member");
+          toast.error(e instanceof Error ? e.message : "移除成员失败");
         } finally {
           setMemberActionId(null);
         }
@@ -289,7 +289,7 @@ export function MembersTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Members ({members.length})</h2>
+          <h2 className="text-sm font-semibold">成员 ({members.length})</h2>
         </div>
 
         {canManageWorkspace && (
@@ -297,7 +297,7 @@ export function MembersTab() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Invite member</h3>
+                <h3 className="text-sm font-medium">邀请成员</h3>
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
@@ -312,15 +312,15 @@ export function MembersTab() {
                 <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
                   <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="member">成员</SelectItem>
+                    <SelectItem value="admin">管理员</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button
                   onClick={handleInviteMember}
                   disabled={inviteLoading || !inviteEmail.trim()}
                 >
-                  {inviteLoading ? "Inviting..." : "Invite"}
+                  {inviteLoading ? "邀请中..." : "邀请"}
                 </Button>
               </div>
             </CardContent>
@@ -344,7 +344,7 @@ export function MembersTab() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No members found.</p>
+          <p className="text-sm text-muted-foreground">暂无成员。</p>
         )}
       </section>
 
@@ -352,7 +352,7 @@ export function MembersTab() {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Pending invitations ({invitations.length})</h2>
+            <h2 className="text-sm font-semibold">待处理邀请 ({invitations.length})</h2>
           </div>
           <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
             {invitations.map((inv, i) => (
@@ -376,7 +376,7 @@ export function MembersTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -384,7 +384,7 @@ export function MembersTab() {
                 setConfirmAction(null);
               }}
             >
-              Confirm
+              确认
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

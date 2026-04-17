@@ -61,9 +61,9 @@ export function AgentsPage() {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent updated");
+      toast.success("智能体已更新");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update agent");
+      toast.error(e instanceof Error ? e.message : "更新智能体失败");
       throw e;
     }
   };
@@ -72,9 +72,9 @@ export function AgentsPage() {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent archived");
+      toast.success("智能体已归档");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to archive agent");
+      toast.error(e instanceof Error ? e.message : "归档智能体失败");
     }
   };
 
@@ -82,9 +82,9 @@ export function AgentsPage() {
     try {
       await api.restoreAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent restored");
+      toast.success("智能体已恢复");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to restore agent");
+      toast.error(e instanceof Error ? e.message : "恢复智能体失败");
     }
   };
 
@@ -141,14 +141,14 @@ export function AgentsPage() {
         {/* Left column — agent list */}
         <div className="overflow-y-auto h-full border-r">
           <PageHeader className="justify-between">
-            <h1 className="text-sm font-semibold">Agents</h1>
+            <h1 className="text-sm font-semibold">智能体</h1>
             <div className="flex items-center gap-1">
               {archivedCount > 0 && (
                 <Button
                   variant={showArchived ? "secondary" : "ghost"}
                   size="icon-sm"
                   onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? "Show active agents" : "Show archived agents"}
+                  title={showArchived ? "显示活跃智能体" : "显示已归档智能体"}
                 >
                   <Archive className="text-muted-foreground" />
                 </Button>
@@ -166,7 +166,7 @@ export function AgentsPage() {
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
+                {showArchived ? "无已归档智能体" : archivedCount > 0 ? "无活跃智能体" : "暂无智能体"}
               </p>
               {!showArchived && (
                 <Button
@@ -175,7 +175,7 @@ export function AgentsPage() {
                   className="mt-3"
                 >
                   <Plus className="h-3 w-3" />
-                  Create Agent
+                  创建智能体
                 </Button>
               )}
             </div>
@@ -212,14 +212,14 @@ export function AgentsPage() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Bot className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select an agent to view details</p>
+            <p className="mt-3 text-sm">选择一个智能体查看详情</p>
             <Button
               onClick={() => setShowCreate(true)}
               size="xs"
               className="mt-3"
             >
               <Plus className="h-3 w-3" />
-              Create Agent
+              创建智能体
             </Button>
           </div>
         )}

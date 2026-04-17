@@ -72,7 +72,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
         : fallbackDest;
       setTimeout(() => push(dest), 1000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to accept invitation");
+      setError(e instanceof Error ? e.message : "接受邀请失败");
     } finally {
       setAccepting(false);
     }
@@ -86,7 +86,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       setDone("declined");
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to decline invitation");
+      setError(e instanceof Error ? e.message : "拒绝邀请失败");
     } finally {
       setDeclining(false);
     }
@@ -115,12 +115,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <X className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold">Invitation not found</h2>
+            <h2 className="text-lg font-semibold">邀请不存在</h2>
             <p className="text-sm text-muted-foreground text-center">
-              This invitation may have expired, been revoked, or doesn&apos;t belong to your account.
+              此邀请可能已过期、被撤销，或不属于您的账号。
             </p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
-              Go to dashboard
+              前往控制台
             </Button>
           </CardContent>
         </Card>
@@ -136,8 +136,8 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Check className="h-6 w-6 text-primary" />
             </div>
-            <h2 className="text-lg font-semibold">You joined {invitation.workspace_name}!</h2>
-            <p className="text-sm text-muted-foreground">Redirecting to workspace...</p>
+            <h2 className="text-lg font-semibold">您已加入 {invitation.workspace_name}！</h2>
+            <p className="text-sm text-muted-foreground">正在跳转到工作区...</p>
           </CardContent>
         </Card>
       </InviteShell>
@@ -149,10 +149,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
-            <h2 className="text-lg font-semibold">Invitation declined</h2>
-            <p className="text-sm text-muted-foreground">You won&apos;t be added to this workspace.</p>
+            <h2 className="text-lg font-semibold">邀请已拒绝</h2>
+            <p className="text-sm text-muted-foreground">您不会被添加到该工作区。</p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
-              Go to dashboard
+              前往控制台
             </Button>
           </CardContent>
         </Card>
@@ -173,21 +173,21 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
 
           <div className="text-center space-y-2">
             <h2 className="text-xl font-semibold">
-              Join {invitation.workspace_name ?? "workspace"}
+              加入 {invitation.workspace_name ?? "工作区"}
             </h2>
             <p className="text-sm text-muted-foreground">
               <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
-              invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
+              邀请您以{invitation.role === "admin" ? "管理员" : "成员"}身份加入。
             </p>
           </div>
 
           {isAlreadyHandled ? (
             <div className="text-sm text-muted-foreground">
-              This invitation has already been {invitation.status}.
+              此邀请已被{invitation.status === "accepted" ? "接受" : "拒绝"}。
             </div>
           ) : isExpired ? (
             <div className="text-sm text-muted-foreground">
-              This invitation has expired.
+              此邀请已过期。
             </div>
           ) : (
             <div className="flex gap-3 w-full">
@@ -197,14 +197,14 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
                 onClick={handleDecline}
                 disabled={accepting || declining}
               >
-                {declining ? "Declining..." : "Decline"}
+                {declining ? "拒绝中..." : "拒绝"}
               </Button>
               <Button
                 className="flex-1"
                 onClick={handleAccept}
                 disabled={accepting || declining}
               >
-                {accepting ? "Joining..." : "Accept & Join"}
+                {accepting ? "加入中..." : "接受并加入"}
               </Button>
             </div>
           )}
@@ -241,7 +241,7 @@ function InviteShell({
           onClick={onBack}
         >
           <ArrowLeft />
-          Back
+          返回
         </Button>
       )}
       <Button
@@ -251,7 +251,7 @@ function InviteShell({
         onClick={logout}
       >
         <LogOut />
-        Log out
+        退出登录
       </Button>
       {children}
     </div>

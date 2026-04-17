@@ -23,7 +23,7 @@ export function PropertyPicker({
   width = "w-48",
   align = "end",
   searchable = false,
-  searchPlaceholder = "Filter...",
+  searchPlaceholder = "筛选...",
   onSearchChange,
   children,
 }: {
@@ -125,7 +125,7 @@ export function PropertyPicker({
               }}
               onKeyDown={handleKeyDown}
               placeholder={searchPlaceholder}
-              aria-label="Filter options"
+              aria-label="筛选选项"
               className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
@@ -195,7 +195,7 @@ export function PickerSection({
 export function PickerEmpty() {
   return (
     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-      No results
+      无结果
     </div>
   );
 }

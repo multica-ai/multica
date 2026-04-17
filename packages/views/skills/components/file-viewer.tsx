@@ -122,7 +122,7 @@ export function FileViewer({
                 }
               />
               <TooltipContent>
-                {editing ? "Preview" : "Edit"}
+                {editing ? "预览" : "编辑"}
               </TooltipContent>
             </Tooltip>
           )}
@@ -135,7 +135,7 @@ export function FileViewer({
           <div className="p-6">
             {frontmatter && <FrontmatterCard data={frontmatter} />}
             <Markdown mode="full">
-              {body || "*No content yet*"}
+              {body || "*暂无内容*"}
             </Markdown>
           </div>
         ) : (
@@ -144,8 +144,8 @@ export function FileViewer({
             onChange={(e) => onChange(e.target.value)}
             placeholder={
               isMd
-                ? "Write markdown content..."
-                : "File content..."
+                ? "编写 Markdown 内容..."
+                : "文件内容..."
             }
             className="h-full min-h-full resize-none rounded-none border-0 font-mono text-sm leading-relaxed focus-visible:ring-0"
           />

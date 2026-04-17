@@ -5,12 +5,12 @@ import type { RuntimeUsage } from "@multica/core/types";
 // ---------------------------------------------------------------------------
 
 export function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return "Never";
+  if (!lastSeenAt) return "从未";
   const diff = Date.now() - new Date(lastSeenAt).getTime();
-  if (diff < 60_000) return "Just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}小时前`;
+  return `${Math.floor(diff / 86_400_000)}天前`;
 }
 
 export function formatTokens(n: number): string {

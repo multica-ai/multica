@@ -81,11 +81,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success("Runtime deleted");
+        toast.success("运行时已删除");
         setDeleteOpen(false);
       },
       onError: (e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to delete runtime");
+        toast.error(e instanceof Error ? e.message : "删除运行时失败");
       },
     });
   };
@@ -121,16 +121,16 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Info grid */}
         <div className="grid grid-cols-2 gap-4">
-          <InfoField label="Runtime Mode" value={runtime.runtime_mode} />
-          <InfoField label="Provider" value={runtime.provider} />
-          <InfoField label="Status" value={runtime.status} />
+          <InfoField label="运行模式" value={runtime.runtime_mode} />
+          <InfoField label="提供商" value={runtime.provider} />
+          <InfoField label="状态" value={runtime.status} />
           <InfoField
-            label="Last Seen"
+            label="最后在线"
             value={formatLastSeen(runtime.last_seen_at)}
           />
           {ownerMember && (
             <div>
-              <div className="text-xs text-muted-foreground mb-1">Owner</div>
+              <div className="text-xs text-muted-foreground mb-1">所有者</div>
               <div className="flex items-center gap-2">
                 <ActorAvatar
                   actorType="member"
@@ -142,10 +142,10 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             </div>
           )}
           {runtime.device_info && (
-            <InfoField label="Device" value={runtime.device_info} />
+            <InfoField label="设备" value={runtime.device_info} />
           )}
           {runtime.daemon_id && (
-            <InfoField label="Daemon ID" value={runtime.daemon_id} mono />
+            <InfoField label="守护进程 ID" value={runtime.daemon_id} mono />
           )}
         </div>
 
@@ -153,7 +153,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {runtime.runtime_mode === "local" && (
           <div>
             <h3 className="text-xs font-medium text-muted-foreground mb-3">
-              CLI Version
+              CLI 版本
             </h3>
             <UpdateSection
               runtimeId={runtime.id}
@@ -167,7 +167,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Connection Test */}
         <div>
           <h3 className="text-xs font-medium text-muted-foreground mb-3">
-            Connection Test
+            连接测试
           </h3>
           <PingSection runtimeId={runtime.id} />
         </div>
@@ -175,7 +175,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Usage */}
         <div>
           <h3 className="text-xs font-medium text-muted-foreground mb-3">
-            Token Usage
+            Token 用量
           </h3>
           <UsageSection runtimeId={runtime.id} />
         </div>
@@ -184,7 +184,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {runtime.metadata && Object.keys(runtime.metadata).length > 0 && (
           <div>
             <h3 className="text-xs font-medium text-muted-foreground mb-2">
-              Metadata
+              元数据
             </h3>
             <div className="rounded-lg border bg-muted/30 p-3">
               <pre className="text-xs font-mono whitespace-pre-wrap break-all">
@@ -197,12 +197,12 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Timestamps */}
         <div className="grid grid-cols-2 gap-4 border-t pt-4">
           <InfoField
-            label="Created"
-            value={new Date(runtime.created_at).toLocaleString()}
+            label="创建时间"
+            value={new Date(runtime.created_at).toLocaleString("zh-CN")}
           />
           <InfoField
-            label="Updated"
-            value={new Date(runtime.updated_at).toLocaleString()}
+            label="更新时间"
+            value={new Date(runtime.updated_at).toLocaleString("zh-CN")}
           />
         </div>
       </div>
@@ -211,19 +211,19 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Runtime</AlertDialogTitle>
+            <AlertDialogTitle>删除运行时</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{runtime.name}&rdquo;? This action cannot be undone.
+              确定要删除「{runtime.name}」吗？此操作无法撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? "删除中..." : "删除"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

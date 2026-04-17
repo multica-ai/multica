@@ -46,12 +46,12 @@ function getRuntimeDevice(agent: Agent, runtimes: RuntimeDevice[]): RuntimeDevic
 type DetailTab = "instructions" | "skills" | "tasks" | "env" | "custom_args" | "settings";
 
 const detailTabs: { id: DetailTab; label: string; icon: typeof FileText }[] = [
-  { id: "instructions", label: "Instructions", icon: FileText },
-  { id: "skills", label: "Skills", icon: BookOpenText },
-  { id: "tasks", label: "Tasks", icon: ListTodo },
-  { id: "env", label: "Environment", icon: KeyRound },
-  { id: "custom_args", label: "Custom Args", icon: Terminal },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "instructions", label: "指令", icon: FileText },
+  { id: "skills", label: "技能", icon: BookOpenText },
+  { id: "tasks", label: "任务", icon: ListTodo },
+  { id: "env", label: "环境变量", icon: KeyRound },
+  { id: "custom_args", label: "自定义参数", icon: Terminal },
+  { id: "settings", label: "设置", icon: Settings },
 ];
 
 export function AgentDetail({
@@ -83,9 +83,9 @@ export function AgentDetail({
       {isArchived && (
         <div className="flex items-center gap-2 bg-muted/50 px-4 py-2 text-xs text-muted-foreground border-b">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">This agent is archived. It cannot be assigned or mentioned.</span>
+          <span className="flex-1">该智能体已归档，无法被分配或提及。</span>
           <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
-            Restore
+            恢复
           </Button>
         </div>
       )}
@@ -98,7 +98,7 @@ export function AgentDetail({
             <h2 className={`text-sm font-semibold truncate ${isArchived ? "text-muted-foreground" : ""}`}>{agent.name}</h2>
             {isArchived ? (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                Archived
+                已归档
               </span>
             ) : (
               <span className={`flex items-center gap-1.5 text-xs ${st.color}`}>
@@ -112,7 +112,7 @@ export function AgentDetail({
               ) : (
                 <Monitor className="h-3 w-3" />
               )}
-              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
+              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "云端" : "本地")}
             </span>
           </div>
         </div>
@@ -131,7 +131,7 @@ export function AgentDetail({
                 onClick={() => setConfirmArchive(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Archive Agent
+                归档智能体
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -201,15 +201,15 @@ export function AgentDetail({
                 <AlertCircle className="h-5 w-5 text-destructive" />
               </div>
               <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-sm font-semibold">Archive agent?</DialogTitle>
+                <DialogTitle className="text-sm font-semibold">归档智能体？</DialogTitle>
                 <DialogDescription className="text-xs">
-                  &quot;{agent.name}&quot; will be archived. It won&apos;t be assignable or mentionable, but all history is preserved. You can restore it later.
+                  「{agent.name}」将被归档。它将无法被分配或提及，但所有历史记录都会保留。您可以随时恢复。
                 </DialogDescription>
               </DialogHeader>
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setConfirmArchive(false)}>
-                Cancel
+                取消
               </Button>
               <Button
                 variant="destructive"
@@ -218,7 +218,7 @@ export function AgentDetail({
                   onArchive(agent.id);
                 }}
               >
-                Archive
+                归档
               </Button>
             </DialogFooter>
           </DialogContent>

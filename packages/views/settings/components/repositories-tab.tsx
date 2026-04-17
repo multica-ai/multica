@@ -39,9 +39,9 @@ export function RepositoriesTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      toast.success("Repositories saved");
+      toast.success("仓库已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save repositories");
+      toast.error(e instanceof Error ? e.message : "保存仓库失败");
     } finally {
       setSaving(false);
     }
@@ -64,12 +64,12 @@ export function RepositoriesTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Repositories</h2>
+        <h2 className="text-sm font-semibold">仓库</h2>
 
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Git repositories associated with this workspace. Agents use these to clone and work on code.
+              与该工作区关联的 Git 仓库。智能体会使用这些仓库来克隆代码并开展工作。
             </p>
 
             {repos.map((repo, index) => (
@@ -88,7 +88,7 @@ export function RepositoriesTab() {
                     value={repo.description}
                     onChange={(e) => handleRepoChange(index, "description", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="Description (e.g. Go backend + Next.js frontend)"
+                    placeholder="描述（例如：Go 后端 + Next.js 前端）"
                     className="text-sm"
                   />
                 </div>
@@ -109,7 +109,7 @@ export function RepositoriesTab() {
               <div className="flex items-center justify-between pt-1">
                 <Button variant="outline" size="sm" onClick={handleAddRepo}>
                   <Plus className="h-3 w-3" />
-                  Add repository
+                  添加仓库
                 </Button>
                 <Button
                   size="sm"
@@ -117,14 +117,14 @@ export function RepositoriesTab() {
                   disabled={saving}
                 >
                   <Save className="h-3 w-3" />
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? "保存中..." : "保存"}
                 </Button>
               </div>
             )}
 
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can manage repositories.
+                只有管理员和所有者可以管理仓库。
               </p>
             )}
           </CardContent>

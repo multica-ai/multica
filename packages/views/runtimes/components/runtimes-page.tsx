@@ -126,7 +126,7 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
           ) : (
             <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
               <Server className="h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm">Select a runtime to view details</p>
+              <p className="mt-3 text-sm">选择一个运行时查看详情</p>
             </div>
           )}
         </ResizablePanel>

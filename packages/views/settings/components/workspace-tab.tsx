@@ -134,9 +134,9 @@ export function WorkspaceTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      toast.success("Workspace settings saved");
+      toast.success("工作区设置已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save workspace settings");
+      toast.error(e instanceof Error ? e.message : "保存工作区设置失败");
     } finally {
       setSaving(false);
     }
@@ -145,8 +145,8 @@ export function WorkspaceTab() {
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
-      title: "Leave workspace",
-      description: `Leave ${workspace.name}? You will lose access until re-invited.`,
+      title: "离开工作区",
+      description: `离开 ${workspace.name}？您将失去访问权限，直到被重新邀请。`,
       variant: "destructive",
       onConfirm: async () => {
         setActionId("leave");
@@ -156,7 +156,7 @@ export function WorkspaceTab() {
         try {
           await leaveWorkspace.mutateAsync(workspace.id);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to leave workspace");
+          toast.error(e instanceof Error ? e.message : "离开工作区失败");
         } finally {
           setActionId(null);
         }
@@ -176,7 +176,7 @@ export function WorkspaceTab() {
     try {
       await deleteWorkspace.mutateAsync(workspace.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete workspace");
+      toast.error(e instanceof Error ? e.message : "删除工作区失败");
     } finally {
       setActionId(null);
     }
@@ -188,12 +188,12 @@ export function WorkspaceTab() {
     <div className="space-y-8">
       {/* Workspace settings */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">General</h2>
+        <h2 className="text-sm font-semibold">常规</h2>
 
         <Card>
           <CardContent className="space-y-3">
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label className="text-xs text-muted-foreground">名称</Label>
               <Input
                 type="text"
                 value={name}
@@ -203,29 +203,29 @@ export function WorkspaceTab() {
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Label className="text-xs text-muted-foreground">描述</Label>
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder="What does this workspace focus on?"
+                placeholder="这个工作区专注于什么？"
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Context</Label>
+              <Label className="text-xs text-muted-foreground">背景信息</Label>
               <Textarea
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
                 rows={4}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder="Background information and context for AI agents working in this workspace"
+                placeholder="为工作区内的 AI 智能体提供背景信息和上下文"
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Slug</Label>
+              <Label className="text-xs text-muted-foreground">标识符</Label>
               <div className="mt-1 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 {workspace.slug}
               </div>
@@ -237,12 +237,12 @@ export function WorkspaceTab() {
                 disabled={saving || !name.trim() || !canManageWorkspace}
               >
                 <Save className="h-3 w-3" />
-                {saving ? "Saving..." : "Save"}
+                {saving ? "保存中..." : "保存"}
               </Button>
             </div>
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can update workspace settings.
+                只有管理员和所有者可以修改工作区设置。
               </p>
             )}
           </CardContent>
@@ -256,20 +256,20 @@ export function WorkspaceTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <LogOut className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Danger Zone</h2>
+          <h2 className="text-sm font-semibold">危险区域</h2>
         </div>
 
         <Card>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium">Leave workspace</p>
+                <p className="text-sm font-medium">离开工作区</p>
                 <p className="text-xs text-muted-foreground">
                   {isSoleOwner
                     ? isSoleMember
-                      ? "You're the only member. Delete the workspace to leave."
-                      : "You're the only owner. Promote another member to owner first, or delete the workspace."
-                    : "Remove yourself from this workspace."}
+                      ? "您是唯一的成员。请删除工作区以退出。"
+                      : "您是唯一的所有者。请先将其他成员提升为所有者，或删除工作区。"
+                    : "将自己从该工作区中移除。"}
                 </p>
               </div>
               <Button
@@ -278,16 +278,16 @@ export function WorkspaceTab() {
                 onClick={handleLeaveWorkspace}
                 disabled={actionId === "leave" || isSoleOwner}
               >
-                {actionId === "leave" ? "Leaving..." : "Leave workspace"}
+                {actionId === "leave" ? "退出中..." : "离开工作区"}
               </Button>
             </div>
 
             {isOwner && (
               <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-destructive">Delete workspace</p>
+                  <p className="text-sm font-medium text-destructive">删除工作区</p>
                   <p className="text-xs text-muted-foreground">
-                    Permanently delete this workspace and its data.
+                    永久删除该工作区及其所有数据。
                   </p>
                 </div>
                 <Button
@@ -296,7 +296,7 @@ export function WorkspaceTab() {
                   onClick={() => setDeleteDialogOpen(true)}
                   disabled={actionId === "delete-workspace"}
                 >
-                  {actionId === "delete-workspace" ? "Deleting..." : "Delete workspace"}
+                  {actionId === "delete-workspace" ? "删除中..." : "删除工作区"}
                 </Button>
               </div>
             )}
@@ -312,7 +312,7 @@ export function WorkspaceTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -320,7 +320,7 @@ export function WorkspaceTab() {
                 setConfirmAction(null);
               }}
             >
-              Confirm
+              确认
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

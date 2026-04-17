@@ -116,7 +116,7 @@ function SessionItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">
-            {session.title || "Untitled"}
+            {session.title || "未命名"}
           </span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">

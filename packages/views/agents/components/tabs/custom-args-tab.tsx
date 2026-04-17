@@ -61,9 +61,9 @@ export function CustomArgsTab({
     setSaving(true);
     try {
       await onSave({ custom_args: currentArgs });
-      toast.success("Custom arguments saved");
+      toast.success("自定义参数已保存");
     } catch {
-      toast.error("Failed to save custom arguments");
+      toast.error("保存自定义参数失败");
     } finally {
       setSaving(false);
     }
@@ -74,11 +74,11 @@ export function CustomArgsTab({
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-xs text-muted-foreground">
-            Custom Arguments
+            自定义参数
           </Label>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Additional CLI arguments appended to the agent command at launch
-            (e.g. --model claude-sonnet-4-20250514)
+            启动时追加到智能体命令的额外 CLI 参数
+            （例如 --model claude-sonnet-4-20250514）
           </p>
         </div>
         <Button
@@ -89,7 +89,7 @@ export function CustomArgsTab({
           className="h-7 gap-1 text-xs"
         >
           <Plus className="h-3 w-3" />
-          Add
+          添加
         </Button>
       </div>
       {entries.length > 0 && (
@@ -120,7 +120,7 @@ export function CustomArgsTab({
         ) : (
           <Save className="h-3.5 w-3.5 mr-1.5" />
         )}
-        Save
+        保存
       </Button>
     </div>
   );

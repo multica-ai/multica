@@ -357,7 +357,7 @@ export function ChatWindow() {
               {isAtMax ? <Minimize2 /> : <Maximize2 />}
             </TooltipTrigger>
             <TooltipContent side="top">
-              {isAtMax ? "Restore" : "Expand"}
+              {isAtMax ? "还原" : "展开"}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -373,7 +373,7 @@ export function ChatWindow() {
             >
               <Minus />
             </TooltipTrigger>
-            <TooltipContent side="top">Minimize</TooltipContent>
+            <TooltipContent side="top">最小化</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -527,7 +527,7 @@ function SessionDropdown({
 }) {
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const title = activeSession?.title?.trim() || "New chat";
+  const title = activeSession?.title?.trim() || "新对话";
   const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
 
   return (
@@ -540,7 +540,7 @@ function SessionDropdown({
       <DropdownMenuContent align="start" className="max-h-80 w-auto min-w-56 max-w-80">
         {sessions.length === 0 ? (
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
-            No previous chats
+            暂无历史对话
           </div>
         ) : (
           sessions.map((session) => {
@@ -558,7 +558,7 @@ function SessionDropdown({
                   <span className="size-6 shrink-0" />
                 )}
                 <span className="truncate flex-1 text-sm">
-                  {session.title?.trim() || "New chat"}
+                  {session.title?.trim() || "新对话"}
                 </span>
                 {session.has_unread && (
                   <span className="size-1.5 shrink-0 rounded-full bg-brand" />
@@ -590,9 +590,9 @@ function AgentAvatarSmall({ agent }: { agent: Agent }) {
  * this chat is for: operating on the workspace, not open-ended Q&A.
  */
 const STARTER_PROMPTS: { icon: string; text: string }[] = [
-  { icon: "📋", text: "List my open tasks by priority" },
-  { icon: "📝", text: "Summarize what I did today" },
-  { icon: "💡", text: "Plan what to work on next" },
+  { icon: "📋", text: "按优先级列出我未完成的任务" },
+  { icon: "📝", text: "总结我今天完成的工作" },
+  { icon: "💡", text: "规划下一步要做的事" },
 ];
 
 function EmptyState({
@@ -606,9 +606,9 @@ function EmptyState({
     <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-8">
       <div className="text-center space-y-1">
         <h3 className="text-base font-semibold">
-          {agentName ? `Hi, I'm ${agentName}` : "Welcome to Multica"}
+          {agentName ? `你好，我是 ${agentName}` : "欢迎使用 Multica"}
         </h3>
-        <p className="text-sm text-muted-foreground">Try asking</p>
+        <p className="text-sm text-muted-foreground">试着问我</p>
       </div>
       <div className="w-full max-w-xs space-y-2">
         {STARTER_PROMPTS.map((prompt) => (

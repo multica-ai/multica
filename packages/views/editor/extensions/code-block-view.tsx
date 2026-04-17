@@ -32,7 +32,7 @@ function CodeBlockView({ node }: NodeViewProps) {
           type="button"
           onClick={handleCopy}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title="Copy code"
+          title="复制代码"
         >
           {copied ? (
             <Check className="h-3.5 w-3.5" />

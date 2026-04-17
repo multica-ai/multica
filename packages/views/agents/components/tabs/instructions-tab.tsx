@@ -35,10 +35,9 @@ export function InstructionsTab({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Agent Instructions</h3>
+        <h3 className="text-sm font-semibold">智能体指令</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Define this agent&apos;s identity and working style. These instructions are
-          injected into the agent&apos;s context for every task.
+          定义该智能体的身份和工作风格。这些指令将在每次任务时注入到智能体的上下文中。
         </p>
       </div>
 
@@ -51,7 +50,7 @@ export function InstructionsTab({
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {value.length > 0 ? `${value.length} characters` : "No instructions set"}
+          {value.length > 0 ? `${value.length} 个字符` : "尚未设置指令"}
         </span>
         <Button
           size="xs"
@@ -63,7 +62,7 @@ export function InstructionsTab({
           ) : (
             <Save className="h-3 w-3" />
           )}
-          Save
+          保存
         </Button>
       </div>
     </div>

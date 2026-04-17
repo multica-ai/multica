@@ -62,20 +62,19 @@ export function DeleteWorkspaceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete workspace</DialogTitle>
+          <DialogTitle>删除工作区</DialogTitle>
           <DialogDescription>
-            This cannot be undone. All issues, agents, and data will be
-            permanently removed.
+            此操作无法撤销。所有任务、智能体和数据将被永久删除。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
           <Label htmlFor="delete-workspace-confirm" className="text-xs">
-            To confirm, type{" "}
+            请在下方输入{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
               {workspaceName}
             </code>{" "}
-            below.
+            以确认删除。
           </Label>
           <Input
             id="delete-workspace-confirm"
@@ -104,7 +103,7 @@ export function DeleteWorkspaceDialog({
             onClick={() => onOpenChange(false)}
             disabled={loading}
           >
-            Cancel
+            取消
           </Button>
           <Button
             type="button"
@@ -112,7 +111,7 @@ export function DeleteWorkspaceDialog({
             onClick={submit}
             disabled={!matched || loading}
           >
-            {loading ? "Deleting..." : "Delete workspace"}
+            {loading ? "删除中..." : "删除工作区"}
           </Button>
         </DialogFooter>
       </DialogContent>

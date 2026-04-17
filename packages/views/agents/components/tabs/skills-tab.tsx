@@ -39,7 +39,7 @@ export function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add skill");
+      toast.error(e instanceof Error ? e.message : "添加技能失败");
     } finally {
       setSaving(false);
       setShowPicker(false);
@@ -53,7 +53,7 @@ export function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to remove skill");
+      toast.error(e instanceof Error ? e.message : "移除技能失败");
     } finally {
       setSaving(false);
     }
@@ -63,9 +63,9 @@ export function SkillsTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Skills</h3>
+          <h3 className="text-sm font-semibold">技能</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Workspace skills assigned to this agent.
+            已分配给该智能体的工作区技能。
           </p>
         </div>
         <Button
@@ -75,23 +75,23 @@ export function SkillsTab({
           disabled={saving || availableSkills.length === 0}
         >
           <Plus className="h-3 w-3" />
-          Add Skill
+          添加技能
         </Button>
       </div>
 
       <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
         <Info className="h-3.5 w-3.5 shrink-0 text-info mt-0.5" />
         <p className="text-xs text-muted-foreground">
-          Local runtime skills (from your CLI&apos;s skills directory) are always available automatically — no need to add them here.
+          本地运行时技能（来自 CLI 技能目录）始终自动可用，无需在此处添加。
         </p>
       </div>
 
       {agent.skills.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
+          <p className="mt-3 text-sm text-muted-foreground">尚未分配技能</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Add workspace skills to share team knowledge with this agent. Local skills are already used automatically.
+            添加工作区技能以与该智能体共享团队知识。本地技能已自动使用。
           </p>
           {availableSkills.length > 0 && (
             <Button
@@ -101,7 +101,7 @@ export function SkillsTab({
               disabled={saving}
             >
               <Plus className="h-3 w-3" />
-              Add Skill
+              添加技能
             </Button>
           )}
         </div>
@@ -142,9 +142,9 @@ export function SkillsTab({
         <Dialog open onOpenChange={(v) => { if (!v) setShowPicker(false); }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-sm">Add Skill</DialogTitle>
+              <DialogTitle className="text-sm">添加技能</DialogTitle>
               <DialogDescription className="text-xs">
-                Select a skill to assign to this agent.
+                选择要分配给该智能体的技能。
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-64 overflow-y-auto space-y-1">
@@ -168,13 +168,13 @@ export function SkillsTab({
               ))}
               {availableSkills.length === 0 && (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  All workspace skills are already assigned.
+                  所有工作区技能均已分配。
                 </p>
               )}
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setShowPicker(false)}>
-                Cancel
+                取消
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -67,8 +67,8 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   }
 
   const groups: MentionGroup[] = [];
-  if (users.length > 0) groups.push({ label: "Users", items: users });
-  if (issues.length > 0) groups.push({ label: "Issues", items: issues });
+  if (users.length > 0) groups.push({ label: "用户", items: users });
+  if (issues.length > 0) groups.push({ label: "任务", items: issues });
   return groups;
 }
 
@@ -261,7 +261,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const allItem: MentionItem[] =
       "all members".includes(q) || "all".includes(q)
-        ? [{ id: "all", label: "All members", type: "all" as const }]
+        ? [{ id: "all", label: "所有成员", type: "all" as const }]
         : [];
 
     const memberItems: MentionItem[] = members
