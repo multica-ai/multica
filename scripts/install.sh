@@ -194,25 +194,22 @@ install_cli() {
 }
 
 # ---------------------------------------------------------------------------
-# Docker check
+# Container runtime (Docker or Podman + Compose)
 # ---------------------------------------------------------------------------
-check_docker() {
-  if ! command_exists docker; then
+check_container_runtime() {
+  if [ ! -f "./scripts/compose.sh" ]; then
+    fail "scripts/compose.sh not found in installation. Update this checkout from GitHub (e.g. git pull in $INSTALL_DIR) so it matches install.sh from main — see https://github.com/multica-ai/multica/blob/main/scripts/compose.sh"
+  fi
+  if ! bash ./scripts/compose.sh version >/dev/null 2>&1; then
     printf "\n"
-    fail "Docker is not installed. Multica self-hosting requires Docker and Docker Compose.
+    fail "No working container compose backend. Install Docker Engine with Compose v2, or Podman 4+ with compose support, then re-run with --with-server.
 
-Install Docker:
-  macOS:  https://docs.docker.com/desktop/install/mac-install/
-  Linux:  https://docs.docker.com/engine/install/
+Docker:   https://docs.docker.com/engine/install/
+Podman:   https://podman.io/docs/installation
 
-After installing Docker, re-run this script with --with-server."
+Optional: export MULTICA_COMPOSE='podman compose' (whitespace-separated prefix) if your CLI is non-standard."
   fi
-
-  if ! docker info >/dev/null 2>&1; then
-    fail "Docker is installed but not running. Please start Docker and re-run this script."
-  fi
-
-  ok "Docker is available"
+  ok "Container runtime (Compose) is available"
 }
 
 # ---------------------------------------------------------------------------
@@ -259,9 +256,11 @@ setup_server() {
     ok "Using existing .env"
   fi
 
-  # Start Docker Compose
+  check_container_runtime
+
+  # Start Compose stack (docker-compose.selfhost.yml)
   info "Starting Multica services (this may take a few minutes on first run)..."
-  docker compose -f docker-compose.selfhost.yml up -d --build
+  bash ./scripts/compose.sh -f docker-compose.selfhost.yml up -d --build
 
   # Wait for health check
   info "Waiting for backend to be ready..."
@@ -278,7 +277,7 @@ setup_server() {
     ok "Multica server is running"
   else
     warn "Server is still starting. You can check logs with:"
-    echo "  cd $INSTALL_DIR && docker compose -f docker-compose.selfhost.yml logs"
+    echo "  cd $INSTALL_DIR && bash ./scripts/compose.sh -f docker-compose.selfhost.yml logs"
     echo ""
   fi
 }
@@ -320,7 +319,6 @@ run_with_server() {
   printf "\n"
 
   detect_os
-  check_docker
   setup_server
   install_cli
 
@@ -354,8 +352,8 @@ run_stop() {
   if [ -d "$INSTALL_DIR" ]; then
     cd "$INSTALL_DIR"
     if [ -f docker-compose.selfhost.yml ]; then
-      docker compose -f docker-compose.selfhost.yml down
-      ok "Docker services stopped"
+      bash ./scripts/compose.sh -f docker-compose.selfhost.yml down
+      ok "Compose services stopped"
     else
       warn "No docker-compose.selfhost.yml found at $INSTALL_DIR"
     fi
@@ -378,22 +376,40 @@ main() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      --with-server) mode="with-server" ;;
-      --local)       mode="with-server" ;;  # backwards compat alias
-      --stop)        mode="stop" ;;
+      --)
+        shift
+        ;;
+      --with-server)
+        mode="with-server"
+        shift
+        ;;
+      --local)
+        mode="with-server" # backwards compat alias
+        shift
+        ;;
+      --stop)
+        mode="stop"
+        shift
+        ;;
       --help|-h)
         echo "Usage: install.sh [--with-server | --stop]"
         echo ""
         echo "  (default)       Install / upgrade the Multica CLI"
-        echo "  --with-server   Install CLI + provision a self-host server (Docker)"
+        echo "  --with-server   Install CLI + provision a self-host server (Docker or Podman)"
         echo "  --stop          Stop a self-hosted installation"
+        echo ""
+        echo "Examples:"
+        echo "  bash scripts/install.sh --with-server"
+        echo "  curl -fsSL .../install.sh | bash -s -- --with-server"
         echo ""
         echo "After installation, run 'multica setup' to configure your environment."
         exit 0
         ;;
-      *) warn "Unknown option: $1" ;;
+      *)
+        warn "Unknown option: $1"
+        shift
+        ;;
     esac
-    shift
   done
 
   case "$mode" in

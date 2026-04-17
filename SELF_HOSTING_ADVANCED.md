@@ -124,7 +124,7 @@ If you prefer to build and run services manually:
 **Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
 
 ```bash
-# Start your PostgreSQL (or use: docker compose up -d postgres)
+# Start your PostgreSQL (or from repo root: ./scripts/compose.sh up -d postgres)
 
 # Build the backend
 make build
@@ -237,7 +237,7 @@ CORS_ALLOWED_ORIGINS=http://192.168.1.100:3000
 Then rebuild:
 
 ```bash
-docker compose -f docker-compose.selfhost.yml up -d --build
+./scripts/compose.sh -f docker-compose.selfhost.yml up -d --build
 ```
 
 The frontend automatically derives the WebSocket URL from the page address, so real-time features (chat streaming, live issue updates, notifications) work over LAN without extra configuration.
@@ -259,7 +259,7 @@ Use this for load balancer health checks or monitoring.
 
 ```bash
 git pull
-docker compose -f docker-compose.selfhost.yml up -d --build
+./scripts/compose.sh -f docker-compose.selfhost.yml up -d --build
 ```
 
 Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
