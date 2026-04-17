@@ -411,7 +411,11 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user info from Google.
-	userInfoReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build Google userinfo request")
+		return
+	}
 	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
 
 	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
