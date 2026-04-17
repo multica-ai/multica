@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -111,16 +112,39 @@ func (w *WebhookWorker) processOne(ctx context.Context) (bool, error) {
 	}
 
 	if err := dispatchWebhookEvent(ctx, deps, row.EventType, row.Payload); err != nil {
-		// Don't mark processed on error — the row stays claimable so the
-		// next worker tries again. Log the failure so it's visible.
-		slog.Error("webhook event apply failed",
+		// Record the failure in the same transaction so the UPDATE runs while
+		// we already hold the FOR UPDATE lock on the row. Committing the tx
+		// persists the failure_count increment without marking processed —
+		// the row stays claimable once the backoff window elapses.
+		if recErr := q.RecordWebhookEventFailure(ctx, db.RecordWebhookEventFailureParams{
+			ID:        row.ID,
+			LastError: pgtype.Text{String: err.Error(), Valid: true},
+		}); recErr != nil {
+			slog.Error("webhook event apply failed (and failure-record write failed)",
+				"workspace_id", row.WorkspaceID, "event_type", row.EventType,
+				"object_id", row.ObjectID, "apply_error", err, "rec_error", recErr)
+			return false, nil
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			slog.Error("webhook event apply failed (failure-record commit failed)",
+				"workspace_id", row.WorkspaceID, "event_type", row.EventType,
+				"object_id", row.ObjectID, "apply_error", err, "commit_error", commitErr)
+			return false, nil
+		}
+
+		nextRetry := time.Duration(row.FailureCount+1) * 5 * time.Second
+		logFn := slog.Error
+		if row.FailureCount >= 3 && row.FailureCount < 9 {
+			// Reduce log noise for events that keep failing.
+			logFn = slog.Warn
+		}
+		logFn("webhook event apply failed",
 			"workspace_id", row.WorkspaceID,
 			"event_type", row.EventType,
 			"object_id", row.ObjectID,
+			"failure_count", row.FailureCount+1,
+			"next_retry_in", nextRetry.String(),
 			"error", err)
-		// Return success-with-no-commit so the SELECT FOR UPDATE lock
-		// releases and another worker can pick it up. The transaction's
-		// rollback (via defer) lets the row revert to claimable.
 		return false, nil
 	}
 
