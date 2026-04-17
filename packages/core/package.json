@@ -59,6 +59,7 @@
     "./query-client": "./query-client.ts",
     "./provider": "./provider.tsx",
     "./logger": "./logger.ts",
+    "./models": "./models.ts",
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
     "./platform": "./platform/index.ts"

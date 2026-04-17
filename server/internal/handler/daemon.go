@@ -399,6 +399,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Skills:       skills,
 			CustomEnv:    customEnv,
 		}
+		if agent.RuntimeConfig != nil {
+			var rc map[string]any
+			if err := json.Unmarshal(agent.RuntimeConfig, &rc); err == nil {
+				if model, ok := rc["model"].(string); ok && model != "" {
+					resp.Agent.Model = model
+				}
+			}
+		}
 	}
 
 	// Include workspace ID and repos so the daemon can set up worktrees.

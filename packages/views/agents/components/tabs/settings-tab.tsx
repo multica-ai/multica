@@ -10,8 +10,11 @@ import {
   Lock,
   Camera,
   ChevronDown,
+  Cpu,
+  Check,
 } from "lucide-react";
 import type { Agent, AgentVisibility, RuntimeDevice } from "@multica/core/types";
+import { PROVIDER_MODELS } from "@multica/core/models";
 import {
   Popover,
   PopoverTrigger,
@@ -39,12 +42,24 @@ export function SettingsTab({
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
+  const [selectedModel, setSelectedModel] = useState(
+    (agent.runtime_config?.model as string) ?? "",
+  );
+  const [customModelInput, setCustomModelInput] = useState("");
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
+  const provider = selectedRuntime?.provider ?? "";
+  const availableModels = PROVIDER_MODELS[provider] ?? [];
+  const isKnownModel = availableModels.some((m) => m.id === selectedModel);
+  const modelLabel =
+    selectedModel === ""
+      ? "Runtime default"
+      : availableModels.find((m) => m.id === selectedModel)?.label ?? selectedModel;
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -60,12 +75,14 @@ export function SettingsTab({
     }
   };
 
+  const currentModel = (agent.runtime_config?.model as string) ?? "";
   const dirty =
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
-    selectedRuntimeId !== agent.runtime_id;
+    selectedRuntimeId !== agent.runtime_id ||
+    selectedModel !== currentModel;
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -81,6 +98,10 @@ export function SettingsTab({
         visibility,
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
+        runtime_config: {
+          ...agent.runtime_config,
+          model: selectedModel || undefined,
+        },
       });
       toast.success("Settings saved");
     } catch {
@@ -224,6 +245,9 @@ export function SettingsTab({
               <button
                 key={device.id}
                 onClick={() => {
+                  if (device.provider !== selectedRuntime?.provider) {
+                    setSelectedModel("");
+                  }
                   setSelectedRuntimeId(device.id);
                   setRuntimeOpen(false);
                 }}
@@ -254,6 +278,86 @@ export function SettingsTab({
                 />
               </button>
             ))}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Model</Label>
+        <p className="text-xs text-muted-foreground mt-0.5 mb-1.5">
+          Override the default model for this agent
+        </p>
+        <Popover open={modelOpen} onOpenChange={setModelOpen}>
+          <PopoverTrigger
+            className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted"
+          >
+            <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className={`min-w-0 flex-1 truncate ${selectedModel === "" ? "text-muted-foreground" : "font-medium"}`}>
+              {modelLabel}
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${modelOpen ? "rotate-180" : ""}`} />
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-72 overflow-y-auto">
+            <button
+              onClick={() => {
+                setSelectedModel("");
+                setModelOpen(false);
+              }}
+              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                selectedModel === "" ? "bg-accent" : "hover:bg-accent/50"
+              }`}
+            >
+              <span className="min-w-0 flex-1 text-muted-foreground">Runtime default</span>
+              {selectedModel === "" && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+            </button>
+            {availableModels.length > 0 && (
+              <div className="my-1 h-px bg-border" />
+            )}
+            {availableModels.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setSelectedModel(m.id);
+                  setModelOpen(false);
+                }}
+                className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  m.id === selectedModel ? "bg-accent" : "hover:bg-accent/50"
+                }`}
+              >
+                <span className="min-w-0 flex-1 font-medium">{m.label}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{m.id}</span>
+                {m.id === selectedModel && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+              </button>
+            ))}
+            <div className="my-1 h-px bg-border" />
+            <form
+              className="flex items-center gap-1.5 px-1 py-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const val = customModelInput.trim();
+                if (val) {
+                  setSelectedModel(val);
+                  setCustomModelInput("");
+                  setModelOpen(false);
+                }
+              }}
+            >
+              <Input
+                value={customModelInput}
+                onChange={(e) => setCustomModelInput(e.target.value)}
+                placeholder="Custom model ID..."
+                className="h-8 text-xs"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <Button type="submit" size="sm" variant="ghost" className="h-8 px-2 text-xs shrink-0" disabled={!customModelInput.trim()}>
+                Use
+              </Button>
+            </form>
+            {selectedModel !== "" && !isKnownModel && (
+              <div className="px-3 py-1 text-xs text-muted-foreground">
+                Custom: {selectedModel}
+              </div>
+            )}
           </PopoverContent>
         </Popover>
       </div>

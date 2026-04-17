@@ -1039,11 +1039,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
+	model := entry.Model
+	if task.Agent != nil && task.Agent.Model != "" {
+		model = task.Agent.Model
+	}
+
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
-		"model", entry.Model,
+		"model", model,
 		"reused", reused,
 	)
 	if task.PriorSessionID != "" {
@@ -1054,7 +1059,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	execOpts := agent.ExecOptions{
 		Cwd:             env.WorkDir,
-		Model:           entry.Model,
+		Model:           model,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 	}
