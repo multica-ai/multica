@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -122,6 +124,49 @@ type SearchIssueResponse struct {
 	IssueResponse
 	MatchSource    string  `json:"match_source"`
 	MatchedSnippet *string `json:"matched_snippet,omitempty"`
+}
+
+// BatchWriteResult is the continue-on-error shape returned by
+// /api/issues/batch-update and /api/issues/batch-delete. HTTP 207
+// Multi-Status when both succeeded and failed items are present;
+// HTTP 200 when all succeeded or all failed (client inspects lists).
+// Individual item failures never abort the batch.
+type BatchWriteResult struct {
+	Succeeded []BatchSucceeded `json:"succeeded"`
+	Failed    []BatchFailed    `json:"failed"`
+}
+
+type BatchSucceeded struct {
+	ID    string         `json:"id"`
+	Issue *IssueResponse `json:"issue"` // nil for batch-delete
+}
+
+type BatchFailed struct {
+	ID        string `json:"id"`
+	ErrorCode string `json:"error_code"` // e.g. "GITLAB_403", "NOT_FOUND", "VALIDATION_FAILED"
+	Message   string `json:"message"`
+}
+
+// classifyBatchError maps a GitLab-or-handler error to a stable error_code
+// string for the BatchFailed response. Stability matters — clients key
+// retry logic off these codes.
+func classifyBatchError(err error) (code, msg string) {
+	if err == nil {
+		return "", ""
+	}
+	m := err.Error()
+	switch {
+	case strings.Contains(m, "403"):
+		return "GITLAB_403", m
+	case strings.Contains(m, "404"):
+		return "GITLAB_404", m
+	case strings.Contains(m, "429"):
+		return "GITLAB_429", m
+	case errors.Is(err, pgx.ErrNoRows):
+		return "NOT_FOUND", "issue not found"
+	default:
+		return "WRITE_FAILED", m
+	}
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.

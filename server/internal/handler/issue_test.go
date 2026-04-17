@@ -606,3 +606,18 @@ func TestCreateIssue_LegacyPathWhenNoGitlabConnection(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestBatchResult_ShapeAndJSON(t *testing.T) {
+	r := BatchWriteResult{
+		Succeeded: []BatchSucceeded{{ID: "abc", Issue: nil}},
+		Failed:    []BatchFailed{{ID: "def", ErrorCode: "GITLAB_403", Message: "forbidden"}},
+	}
+	body, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"succeeded":[{"id":"abc","issue":null}],"failed":[{"id":"def","error_code":"GITLAB_403","message":"forbidden"}]}`
+	if string(body) != want {
+		t.Errorf("json = %s\nwant  %s", body, want)
+	}
+}
