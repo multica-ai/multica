@@ -14,6 +14,14 @@ import (
 // causing the server to resolve the actor as an agent instead of a member.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
+	return authRequestWithAgentTask(t, method, path, body, agentID, "")
+}
+
+// authRequestWithAgentTask makes an authenticated request with X-Agent-ID and
+// optional X-Task-ID headers, modelling an agent acting from within an
+// executing task (the CLI sets both).
+func authRequestWithAgentTask(t *testing.T, method, path string, body any, agentID, taskID string) *http.Response {
+	t.Helper()
 	var bodyReader io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -27,12 +35,37 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
+	if taskID != "" {
+		req.Header.Set("X-Task-ID", taskID)
+	}
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	return r
+}
+
+// insertRunningTask inserts a dispatched agent_task_queue row for the given
+// (agent, issue) pair and returns its ID. Used to simulate an agent acting
+// from within an executing task context.
+func insertRunningTask(t *testing.T, agentID, issueID string) string {
+	t.Helper()
+	var id string
+	err := testPool.QueryRow(context.Background(),
+		`INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		 VALUES ($1, $2, 'dispatched',
+			 (SELECT runtime_id FROM agent WHERE id = $1))
+		 RETURNING id`,
+		agentID, issueID).Scan(&id)
+	if err != nil {
+		t.Fatalf("failed to insert running task: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE id = $1`, id)
+	})
+	return id
 }
 
 // countPendingTasks returns the number of queued/dispatched tasks for an issue.
@@ -347,6 +380,52 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		postCommentAsAgent(t, issueID, "I am working on this", agentID, nil)
 		if n := countPendingTasks(t, issueID); n != 0 {
 			t.Errorf("expected 0 pending tasks (assignee self-comment), got %d", n)
+		}
+	})
+
+	t.Run("assignee agent commenting from a task on a different issue triggers hand-off", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Simulate the agent completing another issue and posting a hand-off
+		// comment on THIS issue (both assigned to the same agent). The task
+		// context points at the OTHER issue, so this is a chain, not a loop.
+		otherIssueID := createIssueAssignedToAgent(t, "Previous issue in chain", agentID)
+		t.Cleanup(func() {
+			clearTasks(t, otherIssueID)
+			resp := authRequest(t, "DELETE", "/api/issues/"+otherIssueID, nil)
+			resp.Body.Close()
+		})
+		clearTasks(t, issueID)
+		clearTasks(t, otherIssueID)
+		otherTaskID := insertRunningTask(t, agentID, otherIssueID)
+		body := map[string]any{"content": "Previous issue done, you can start", "type": "comment"}
+		resp := authRequestWithAgentTask(t, "POST", "/api/issues/"+issueID+"/comments", body, agentID, otherTaskID)
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("hand-off comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		resp.Body.Close()
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (hand-off from different-issue task), got %d", n)
+		}
+	})
+
+	t.Run("assignee agent commenting from a task on the same issue does not loop", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Same agent, same issue, same task — classic self-loop, must not trigger.
+		ownTaskID := insertRunningTask(t, agentID, issueID)
+		body := map[string]any{"content": "Progress update", "type": "comment"}
+		resp := authRequestWithAgentTask(t, "POST", "/api/issues/"+issueID+"/comments", body, agentID, ownTaskID)
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("self-task comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		resp.Body.Close()
+		if n := countPendingTasks(t, issueID); n != 1 {
+			// The dispatched task inserted above counts toward the pending set
+			// (status='dispatched'); we assert no NEW task was enqueued.
+			t.Errorf("expected 1 pending task (only the original dispatched task), got %d", n)
 		}
 	})
 }
