@@ -649,15 +649,28 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	copy(order, callOrder)
 	mu.Unlock()
 
-	// usage must be in the call order — cancelled-by-poll path must not drop tokens.
+	// Verify the poll goroutine actually fired — without this assertion the test
+	// could pass via the post-run GetTaskStatus check without ever taking the
+	// cancelledByPoll path, making it a vacuous regression guard.
+	pollStatusIdx := -1
 	usageIdx := -1
 	for i, name := range order {
-		if name == "usage" {
+		switch name {
+		case "poll-status":
+			pollStatusIdx = i
+		case "usage":
 			usageIdx = i
-			break
 		}
+	}
+	if pollStatusIdx == -1 {
+		t.Fatalf("poll goroutine never fired (order: %v) — cancelledByPoll path not exercised", order)
 	}
 	if usageIdx == -1 {
 		t.Fatalf("ReportTaskUsage was never called on poll-cancelled path (order: %v) — tokens lost", order)
+	}
+	// usage is reported after the runner unblocks (which is after runCtx is cancelled
+	// by the poll goroutine), so usage must come after poll-status in the call order.
+	if usageIdx < pollStatusIdx {
+		t.Fatalf("usage reported before poll-status (order: %v) — unexpected ordering", order)
 	}
 }
