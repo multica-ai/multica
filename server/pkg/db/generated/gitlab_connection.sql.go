@@ -132,6 +132,25 @@ func (q *Queries) GetWorkspaceGitlabConnection(ctx context.Context, workspaceID 
 	return i, err
 }
 
+const updateWorkspaceGitlabConnectionStatus = `-- name: UpdateWorkspaceGitlabConnectionStatus :exec
+UPDATE workspace_gitlab_connection
+SET connection_status = $2,
+    status_message    = $3,
+    updated_at        = now()
+WHERE workspace_id = $1
+`
+
+type UpdateWorkspaceGitlabConnectionStatusParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ConnectionStatus string      `json:"connection_status"`
+	StatusMessage    pgtype.Text `json:"status_message"`
+}
+
+func (q *Queries) UpdateWorkspaceGitlabConnectionStatus(ctx context.Context, arg UpdateWorkspaceGitlabConnectionStatusParams) error {
+	_, err := q.db.Exec(ctx, updateWorkspaceGitlabConnectionStatus, arg.WorkspaceID, arg.ConnectionStatus, arg.StatusMessage)
+	return err
+}
+
 const upsertUserGitlabConnection = `-- name: UpsertUserGitlabConnection :one
 INSERT INTO user_gitlab_connection (
     user_id,

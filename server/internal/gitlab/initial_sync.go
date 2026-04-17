@@ -26,13 +26,32 @@ type RunInitialSyncInput struct {
 }
 
 // RunInitialSync orchestrates a one-shot pull of GitLab project state into
-// Multica's cache tables for one workspace.
+// Multica's cache tables for one workspace, and reports the outcome on the
+// workspace_gitlab_connection row.
 func RunInitialSync(ctx context.Context, deps SyncDeps, in RunInitialSyncInput) error {
 	wsUUID, err := pgUUID(in.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("initial sync: workspace_id: %w", err)
 	}
+	if err := runInitialSyncImpl(ctx, deps, in, wsUUID); err != nil {
+		// Best-effort status update — log but don't override the original error.
+		_ = deps.Queries.UpdateWorkspaceGitlabConnectionStatus(ctx, db.UpdateWorkspaceGitlabConnectionStatusParams{
+			WorkspaceID:      wsUUID,
+			ConnectionStatus: "error",
+			StatusMessage:    pgtype.Text{String: err.Error(), Valid: true},
+		})
+		return err
+	}
+	return deps.Queries.UpdateWorkspaceGitlabConnectionStatus(ctx, db.UpdateWorkspaceGitlabConnectionStatusParams{
+		WorkspaceID:      wsUUID,
+		ConnectionStatus: "connected",
+		StatusMessage:    pgtype.Text{},
+	})
+}
 
+// runInitialSyncImpl is the body of the previous RunInitialSync — same logic,
+// just with the wsUUID parameter passed in instead of derived inside.
+func runInitialSyncImpl(ctx context.Context, deps SyncDeps, in RunInitialSyncInput, wsUUID pgtype.UUID) error {
 	// 1. Bootstrap canonical scoped labels (idempotent).
 	if err := BootstrapScopedLabels(ctx, deps.Client, in.Token, in.ProjectID); err != nil {
 		return fmt.Errorf("initial sync: bootstrap labels: %w", err)

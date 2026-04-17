@@ -40,3 +40,10 @@ WHERE user_id = $1 AND workspace_id = $2;
 -- name: DeleteUserGitlabConnection :exec
 DELETE FROM user_gitlab_connection
 WHERE user_id = $1 AND workspace_id = $2;
+
+-- name: UpdateWorkspaceGitlabConnectionStatus :exec
+UPDATE workspace_gitlab_connection
+SET connection_status = $2,
+    status_message    = $3,
+    updated_at        = now()
+WHERE workspace_id = $1;

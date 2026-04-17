@@ -260,3 +260,91 @@ func TestInitialSync_PopulatesHumanNotesAndAwards(t *testing.T) {
 		t.Errorf("expected 1 award cached, got %d", awardCount)
 	}
 }
+
+func TestInitialSync_TransitionsStatusToConnected(t *testing.T) {
+	pool := connectTestPool(t)
+	defer pool.Close()
+	wsID := makeWorkspace(t, pool)
+
+	// Insert a connection row in 'connecting' state.
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO workspace_gitlab_connection (
+			workspace_id, gitlab_project_id, gitlab_project_path,
+			service_token_encrypted, service_token_user_id, connection_status
+		) VALUES ($1, 7, 'g/a', '\x'::bytea, 1, 'connecting')
+	`, wsID)
+	if err != nil {
+		t.Fatalf("seed connection: %v", err)
+	}
+
+	// Minimal happy-path fake gitlab.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v4/projects/7/labels" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode([]gitlabapi.Label{})
+		case r.URL.Path == "/api/v4/projects/7/labels" && r.Method == http.MethodPost:
+			w.Write([]byte(`{"id":1}`))
+		case r.URL.Path == "/api/v4/projects/7/members/all":
+			json.NewEncoder(w).Encode([]gitlabapi.ProjectMember{})
+		case r.URL.Path == "/api/v4/projects/7/issues":
+			json.NewEncoder(w).Encode([]gitlabapi.Issue{})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	queries := db.New(pool)
+	deps := SyncDeps{Queries: queries, Client: gitlabapi.NewClient(srv.URL, srv.Client())}
+	if err := RunInitialSync(context.Background(), deps, RunInitialSyncInput{
+		WorkspaceID: wsID, ProjectID: 7, Token: "tok",
+	}); err != nil {
+		t.Fatalf("RunInitialSync: %v", err)
+	}
+
+	row, err := queries.GetWorkspaceGitlabConnection(context.Background(), mustPGUUID(t, wsID))
+	if err != nil {
+		t.Fatalf("GetWorkspaceGitlabConnection: %v", err)
+	}
+	if row.ConnectionStatus != "connected" {
+		t.Errorf("status = %q, want connected", row.ConnectionStatus)
+	}
+}
+
+func TestInitialSync_TransitionsStatusToErrorOnFailure(t *testing.T) {
+	pool := connectTestPool(t)
+	defer pool.Close()
+	wsID := makeWorkspace(t, pool)
+
+	pool.Exec(context.Background(), `
+		INSERT INTO workspace_gitlab_connection (
+			workspace_id, gitlab_project_id, gitlab_project_path,
+			service_token_encrypted, service_token_user_id, connection_status
+		) VALUES ($1, 7, 'g/a', '\x'::bytea, 1, 'connecting')
+	`, wsID)
+
+	// Fake gitlab that 401s — sync should fail and transition to error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"401 Unauthorized"}`))
+	}))
+	defer srv.Close()
+
+	queries := db.New(pool)
+	deps := SyncDeps{Queries: queries, Client: gitlabapi.NewClient(srv.URL, srv.Client())}
+	err := RunInitialSync(context.Background(), deps, RunInitialSyncInput{
+		WorkspaceID: wsID, ProjectID: 7, Token: "bad",
+	})
+	if err == nil {
+		t.Fatalf("expected error from failing sync")
+	}
+
+	row, _ := queries.GetWorkspaceGitlabConnection(context.Background(), mustPGUUID(t, wsID))
+	if row.ConnectionStatus != "error" {
+		t.Errorf("status = %q, want error", row.ConnectionStatus)
+	}
+	if !row.StatusMessage.Valid || row.StatusMessage.String == "" {
+		t.Errorf("status_message should be populated, got %+v", row.StatusMessage)
+	}
+}
