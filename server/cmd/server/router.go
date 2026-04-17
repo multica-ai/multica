@@ -21,6 +21,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/gitlab"
+	"github.com/multica-ai/multica/server/pkg/secrets"
 )
 
 var defaultOrigins = []string{
@@ -53,7 +55,7 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCipher *secrets.Cipher, gitlabClient *gitlab.Client, gitlabEnabled bool) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -70,7 +72,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner)
+	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, secretsCipher, gitlabClient, gitlabEnabled)
 
 	r := chi.NewRouter()
 
@@ -175,6 +177,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					r.Get("/gitlab/connect", h.GetGitlabWorkspaceConnection)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -187,6 +190,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Post("/gitlab/connect", h.ConnectGitlabWorkspace)
+					r.Delete("/gitlab/connect", h.DisconnectGitlabWorkspace)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)

@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 	bus := events.New()
 	emailSvc := service.NewEmailService()
-	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil)
+	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, nil, nil, false)
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)

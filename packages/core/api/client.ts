@@ -64,6 +64,7 @@ import type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "../types";
+import type { GitlabConnection, ConnectGitlabInput } from "../gitlab/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -879,5 +880,24 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // GitLab connection
+  async getWorkspaceGitlabConnection(workspaceId: string): Promise<GitlabConnection> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitlab/connect`);
+  }
+
+  async connectWorkspaceGitlab(
+    workspaceId: string,
+    input: ConnectGitlabInput,
+  ): Promise<GitlabConnection> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitlab/connect`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async disconnectWorkspaceGitlab(workspaceId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/gitlab/connect`, { method: "DELETE" });
   }
 }

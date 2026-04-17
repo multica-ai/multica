@@ -19,6 +19,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/gitlab"
+	"github.com/multica-ai/multica/server/pkg/secrets"
 )
 
 type txStarter interface {
@@ -44,9 +46,28 @@ type Handler struct {
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
+	// Secrets and Gitlab are always non-nil when GitlabEnabled is true.
+	// When GitlabEnabled is false they may be nil — every gitlab handler must
+	// gate on `if !h.GitlabEnabled { return 404 }` before touching either,
+	// otherwise the handler will nil-panic on a request from a misconfigured
+	// or test environment.
+	Secrets       *secrets.Cipher
+	Gitlab        *gitlab.Client
+	GitlabEnabled bool
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+func New(
+	queries *db.Queries,
+	txStarter txStarter,
+	hub *realtime.Hub,
+	bus *events.Bus,
+	emailService *service.EmailService,
+	store storage.Storage,
+	cfSigner *auth.CloudFrontSigner,
+	secretsCipher *secrets.Cipher,
+	gitlabClient *gitlab.Client,
+	gitlabEnabled bool,
+) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
@@ -66,6 +87,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:      NewUpdateStore(),
 		Storage:          store,
 		CFSigner:         cfSigner,
+		Secrets:          secretsCipher,
+		Gitlab:           gitlabClient,
+		GitlabEnabled:    gitlabEnabled,
 	}
 }
 

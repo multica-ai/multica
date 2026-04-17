@@ -33,9 +33,11 @@ export interface ExtraSettingsTab {
 interface SettingsPageProps {
   /** Additional tabs injected by platform (e.g. desktop daemon settings) */
   extraAccountTabs?: ExtraSettingsTab[];
+  /** Additional workspace-scoped tabs injected by platform (e.g. gitlab integration behind a feature flag) */
+  extraWorkspaceTabs?: ExtraSettingsTab[];
 }
 
-export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
+export function SettingsPage({ extraAccountTabs, extraWorkspaceTabs }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
 
   return (
@@ -71,6 +73,12 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
               {tab.label}
             </TabsTrigger>
           ))}
+          {extraWorkspaceTabs?.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
       </div>
 
@@ -84,6 +92,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
+          ))}
+          {extraWorkspaceTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}
         </div>

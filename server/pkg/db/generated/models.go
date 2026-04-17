@@ -391,6 +391,15 @@ type User struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserGitlabConnection struct {
+	UserID         pgtype.UUID        `json:"user_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	GitlabUserID   int64              `json:"gitlab_user_id"`
+	GitlabUsername string             `json:"gitlab_username"`
+	PatEncrypted   []byte             `json:"pat_encrypted"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type VerificationCode struct {
 	ID        pgtype.UUID        `json:"id"`
 	Email     string             `json:"email"`
@@ -413,6 +422,21 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+}
+
+type WorkspaceGitlabConnection struct {
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	GitlabProjectID       int64              `json:"gitlab_project_id"`
+	GitlabProjectPath     string             `json:"gitlab_project_path"`
+	ServiceTokenEncrypted []byte             `json:"service_token_encrypted"`
+	ServiceTokenUserID    int64              `json:"service_token_user_id"`
+	WebhookSecret         pgtype.Text        `json:"webhook_secret"`
+	WebhookGitlabID       pgtype.Int8        `json:"webhook_gitlab_id"`
+	LastSyncCursor        pgtype.Timestamptz `json:"last_sync_cursor"`
+	ConnectionStatus      string             `json:"connection_status"`
+	StatusMessage         pgtype.Text        `json:"status_message"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkspaceInvitation struct {
