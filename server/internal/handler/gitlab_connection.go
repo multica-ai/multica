@@ -114,3 +114,38 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 		ConnectionStatus:     row.ConnectionStatus,
 	})
 }
+
+// GetGitlabWorkspaceConnection returns sanitized connection status (never the token).
+func (h *Handler) GetGitlabWorkspaceConnection(w http.ResponseWriter, r *http.Request) {
+	if !h.GitlabEnabled {
+		writeError(w, http.StatusNotFound, "gitlab integration disabled")
+		return
+	}
+	workspaceID := chi.URLParam(r, "workspaceID")
+	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
+		return
+	}
+	row, err := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "gitlab is not connected")
+			return
+		}
+		slog.Error("read workspace_gitlab_connection failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to read connection")
+		return
+	}
+
+	statusMessage := ""
+	if row.StatusMessage.Valid {
+		statusMessage = row.StatusMessage.String
+	}
+	writeJSON(w, http.StatusOK, gitlabConnectionResponse{
+		WorkspaceID:        uuidToString(row.WorkspaceID),
+		GitlabProjectID:    row.GitlabProjectID,
+		GitlabProjectPath:  row.GitlabProjectPath,
+		ServiceTokenUserID: row.ServiceTokenUserID,
+		ConnectionStatus:   row.ConnectionStatus,
+		StatusMessage:      statusMessage,
+	})
+}

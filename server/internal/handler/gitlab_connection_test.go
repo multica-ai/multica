@@ -87,6 +87,65 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
 }
 
+func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v4/user":
+			w.Write([]byte(`{"id": 555, "username": "svc-bot"}`))
+		case "/api/v4/projects/42":
+			w.Write([]byte(`{"id": 42, "path_with_namespace": "team/app"}`))
+		}
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	// Set up one connection via the POST handler.
+	body, _ := json.Marshal(map[string]string{"project": "42", "token": "glpat-abc"})
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	h.ConnectGitlabWorkspace(httptest.NewRecorder(), req)
+
+	// Now GET.
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.Header.Set("X-User-ID", testUserID)
+	req2 = withURLParam(req2, "workspaceID", testWorkspaceID)
+	rr := httptest.NewRecorder()
+	h.GetGitlabWorkspaceConnection(rr, req2)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+	var got gitlabConnectionResponse
+	json.Unmarshal(rr.Body.Bytes(), &got)
+	if got.GitlabProjectPath != "team/app" {
+		t.Errorf("got %+v", got)
+	}
+
+	// Clean up.
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+}
+
+func TestGetGitlabWorkspaceConnection_NotConnected(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer fake.Close()
+	h := buildHandlerWithGitlab(t, fake.URL)
+	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	rr := httptest.NewRecorder()
+	h.GetGitlabWorkspaceConnection(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
 func TestConnectGitlabWorkspace_BadToken(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
