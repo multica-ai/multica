@@ -290,6 +290,25 @@ func TestCommentTriggerOnComment(t *testing.T) {
 			t.Errorf("expected 1 pending task (assignee mentioned in thread root), got %d", n)
 		}
 	})
+
+	t.Run("comment from a different agent triggers the assignee agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// A second agent posts a comment on the issue (sequential chaining use case).
+		secondAgentID := createSecondAgent(t)
+		postCommentAsAgent(t, issueID, "Tu peux démarrer", secondAgentID, nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (comment from different agent), got %d", n)
+		}
+	})
+
+	t.Run("comment from the assignee agent does not trigger itself", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// The assignee agent posts a comment on its own issue — must not loop.
+		postCommentAsAgent(t, issueID, "I am working on this", agentID, nil)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (assignee self-comment), got %d", n)
+		}
+	})
 }
 
 // TestCommentTriggerAtAllSuppression verifies that @all mentions do not
