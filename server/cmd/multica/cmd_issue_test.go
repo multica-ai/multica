@@ -137,6 +137,71 @@ func TestResolveAssignee(t *testing.T) {
 	})
 }
 
+func TestIssueDisplayID(t *testing.T) {
+	tests := []struct {
+		name  string
+		issue map[string]any
+		want  string
+	}{
+		{
+			name:  "returns identifier when present",
+			issue: map[string]any{"identifier": "PRA-42", "id": "5847db82-bf0a-404f-b987-5cfc2d402ebd"},
+			want:  "PRA-42",
+		},
+		{
+			name:  "falls back to truncated UUID when identifier is absent",
+			issue: map[string]any{"id": "5847db82-bf0a-404f-b987-5cfc2d402ebd"},
+			want:  "5847db82",
+		},
+		{
+			name:  "falls back to truncated UUID when identifier is empty string",
+			issue: map[string]any{"identifier": "", "id": "5847db82-bf0a-404f-b987-5cfc2d402ebd"},
+			want:  "5847db82",
+		},
+		{
+			name:  "empty map returns empty string",
+			issue: map[string]any{},
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := issueDisplayID(tt.issue)
+			if got != tt.want {
+				t.Errorf("issueDisplayID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIssueListUsesIdentifierAsID(t *testing.T) {
+	issues := []map[string]any{
+		{"identifier": "MUL-1", "id": "aaaaaaaa-0000-0000-0000-000000000001", "title": "First", "status": "todo", "priority": "high"},
+		{"identifier": "MUL-2", "id": "bbbbbbbb-0000-0000-0000-000000000002", "title": "Second", "status": "backlog", "priority": "none"},
+		{"id": "cccccccc-0000-0000-0000-000000000003", "title": "No identifier", "status": "done", "priority": "low"},
+	}
+
+	rows := make([][]string, 0, len(issues))
+	for _, issue := range issues {
+		rows = append(rows, []string{
+			issueDisplayID(issue),
+			strVal(issue, "title"),
+			strVal(issue, "status"),
+		})
+	}
+
+	// Verify identifiers are used where available, truncated UUID otherwise
+	if rows[0][0] != "MUL-1" {
+		t.Errorf("row 0 ID = %q, want MUL-1", rows[0][0])
+	}
+	if rows[1][0] != "MUL-2" {
+		t.Errorf("row 1 ID = %q, want MUL-2", rows[1][0])
+	}
+	if rows[2][0] != "cccccccc" {
+		t.Errorf("row 2 ID = %q, want cccccccc (truncated UUID fallback)", rows[2][0])
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,
