@@ -325,6 +325,24 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		s.broadcastChatDone(ctx, task)
 	}
 
+	// Auto-advance issue to in_review when a non-chat issue task completes and
+	// the issue is still in an active state (the agent didn't set it manually).
+	if task.IssueID.Valid && !task.ChatSessionID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			active := issue.Status != "in_review" && issue.Status != "done" && issue.Status != "cancelled"
+			if active {
+				if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+					ID:     task.IssueID,
+					Status: "in_review",
+				}); err != nil {
+					slog.Warn("auto in_review failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
+				} else {
+					slog.Info("issue auto-advanced to in_review", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
+				}
+			}
+		}
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
