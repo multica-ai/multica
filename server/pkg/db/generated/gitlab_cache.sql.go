@@ -39,6 +39,21 @@ func (q *Queries) ClearIssueLabels(ctx context.Context, issueID pgtype.UUID) err
 	return err
 }
 
+const deleteGitlabLabel = `-- name: DeleteGitlabLabel :exec
+DELETE FROM gitlab_label
+WHERE workspace_id = $1 AND gitlab_label_id = $2
+`
+
+type DeleteGitlabLabelParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	GitlabLabelID int64       `json:"gitlab_label_id"`
+}
+
+func (q *Queries) DeleteGitlabLabel(ctx context.Context, arg DeleteGitlabLabelParams) error {
+	_, err := q.db.Exec(ctx, deleteGitlabLabel, arg.WorkspaceID, arg.GitlabLabelID)
+	return err
+}
+
 const deleteWorkspaceCachedIssues = `-- name: DeleteWorkspaceCachedIssues :exec
 DELETE FROM issue WHERE workspace_id = $1 AND gitlab_iid IS NOT NULL
 `

@@ -24,6 +24,10 @@ WHERE workspace_id = $1 AND name = $2;
 -- name: DeleteWorkspaceGitlabLabels :exec
 DELETE FROM gitlab_label WHERE workspace_id = $1;
 
+-- name: DeleteGitlabLabel :exec
+DELETE FROM gitlab_label
+WHERE workspace_id = $1 AND gitlab_label_id = $2;
+
 -- issue_gitlab_label (issue ↔ label association) --------------------------
 
 -- name: ClearIssueLabels :exec
