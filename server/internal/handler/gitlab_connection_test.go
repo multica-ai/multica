@@ -63,7 +63,7 @@ func TestConnectGitlabWorkspace_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost,
 		fmt.Sprintf("/api/workspaces/%s/gitlab/connect", testWorkspaceID), bytes.NewReader(body))
 	req.Header.Set("X-User-ID", testUserID)
-	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	req = withURLParam(req, "id", testWorkspaceID)
 	rr := httptest.NewRecorder()
 
 	h.ConnectGitlabWorkspace(rr, req)
@@ -106,13 +106,13 @@ func TestGetGitlabWorkspaceConnection_Connected(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"project": "42", "token": "glpat-abc"})
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 	req.Header.Set("X-User-ID", testUserID)
-	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	req = withURLParam(req, "id", testWorkspaceID)
 	h.ConnectGitlabWorkspace(httptest.NewRecorder(), req)
 
 	// Now GET.
 	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 	req2.Header.Set("X-User-ID", testUserID)
-	req2 = withURLParam(req2, "workspaceID", testWorkspaceID)
+	req2 = withURLParam(req2, "id", testWorkspaceID)
 	rr := httptest.NewRecorder()
 	h.GetGitlabWorkspaceConnection(rr, req2)
 
@@ -137,7 +137,7 @@ func TestGetGitlabWorkspaceConnection_NotConnected(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-User-ID", testUserID)
-	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	req = withURLParam(req, "id", testWorkspaceID)
 	rr := httptest.NewRecorder()
 	h.GetGitlabWorkspaceConnection(rr, req)
 
@@ -165,13 +165,13 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"project": "1", "token": "glpat-x"})
 	postReq := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 	postReq.Header.Set("X-User-ID", testUserID)
-	postReq = withURLParam(postReq, "workspaceID", testWorkspaceID)
+	postReq = withURLParam(postReq, "id", testWorkspaceID)
 	h.ConnectGitlabWorkspace(httptest.NewRecorder(), postReq)
 
 	// DELETE.
 	delReq := httptest.NewRequest(http.MethodDelete, "/", nil)
 	delReq.Header.Set("X-User-ID", testUserID)
-	delReq = withURLParam(delReq, "workspaceID", testWorkspaceID)
+	delReq = withURLParam(delReq, "id", testWorkspaceID)
 	rr := httptest.NewRecorder()
 	h.DisconnectGitlabWorkspace(rr, delReq)
 
@@ -182,7 +182,7 @@ func TestDisconnectGitlabWorkspace_Success(t *testing.T) {
 	// GET should now 404.
 	getReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	getReq.Header.Set("X-User-ID", testUserID)
-	getReq = withURLParam(getReq, "workspaceID", testWorkspaceID)
+	getReq = withURLParam(getReq, "id", testWorkspaceID)
 	rr2 := httptest.NewRecorder()
 	h.GetGitlabWorkspaceConnection(rr2, getReq)
 	if rr2.Code != http.StatusNotFound {
@@ -204,7 +204,7 @@ func TestConnectGitlabWorkspace_BadToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost,
 		fmt.Sprintf("/api/workspaces/%s/gitlab/connect", testWorkspaceID), bytes.NewReader(body))
 	req.Header.Set("X-User-ID", testUserID)
-	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	req = withURLParam(req, "id", testWorkspaceID)
 	rr := httptest.NewRecorder()
 
 	h.ConnectGitlabWorkspace(rr, req)

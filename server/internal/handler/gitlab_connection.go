@@ -33,7 +33,7 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "gitlab integration disabled")
 		return
 	}
-	workspaceID := chi.URLParam(r, "workspaceID")
+	workspaceID := chi.URLParam(r, "id")
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
@@ -122,7 +122,7 @@ func (h *Handler) DisconnectGitlabWorkspace(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "gitlab integration disabled")
 		return
 	}
-	workspaceID := chi.URLParam(r, "workspaceID")
+	workspaceID := chi.URLParam(r, "id")
 	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
 		return
 	}
@@ -140,7 +140,7 @@ func (h *Handler) GetGitlabWorkspaceConnection(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusNotFound, "gitlab integration disabled")
 		return
 	}
-	workspaceID := chi.URLParam(r, "workspaceID")
+	workspaceID := chi.URLParam(r, "id")
 	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
 		return
 	}
