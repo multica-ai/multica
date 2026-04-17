@@ -19,6 +19,7 @@ dist-electron
 
 # env
 .env*
+!.env.bot
 !.env.example
 # Desktop production config is public (backend URL, etc.) — track it so
 # `pnpm package` produces a release-ready build without extra setup.
