@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { normalizeGitVersion, stripLeadingSeparator } from "./package.mjs";
+import {
+  builderArgsForTarget,
+  normalizeGitVersion,
+  parsePackageArgs,
+  resolveBuildMatrix,
+  stripLeadingSeparator,
+} from "./package.mjs";
 
 describe("normalizeGitVersion", () => {
   it("returns null for empty / nullish input", () => {
@@ -57,5 +63,151 @@ describe("stripLeadingSeparator", () => {
 
   it("handles an empty array", () => {
     expect(stripLeadingSeparator([])).toEqual([]);
+  });
+});
+
+describe("parsePackageArgs", () => {
+  it("collects per-platform targets and shared args", () => {
+    expect(
+      parsePackageArgs([
+        "--win", "nsis",
+        "--mac", "dmg", "zip",
+        "--arm64",
+        "--publish", "never",
+      ]),
+    ).toEqual({
+      allPlatforms: false,
+      sharedArgs: ["--publish", "never"],
+      platformTargets: {
+        mac: ["dmg", "zip"],
+        win: ["nsis"],
+        linux: [],
+      },
+      requestedPlatforms: ["win", "mac"],
+      requestedArchs: ["arm64"],
+    });
+  });
+
+  it("expands combined short flags", () => {
+    expect(parsePackageArgs(["-mw", "--x64"]).requestedPlatforms).toEqual([
+      "mac",
+      "win",
+    ]);
+  });
+
+  it("tracks the all-platforms shortcut", () => {
+    expect(parsePackageArgs(["--all-platforms", "--publish", "never"]).allPlatforms).toBe(true);
+  });
+});
+
+describe("resolveBuildMatrix", () => {
+  it("defaults to the current host platform and arch", () => {
+    expect(
+      resolveBuildMatrix(
+        {
+          allPlatforms: false,
+          sharedArgs: [],
+          platformTargets: { mac: [], win: [], linux: [] },
+          requestedPlatforms: [],
+          requestedArchs: [],
+        },
+        "darwin",
+        "arm64",
+      ),
+    ).toEqual([{ platform: "mac", arch: "arm64" }]);
+  });
+
+  it("expands all-platforms on macOS", () => {
+    expect(
+      resolveBuildMatrix(
+        {
+          allPlatforms: true,
+          sharedArgs: [],
+          platformTargets: { mac: [], win: [], linux: [] },
+          requestedPlatforms: [],
+          requestedArchs: [],
+        },
+        "darwin",
+        "arm64",
+      ),
+    ).toEqual([
+      { platform: "mac", arch: "x64" },
+      { platform: "mac", arch: "arm64" },
+      { platform: "win", arch: "x64" },
+      { platform: "win", arch: "arm64" },
+      { platform: "linux", arch: "x64" },
+    ]);
+  });
+
+  it("rejects unsupported architectures", () => {
+    expect(() =>
+      resolveBuildMatrix(
+        {
+          allPlatforms: false,
+          sharedArgs: [],
+          platformTargets: { mac: [], win: [], linux: [] },
+          requestedPlatforms: ["win"],
+          requestedArchs: ["universal"],
+        },
+        "darwin",
+        "arm64",
+      ),
+    ).toThrow(/unsupported Desktop CLI architecture/);
+  });
+});
+
+describe("builderArgsForTarget", () => {
+  it("adds scoped output directories for multi-target builds", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "win", arch: "arm64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "never"],
+          platformTargets: { mac: [], win: ["nsis"], linux: [] },
+          requestedPlatforms: ["win"],
+          requestedArchs: ["arm64"],
+        },
+        "1.2.3",
+        {
+          disableMacNotarize: true,
+          hostPlatform: "darwin",
+          useScopedOutputDir: true,
+        },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=1.2.3",
+      "-c.mac.notarize=false",
+      "--win",
+      "nsis",
+      "--arm64",
+      "--publish",
+      "never",
+      "-c.directories.output=dist/win-arm64",
+    ]);
+  });
+
+  it("defaults linux cross-builds to AppImage on non-Linux hosts", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "linux", arch: "x64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "never"],
+          platformTargets: { mac: [], win: [], linux: [] },
+          requestedPlatforms: ["linux"],
+          requestedArchs: ["x64"],
+        },
+        "1.2.3",
+        { hostPlatform: "darwin" },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=1.2.3",
+      "--linux",
+      "AppImage",
+      "--x64",
+      "--publish",
+      "never",
+    ]);
   });
 });

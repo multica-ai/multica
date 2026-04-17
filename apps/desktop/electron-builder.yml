@@ -37,7 +37,7 @@ linux:
 win:
   target:
     - nsis
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: multica-desktop-${version}-${arch}-setup.${ext}
 publish:
   provider: github
   owner: multica-ai

@@ -8,10 +8,9 @@ import { pipeline } from "stream/promises";
 import { tmpdir } from "os";
 import { Readable } from "stream";
 
-// Desktop bootstraps its own copy of the `multica` CLI into userData on first
-// launch, so users never have to brew-install anything. Build-time decoupled:
-// we don't bundle the binary into the .app, we download whatever the upstream
-// release is at first run.
+// Desktop prefers the bundled `multica` CLI shipped inside the app for
+// same-repo builds, but it can also repair or bootstrap a managed copy in
+// userData on first launch when the bundled binary is missing or unusable.
 
 const GITHUB_LATEST_BASE =
   "https://github.com/multica-ai/multica/releases/latest/download";
@@ -143,6 +142,7 @@ async function installFresh(): Promise<string> {
     }
 
     await mkdir(dirname(target), { recursive: true });
+    await rm(target, { force: true }).catch(() => {});
     await rename(extractedBin, target);
     await chmod(target, 0o755);
 
@@ -166,8 +166,10 @@ async function installFresh(): Promise<string> {
  * the managed userData location, returns it immediately. Otherwise downloads
  * the latest release asset for the current platform and installs it.
  */
-export async function ensureManagedCli(): Promise<string> {
+export async function ensureManagedCli(
+  options: { forceInstall?: boolean } = {},
+): Promise<string> {
   const target = managedCliPath();
-  if (existsSync(target)) return target;
+  if (existsSync(target) && !options.forceInstall) return target;
   return installFresh();
 }
