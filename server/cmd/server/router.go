@@ -55,7 +55,7 @@ func allowedOrigins() []string {
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
 	queries := db.New(pool)
-	emailSvc := service.NewEmailService()
+	emailSvc := service.NewEmailSender()
 
 	// Initialize storage with S3 as primary, fallback to local
 	var store storage.Storage

@@ -39,14 +39,14 @@ type Handler struct {
 	Bus              *events.Bus
 	TaskService      *service.TaskService
 	AutopilotService *service.AutopilotService
-	EmailService     *service.EmailService
+	EmailService     service.EmailSender
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService service.EmailSender, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate

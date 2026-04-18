@@ -53,7 +53,7 @@ func TestMain(m *testing.M) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
-	emailSvc := service.NewEmailService()
+	emailSvc := service.NewEmailSender()
 	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil)
 	testPool = pool
 
