@@ -323,6 +323,21 @@ func TestBuildUpdateIssueInput(t *testing.T) {
 			wantDesc: &descNew,
 			wantDue:  &due,
 		},
+		{
+			name:          "status unchanged emits no labels or state event",
+			old:           oldSnap{status: "in_progress", priority: "none"},
+			req:           UpdateIssueRequest{Status: strPtr("in_progress")},
+			wantAddLabels: nil,
+			wantRemove:    nil,
+			// wantState defaults to nil — no state_event for a no-op status
+		},
+		{
+			name:          "priority none → none emits nothing",
+			old:           oldSnap{status: "todo", priority: "none"},
+			req:           UpdateIssueRequest{Priority: strPtr("none")},
+			wantAddLabels: nil,
+			wantRemove:    nil,
+		},
 	}
 
 	for _, tc := range cases {
