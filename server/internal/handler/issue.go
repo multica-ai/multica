@@ -1196,6 +1196,17 @@ func buildUpsertParamsFromCreate(wsUUID pgtype.UUID, projectID int64, issue gitl
 	}
 }
 
+// explicitClearFields captures which fields of a PATCH were present in the
+// request body with a `null` value. Derived from rawFields + the typed
+// request struct: when the JSON key is present but the parsed pointer is
+// nil, the user meant "clear". Used to drive explicit-clear semantics in
+// buildUpsertParamsForUpdate (so the cache upsert writes SQL NULL rather
+// than preserving prev values).
+type explicitClearFields struct {
+	Assignee bool // assignee_type OR assignee_id was present-and-null
+	DueDate  bool // due_date was present-and-null
+}
+
 // buildUpsertParamsForUpdate builds UpsertIssueFromGitlabParams for the PATCH
 // write-through path. The key difference from buildUpsertParamsFromCreate is
 // that UpsertIssueFromGitlab's DO UPDATE clause blindly overwrites
@@ -1207,9 +1218,11 @@ func buildUpsertParamsFromCreate(wsUUID pgtype.UUID, projectID int64, issue gitl
 //   - The translator resolved an agent assignee from an agent::<slug> label
 //     (so the GitLab-side change wins).
 //   - The request explicitly sets a new due_date (rawFields makes the
-//     distinction between "absent" and "null"; we only write a new non-null
-//     value here — clearing continues to happen via the later UpdateIssue
-//     patch so we don't zero the column via the upsert path).
+//     distinction between "absent" and "null"). A non-null value lands
+//     here; an explicit-null (clear.DueDate) zeroes the column via the
+//     upsert's bare EXCLUDED assignment.
+//   - The request explicitly clears the assignee (clear.Assignee) —
+//     we skip the member-preserve branch so the upsert writes NULL.
 //
 // Title / description / status / priority / gitlab_* / external_updated_at
 // come from the GitLab response (via values) as before — the upsert IS how
@@ -1220,6 +1233,7 @@ func buildUpsertParamsForUpdate(
 	issue gitlabapi.Issue,
 	values gitlabsync.IssueValues,
 	req UpdateIssueRequest,
+	clear explicitClearFields,
 ) db.UpsertIssueFromGitlabParams {
 	// Default both to zero. We'll fill them in below per the following rules:
 	//   - Agent assignment: GitLab's labels are the source of truth. If the
@@ -1228,7 +1242,9 @@ func buildUpsertParamsForUpdate(
 	//     label was dropped, either by this PATCH or by an outside actor).
 	//   - Member assignment: cache-only in Phase 3b (translator drops it).
 	//     Preserve the prev cache value so a GitLab-originated PATCH that
-	//     only touches labels doesn't wipe the member assignee.
+	//     only touches labels doesn't wipe the member assignee — EXCEPT
+	//     when the request explicitly cleared the assignee, in which case
+	//     the zero (NULL) is what the user wants.
 	var assigneeType pgtype.Text
 	var assigneeID pgtype.UUID
 	dueDate := prevIssue.DueDate
@@ -1240,10 +1256,14 @@ func buildUpsertParamsForUpdate(
 		var newID pgtype.UUID
 		_ = newID.Scan(values.AssigneeID)
 		assigneeID = newID
+	case clear.Assignee:
+		// Explicit-null clear: leave the zero values so the upsert writes
+		// SQL NULL for assignee_type / assignee_id (bare EXCLUDED). This
+		// branch must come before the member-preserve case below so the
+		// user's "Unassigned" click isn't silently reverted.
 	case prevIssue.AssigneeType.String == "member":
 		// Member assignee is cache-only (translator drops member assignees).
-		// Preserve it so non-assignee PATCHes don't wipe it. Explicit member
-		// clearing continues to flow through the narg UpdateIssue step below.
+		// Preserve it so non-assignee PATCHes don't wipe it.
 		assigneeType = prevIssue.AssigneeType
 		assigneeID = prevIssue.AssigneeID
 	default:
@@ -1252,10 +1272,12 @@ func buildUpsertParamsForUpdate(
 		// desired cache state is unassigned — leave the zero values.
 	}
 
-	// If the PATCH body set a non-empty due_date, use it. (Explicit null
-	// clearing is applied via the later UpdateIssue narg-patch, which COALESCE
-	// handles — we avoid zeroing the column through the upsert path here.)
-	if req.DueDate != nil && *req.DueDate != "" {
+	// due_date: explicit-null clear wins over prev preservation; otherwise
+	// a non-empty new value replaces prev; otherwise we keep prev.
+	switch {
+	case clear.DueDate:
+		dueDate = pgtype.Timestamptz{Valid: false}
+	case req.DueDate != nil && *req.DueDate != "":
 		if t, err := time.Parse(time.RFC3339, *req.DueDate); err == nil {
 			dueDate = pgtype.Timestamptz{Time: t, Valid: true}
 		}
@@ -1316,12 +1338,12 @@ type writeThroughError struct {
 
 func (e *writeThroughError) Error() string {
 	if e.err != nil {
-		// Use %w so errors.Is / errors.As traverse the wrapped chain at
-		// higher layers (e.g. classifyBatchError matching sentinel errors
-		// through the wrapper); Unwrap() below is what actually exposes
-		// the chain, but fmt.Errorf with %w also avoids double-wrapping
-		// the formatted message.
-		return fmt.Errorf("%s: %w", e.msg, e.err).Error()
+		// Plain string concatenation — %w in fmt.Errorf is only useful
+		// when the result is returned as an error (so errors.Is/As can
+		// traverse), but here we immediately collapse to a string. The
+		// wrapped-chain traversal is provided by Unwrap() below, which
+		// lets classifyBatchError match sentinels through this wrapper.
+		return e.msg + ": " + e.err.Error()
 	}
 	return e.msg
 }
@@ -1391,19 +1413,34 @@ func (h *Handler) updateSingleIssueWriteThrough(
 		AssigneeID:   req.AssigneeID,
 		DueDate:      req.DueDate,
 	}
-	// Explicit-null assignee clearing: a PATCH body with
-	// {"assignee_type": null, "assignee_id": null} must remove the
-	// agent::<slug> label on GitLab. The req fields arrive as nil *string
-	// (indistinguishable from "absent"), so we use rawFields to tell the
-	// difference — when the key is present but the pointer is nil, pass a
-	// pointer to the empty string so BuildUpdateIssueInput diffs to "clear".
+	// Explicit-null clearing. The req pointer fields arrive as nil *string
+	// for both "field absent" and "field: null" — we use rawFields (the
+	// raw JSON keys present in the body) to tell them apart.
+	//
+	//   - assignee_type / assignee_id: a PATCH of
+	//     {"assignee_type": null, "assignee_id": null} must remove the
+	//     agent::<slug> label on GitLab. Pass &"" so BuildUpdateIssueInput
+	//     diffs to "clear".
+	//   - due_date: a PATCH of {"due_date": null} must send due_date: ""
+	//     to GitLab (GitLab's clear-date signal).
+	//
+	// We also derive explicitClearFields here so buildUpsertParamsForUpdate
+	// knows to write SQL NULL via the upsert path rather than preserving
+	// prevIssue values.
+	var clear explicitClearFields
 	if rawFields != nil {
 		empty := ""
 		if _, present := rawFields["assignee_type"]; present && req.AssigneeType == nil {
 			translatorReq.AssigneeType = &empty
+			clear.Assignee = true
 		}
 		if _, present := rawFields["assignee_id"]; present && req.AssigneeID == nil {
 			translatorReq.AssigneeID = &empty
+			clear.Assignee = true
+		}
+		if _, present := rawFields["due_date"]; present && req.DueDate == nil {
+			translatorReq.DueDate = &empty
+			clear.DueDate = true
 		}
 	}
 	glInput := gitlabsync.BuildUpdateIssueInput(oldSnap, translatorReq, agentSlugByUUID)
@@ -1450,7 +1487,7 @@ func (h *Handler) updateSingleIssueWriteThrough(
 	qtxGL := h.Queries.WithTx(glTx)
 
 	cacheRow, upErr := qtxGL.UpsertIssueFromGitlab(ctx,
-		buildUpsertParamsForUpdate(prevIssue, prevIssue.GitlabProjectID.Int64, *glIssue, values, req))
+		buildUpsertParamsForUpdate(prevIssue, prevIssue.GitlabProjectID.Int64, *glIssue, values, req, clear))
 	if upErr != nil && !errors.Is(upErr, pgx.ErrNoRows) {
 		slog.Error("upsert gitlab cache row on update", "error", upErr)
 		return nil, db.Issue{}, &writeThroughError{

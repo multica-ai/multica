@@ -1403,6 +1403,165 @@ func TestUpdateIssue_WriteThroughExplicitNullAssigneeRemovesAgentLabel(t *testin
 	}
 }
 
+// TestUpdateIssue_WriteThroughExplicitNullDueDateClears guards the symmetric
+// I-new-1 regression: a PATCH of {"due_date": null} on a GitLab-connected
+// issue must send due_date: "" to GitLab (GitLab's clear-date signal) AND
+// NULL the cache row's due_date column. The req.DueDate field arrives as
+// nil *string (indistinguishable from "absent"), so the handler uses
+// rawFields to tell the difference — an empty-string pointer tells the
+// translator "cleared", and an explicit-clear marker skips the upsert's
+// preserve-prev-due-date branch so the narg patch writes SQL NULL.
+func TestUpdateIssue_WriteThroughExplicitNullDueDateClears(t *testing.T) {
+	ctx := context.Background()
+
+	var gitlabBody map[string]any
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gitlabBody)
+		w.Header().Set("Content-Type", "application/json")
+		// GitLab responds with due_date cleared (empty string).
+		_, _ = w.Write([]byte(`{"id":9301,"iid":212,"title":"T","state":"opened",
+			"labels":["status::todo","priority::none"],"due_date":"",
+			"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	// Seed the issue WITH a due_date to prove the PATCH clears it.
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 due_date,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 3030, 'T', '', 'todo', 'none',
+		         '2026-05-01T00:00:00Z',
+		         212, 42, 9301, '2026-04-17T12:00:00Z',
+		         'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	// PATCH must be raw JSON to preserve `null` semantics.
+	body := []byte(`{"due_date": null}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// GitLab's PUT body MUST include due_date as the empty string (GitLab's
+	// convention for "clear the date"). A missing due_date key or a non-empty
+	// string means the clear was dropped.
+	if got, ok := gitlabBody["due_date"]; !ok {
+		t.Errorf("GitLab PATCH body missing due_date key — explicit-null dropped (I-new-1)")
+	} else if s, sok := got.(string); !sok || s != "" {
+		t.Errorf("GitLab PATCH due_date = %v (%T), want empty string (I-new-1)", got, got)
+	}
+
+	// Cache row's due_date must be NULL.
+	var dueDateNull bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT due_date IS NULL FROM issue WHERE id = $1::uuid`, issueID).Scan(&dueDateNull); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if !dueDateNull {
+		t.Errorf("cached due_date not cleared, want NULL (I-new-1)")
+	}
+}
+
+// TestUpdateIssue_WriteThroughExplicitNullMemberAssigneeClears guards the
+// symmetric I-new-2 regression: a PATCH of
+// {"assignee_type": null, "assignee_id": null} on an issue that currently
+// has a MEMBER-typed assignee must clear the assignee on the cache row.
+// Member assignees are cache-only in Phase 3b (no label on GitLab), so the
+// translator correctly no-ops. But the B1 fix added a
+// "preserve member assignee through upsert" branch that wrongly fires on
+// explicit-null — the explicit-clear path must skip preservation and let
+// the narg patch write SQL NULL.
+func TestUpdateIssue_WriteThroughExplicitNullMemberAssigneeClears(t *testing.T) {
+	ctx := context.Background()
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":9302,"iid":213,"title":"T","state":"opened",
+			"labels":["status::todo","priority::none"],"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	// issue.assignee_id has no FK constraint — use a fresh UUID verbatim
+	// (matches the pattern in TestUpdateIssue_WriteThroughPreservesAssigneeAndDueDateOnTitleOnlyPatch).
+	memberUserID := uuid.New().String()
+
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 assignee_type, assignee_id,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 3040, 'T', '', 'todo', 'none',
+		         'member', $3::uuid,
+		         213, 42, 9302, '2026-04-17T12:00:00Z',
+		         'member', $4::uuid, 0)`,
+		issueID, testWorkspaceID, memberUserID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(`{"assignee_type": null, "assignee_id": null}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Cache row's assignee must be cleared.
+	var (
+		cachedType *string
+		cachedID   *string
+	)
+	if err := testPool.QueryRow(ctx,
+		`SELECT assignee_type, assignee_id::text FROM issue WHERE id = $1::uuid`,
+		issueID).Scan(&cachedType, &cachedID); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if cachedType != nil {
+		t.Errorf("cached assignee_type = %q, want NULL (I-new-2)", *cachedType)
+	}
+	if cachedID != nil {
+		t.Errorf("cached assignee_id = %q, want NULL (I-new-2)", *cachedID)
+	}
+}
+
 // TestDeleteIssue_WriteThrough_GitLab404IsIdempotent verifies the handler-level
 // idempotency contract that pairs with the client-level test in pkg/gitlab:
 // when GitLab returns 404 on DELETE /issues/:iid (issue already gone), the
