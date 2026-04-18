@@ -197,3 +197,211 @@ func TestAddReaction_WriteThroughGitLabErrorReturns502(t *testing.T) {
 		t.Errorf("cache leaked on error, count = %d", count)
 	}
 }
+
+// TestRemoveReaction_WriteThroughDeletesOnGitLab verifies that removing a
+// human-authored comment reaction on a GitLab-connected workspace looks up the
+// cache row's gitlab_award_id, calls DELETE
+// /api/v4/projects/:id/issues/:iid/notes/:note_id/award_emoji/:award_id, and
+// deletes the local cache row.
+func TestRemoveReaction_WriteThroughDeletesOnGitLab(t *testing.T) {
+	ctx := context.Background()
+	var capturedMethod, capturedPath string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	defer h.Queries.DeleteWorkspaceGitlabConnection(ctx, parseUUID(testWorkspaceID))
+
+	seedGitlabWriteThroughFixture(t, h)
+
+	issueID := seedGitlabConnectedIssue(t, 720, 42)
+	commentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, gitlab_note_id, external_updated_at)
+		 VALUES ($1, $2, $3, 'member', $4, 'x', 8910, '2026-04-17T12:00:00Z')`,
+		commentID, testWorkspaceID, issueID, testUserID,
+	); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM comment_reaction WHERE comment_id = $1`, commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment_reaction (id, workspace_id, comment_id, actor_type, actor_id, emoji, gitlab_award_id, gitlab_actor_user_id, external_updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, 'member', $3, 'heart', 9960, 7, '2026-04-17T12:00:00Z')`,
+		testWorkspaceID, commentID, testUserID); err != nil {
+		t.Fatalf("seed reaction: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"heart"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "commentId", commentID)
+	rec := httptest.NewRecorder()
+
+	h.RemoveReaction(rec, req)
+
+	if rec.Code < 200 || rec.Code >= 300 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if capturedMethod != http.MethodDelete {
+		t.Errorf("method = %s, want DELETE", capturedMethod)
+	}
+	if capturedPath != "/api/v4/projects/42/issues/720/notes/8910/award_emoji/9960" {
+		t.Errorf("path = %s", capturedPath)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM comment_reaction WHERE comment_id = $1 AND emoji = 'heart'`,
+		commentID).Scan(&count); err != nil {
+		t.Fatalf("query cache row: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("cache row not deleted, count=%d", count)
+	}
+}
+
+// TestRemoveReaction_WriteThroughAgentStaysMulticaOnly verifies that an
+// agent-authored comment reaction removal on a GitLab-connected workspace does
+// NOT call GitLab — agent reactions have no GitLab representation.
+func TestRemoveReaction_WriteThroughAgentStaysMulticaOnly(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID); err != nil {
+		t.Fatalf("look up test agent: %v", err)
+	}
+
+	var gitlabCalls int
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gitlabCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	defer h.Queries.DeleteWorkspaceGitlabConnection(ctx, parseUUID(testWorkspaceID))
+
+	seedGitlabWriteThroughFixture(t, h)
+
+	issueID := seedGitlabConnectedIssue(t, 721, 42)
+	commentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, gitlab_note_id, external_updated_at)
+		 VALUES ($1, $2, $3, 'member', $4, 'x', 8911, '2026-04-17T12:00:00Z')`,
+		commentID, testWorkspaceID, issueID, testUserID,
+	); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM comment_reaction WHERE comment_id = $1`, commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment_reaction (id, workspace_id, comment_id, actor_type, actor_id, emoji)
+		 VALUES (gen_random_uuid(), $1, $2, 'agent', $3, 'rocket')`,
+		testWorkspaceID, commentID, agentID); err != nil {
+		t.Fatalf("seed agent reaction: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"rocket"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req = withURLParam(req, "commentId", commentID)
+	rec := httptest.NewRecorder()
+
+	h.RemoveReaction(rec, req)
+
+	if rec.Code < 200 || rec.Code >= 300 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if gitlabCalls != 0 {
+		t.Errorf("GitLab got %d calls — agent removals must stay Multica-only", gitlabCalls)
+	}
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM comment_reaction WHERE comment_id = $1 AND actor_type = 'agent' AND emoji = 'rocket'`,
+		commentID).Scan(&count); err != nil {
+		t.Fatalf("query cache row: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Multica cache row not deleted, count=%d", count)
+	}
+}
+
+// TestRemoveReaction_WriteThroughGitLabErrorPreservesCache verifies that a
+// non-idempotent GitLab error aborts the request and does NOT delete the local
+// cache row — otherwise the reaction would vanish locally while staying on
+// GitLab.
+func TestRemoveReaction_WriteThroughGitLabErrorPreservesCache(t *testing.T) {
+	ctx := context.Background()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	defer h.Queries.DeleteWorkspaceGitlabConnection(ctx, parseUUID(testWorkspaceID))
+
+	seedGitlabWriteThroughFixture(t, h)
+
+	issueID := seedGitlabConnectedIssue(t, 722, 42)
+	commentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, gitlab_note_id, external_updated_at)
+		 VALUES ($1, $2, $3, 'member', $4, 'x', 8912, '2026-04-17T12:00:00Z')`,
+		commentID, testWorkspaceID, issueID, testUserID,
+	); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM comment_reaction WHERE comment_id = $1`, commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment_reaction (id, workspace_id, comment_id, actor_type, actor_id, emoji, gitlab_award_id)
+		 VALUES (gen_random_uuid(), $1, $2, 'member', $3, 'thumbsup', 9961)`,
+		testWorkspaceID, commentID, testUserID); err != nil {
+		t.Fatalf("seed reaction: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"thumbsup"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "commentId", commentID)
+	rec := httptest.NewRecorder()
+
+	h.RemoveReaction(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("status = %d, want >=400", rec.Code)
+	}
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM comment_reaction WHERE comment_id = $1`,
+		commentID).Scan(&count); err != nil {
+		t.Fatalf("query cache row: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("cache mutated on error, count=%d", count)
+	}
+}

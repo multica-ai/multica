@@ -251,6 +251,82 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
+	// Phase 3d write-through: on a GitLab-connected workspace, human-authored
+	// reaction removals look up the cache row's gitlab_award_id, DELETE the
+	// award on GitLab's note endpoint, then drop the local row. Agent
+	// reactions have no GitLab representation — they fall through to the
+	// legacy path.
+	if h.GitlabEnabled && h.GitlabResolver != nil && actorType != "agent" {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), comment.WorkspaceID)
+		if wsErr == nil {
+			existing, exErr := h.Queries.GetCommentReactionByKey(r.Context(), db.GetCommentReactionByKeyParams{
+				CommentID: comment.ID,
+				ActorType: actorType,
+				ActorID:   parseUUID(actorID),
+				Emoji:     req.Emoji,
+			})
+			if exErr != nil {
+				if errors.Is(exErr, pgx.ErrNoRows) {
+					// No local row — idempotent success. No GitLab call.
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				slog.Error("lookup comment reaction for delete", "error", exErr, "comment_id", commentId)
+				writeError(w, http.StatusInternalServerError, "failed to remove reaction")
+				return
+			}
+
+			issue, issueErr := h.Queries.GetIssue(r.Context(), comment.IssueID)
+			if issueErr != nil {
+				slog.Error("load parent issue for gitlab reaction delete",
+					"error", issueErr, "comment_id", commentId)
+				writeError(w, http.StatusInternalServerError, "failed to load issue")
+				return
+			}
+			if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid || !comment.GitlabNoteID.Valid {
+				slog.Error("gitlab connected workspace but comment/issue missing gitlab refs",
+					"comment_id", commentId, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "comment or issue not linked to gitlab")
+				return
+			}
+
+			if existing.GitlabAwardID.Valid {
+				token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+				if tokErr != nil {
+					slog.Error("resolve gitlab token", "error", tokErr, "workspace_id", workspaceID)
+					writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+					return
+				}
+
+				if err := h.Gitlab.DeleteNoteAwardEmoji(r.Context(), token,
+					issue.GitlabProjectID.Int64, int(issue.GitlabIid.Int32),
+					comment.GitlabNoteID.Int64, existing.GitlabAwardID.Int64); err != nil {
+					slog.Error("gitlab delete note award_emoji", "error", err, "comment_id", commentId)
+					writeError(w, http.StatusBadGateway, "gitlab delete award_emoji failed")
+					return
+				}
+			}
+			// No gitlab_award_id → Multica-native row (pre-connection). Just drop locally.
+
+			if err := h.Queries.DeleteCommentReactionByID(r.Context(), existing.ID); err != nil {
+				slog.Error("delete comment reaction cache row", "error", err, "reaction_id", uuidToString(existing.ID))
+				writeError(w, http.StatusInternalServerError, "failed to remove reaction")
+				return
+			}
+
+			h.publish(protocol.EventReactionRemoved, workspaceID, actorType, actorID, map[string]any{
+				"comment_id": commentId,
+				"issue_id":   uuidToString(comment.IssueID),
+				"emoji":      req.Emoji,
+				"actor_type": actorType,
+				"actor_id":   actorID,
+			})
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// wsErr != nil → fall through to legacy path (non-connected workspace).
+	}
+
 	if err := h.Queries.RemoveReaction(r.Context(), db.RemoveReactionParams{
 		CommentID: comment.ID,
 		ActorType: actorType,
