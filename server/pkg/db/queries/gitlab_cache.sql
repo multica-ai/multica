@@ -171,3 +171,28 @@ ON CONFLICT (gitlab_award_id) WHERE gitlab_award_id IS NOT NULL DO UPDATE SET
     gitlab_actor_user_id = EXCLUDED.gitlab_actor_user_id,
     external_updated_at = EXCLUDED.external_updated_at
 RETURNING *;
+
+-- name: UpsertCommentReactionFromGitlab :one
+INSERT INTO comment_reaction (
+    workspace_id,
+    comment_id,
+    actor_type,
+    actor_id,
+    gitlab_actor_user_id,
+    emoji,
+    gitlab_award_id,
+    external_updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (gitlab_award_id) WHERE gitlab_award_id IS NOT NULL DO UPDATE SET
+    actor_type = EXCLUDED.actor_type,
+    actor_id = EXCLUDED.actor_id,
+    gitlab_actor_user_id = EXCLUDED.gitlab_actor_user_id,
+    emoji = EXCLUDED.emoji,
+    external_updated_at = EXCLUDED.external_updated_at
+WHERE comment_reaction.external_updated_at IS NULL
+   OR comment_reaction.external_updated_at < EXCLUDED.external_updated_at
+RETURNING *;
+
+-- name: DeleteCommentReactionByGitlabAwardID :exec
+DELETE FROM comment_reaction WHERE gitlab_award_id = $1;

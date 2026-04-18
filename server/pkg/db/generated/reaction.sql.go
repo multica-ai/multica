@@ -15,7 +15,7 @@ const addReaction = `-- name: AddReaction :one
 INSERT INTO comment_reaction (comment_id, workspace_id, actor_type, actor_id, emoji)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (comment_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = comment_reaction.created_at
-RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at
+RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at, gitlab_actor_user_id
 `
 
 type AddReactionParams struct {
@@ -43,12 +43,15 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (Comme
 		&i.ActorID,
 		&i.Emoji,
 		&i.CreatedAt,
+		&i.GitlabAwardID,
+		&i.ExternalUpdatedAt,
+		&i.GitlabActorUserID,
 	)
 	return i, err
 }
 
 const listReactionsByCommentIDs = `-- name: ListReactionsByCommentIDs :many
-SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at FROM comment_reaction
+SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at, gitlab_actor_user_id FROM comment_reaction
 WHERE comment_id = ANY($1::uuid[])
 ORDER BY created_at ASC
 `
@@ -70,6 +73,9 @@ func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgty
 			&i.ActorID,
 			&i.Emoji,
 			&i.CreatedAt,
+			&i.GitlabAwardID,
+			&i.ExternalUpdatedAt,
+			&i.GitlabActorUserID,
 		); err != nil {
 			return nil, err
 		}

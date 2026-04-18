@@ -189,13 +189,16 @@ type Comment struct {
 }
 
 type CommentReaction struct {
-	ID          pgtype.UUID        `json:"id"`
-	CommentID   pgtype.UUID        `json:"comment_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ActorType   string             `json:"actor_type"`
-	ActorID     pgtype.UUID        `json:"actor_id"`
-	Emoji       string             `json:"emoji"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                pgtype.UUID        `json:"id"`
+	CommentID         pgtype.UUID        `json:"comment_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ActorType         string             `json:"actor_type"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	Emoji             string             `json:"emoji"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	GitlabAwardID     pgtype.Int8        `json:"gitlab_award_id"`
+	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+	GitlabActorUserID pgtype.Int8        `json:"gitlab_actor_user_id"`
 }
 
 type DaemonConnection struct {
