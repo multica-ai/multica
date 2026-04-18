@@ -175,19 +175,24 @@ func ApplyIssueHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 
 // shouldEnqueueAgentOnWebhook decides whether the post-upsert cache row
 // represents a fresh agent assignment worth spawning a task for. Returns
-// true only when the current row is agent-assigned AND (the prior row was
-// NOT an agent, OR it was a different agent). Same-agent replays are no-ops.
+// true only when the current row is agent-assigned, NOT in backlog, AND
+// (the prior row was NOT an agent, OR it was a different agent).
+// Same-agent replays are no-ops.
 //
-// Backlog issues are still enqueued here — the webhook can't faithfully
-// mirror the handler's `status != 'backlog'` gate because the translator
-// maps GitLab state to Multica status, and the hook payload may land
-// before labels catch up. TaskEnqueuer.EnqueueTaskForIssue still requires a
-// non-archived agent with a runtime, so an unready agent silently no-ops.
+// Backlog status gate matches the handler's write-through path
+// (shouldEnqueueAgentTask): issues parked in backlog don't auto-run even
+// when an agent is assigned. The webhook payload's labels drive status
+// via TranslateIssue in the same step, so the gate sees the authoritative
+// new-state status. TaskEnqueuer.EnqueueTaskForIssue additionally requires
+// a non-archived agent with a runtime — unready agents silently no-op.
 func shouldEnqueueAgentOnWebhook(prior, cur db.Issue) bool {
 	if !cur.AssigneeType.Valid || cur.AssigneeType.String != "agent" {
 		return false
 	}
 	if !cur.AssigneeID.Valid {
+		return false
+	}
+	if cur.Status == "backlog" {
 		return false
 	}
 	// Brand-new issue OR prior wasn't agent-assigned → enqueue.

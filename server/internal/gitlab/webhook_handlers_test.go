@@ -867,3 +867,43 @@ func TestApplyIssueHookEvent_DoesNotEnqueueOnNonAgentAssignee(t *testing.T) {
 		t.Fatalf("EnqueueTaskForIssue calls = %d, want 0 (no agent assignment)", got)
 	}
 }
+
+// TestApplyIssueHookEvent_DoesNotEnqueueOnBacklogAgentAssignment asserts the
+// backlog gate — an agent assigned to a backlog issue is parked, not run.
+// Mirrors handler.shouldEnqueueAgentTask's status != "backlog" check so the
+// webhook path and the Multica write-through path agree on intent.
+func TestApplyIssueHookEvent_DoesNotEnqueueOnBacklogAgentAssignment(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	seedAgentNamed(t, pool, wsID, "builder")
+
+	enq := &recordingEnqueuer{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  wsUUID,
+		ProjectID:    7,
+		Resolver:     newTestResolver(queries),
+		TaskEnqueuer: enq,
+	}
+
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 903,
+			"title": "Parked in backlog with agent",
+			"state": "opened",
+			"updated_at": "2026-04-17T10:00:00Z",
+			"labels": [{"title": "agent::builder"}, {"title": "status::backlog"}]
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := enq.callCount(); got != 0 {
+		t.Fatalf("EnqueueTaskForIssue calls = %d, want 0 (backlog status should park the agent)", got)
+	}
+}
