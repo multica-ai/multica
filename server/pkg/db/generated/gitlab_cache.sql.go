@@ -318,6 +318,8 @@ ON CONFLICT (gitlab_note_id) WHERE gitlab_note_id IS NOT NULL DO UPDATE SET
     gitlab_author_user_id = EXCLUDED.gitlab_author_user_id,
     external_updated_at = EXCLUDED.external_updated_at,
     updated_at = now()
+WHERE comment.external_updated_at IS NULL
+   OR comment.external_updated_at < EXCLUDED.external_updated_at
 RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, gitlab_note_id, external_updated_at, gitlab_author_user_id
 `
 

@@ -272,10 +272,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 					// Writes — gated until Phase 3b migrates them.
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
-					r.With(gw).Post("/comments", h.CreateComment)
+					r.Post("/comments", h.CreateComment)
 					r.With(gw).Post("/subscribe", h.SubscribeToIssue)
 					r.With(gw).Post("/unsubscribe", h.UnsubscribeFromIssue)
-					r.With(gw).Post("/tasks/{taskId}/cancel", h.CancelTask)
+					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.With(gw).Post("/reactions", h.AddIssueReaction)
 					r.With(gw).Delete("/reactions", h.RemoveIssueReaction)
 				})
@@ -328,11 +328,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
-				r.Use(middleware.GitlabWritesBlocked(queries))
-				r.Put("/", h.UpdateComment)
-				r.Delete("/", h.DeleteComment)
-				r.Post("/reactions", h.AddReaction)
-				r.Delete("/reactions", h.RemoveReaction)
+				gw := middleware.GitlabWritesBlocked(queries)
+				r.Put("/", h.UpdateComment)          // unmounted (Phase 3c)
+				r.Delete("/", h.DeleteComment)       // unmounted (Phase 3c)
+				r.With(gw).Post("/reactions", h.AddReaction)       // 501 (Phase 3d)
+				r.With(gw).Delete("/reactions", h.RemoveReaction)  // 501 (Phase 3d)
 			})
 
 			// Agents

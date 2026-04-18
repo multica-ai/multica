@@ -135,6 +135,70 @@ func TestTranslateAward_PassesEmoji(t *testing.T) {
 	}
 }
 
+func TestBuildCreateNoteBody(t *testing.T) {
+	cases := []struct {
+		name       string
+		authorType string
+		agentSlug  string
+		content    string
+		want       string
+	}{
+		{
+			name:       "human author passes body through",
+			authorType: "member",
+			agentSlug:  "",
+			content:    "hello world",
+			want:       "hello world",
+		},
+		{
+			name:       "agent prefixes body",
+			authorType: "agent",
+			agentSlug:  "builder",
+			content:    "I will investigate this",
+			want:       "**[agent:builder]** I will investigate this",
+		},
+		{
+			name:       "agent with empty slug falls back to human-style (defensive)",
+			authorType: "agent",
+			agentSlug:  "",
+			content:    "fallback",
+			want:       "fallback",
+		},
+		{
+			name:       "empty content still prefixed for agent",
+			authorType: "agent",
+			agentSlug:  "reviewer",
+			content:    "",
+			want:       "**[agent:reviewer]** ",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildCreateNoteBody(tc.authorType, tc.agentSlug, tc.content)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Round-trip invariant: BuildCreateNoteBody output parsed by TranslateNote
+// recovers the original slug + content.
+func TestBuildCreateNoteBody_RoundTripsWithTranslateNote(t *testing.T) {
+	body := BuildCreateNoteBody("agent", "builder", "I will investigate this")
+	nv := TranslateNote(gitlabapi.Note{ID: 1, Body: body, UpdatedAt: "2026-04-17T12:00:00Z"})
+	if nv.AuthorType != "agent" {
+		t.Errorf("AuthorType = %q, want agent", nv.AuthorType)
+	}
+	if nv.AuthorSlug != "builder" {
+		t.Errorf("AuthorSlug = %q, want builder", nv.AuthorSlug)
+	}
+	if nv.Body != "I will investigate this" {
+		t.Errorf("Body = %q, want 'I will investigate this'", nv.Body)
+	}
+}
+
 func TestBuildCreateIssueInput_StatusAndPriorityToLabels(t *testing.T) {
 	in := CreateIssueRequest{
 		Title:    "hi",

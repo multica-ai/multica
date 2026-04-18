@@ -257,7 +257,9 @@ func syncOneIssue(
 			Type:               nv.Type,
 			GitlabNoteID:       pgtype.Int8{Int64: n.ID, Valid: true},
 			ExternalUpdatedAt:  parseTS(nv.UpdatedAt),
-		}); err != nil {
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			// pgx.ErrNoRows here means the cache already has a newer-or-equal
+			// row — the clobber guard short-circuited. That's success.
 			return fmt.Errorf("upsert note %d: %w", n.ID, err)
 		}
 	}

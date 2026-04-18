@@ -3,9 +3,11 @@ package gitlab
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	gitlabapi "github.com/multica-ai/multica/server/pkg/gitlab"
@@ -165,7 +167,11 @@ func ApplyNoteHookEvent(ctx context.Context, deps WebhookDeps, body []byte) erro
 		Type:               nv.Type,
 		GitlabNoteID:       pgtype.Int8{Int64: p.ObjectAttributes.ID, Valid: true},
 		ExternalUpdatedAt:  parseTS(nv.UpdatedAt),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// pgx.ErrNoRows here means the clobber guard short-circuited: the
+		// cache already has a newer-or-equal row (webhook replay or race with
+		// a Phase 3c write-through). Treat it as success — the stored copy
+		// stays authoritative.
 		return fmt.Errorf("upsert comment: %w", err)
 	}
 	return nil

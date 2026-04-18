@@ -128,6 +128,21 @@ func TranslateNote(in gitlabapi.Note) NoteValues {
 	return out
 }
 
+// BuildCreateNoteBody constructs the GitLab note body for a write-through
+// comment. Agent-authored comments are prefixed with "**[agent:<slug>]** "
+// so Phase 2b's TranslateNote round-trips the authorship on webhook replay.
+// Human-authored comments pass the content through unchanged.
+//
+// Defensive: if authorType is "agent" but the slug is empty, we fall back to
+// the human-style body (no prefix) rather than emitting a malformed
+// "**[agent:]** " prefix that parseAgentPrefix won't recognize.
+func BuildCreateNoteBody(authorType, agentSlug, content string) string {
+	if authorType == "agent" && agentSlug != "" {
+		return "**[agent:" + agentSlug + "]** " + content
+	}
+	return content
+}
+
 func parseAgentPrefix(body string) (slug, stripped string, ok bool) {
 	const open = "**[agent:"
 	const close = "]** "

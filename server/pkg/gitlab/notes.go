@@ -2,7 +2,9 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 )
 
 type Note struct {
@@ -22,4 +24,43 @@ func (c *Client) ListNotes(ctx context.Context, token string, projectID int64, i
 		return nil
 	})
 	return all, err
+}
+
+// CreateNote sends POST /api/v4/projects/:id/issues/:iid/notes with the given
+// body text, returning the created Note as GitLab persisted it.
+func (c *Client) CreateNote(ctx context.Context, token string, projectID int64, issueIID int, body string) (*Note, error) {
+	path := fmt.Sprintf("/projects/%d/issues/%d/notes", projectID, issueIID)
+	payload := map[string]any{"body": body}
+	var out Note
+	if err := c.do(ctx, http.MethodPost, token, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateNote sends PUT /api/v4/projects/:id/issues/:iid/notes/:note_id with the
+// given body text, returning the updated Note as GitLab persisted it.
+func (c *Client) UpdateNote(ctx context.Context, token string, projectID int64, issueIID int, noteID int64, body string) (*Note, error) {
+	path := fmt.Sprintf("/projects/%d/issues/%d/notes/%d", projectID, issueIID, noteID)
+	payload := map[string]any{"body": body}
+	var out Note
+	if err := c.do(ctx, http.MethodPut, token, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteNote sends DELETE /api/v4/projects/:id/issues/:iid/notes/:note_id.
+// Treats 404 as success (idempotent — if the note is already gone, that's
+// the desired state).
+func (c *Client) DeleteNote(ctx context.Context, token string, projectID int64, issueIID int, noteID int64) error {
+	path := fmt.Sprintf("/projects/%d/issues/%d/notes/%d", projectID, issueIID, noteID)
+	err := c.do(ctx, http.MethodDelete, token, path, nil, nil)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
