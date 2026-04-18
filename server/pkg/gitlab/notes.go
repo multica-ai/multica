@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -47,4 +48,19 @@ func (c *Client) UpdateNote(ctx context.Context, token string, projectID int64, 
 		return nil, err
 	}
 	return &out, nil
+}
+
+// DeleteNote sends DELETE /api/v4/projects/:id/issues/:iid/notes/:note_id.
+// Treats 404 as success (idempotent — if the note is already gone, that's
+// the desired state).
+func (c *Client) DeleteNote(ctx context.Context, token string, projectID int64, issueIID int, noteID int64) error {
+	path := fmt.Sprintf("/projects/%d/issues/%d/notes/%d", projectID, issueIID, noteID)
+	err := c.do(ctx, http.MethodDelete, token, path, nil, nil)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }

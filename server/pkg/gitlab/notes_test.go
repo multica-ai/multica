@@ -130,3 +130,49 @@ func TestUpdateNote_PropagatesNon2xx(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestDeleteNote_SendsDELETE(t *testing.T) {
+	var capturedMethod, capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	if err := c.DeleteNote(context.Background(), "tok", 42, 7, 555); err != nil {
+		t.Fatalf("DeleteNote: %v", err)
+	}
+	if capturedMethod != http.MethodDelete {
+		t.Errorf("method = %s", capturedMethod)
+	}
+	if capturedPath != "/api/v4/projects/42/issues/7/notes/555" {
+		t.Errorf("path = %s", capturedPath)
+	}
+}
+
+func TestDeleteNote_404IsIdempotentSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"404 Not Found"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	if err := c.DeleteNote(context.Background(), "tok", 1, 1, 1); err != nil {
+		t.Fatalf("expected 404 as success, got %v", err)
+	}
+}
+
+func TestDeleteNote_PropagatesNon404Errors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	if err := c.DeleteNote(context.Background(), "tok", 1, 1, 1); err == nil {
+		t.Fatal("expected error for 403")
+	}
+}
