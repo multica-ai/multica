@@ -188,6 +188,13 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: SetTaskSkipResume :exec
+-- Marks a task so the daemon skips session resumption for this dispatch.
+-- Used by the /fresh comment directive.
+UPDATE agent_task_queue
+SET context = jsonb_set(COALESCE(context, '{}'), '{skip_resume}', 'true')
+WHERE id = $1;
+
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
