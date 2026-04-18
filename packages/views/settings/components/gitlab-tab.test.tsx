@@ -93,6 +93,30 @@ describe("GitlabTab", () => {
     });
   });
 
+  it("shows project info + disconnect button when connection_status is 'error' (no dead-end)", async () => {
+    // Regression: a failed webhook registration leaves the row at status=error
+    // with a status_message. The UI used to render the connect form in this
+    // state, trapping the user — they couldn't disconnect without direct DB
+    // access. Now we render the connected-state shell with the error banner.
+    (api.getWorkspaceGitlabConnection as ReturnType<typeof vi.fn>).mockResolvedValue({
+      workspace_id: "ws-1",
+      gitlab_project_id: 9,
+      gitlab_project_path: "group/broken-repo",
+      service_token_user_id: 1,
+      connection_status: "error",
+      status_message: "Failed to register GitLab webhook: forbidden (403).",
+    });
+    (api.getUserGitlabConnection as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: false });
+    renderTab();
+    expect(await screen.findByText(/group\/broken-repo/)).toBeInTheDocument();
+    // The Disconnect button must be reachable so the user can reset.
+    expect(screen.getByRole("button", { name: /disconnect/i })).toBeInTheDocument();
+    // The error message is surfaced as a banner.
+    expect(screen.getByRole("alert")).toHaveTextContent(/forbidden \(403\)/);
+    // The connect form (heading) must NOT render — we have a row already.
+    expect(screen.queryByRole("heading", { name: /connect gitlab/i })).not.toBeInTheDocument();
+  });
+
   it("shows connected state when already connected", async () => {
     (api.getWorkspaceGitlabConnection as ReturnType<typeof vi.fn>).mockResolvedValue({
       workspace_id: "ws-1",

@@ -49,7 +49,14 @@ function WorkspaceGitlabSection({ workspaceId }: { workspaceId: string }) {
     !data && error instanceof ApiError && error.status === 404;
   const otherError = !data && !notConnected && error != null;
 
-  if (data && data.connection_status === "connected") {
+  // Any non-404 `data` response means a connection row exists — render the
+  // connected layout so the user can always reach Disconnect. Status "error"
+  // surfaces status_message as a banner; status "connecting" renders the same
+  // shell and lets the user watch it resolve (or bail out). Without this,
+  // rows stuck in "error" (e.g. webhook registration failed) rendered the
+  // connect form and trapped the user in a dead end.
+  if (data) {
+    const isError = data.connection_status === "error";
     return (
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">GitLab</h2>
@@ -62,6 +69,14 @@ function WorkspaceGitlabSection({ workspaceId }: { workspaceId: string }) {
             <div className="text-muted-foreground text-sm">
               Service account user id: {data.service_token_user_id}
             </div>
+            {isError && data.status_message ? (
+              <div
+                role="alert"
+                className="text-destructive rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm"
+              >
+                {data.status_message}
+              </div>
+            ) : null}
             <Button
               variant="destructive"
               disabled={disconnectMu.isPending}

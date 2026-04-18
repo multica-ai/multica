@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -180,7 +181,22 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 			EnableSSLVerification:    true,
 		})
 		if err != nil {
+			// Surface the failure on the connection row so the UI shows an
+			// error state (with a Disconnect button) instead of a misleading
+			// "connected" green light. A common cause here is the service
+			// token lacking Maintainer perms on the project — include the raw
+			// GitLab error so the user knows what to fix.
 			slog.Error("create project hook", "error", err, "workspace_id", wsID)
+			if updErr := h.Queries.UpdateWorkspaceGitlabConnectionStatus(syncCtx, db.UpdateWorkspaceGitlabConnectionStatusParams{
+				WorkspaceID:      parseUUID(wsID),
+				ConnectionStatus: "error",
+				StatusMessage: pgtype.Text{
+					String: fmt.Sprintf("Failed to register GitLab webhook: %v. Reconnect after giving the service account Maintainer access on the project.", err),
+					Valid:  true,
+				},
+			}); updErr != nil {
+				slog.Warn("update connection status to error after hook failure", "error", updErr)
+			}
 			return
 		}
 		if err := h.Queries.UpdateWorkspaceGitlabWebhook(syncCtx, db.UpdateWorkspaceGitlabWebhookParams{
@@ -188,7 +204,21 @@ func (h *Handler) ConnectGitlabWorkspace(w http.ResponseWriter, r *http.Request)
 			WebhookSecret:   pgtype.Text{String: secret, Valid: true},
 			WebhookGitlabID: pgtype.Int8{Int64: hook.ID, Valid: true},
 		}); err != nil {
+			// The GitLab-side hook registration succeeded but we failed to
+			// persist its id locally. Flag the row as errored so the next
+			// disconnect can't "forget" the orphan hook (and the UI tells the
+			// user something is off).
 			slog.Error("save webhook fields", "error", err, "workspace_id", wsID)
+			if updErr := h.Queries.UpdateWorkspaceGitlabConnectionStatus(syncCtx, db.UpdateWorkspaceGitlabConnectionStatusParams{
+				WorkspaceID:      parseUUID(wsID),
+				ConnectionStatus: "error",
+				StatusMessage: pgtype.Text{
+					String: fmt.Sprintf("GitLab webhook was registered but its id could not be saved locally: %v. Reconnect to retry.", err),
+					Valid:  true,
+				},
+			}); updErr != nil {
+				slog.Warn("update connection status to error after webhook-save failure", "error", updErr)
+			}
 		}
 	}(req.Token, project.ID, workspaceID)
 
