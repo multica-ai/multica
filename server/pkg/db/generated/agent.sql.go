@@ -894,6 +894,17 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 	return items, nil
 }
 
+const setTaskSkipResume = `-- name: SetTaskSkipResume :exec
+UPDATE agent_task_queue
+SET context = jsonb_set(COALESCE(context, '{}'), '{skip_resume}', 'true')
+WHERE id = $1
+`
+
+func (q *Queries) SetTaskSkipResume(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, setTaskSkipResume, id)
+	return err
+}
+
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1

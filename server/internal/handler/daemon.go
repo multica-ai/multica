@@ -572,13 +572,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
-		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-			AgentID: task.AgentID,
-			IssueID: task.IssueID,
-		}); err == nil && prior.SessionID.Valid {
-			resp.PriorSessionID = prior.SessionID.String
-			if prior.WorkDir.Valid {
-				resp.PriorWorkDir = prior.WorkDir.String
+		// Skip if the task was created with /fresh directive.
+		skipResume := false
+		if len(task.Context) > 0 {
+			var taskCtx map[string]any
+			if json.Unmarshal(task.Context, &taskCtx) == nil {
+				if sr, _ := taskCtx["skip_resume"].(bool); sr {
+					skipResume = true
+				}
+			}
+		}
+		if !skipResume {
+			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
+				AgentID: task.AgentID,
+				IssueID: task.IssueID,
+			}); err == nil && prior.SessionID.Valid {
+				resp.PriorSessionID = prior.SessionID.String
+				if prior.WorkDir.Valid {
+					resp.PriorWorkDir = prior.WorkDir.String
+				}
 			}
 		}
 	}
