@@ -3,13 +3,16 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/sanitize"
@@ -222,6 +225,27 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Sanitize HTML to prevent stored XSS.
 	req.Content = sanitize.HTML(req.Content)
 
+	// Phase 3c write-through: when the workspace has a GitLab connection AND
+	// the parent issue is GitLab-backed (gitlab_iid + gitlab_project_id), POST
+	// the note to GitLab first, then upsert the cache row from the returned
+	// representation. Falls through to the legacy direct-DB path only when no
+	// connection exists; a connected workspace with a local-only parent issue
+	// is a data-integrity error and returns 502 rather than silently diverging.
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
+		if wsErr == nil {
+			if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
+				slog.Error("gitlab connected workspace but issue has no gitlab refs",
+					"issue_id", issueID, "workspace_id", uuidToString(issue.WorkspaceID))
+				writeError(w, http.StatusBadGateway, "issue not linked to gitlab")
+				return
+			}
+			h.createCommentWriteThrough(w, r, issue, parentComment, parentID, req, authorType, authorID, issueID)
+			return
+		}
+		// err != nil → fall through to legacy path (non-connected workspace).
+	}
+
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -246,6 +270,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
+	h.publishCommentCreated(issue, resp, authorType, authorID)
+
+	// Post-commit side effects: on_comment agent trigger + @mention fan-out.
+	h.runCommentCreatePostCommit(r.Context(), issue, comment, parentComment, authorType, authorID, issueID)
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// publishCommentCreated publishes the protocol.EventCommentCreated event with
+// the shared payload shape used by both the legacy and write-through paths.
+func (h *Handler) publishCommentCreated(issue db.Issue, resp CommentResponse, authorType, authorID string) {
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
@@ -253,16 +288,28 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
 	})
+}
 
+// runCommentCreatePostCommit executes the on_comment agent trigger + @mention
+// fan-out side effects after a comment is persisted. Shared between the
+// legacy direct-DB path and the GitLab write-through path so both branches
+// produce identical task-queue side effects.
+func (h *Handler) runCommentCreatePostCommit(
+	ctx context.Context,
+	issue db.Issue,
+	comment db.Comment,
+	parentComment *db.Comment,
+	authorType, authorID, issueID string,
+) {
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
 	// Also skip when the comment @mentions others but not the assignee agent —
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
+	if authorType == "member" && h.shouldEnqueueOnComment(ctx, issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
+		!h.isReplyToMemberThread(ctx, parentComment, comment.Content, issue) {
 		// Resolve thread root: if the comment is a reply, agent should reply
 		// to the thread root (matching frontend behavior where all replies
 		// in a thread share the same top-level parent).
@@ -270,17 +317,222 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if comment.ParentID.Valid {
 			replyTo = comment.ParentID
 		}
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, replyTo); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, replyTo); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	h.enqueueMentionedAgentTasks(ctx, issue, comment, parentComment, authorType, authorID)
+}
+
+// createCommentWriteThrough implements the Phase 3c write-through branch of
+// POST /api/issues/{id}/comments: POST the note to GitLab, then upsert the
+// cache row from the returned representation inside a transaction. Threads
+// parent_id (Multica-native) + attachments through the same txn so a partial
+// failure rolls the whole thing back.
+//
+// On GitLab error returns a non-2xx status and aborts — we must NOT fall
+// through to the legacy path, which would produce orphaned cache rows on a
+// connected workspace.
+func (h *Handler) createCommentWriteThrough(
+	w http.ResponseWriter,
+	r *http.Request,
+	issue db.Issue,
+	parentComment *db.Comment,
+	parentID pgtype.UUID,
+	req CreateCommentRequest,
+	authorType, authorID, issueID string,
+) {
+	ctx := r.Context()
+	workspaceID := uuidToString(issue.WorkspaceID)
+
+	token, _, err := h.GitlabResolver.ResolveTokenForWrite(ctx, workspaceID, authorType, authorID)
+	if err != nil {
+		slog.Error("resolve gitlab token", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+		return
+	}
+
+	// Resolve the agent slug (if any) so BuildCreateNoteBody can emit the
+	// canonical "**[agent:<slug>]** " prefix that TranslateNote round-trips
+	// on webhook replay.
+	var agentSlug string
+	if authorType == "agent" {
+		agentMap, err := h.buildAgentUUIDSlugMap(ctx, issue.WorkspaceID)
+		if err != nil {
+			slog.Error("agent slug map", "error", err, "workspace_id", workspaceID)
+			writeError(w, http.StatusInternalServerError, "build agent map failed")
+			return
+		}
+		agentSlug = agentMap[authorID]
+	}
+
+	glBody := gitlabsync.BuildCreateNoteBody(authorType, agentSlug, req.Content)
+
+	glNote, err := h.Gitlab.CreateNote(ctx,
+		token,
+		issue.GitlabProjectID.Int64,
+		int(issue.GitlabIid.Int32),
+		glBody,
+	)
+	if err != nil {
+		slog.Error("gitlab create note", "error", err, "issue_id", issueID)
+		writeError(w, http.StatusBadGateway, "gitlab create note failed")
+		return
+	}
+
+	nv := gitlabsync.TranslateNote(*glNote)
+
+	// Author resolution mirrors the webhook handler: Multica actor refs
+	// (author_type/author_id) come from the requesting user (member or
+	// agent), while gitlab_author_user_id is the GitLab-side author id echoed
+	// back on the note payload. This keeps the cache consistent with the
+	// webhook-written shape so a subsequent webhook replay hits the clobber
+	// guard and short-circuits.
+	var authorTypeCol pgtype.Text
+	var authorIDCol pgtype.UUID
+	if authorType != "" {
+		authorTypeCol = pgtype.Text{String: authorType, Valid: true}
+		authorIDCol = parseUUID(authorID)
+	}
+	var glAuthor pgtype.Int8
+	if nv.GitlabUserID != 0 {
+		glAuthor = pgtype.Int8{Int64: nv.GitlabUserID, Valid: true}
+	} else if glNote.Author.ID != 0 {
+		glAuthor = pgtype.Int8{Int64: glNote.Author.ID, Valid: true}
+	}
+
+	externalUpdatedAt := parseGitlabTS(nv.UpdatedAt)
+
+	glTx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Error("begin gitlab write-through tx (comment)", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create comment")
+		return
+	}
+	defer glTx.Rollback(ctx)
+	qtxGL := h.Queries.WithTx(glTx)
+
+	comment, err := qtxGL.UpsertCommentFromGitlab(ctx, db.UpsertCommentFromGitlabParams{
+		WorkspaceID:        issue.WorkspaceID,
+		IssueID:            issue.ID,
+		AuthorType:         authorTypeCol,
+		AuthorID:           authorIDCol,
+		GitlabAuthorUserID: glAuthor,
+		Content:            nv.Body,
+		Type:               nv.Type,
+		GitlabNoteID:       pgtype.Int8{Int64: glNote.ID, Valid: true},
+		ExternalUpdatedAt:  externalUpdatedAt,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Clobber guard short-circuited: a concurrent webhook wrote a
+			// newer-or-equal row. Load the existing cache copy so the
+			// response still reflects reality, then skip the rest of the
+			// write-through bookkeeping (parent_id + attachments). Mirrors
+			// the webhook handler's tolerance for this case.
+			existing, loadErr := qtxGL.GetCommentByGitlabNoteID(ctx,
+				pgtype.Int8{Int64: glNote.ID, Valid: true})
+			if loadErr != nil {
+				slog.Error("load comment after clobber-guard short-circuit",
+					"error", loadErr, "gitlab_note_id", glNote.ID)
+				writeError(w, http.StatusInternalServerError, "failed to create comment")
+				return
+			}
+			if commitErr := glTx.Commit(ctx); commitErr != nil {
+				slog.Error("commit gitlab write-through tx (comment, no-op)",
+					"error", commitErr)
+				writeError(w, http.StatusInternalServerError, "failed to create comment")
+				return
+			}
+			resp := commentToResponse(existing, nil, nil)
+			slog.Info("comment created (clobber-guard preserved existing cache)",
+				append(logger.RequestAttrs(r), "comment_id", uuidToString(existing.ID),
+					"issue_id", issueID)...)
+			h.publishCommentCreated(issue, resp, authorType, authorID)
+			h.runCommentCreatePostCommit(ctx, issue, existing, parentComment, authorType, authorID, issueID)
+			writeJSON(w, http.StatusCreated, resp)
+			return
+		}
+		slog.Error("upsert gitlab comment cache row", "error", err)
+		writeError(w, http.StatusInternalServerError, "cache upsert failed")
+		return
+	}
+
+	// Thread parent_id (Multica-native; not round-tripped through GitLab).
+	if parentID.Valid {
+		patched, err := qtxGL.UpdateCommentParent(ctx, db.UpdateCommentParentParams{
+			ID:       comment.ID,
+			ParentID: parentID,
+		})
+		if err != nil {
+			slog.Error("patch parent_id on gitlab comment cache row", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to create comment")
+			return
+		}
+		comment = patched
+	}
+
+	// Link uploaded attachments inside the same txn so a partial failure
+	// rolls the whole thing back.
+	if len(req.AttachmentIDs) > 0 {
+		attachmentUUIDs := make([]pgtype.UUID, len(req.AttachmentIDs))
+		for i, id := range req.AttachmentIDs {
+			attachmentUUIDs[i] = parseUUID(id)
+		}
+		if err := qtxGL.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
+			CommentID: comment.ID,
+			IssueID:   issue.ID,
+			Column3:   attachmentUUIDs,
+		}); err != nil {
+			slog.Error("link attachments to gitlab comment", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to create comment")
+			return
+		}
+	}
+
+	if err := glTx.Commit(ctx); err != nil {
+		slog.Error("commit gitlab write-through tx (comment)", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create comment")
+		return
+	}
+
+	// Fetch linked attachments so the response carries the populated slice.
+	var attachments []AttachmentResponse
+	if len(req.AttachmentIDs) > 0 {
+		groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+		attachments = groupedAtt[uuidToString(comment.ID)]
+	}
+	resp := commentToResponse(comment, nil, attachments)
+
+	slog.Info("comment created (gitlab write-through)",
+		append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID),
+			"issue_id", issueID, "gitlab_note_id", glNote.ID)...)
+	h.publishCommentCreated(issue, resp, authorType, authorID)
+
+	// Post-commit side effects: mirror the legacy path exactly so trigger
+	// behavior is identical on connected vs non-connected workspaces.
+	h.runCommentCreatePostCommit(ctx, issue, comment, parentComment, authorType, authorID, issueID)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
+
+// parseGitlabTS parses a GitLab RFC3339 timestamp into pgtype.Timestamptz.
+// Invalid or empty input produces a NULL timestamp — matching the behaviour
+// of the sync-side parseTS so clobber-guard comparisons stay consistent.
+func parseGitlabTS(s string) pgtype.Timestamptz {
+	if s == "" {
+		return pgtype.Timestamptz{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}
+}
+
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
 // anyone but does NOT @mention the issue's assignee agent. This is used to

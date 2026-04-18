@@ -32,6 +32,26 @@ WHERE id = $1;
 SELECT * FROM comment
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetCommentByGitlabNoteID :one
+-- Resolves a GitLab note id back to the cached comment row. Used by the
+-- POST /api/issues/{id}/comments write-through path when the upsert's
+-- clobber guard short-circuits (a concurrent webhook already wrote a
+-- newer-or-equal row): we return the existing cache copy as the response.
+SELECT * FROM comment
+WHERE gitlab_note_id = $1
+LIMIT 1;
+
+-- name: UpdateCommentParent :one
+-- Patches parent_id on an existing comment row. Used by the
+-- POST /api/issues/{id}/comments write-through path: UpsertCommentFromGitlab
+-- does not accept parent_id (threading is Multica-native, not round-tripped
+-- through GitLab), so we thread it in here after the upsert succeeds.
+UPDATE comment SET
+    parent_id = sqlc.narg(parent_id),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CreateComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 VALUES ($1, $2, $3, $4, $5, $6, sqlc.narg(parent_id))

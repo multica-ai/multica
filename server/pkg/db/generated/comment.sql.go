@@ -108,6 +108,37 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 	return i, err
 }
 
+const getCommentByGitlabNoteID = `-- name: GetCommentByGitlabNoteID :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, gitlab_note_id, external_updated_at, gitlab_author_user_id FROM comment
+WHERE gitlab_note_id = $1
+LIMIT 1
+`
+
+// Resolves a GitLab note id back to the cached comment row. Used by the
+// POST /api/issues/{id}/comments write-through path when the upsert's
+// clobber guard short-circuits (a concurrent webhook already wrote a
+// newer-or-equal row): we return the existing cache copy as the response.
+func (q *Queries) GetCommentByGitlabNoteID(ctx context.Context, gitlabNoteID pgtype.Int8) (Comment, error) {
+	row := q.db.QueryRow(ctx, getCommentByGitlabNoteID, gitlabNoteID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.GitlabNoteID,
+		&i.ExternalUpdatedAt,
+		&i.GitlabAuthorUserID,
+	)
+	return i, err
+}
+
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, gitlab_note_id, external_updated_at, gitlab_author_user_id FROM comment
 WHERE id = $1 AND workspace_id = $2
@@ -396,6 +427,44 @@ type UpdateCommentParams struct {
 
 func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, updateComment, arg.ID, arg.Content)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.GitlabNoteID,
+		&i.ExternalUpdatedAt,
+		&i.GitlabAuthorUserID,
+	)
+	return i, err
+}
+
+const updateCommentParent = `-- name: UpdateCommentParent :one
+UPDATE comment SET
+    parent_id = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, gitlab_note_id, external_updated_at, gitlab_author_user_id
+`
+
+type UpdateCommentParentParams struct {
+	ID       pgtype.UUID `json:"id"`
+	ParentID pgtype.UUID `json:"parent_id"`
+}
+
+// Patches parent_id on an existing comment row. Used by the
+// POST /api/issues/{id}/comments write-through path: UpsertCommentFromGitlab
+// does not accept parent_id (threading is Multica-native, not round-tripped
+// through GitLab), so we thread it in here after the upsert succeeds.
+func (q *Queries) UpdateCommentParent(ctx context.Context, arg UpdateCommentParentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, updateCommentParent, arg.ID, arg.ParentID)
 	var i Comment
 	err := row.Scan(
 		&i.ID,
