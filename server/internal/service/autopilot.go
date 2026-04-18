@@ -218,13 +218,9 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
 func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue) {
-	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" {
+	run, ok := s.resolveActiveRunForIssue(ctx, issue)
+	if !ok {
 		return
-	}
-
-	run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
-	if err != nil {
-		return // no active run linked to this issue
 	}
 
 	wsID := util.UUIDToString(issue.WorkspaceID)
@@ -249,6 +245,48 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.publishRunDone(wsID, run, "failed")
 	}
+}
+
+// resolveActiveRunForIssue finds the active autopilot run that owns an issue.
+// It prefers the Phase 4 autopilot_issue mapping (workspace_id + gitlab_iid),
+// which is the forward-looking path — it works for issues created via GitLab
+// write-through that do not carry an origin marker. It falls back to the legacy
+// origin_type/origin_id path for rows created before the mapping existed.
+// Phase 5 will drop the origin_type/origin_id columns and remove the fallback.
+//
+// Only returns runs in an active status (issue_created / running) — matches the
+// existing GetAutopilotRunByIssue semantics, so terminal runs are never
+// re-synced.
+func (s *AutopilotService) resolveActiveRunForIssue(ctx context.Context, issue db.Issue) (db.AutopilotRun, bool) {
+	// Phase 4 path: mapping keyed by workspace_id + gitlab_iid.
+	if issue.GitlabIid.Valid {
+		mapping, err := s.Queries.GetAutopilotIssueByIID(ctx, db.GetAutopilotIssueByIIDParams{
+			WorkspaceID: issue.WorkspaceID,
+			GitlabIid:   issue.GitlabIid.Int32,
+		})
+		if err == nil {
+			run, err := s.Queries.GetAutopilotRun(ctx, mapping.AutopilotRunID)
+			if err == nil && isActiveRunStatus(run.Status) {
+				return run, true
+			}
+		}
+	}
+
+	// Legacy fallback: origin_type/origin_id. Remove in Phase 5.
+	if issue.OriginType.Valid && issue.OriginType.String == "autopilot" {
+		run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
+		if err == nil {
+			return run, true
+		}
+	}
+
+	return db.AutopilotRun{}, false
+}
+
+// isActiveRunStatus reports whether an autopilot run is still open for
+// status-transition syncing. Mirrors the filter on GetAutopilotRunByIssue.
+func isActiveRunStatus(status string) bool {
+	return status == "issue_created" || status == "running"
 }
 
 // SyncRunFromTask updates the autopilot run when a run_only task completes or fails.
