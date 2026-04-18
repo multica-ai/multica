@@ -71,6 +71,93 @@ func TestReconciler_PicksUpDriftAndAdvancesCursor(t *testing.T) {
 	}
 }
 
+// TestUpsertIssueFromGitlab_AssignsSequentialNumbers asserts the number-
+// collision fix: previously the sqlc upsert relied on issue.number's DEFAULT 0,
+// so the second GitLab-synced issue in any workspace collided on
+// uq_issue_workspace_number (workspace_id, number). The query now allocates
+// via workspace.issue_counter in a CTE, mirroring the local CreateIssue path.
+//
+// Verifies:
+// - Two fresh inserts get distinct, monotonically increasing numbers.
+// - Re-upserting the same issue (IID) preserves its number and does NOT
+//   consume additional counter values.
+func TestUpsertIssueFromGitlab_AssignsSequentialNumbers(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	// Record starting counter so the assertions are independent of whatever
+	// state other tests leave behind in the shared workspace counter column.
+	var startCounter int32
+	if err := pool.QueryRow(context.Background(),
+		`SELECT issue_counter FROM workspace WHERE id = $1`, wsID).Scan(&startCounter); err != nil {
+		t.Fatalf("read start counter: %v", err)
+	}
+
+	row1, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 1001, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 900, Valid: true},
+		Title:             "first",
+		Status:            "todo",
+		Priority:          "none",
+		ExternalUpdatedAt: parseTS("2026-04-17T09:00:00Z"),
+	})
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if row1.Number != startCounter+1 {
+		t.Errorf("row1.number = %d, want %d", row1.Number, startCounter+1)
+	}
+
+	row2, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 1002, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 900, Valid: true},
+		Title:             "second",
+		Status:            "todo",
+		Priority:          "none",
+		ExternalUpdatedAt: parseTS("2026-04-17T09:01:00Z"),
+	})
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if row2.Number != startCounter+2 {
+		t.Errorf("row2.number = %d, want %d (distinct from row1)", row2.Number, startCounter+2)
+	}
+
+	// Re-upsert row1 with a newer external_updated_at. The UPDATE branch must
+	// preserve the existing number and NOT allocate a new counter value.
+	row1Again, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 1001, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 900, Valid: true},
+		Title:             "first edited",
+		Status:            "in_progress",
+		Priority:          "none",
+		ExternalUpdatedAt: parseTS("2026-04-17T10:00:00Z"),
+	})
+	if err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+	if row1Again.Number != row1.Number {
+		t.Errorf("re-upsert changed number: got %d, want %d (existing number must be preserved)",
+			row1Again.Number, row1.Number)
+	}
+
+	// Counter must have advanced by exactly 2 (one per unique IID), not 3.
+	var endCounter int32
+	if err := pool.QueryRow(context.Background(),
+		`SELECT issue_counter FROM workspace WHERE id = $1`, wsID).Scan(&endCounter); err != nil {
+		t.Fatalf("read end counter: %v", err)
+	}
+	if endCounter != startCounter+2 {
+		t.Errorf("workspace.issue_counter = %d, want %d (re-upsert must not consume a value)",
+			endCounter, startCounter+2)
+	}
+}
+
 // TestReconciler_SweepDeletesOrphanedCacheRow asserts the deletion sweep
 // tears down cache rows whose GitLab counterpart has been destroyed (project
 // webhooks don't fire on destroy, so without this sweep deleted issues

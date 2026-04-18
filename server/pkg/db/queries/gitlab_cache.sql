@@ -82,6 +82,29 @@ DELETE FROM gitlab_project_member WHERE workspace_id = $1;
 -- issue cache upserts ------------------------------------------------------
 
 -- name: UpsertIssueFromGitlab :one
+-- On INSERT: atomically allocate issue.number by incrementing the workspace's
+-- issue_counter. The `next_num` CTE only fires when `existing` is empty
+-- (new row), so re-upserts of an already-cached issue don't consume counter
+-- values. On UPDATE: `number` is omitted from the SET clause so the value
+-- assigned on first insert is preserved.
+--
+-- Without this, INSERTs fell back to the column DEFAULT of 0 and the second
+-- GitLab-synced issue in any workspace collided on uq_issue_workspace_number.
+WITH existing AS (
+    SELECT number FROM issue
+    WHERE workspace_id = $1 AND gitlab_iid = $2
+),
+next_num AS (
+    UPDATE workspace SET issue_counter = issue_counter + 1
+    WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM existing)
+    RETURNING issue_counter
+),
+assigned AS (
+    SELECT COALESCE(
+        (SELECT number FROM existing),
+        (SELECT issue_counter FROM next_num)
+    )::int AS num
+)
 INSERT INTO issue (
     workspace_id,
     gitlab_iid,
@@ -96,9 +119,10 @@ INSERT INTO issue (
     creator_type,
     creator_id,
     due_date,
-    external_updated_at
+    external_updated_at,
+    number
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, (SELECT num FROM assigned))
 ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
@@ -128,6 +152,15 @@ WHERE workspace_id = $1 AND gitlab_issue_id = $2;
 
 -- name: DeleteWorkspaceCachedIssues :exec
 DELETE FROM issue WHERE workspace_id = $1 AND gitlab_iid IS NOT NULL;
+
+-- name: ListCachedGitlabIssues :many
+-- Used by the reconciler's deletion sweep: we diff the returned IIDs against
+-- the set currently present in GitLab and tear down any cached rows that have
+-- no counterpart upstream. Returns full issue rows because the deleter needs
+-- the row to cancel agent tasks, fail autopilot runs, and clean up S3 before
+-- the DELETE itself runs.
+SELECT * FROM issue
+WHERE workspace_id = $1 AND gitlab_iid IS NOT NULL;
 
 -- comment cache upserts ----------------------------------------------------
 
