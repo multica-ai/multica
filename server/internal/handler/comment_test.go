@@ -468,3 +468,192 @@ func TestUpdateComment_WriteThroughGitLabErrorReturns502(t *testing.T) {
 		t.Errorf("cached content = %q, want %q (write-through must not mutate cache on GitLab error)", cachedContent, "original")
 	}
 }
+
+// TestDeleteComment_WriteThroughSendsDELETE verifies that on a GitLab-connected
+// workspace, deleting a comment DELETEs GitLab's notes endpoint first and
+// then tears down the Multica cache row.
+func TestDeleteComment_WriteThroughSendsDELETE(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedMethod, capturedPath string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	seedGitlabWriteThroughFixture(t, h)
+
+	issueID := seedGitlabConnectedIssue(t, 520, 42)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	commentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, type,
+			gitlab_note_id, external_updated_at)
+		 VALUES ($1, $2, $3, 'member', $4, 'x', 'comment', 8820, '2026-04-17T12:00:00Z')`,
+		commentID, parseUUID(testWorkspaceID), parseUUID(issueID), parseUUID(testUserID)); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/"+commentID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "commentId", commentID)
+	rec := httptest.NewRecorder()
+
+	h.DeleteComment(rec, req)
+
+	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if capturedMethod != http.MethodDelete {
+		t.Errorf("method = %s, want DELETE", capturedMethod)
+	}
+	if capturedPath != "/api/v4/projects/42/issues/520/notes/8820" {
+		t.Errorf("path = %s, want /api/v4/projects/42/issues/520/notes/8820", capturedPath)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM comment WHERE id = $1`, commentID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count cache: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("cache row not deleted, count = %d", count)
+	}
+}
+
+// TestDeleteComment_WriteThroughGitLab404IsIdempotent verifies that when
+// GitLab returns 404 on DELETE notes (note already gone), Client.DeleteNote
+// swallows the 404 and the handler proceeds to clean up the cache row —
+// matching the idempotent behaviour of Client.DeleteIssue.
+func TestDeleteComment_WriteThroughGitLab404IsIdempotent(t *testing.T) {
+	ctx := context.Background()
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"404 Not Found"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	seedGitlabWriteThroughFixture(t, h)
+
+	issueID := seedGitlabConnectedIssue(t, 521, 42)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	commentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, type,
+			gitlab_note_id, external_updated_at)
+		 VALUES ($1, $2, $3, 'member', $4, 'x', 'comment', 8821, '2026-04-17T12:00:00Z')`,
+		commentID, parseUUID(testWorkspaceID), parseUUID(issueID), parseUUID(testUserID)); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/"+commentID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "commentId", commentID)
+	rec := httptest.NewRecorder()
+
+	h.DeleteComment(rec, req)
+
+	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 204/200 (GitLab 404 is idempotent), body = %s",
+			rec.Code, rec.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM comment WHERE id = $1`, commentID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count cache: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("cache row not cleaned up on 404, count = %d", count)
+	}
+}
+
+// TestDeleteComment_WriteThroughGitLab403PreservesCache verifies the
+// authoritative guarantee: on non-404 GitLab failure the handler returns a
+// non-2xx status AND the cache row remains intact (no fallback to legacy
+// direct-DB delete).
+func TestDeleteComment_WriteThroughGitLab403PreservesCache(t *testing.T) {
+	ctx := context.Background()
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	seedGitlabWriteThroughFixture(t, h)
+
+	issueID := seedGitlabConnectedIssue(t, 522, 42)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	commentID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, type,
+			gitlab_note_id, external_updated_at)
+		 VALUES ($1, $2, $3, 'member', $4, 'original', 'comment', 8822, '2026-04-17T12:00:00Z')`,
+		commentID, parseUUID(testWorkspaceID), parseUUID(issueID), parseUUID(testUserID)); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/"+commentID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "commentId", commentID)
+	rec := httptest.NewRecorder()
+
+	h.DeleteComment(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("status = %d, want >=400, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Cache row must NOT have been deleted on GitLab error.
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM comment WHERE id = $1`, commentID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count cache: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("cache row deleted on GitLab error, count = %d (must be preserved)", count)
+	}
+}

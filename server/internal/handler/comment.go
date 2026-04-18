@@ -949,20 +949,123 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect attachment URLs before CASCADE delete removes them.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), parseUUID(commentId))
+	// Phase 3c write-through: when the workspace has a GitLab connection AND
+	// the comment is GitLab-backed (gitlab_note_id + parent issue has
+	// gitlab_iid + gitlab_project_id), DELETE the note on GitLab first, then
+	// tear down the cache row. On a GitLab-connected workspace the
+	// write-through is AUTHORITATIVE — on GitLab error we return 502 and
+	// never fall back to legacy (that would leave GitLab and the cache
+	// diverged). Client.DeleteNote swallows 404 so a missing remote note is
+	// idempotently treated as success and cache cleanup still runs.
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), comment.WorkspaceID)
+		if wsErr == nil {
+			h.deleteCommentWriteThrough(w, r, comment, actorType, actorID, workspaceID, commentId)
+			return
+		}
+		// err != nil → fall through to legacy path (non-connected workspace).
+	}
 
-	if err := h.Queries.DeleteComment(r.Context(), parseUUID(commentId)); err != nil {
+	if err := h.cleanupAndDeleteCommentRow(r.Context(), comment); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
 	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
 		"comment_id": commentId,
 		"issue_id":   uuidToString(comment.IssueID),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// cleanupAndDeleteCommentRow performs the Multica-side cleanup for a deleted
+// comment: collects attachment URLs, deletes the cache row (cascade removes
+// comment_reaction rows via FK), and deletes the S3 objects. Shared between
+// the legacy DeleteComment path and the GitLab write-through branch — the
+// write-through calls GitLab first, then calls this to tear down local state.
+func (h *Handler) cleanupAndDeleteCommentRow(ctx context.Context, comment db.Comment) error {
+	// Collect attachment URLs before CASCADE delete removes them.
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(ctx, comment.ID)
+
+	if err := h.Queries.DeleteComment(ctx, comment.ID); err != nil {
+		return err
+	}
+
+	h.deleteS3Objects(ctx, attachmentURLs)
+	return nil
+}
+
+// deleteCommentWriteThrough implements the Phase 3c write-through branch of
+// DELETE /api/comments/{commentId}: DELETE the note on GitLab, then clean up
+// the Multica cache row via cleanupAndDeleteCommentRow.
+//
+// Data-integrity preconditions: a connected workspace + local-only comment or
+// parent issue is a 502 (not silent divergence). GitLab's DeleteNote swallows
+// 404 so a missing remote note is treated as idempotent success and cache
+// cleanup still runs.
+//
+// On non-404 GitLab error returns a non-2xx status and aborts — we must NOT
+// fall through to the legacy path, which would diverge the cache from GitLab.
+func (h *Handler) deleteCommentWriteThrough(
+	w http.ResponseWriter,
+	r *http.Request,
+	existing db.Comment,
+	actorType, actorID, workspaceID, commentId string,
+) {
+	ctx := r.Context()
+
+	if !existing.GitlabNoteID.Valid {
+		slog.Error("gitlab connected workspace but comment has no gitlab_note_id",
+			"comment_id", commentId, "workspace_id", workspaceID)
+		writeError(w, http.StatusBadGateway, "comment not linked to gitlab")
+		return
+	}
+	issue, issueErr := h.Queries.GetIssue(ctx, existing.IssueID)
+	if issueErr != nil {
+		slog.Error("load parent issue for gitlab comment delete", "error", issueErr, "comment_id", commentId)
+		writeError(w, http.StatusInternalServerError, "failed to delete comment")
+		return
+	}
+	if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
+		slog.Error("gitlab connected workspace but parent issue has no gitlab refs",
+			"comment_id", commentId, "issue_id", uuidToString(existing.IssueID))
+		writeError(w, http.StatusBadGateway, "issue not linked to gitlab")
+		return
+	}
+
+	token, _, err := h.GitlabResolver.ResolveTokenForWrite(ctx, workspaceID, actorType, actorID)
+	if err != nil {
+		slog.Error("resolve gitlab token", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+		return
+	}
+
+	if err := h.Gitlab.DeleteNote(ctx,
+		token,
+		issue.GitlabProjectID.Int64,
+		int(issue.GitlabIid.Int32),
+		existing.GitlabNoteID.Int64,
+	); err != nil {
+		slog.Error("gitlab delete note", "error", err, "comment_id", commentId)
+		writeError(w, http.StatusBadGateway, "gitlab delete note failed")
+		return
+	}
+
+	if err := h.cleanupAndDeleteCommentRow(ctx, existing); err != nil {
+		slog.Error("cleanup comment row after gitlab delete", "error", err, "comment_id", commentId)
+		writeError(w, http.StatusInternalServerError, "failed to delete comment")
+		return
+	}
+
+	slog.Info("comment deleted (gitlab write-through)",
+		append(logger.RequestAttrs(r), "comment_id", commentId,
+			"issue_id", uuidToString(existing.IssueID),
+			"gitlab_note_id", existing.GitlabNoteID.Int64)...)
+	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
+		"comment_id": commentId,
+		"issue_id":   uuidToString(existing.IssueID),
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
