@@ -342,8 +342,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
-  const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
+  const sidebarRef = usePanelRef();
   const [sidebarOpen, setSidebarOpen] = useState(defaultSidebarOpen);
 
   useEffect(() => {
@@ -1408,13 +1408,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       {!isMobile && (
       <ResizablePanel
         id="sidebar"
-        defaultSize={defaultSidebarOpen ? 320 : 0}
-        minSize={260}
-        maxSize={420}
+        defaultSize={isMobile ? 0 : (defaultSidebarOpen ? 320 : 0)}
+        minSize={isMobile ? 0 : 260}
+        maxSize={isMobile ? 0 : 420}
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}
         onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+        style={isMobile ? { display: "none" } : undefined}
       >
       <div className="overflow-y-auto border-l h-full">
         <div className="p-4">
