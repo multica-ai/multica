@@ -223,7 +223,7 @@ func ApplyEmojiHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 		Emoji:             p.ObjectAttributes.Name,
 		GitlabAwardID:     pgtype.Int8{Int64: p.ObjectAttributes.ID, Valid: true},
 		ExternalUpdatedAt: parseTS(p.ObjectAttributes.UpdatedAt),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("upsert reaction: %w", err)
 	}
 	return nil

@@ -285,7 +285,7 @@ func syncOneIssue(
 			Emoji:             av.Emoji,
 			GitlabAwardID:     pgtype.Int8{Int64: a.ID, Valid: true},
 			ExternalUpdatedAt: parseTS(av.UpdatedAt),
-		}); err != nil {
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("upsert award %d: %w", a.ID, err)
 		}
 	}

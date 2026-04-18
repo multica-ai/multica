@@ -701,6 +701,8 @@ ON CONFLICT (gitlab_award_id) WHERE gitlab_award_id IS NOT NULL DO UPDATE SET
     actor_id = EXCLUDED.actor_id,
     gitlab_actor_user_id = EXCLUDED.gitlab_actor_user_id,
     external_updated_at = EXCLUDED.external_updated_at
+WHERE issue_reaction.external_updated_at IS NULL
+   OR issue_reaction.external_updated_at < EXCLUDED.external_updated_at
 RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at, gitlab_actor_user_id
 `
 
