@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"net/http"
 )
 
 type Note struct {
@@ -22,4 +23,16 @@ func (c *Client) ListNotes(ctx context.Context, token string, projectID int64, i
 		return nil
 	})
 	return all, err
+}
+
+// CreateNote sends POST /api/v4/projects/:id/issues/:iid/notes with the given
+// body text, returning the created Note as GitLab persisted it.
+func (c *Client) CreateNote(ctx context.Context, token string, projectID int64, issueIID int, body string) (*Note, error) {
+	path := fmt.Sprintf("/projects/%d/issues/%d/notes", projectID, issueIID)
+	payload := map[string]any{"body": body}
+	var out Note
+	if err := c.do(ctx, http.MethodPost, token, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
