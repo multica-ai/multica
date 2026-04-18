@@ -136,7 +136,7 @@ INSERT INTO issue (
     parent_issue_id, position, due_date, number, project_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
 `
 
 type CreateIssueParams struct {
@@ -194,89 +194,6 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.GitlabIid,
-		&i.GitlabProjectID,
-		&i.ExternalUpdatedAt,
-		&i.GitlabIssueID,
-	)
-	return i, err
-}
-
-const createIssueWithOrigin = `-- name: CreateIssueWithOrigin :one
-INSERT INTO issue (
-    workspace_id, title, description, status, priority,
-    assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number, project_id,
-    origin_type, origin_id
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
-`
-
-type CreateIssueWithOriginParams struct {
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   pgtype.Text        `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	OriginType    pgtype.Text        `json:"origin_type"`
-	OriginID      pgtype.UUID        `json:"origin_id"`
-}
-
-func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, createIssueWithOrigin,
-		arg.WorkspaceID,
-		arg.Title,
-		arg.Description,
-		arg.Status,
-		arg.Priority,
-		arg.AssigneeType,
-		arg.AssigneeID,
-		arg.CreatorType,
-		arg.CreatorID,
-		arg.ParentIssueID,
-		arg.Position,
-		arg.DueDate,
-		arg.Number,
-		arg.ProjectID,
-		arg.OriginType,
-		arg.OriginID,
-	)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -295,7 +212,7 @@ func (q *Queries) DeleteIssue(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE id = $1
 `
 
@@ -322,8 +239,6 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -333,7 +248,7 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -365,8 +280,6 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -376,7 +289,7 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -408,8 +321,6 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -419,7 +330,7 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC
 `
@@ -453,8 +364,6 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.UpdatedAt,
 			&i.Number,
 			&i.ProjectID,
-			&i.OriginType,
-			&i.OriginID,
 			&i.GitlabIid,
 			&i.GitlabProjectID,
 			&i.ExternalUpdatedAt,
@@ -665,7 +574,7 @@ UPDATE issue SET
     project_id = $11,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
 `
 
 type UpdateIssueParams struct {
@@ -717,8 +626,6 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -732,7 +639,7 @@ UPDATE issue SET
     status = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
 `
 
 type UpdateIssueStatusParams struct {
@@ -763,8 +670,6 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,

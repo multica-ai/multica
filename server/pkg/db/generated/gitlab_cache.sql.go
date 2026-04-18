@@ -188,7 +188,7 @@ func (q *Queries) GetGitlabProjectMemberByID(ctx context.Context, id pgtype.UUID
 }
 
 const getIssueByGitlabID = `-- name: GetIssueByGitlabID :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE workspace_id = $1 AND gitlab_issue_id = $2
 `
 
@@ -223,8 +223,6 @@ func (q *Queries) GetIssueByGitlabID(ctx context.Context, arg GetIssueByGitlabID
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -234,7 +232,7 @@ func (q *Queries) GetIssueByGitlabID(ctx context.Context, arg GetIssueByGitlabID
 }
 
 const getIssueByGitlabIID = `-- name: GetIssueByGitlabIID :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE workspace_id = $1 AND gitlab_iid = $2
 `
 
@@ -266,8 +264,6 @@ func (q *Queries) GetIssueByGitlabIID(ctx context.Context, arg GetIssueByGitlabI
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,
@@ -663,7 +659,7 @@ ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SE
     updated_at = now()
 WHERE issue.external_updated_at IS NULL
    OR issue.external_updated_at < EXCLUDED.external_updated_at
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id
 `
 
 type UpsertIssueFromGitlabParams struct {
@@ -722,8 +718,6 @@ func (q *Queries) UpsertIssueFromGitlab(ctx context.Context, arg UpsertIssueFrom
 		&i.UpdatedAt,
 		&i.Number,
 		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
 		&i.GitlabIid,
 		&i.GitlabProjectID,
 		&i.ExternalUpdatedAt,

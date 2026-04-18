@@ -55,22 +55,14 @@ func seedAutopilotFixture(t *testing.T, ctx context.Context, workspaceID, creato
 	return autopilotID, runID
 }
 
-// seedIssueForAutopilot inserts an issue and optionally sets gitlab_iid,
-// origin_type/origin_id. Returns the sqlc-loaded db.Issue.
-func seedIssueForAutopilot(t *testing.T, ctx context.Context, workspaceID, creatorID string, gitlabIid int32, originType, originID string) db.Issue {
+// seedIssueForAutopilot inserts an issue and optionally sets gitlab_iid.
+// Returns the sqlc-loaded db.Issue.
+func seedIssueForAutopilot(t *testing.T, ctx context.Context, workspaceID, creatorID string, gitlabIid int32) db.Issue {
 	t.Helper()
 
 	var gitlabIidParam any
 	if gitlabIid > 0 {
 		gitlabIidParam = gitlabIid
-	}
-	var originTypeParam any
-	if originType != "" {
-		originTypeParam = originType
-	}
-	var originIDParam any
-	if originID != "" {
-		originIDParam = originID
 	}
 
 	var issueID string
@@ -78,14 +70,14 @@ func seedIssueForAutopilot(t *testing.T, ctx context.Context, workspaceID, creat
 		INSERT INTO issue (
 			workspace_id, title, status, priority,
 			creator_type, creator_id, position,
-			gitlab_iid, origin_type, origin_id
+			gitlab_iid
 		) VALUES (
 			$1, 'autopilot test issue', 'todo', 'medium',
 			'member', $2, 0,
-			$3, $4, $5
+			$3
 		)
 		RETURNING id
-	`, workspaceID, creatorID, gitlabIidParam, originTypeParam, originIDParam).Scan(&issueID); err != nil {
+	`, workspaceID, creatorID, gitlabIidParam).Scan(&issueID); err != nil {
 		t.Fatalf("seedIssueForAutopilot: %v", err)
 	}
 
@@ -119,8 +111,8 @@ func TestAutopilotSyncRunFromIssue_PrefersAutopilotIssueMapping(t *testing.T) {
 
 	autopilotID, runID := seedAutopilotFixture(t, ctx, testWorkspaceID, testUserID)
 
-	// Issue has gitlab_iid but NO origin_type. Mapping is the ONLY link.
-	issue := seedIssueForAutopilot(t, ctx, testWorkspaceID, testUserID, 800, "", "")
+	// Issue has gitlab_iid; mapping links it to the autopilot run.
+	issue := seedIssueForAutopilot(t, ctx, testWorkspaceID, testUserID, 800)
 
 	// Seed the Phase 4 mapping row.
 	if _, err := testPool.Exec(ctx, `
@@ -158,56 +150,8 @@ func TestAutopilotSyncRunFromIssue_PrefersAutopilotIssueMapping(t *testing.T) {
 	}
 }
 
-// TestAutopilotSyncRunFromIssue_FallsBackToOriginType verifies the legacy
-// path still works: an issue with origin_type='autopilot' and origin_id
-// pointing at the autopilot (and a run linked via issue_id) is synced,
-// even with NO autopilot_issue mapping row.
-func TestAutopilotSyncRunFromIssue_FallsBackToOriginType(t *testing.T) {
-	if testPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	autopilotID, runID := seedAutopilotFixture(t, ctx, testWorkspaceID, testUserID)
-
-	// Issue has origin_type='autopilot' but NO gitlab_iid and NO mapping row.
-	issue := seedIssueForAutopilot(t, ctx, testWorkspaceID, testUserID, 0, "autopilot", autopilotID)
-
-	// Link the run to the issue — the legacy GetAutopilotRunByIssue query
-	// resolves via autopilot_run.issue_id.
-	if _, err := testPool.Exec(ctx, `UPDATE autopilot_run SET issue_id = $1 WHERE id = $2`, util.UUIDToString(issue.ID), runID); err != nil {
-		t.Fatalf("link run to issue: %v", err)
-	}
-
-	defer cleanupAutopilotFixture(t, ctx, util.UUIDToString(issue.ID), runID, autopilotID)
-
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = 'done' WHERE id = $1`, util.UUIDToString(issue.ID)); err != nil {
-		t.Fatalf("update issue status: %v", err)
-	}
-
-	queries := db.New(testPool)
-	reloaded, err := queries.GetIssue(ctx, issue.ID)
-	if err != nil {
-		t.Fatalf("reload issue: %v", err)
-	}
-
-	bus := events.New()
-	svc := service.NewAutopilotService(queries, testPool, bus, nil)
-
-	svc.SyncRunFromIssue(ctx, reloaded)
-
-	var runStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM autopilot_run WHERE id = $1`, runID).Scan(&runStatus); err != nil {
-		t.Fatalf("read run status: %v", err)
-	}
-	if runStatus != "completed" {
-		t.Fatalf("expected run status 'completed' via legacy origin_type fallback, got %q", runStatus)
-	}
-}
-
 // TestAutopilotSyncRunFromIssue_NoAssociationNoOp verifies that an issue with
-// neither a mapping row nor origin_type stays a no-op — no spurious updates,
-// no panic.
+// no autopilot_issue mapping stays a no-op — no spurious updates, no panic.
 func TestAutopilotSyncRunFromIssue_NoAssociationNoOp(t *testing.T) {
 	if testPool == nil {
 		t.Skip("database not available")
@@ -216,8 +160,8 @@ func TestAutopilotSyncRunFromIssue_NoAssociationNoOp(t *testing.T) {
 
 	autopilotID, runID := seedAutopilotFixture(t, ctx, testWorkspaceID, testUserID)
 
-	// Issue is a plain issue — no mapping, no origin.
-	issue := seedIssueForAutopilot(t, ctx, testWorkspaceID, testUserID, 0, "", "")
+	// Plain issue — no autopilot_issue mapping.
+	issue := seedIssueForAutopilot(t, ctx, testWorkspaceID, testUserID, 0)
 
 	defer cleanupAutopilotFixture(t, ctx, util.UUIDToString(issue.ID), runID, autopilotID)
 
