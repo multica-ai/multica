@@ -2,11 +2,65 @@ package gitlab
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// recordingEnqueuer is a test stub that implements TaskEnqueuer. It records
+// each call (issueID + triggerCommentID) and returns a zero task row. Tests
+// assert on the recorded calls to verify the webhook enqueue logic without
+// pulling in the real *service.TaskService (which would require hub/bus).
+type recordingEnqueuer struct {
+	mu    sync.Mutex
+	calls []enqueueCall
+}
+
+type enqueueCall struct {
+	issueID string
+}
+
+func (r *recordingEnqueuer) EnqueueTaskForIssue(_ context.Context, issue db.Issue, _ ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, enqueueCall{issueID: uuidString(issue.ID)})
+	return db.AgentTaskQueue{}, nil
+}
+
+func (r *recordingEnqueuer) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+// seedAgentNamed inserts a runtime + agent named `name` in the workspace.
+// The slug in agent labels derives from the agent's name (lowercased,
+// spaces → hyphens), so passing "handler-test-agent" lets a webhook payload
+// carrying the label `agent::handler-test-agent` resolve to this agent.
+func seedAgentNamed(t *testing.T, pool *pgxpool.Pool, workspaceID, name string) string {
+	t.Helper()
+	var runtimeID string
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
+		VALUES ($1, $2, 'cloud', 'test')
+		RETURNING id
+	`, workspaceID, fmt.Sprintf("rt-%s", name)).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert runtime: %v", err)
+	}
+	var agentID string
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks, owner_id, runtime_id)
+		VALUES ($1, $2, 'cloud', '{}'::jsonb, 'workspace', 1, NULL, $3)
+		RETURNING id
+	`, workspaceID, name, runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	return agentID
+}
 
 func TestApplyIssueHookEvent_UpsertsCachedIssue(t *testing.T) {
 	pool := connectTestPool(t)
@@ -660,5 +714,156 @@ func TestApplyLabelHookEvent_DeleteRemovesLabel(t *testing.T) {
 		if l.GitlabLabelID == 800 {
 			t.Errorf("label 800 should be gone, but found %+v", l)
 		}
+	}
+}
+
+// TestApplyIssueHookEvent_EnqueuesAgentTaskOnNewAssignment asserts that when a
+// GitLab webhook lands for an issue that was NOT previously agent-assigned
+// and now carries ~agent::<slug>, the handler enqueues exactly one agent
+// task (mirroring the POST/PATCH write-through path in handler/issue.go).
+func TestApplyIssueHookEvent_EnqueuesAgentTaskOnNewAssignment(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	seedAgentNamed(t, pool, wsID, "builder")
+
+	enq := &recordingEnqueuer{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  wsUUID,
+		ProjectID:    7,
+		Resolver:     newTestResolver(queries),
+		TaskEnqueuer: enq,
+	}
+
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 900,
+			"title": "Assign agent from GitLab UI",
+			"state": "opened",
+			"updated_at": "2026-04-17T10:00:00Z",
+			"labels": [{"title": "agent::builder"}]
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := enq.callCount(); got != 1 {
+		t.Fatalf("EnqueueTaskForIssue calls = %d, want 1", got)
+	}
+
+	// The enqueued issue should be the one just upserted.
+	row, err := queries.GetIssueByGitlabIID(context.Background(), db.GetIssueByGitlabIIDParams{
+		WorkspaceID: wsUUID,
+		GitlabIid:   pgtype.Int4{Int32: 900, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetIssueByGitlabIID: %v", err)
+	}
+	if enq.calls[0].issueID != uuidString(row.ID) {
+		t.Errorf("enqueued issue_id = %q, want %q", enq.calls[0].issueID, uuidString(row.ID))
+	}
+}
+
+// TestApplyIssueHookEvent_DoesNotEnqueueOnUnchangedAgent asserts that when a
+// webhook replays (or delivers an unrelated update like title-only) while the
+// same agent stays assigned, no additional task is enqueued. This guards the
+// coalescing behavior — GitLab happily re-sends the same payload and also
+// fires issue-hook on every attribute change.
+func TestApplyIssueHookEvent_DoesNotEnqueueOnUnchangedAgent(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	agentID := seedAgentNamed(t, pool, wsID, "builder")
+
+	// Pre-seed a cache row already assigned to the agent, with an older
+	// external_updated_at than the incoming webhook (so the stale-event
+	// guard doesn't short-circuit before the enqueue gate runs).
+	assigneeUUID := mustPGUUID(t, agentID)
+	_, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 901, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 7, Valid: true},
+		Title:             "Already agent-assigned",
+		Status:            "todo",
+		Priority:          "none",
+		AssigneeType:      pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:        assigneeUUID,
+		ExternalUpdatedAt: parseTS("2026-04-17T09:00:00Z"),
+	})
+	if err != nil {
+		t.Fatalf("seed prior: %v", err)
+	}
+
+	enq := &recordingEnqueuer{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  wsUUID,
+		ProjectID:    7,
+		Resolver:     newTestResolver(queries),
+		TaskEnqueuer: enq,
+	}
+
+	// Title changed but same agent still assigned via the label.
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 901,
+			"title": "Title edited — same agent",
+			"state": "opened",
+			"updated_at": "2026-04-17T10:00:00Z",
+			"labels": [{"title": "agent::builder"}]
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := enq.callCount(); got != 0 {
+		t.Fatalf("EnqueueTaskForIssue calls = %d, want 0 (same agent still assigned)", got)
+	}
+}
+
+// TestApplyIssueHookEvent_DoesNotEnqueueOnNonAgentAssignee asserts that when
+// an issue-hook carries no agent label (plain edit, human assignee, or no
+// assignee at all), no task is enqueued.
+func TestApplyIssueHookEvent_DoesNotEnqueueOnNonAgentAssignee(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	enq := &recordingEnqueuer{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  wsUUID,
+		ProjectID:    7,
+		Resolver:     newTestResolver(queries),
+		TaskEnqueuer: enq,
+	}
+
+	// No assignees, no agent label, just a vanilla issue.
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 902,
+			"title": "Plain issue, no agent",
+			"state": "opened",
+			"updated_at": "2026-04-17T10:00:00Z",
+			"labels": [{"title": "status::in_progress"}]
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := enq.callCount(); got != 0 {
+		t.Fatalf("EnqueueTaskForIssue calls = %d, want 0 (no agent assignment)", got)
 	}
 }

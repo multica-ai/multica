@@ -31,6 +31,11 @@ type WebhookWorker struct {
 	// decrypter is fine when webhook handlers don't need write-token
 	// resolution. Kept as a field for forward-compatibility.
 	decrypt TokenDecrypter
+	// taskEnqueuer is optional. When non-nil, ApplyIssueHookEvent hands
+	// off to it after the upsert so a human assigning ~agent::<slug> from
+	// gitlab.com spawns a task on the same path as the POST/PATCH route
+	// in handler/issue.go. Wired by cmd/server/main.go.
+	taskEnqueuer TaskEnqueuer
 }
 
 // NewWebhookWorker returns a worker that runs `numWorkers` goroutines and
@@ -65,6 +70,17 @@ func noopDecrypter(_ context.Context, _ []byte) (string, error) {
 func (w *WebhookWorker) WithDecrypter(d TokenDecrypter) *WebhookWorker {
 	if d != nil {
 		w.decrypt = d
+	}
+	return w
+}
+
+// WithTaskEnqueuer installs a TaskEnqueuer on the worker so the issue-hook
+// handler can spawn agent work when a webhook event newly assigns an agent.
+// Optional; when omitted, webhook-initiated assignments land in the cache
+// but no task is queued.
+func (w *WebhookWorker) WithTaskEnqueuer(te TaskEnqueuer) *WebhookWorker {
+	if te != nil {
+		w.taskEnqueuer = te
 	}
 	return w
 }
@@ -142,10 +158,11 @@ func (w *WebhookWorker) processOne(ctx context.Context) (bool, error) {
 	resolver := NewResolver(q, w.decrypt)
 
 	deps := WebhookDeps{
-		Queries:     q,
-		WorkspaceID: row.WorkspaceID,
-		ProjectID:   conn.GitlabProjectID,
-		Resolver:    resolver,
+		Queries:      q,
+		WorkspaceID:  row.WorkspaceID,
+		ProjectID:    conn.GitlabProjectID,
+		Resolver:     resolver,
+		TaskEnqueuer: w.taskEnqueuer,
 	}
 
 	if err := dispatchWebhookEvent(ctx, deps, row.EventType, row.Payload); err != nil {

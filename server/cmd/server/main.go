@@ -134,8 +134,12 @@ func main() {
 		decrypter := gitlabsync.NewCipherDecrypter(secretsCipher)
 
 		// Webhook worker pool — drains gitlab_webhook_event into the cache.
+		// TaskEnqueuer lets the issue-hook spawn agent tasks when a human
+		// assigns ~agent::<slug> from gitlab.com (Phase 4), closing the gap
+		// between the REST write-through path and webhook-initiated updates.
 		webhookWorker := gitlabsync.NewWebhookWorker(glQueries, pool, 5, 250*time.Millisecond).
-			WithDecrypter(decrypter)
+			WithDecrypter(decrypter).
+			WithTaskEnqueuer(taskSvc)
 		go webhookWorker.Run(serverCtx)
 
 		// Reconciler — 5-minute drift catcher.

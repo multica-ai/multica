@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,14 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	gitlabapi "github.com/multica-ai/multica/server/pkg/gitlab"
 )
+
+// TaskEnqueuer is the minimal surface the webhook handlers need from the
+// task service to enqueue agent work. Defining it locally avoids importing
+// internal/service (which would create a package cycle once service grows
+// gitlab-aware code) and lets tests supply a no-op/recording stub.
+type TaskEnqueuer interface {
+	EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error)
+}
 
 // WebhookDeps is what every per-event handler needs. The worker constructs
 // this once per event.
@@ -21,11 +30,17 @@ import (
 // for issue assignees). When nil, handlers leave Multica author/actor/assignee
 // columns NULL and preserve only the raw gitlab_*_user_id hint — matching the
 // pre-Phase-4 behavior.
+//
+// TaskEnqueuer is optional: when non-nil, ApplyIssueHookEvent enqueues an
+// agent task after the upsert if the assignment changed to a (new) agent
+// — mirroring the write-through path in handler/issue.go. When nil, the
+// webhook path applies cache changes but does NOT spawn agent work.
 type WebhookDeps struct {
-	Queries     *db.Queries
-	WorkspaceID pgtype.UUID
-	ProjectID   int64
-	Resolver    *Resolver
+	Queries      *db.Queries
+	WorkspaceID  pgtype.UUID
+	ProjectID    int64
+	Resolver     *Resolver
+	TaskEnqueuer TaskEnqueuer
 }
 
 // issueHookPayload is the subset of the Issue Hook body we read.
@@ -122,8 +137,29 @@ func ApplyIssueHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 		return fmt.Errorf("resolve creator: %w", err)
 	}
 
-	if _, err := deps.Queries.UpsertIssueFromGitlab(ctx, buildUpsertIssueParams(deps.WorkspaceID, deps.ProjectID, apiIssue, values, creatorType, creatorID)); err != nil {
+	cacheRow, err := deps.Queries.UpsertIssueFromGitlab(ctx, buildUpsertIssueParams(deps.WorkspaceID, deps.ProjectID, apiIssue, values, creatorType, creatorID))
+	if err != nil {
 		return fmt.Errorf("upsert issue: %w", err)
+	}
+
+	// Enqueue an agent task when the GitLab-originated update JUST moved the
+	// issue into an agent assignment (or switched to a different agent). This
+	// closes the "human adds ~agent::<slug> from gitlab.com" gap that Phase 2a
+	// left open — the write-through path in handler/issue.go already enqueues
+	// on the POST/PATCH route, but a webhook-only assignment never reached the
+	// task queue until Phase 4. Change detection compares prior cache row vs.
+	// fresh upsert row so webhook replays and unrelated updates (title-only,
+	// description-only) don't spawn duplicate tasks.
+	if deps.TaskEnqueuer != nil && shouldEnqueueAgentOnWebhook(existing, cacheRow) {
+		if _, err := deps.TaskEnqueuer.EnqueueTaskForIssue(ctx, cacheRow); err != nil {
+			// Match the write-through tail: a failed enqueue must not fail the
+			// webhook event (the cache update already landed). Log and move on;
+			// the reconciler / next webhook delivery will retry naturally.
+			slog.Error("webhook issue hook: enqueue agent task failed",
+				"workspace_id", uuidString(deps.WorkspaceID),
+				"issue_id", uuidString(cacheRow.ID),
+				"err", err)
+		}
 	}
 
 	// Note: this handler doesn't update issue_gitlab_label junction rows. The
@@ -135,6 +171,31 @@ func ApplyIssueHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 	// associations. Phase 3 may add a label-by-name resolver here if real-time
 	// per-issue label drift becomes a UX problem.
 	return nil
+}
+
+// shouldEnqueueAgentOnWebhook decides whether the post-upsert cache row
+// represents a fresh agent assignment worth spawning a task for. Returns
+// true only when the current row is agent-assigned AND (the prior row was
+// NOT an agent, OR it was a different agent). Same-agent replays are no-ops.
+//
+// Backlog issues are still enqueued here — the webhook can't faithfully
+// mirror the handler's `status != 'backlog'` gate because the translator
+// maps GitLab state to Multica status, and the hook payload may land
+// before labels catch up. TaskEnqueuer.EnqueueTaskForIssue still requires a
+// non-archived agent with a runtime, so an unready agent silently no-ops.
+func shouldEnqueueAgentOnWebhook(prior, cur db.Issue) bool {
+	if !cur.AssigneeType.Valid || cur.AssigneeType.String != "agent" {
+		return false
+	}
+	if !cur.AssigneeID.Valid {
+		return false
+	}
+	// Brand-new issue OR prior wasn't agent-assigned → enqueue.
+	if !prior.AssigneeType.Valid || prior.AssigneeType.String != "agent" || !prior.AssigneeID.Valid {
+		return true
+	}
+	// Swapped to a different agent → enqueue.
+	return prior.AssigneeID != cur.AssigneeID
 }
 
 type noteHookPayload struct {
