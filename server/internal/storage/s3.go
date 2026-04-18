@@ -158,14 +158,18 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 
+	// Prefer the configured CDN/public-read domain when set. This allows S3-compatible
+	// backends (MinIO, R2, B2, Wasabi, etc.) to be paired with a separate public domain
+	// for reads — the custom endpoint is still used for writes via the SDK, but the URL
+	// stored for client consumption points at the reader-facing domain.
+	if s.cdnDomain != "" {
+		link := fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
+		return link, nil
+	}
 	if s.endpointURL != "" {
 		link := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
 		return link, nil
 	}
-	domain := s.bucket
-	if s.cdnDomain != "" {
-		domain = s.cdnDomain
-	}
-	link := fmt.Sprintf("https://%s/%s", domain, key)
+	link := fmt.Sprintf("https://%s/%s", s.bucket, key)
 	return link, nil
 }
