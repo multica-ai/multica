@@ -11,7 +11,10 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Download,
+  FileText,
   Link2,
+  Paperclip,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -73,7 +76,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -151,6 +154,12 @@ function formatActivity(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -359,6 +368,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
@@ -401,6 +411,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
+
+  // Attachments
+  const { data: attachments = [] } = useQuery(issueAttachmentsOptions(id));
 
   // Pinned state
   const { data: pinnedItems = [] } = useQuery({
@@ -663,6 +676,36 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <PropRow label="Runs">
               <span className="text-muted-foreground">{usage.task_count}</span>
             </PropRow>
+          </div>}
+        </div>
+      )}
+
+      {/* Attachments */}
+      {attachments.length > 0 && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${attachmentsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setAttachmentsOpen(!attachmentsOpen)}
+          >
+            <Paperclip className="!size-3 shrink-0" />
+            Attachments
+            <span className="text-muted-foreground ml-auto mr-1">{attachments.length}</span>
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${attachmentsOpen ? "rotate-90" : ""}`} />
+          </button>
+          {attachmentsOpen && <div className="space-y-1 pl-2">
+            {attachments.map((att) => (
+              <button
+                key={att.id}
+                type="button"
+                onClick={() => window.open(att.download_url || att.url, "_blank", "noopener,noreferrer")}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group text-left"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate flex-1 group-hover:text-foreground">{att.filename}</span>
+                <span className="text-muted-foreground shrink-0 text-[10px]">{formatFileSize(att.size_bytes)}</span>
+                <Download className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            ))}
           </div>}
         </div>
       )}

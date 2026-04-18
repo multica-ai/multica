@@ -21,6 +21,8 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  attachments: (issueId: string) =>
+    ["issues", "attachments", issueId] as const,
 };
 
 export type MyIssuesFilter = Pick<ListIssuesParams, "assignee_id" | "assignee_ids" | "creator_id">;
@@ -140,5 +142,12 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export function issueAttachmentsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.attachments(issueId),
+    queryFn: () => api.listAttachments(issueId),
   });
 }
