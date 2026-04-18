@@ -86,3 +86,47 @@ func TestCreateNote_PropagatesNon2xx(t *testing.T) {
 		t.Errorf("error = %v, want 403 or forbidden", err)
 	}
 }
+
+func TestUpdateNote_SendsPUTWithBody(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":555,"body":"updated","author":{"id":9},"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	note, err := c.UpdateNote(context.Background(), "tok", 42, 7, 555, "updated")
+	if err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	if capturedMethod != http.MethodPut {
+		t.Errorf("method = %s, want PUT", capturedMethod)
+	}
+	if capturedPath != "/api/v4/projects/42/issues/7/notes/555" {
+		t.Errorf("path = %s", capturedPath)
+	}
+	if capturedBody["body"] != "updated" {
+		t.Errorf("body = %v, want updated", capturedBody["body"])
+	}
+	if note.ID != 555 || note.Body != "updated" {
+		t.Errorf("note = %+v", note)
+	}
+}
+
+func TestUpdateNote_PropagatesNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	_, err := c.UpdateNote(context.Background(), "tok", 1, 1, 1, "x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}

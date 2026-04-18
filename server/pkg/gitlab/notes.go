@@ -36,3 +36,15 @@ func (c *Client) CreateNote(ctx context.Context, token string, projectID int64, 
 	}
 	return &out, nil
 }
+
+// UpdateNote sends PUT /api/v4/projects/:id/issues/:iid/notes/:note_id with the
+// given body text, returning the updated Note as GitLab persisted it.
+func (c *Client) UpdateNote(ctx context.Context, token string, projectID int64, issueIID int, noteID int64, body string) (*Note, error) {
+	path := fmt.Sprintf("/projects/%d/issues/%d/notes/%d", projectID, issueIID, noteID)
+	payload := map[string]any{"body": body}
+	var out Note
+	if err := c.do(ctx, http.MethodPut, token, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
