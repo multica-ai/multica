@@ -1513,19 +1513,19 @@ func TestUpdateIssue_WriteThroughExplicitNullDueDateClears(t *testing.T) {
 // TestUpdateIssue_WriteThroughExplicitNullMemberAssigneeClears guards the
 // symmetric I-new-2 regression: a PATCH of
 // {"assignee_type": null, "assignee_id": null} on an issue that currently
-// has a MEMBER-typed assignee must clear the assignee on the cache row.
-// Member assignees are cache-only in Phase 3b (no label on GitLab), so the
-// translator correctly no-ops. But the B1 fix added a
-// "preserve member assignee through upsert" branch that wrongly fires on
-// explicit-null — the explicit-clear path must skip preservation and let
-// the narg patch write SQL NULL.
+// has a MEMBER-typed assignee must clear the assignee on the cache row AND
+// tell GitLab to drop its native assignees (Phase 4: member assignees flow
+// through GitLab via assignee_ids, so an explicit-null clear must also send
+// assignee_ids: [] to GitLab).
 func TestUpdateIssue_WriteThroughExplicitNullMemberAssigneeClears(t *testing.T) {
 	ctx := context.Background()
 
+	var gitlabBody map[string]any
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gitlabBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":9302,"iid":213,"title":"T","state":"opened",
-			"labels":["status::todo","priority::none"],"updated_at":"2026-04-17T13:00:00Z"}`))
+			"labels":["status::todo","priority::none"],"assignees":[],"updated_at":"2026-04-17T13:00:00Z"}`))
 	}))
 	defer fake.Close()
 
@@ -1570,6 +1570,17 @@ func TestUpdateIssue_WriteThroughExplicitNullMemberAssigneeClears(t *testing.T) 
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 
+	// Phase 4: GitLab must have received assignee_ids: [] (explicit clear).
+	ids, present := gitlabBody["assignee_ids"]
+	if !present {
+		t.Fatalf("GitLab PATCH body missing assignee_ids — Phase 4 requires explicit-null to reach GitLab")
+	}
+	if arr, ok := ids.([]any); !ok {
+		t.Errorf("assignee_ids = %v (%T), want []any{}", ids, ids)
+	} else if len(arr) != 0 {
+		t.Errorf("assignee_ids = %v, want [] (empty = clear)", arr)
+	}
+
 	// Cache row's assignee must be cleared.
 	var (
 		cachedType *string
@@ -1585,6 +1596,161 @@ func TestUpdateIssue_WriteThroughExplicitNullMemberAssigneeClears(t *testing.T) 
 	}
 	if cachedID != nil {
 		t.Errorf("cached assignee_id = %q, want NULL (I-new-2)", *cachedID)
+	}
+}
+
+// TestUpdateIssue_WriteThroughMemberAssigneeHitsGitLab verifies that a PATCH
+// setting a member assignee with a user_gitlab_connection mapping sends
+// assignee_ids: [N] to GitLab and lands the member on the cache row. Phase 4
+// lifts Phase 3b's cache-only deferral for member assignees.
+func TestUpdateIssue_WriteThroughMemberAssigneeHitsGitLab(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody map[string]any
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":9303,"iid":501,"title":"T","state":"opened",
+			"labels":["status::todo","priority::none"],"assignees":[{"id":7,"username":"alice"}],
+			"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+	seedUserGitlabConnection(t, h, testUserID, testWorkspaceID, 7, "alice")
+
+	// Seed an unassigned GitLab-connected issue.
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 3050, 'T', '', 'todo', 'none',
+		         501, 42, 9303, '2026-04-17T12:00:00Z',
+		         'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(fmt.Sprintf(`{"assignee_type":"member","assignee_id":"%s"}`, testUserID))
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	ids, ok := capturedBody["assignee_ids"].([]any)
+	if !ok {
+		t.Fatalf("expected assignee_ids array in GitLab payload, got %v", capturedBody["assignee_ids"])
+	}
+	if len(ids) != 1 || int(ids[0].(float64)) != 7 {
+		t.Errorf("GitLab assignee_ids = %v, want [7]", ids)
+	}
+
+	// Cache row must reflect the member assignment.
+	var (
+		cachedType string
+		cachedID   string
+	)
+	if err := testPool.QueryRow(ctx,
+		`SELECT assignee_type::text, assignee_id::text FROM issue WHERE id = $1::uuid`,
+		issueID).Scan(&cachedType, &cachedID); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if cachedType != "member" {
+		t.Errorf("cached assignee_type = %q, want member", cachedType)
+	}
+	if cachedID != testUserID {
+		t.Errorf("cached assignee_id = %q, want %q", cachedID, testUserID)
+	}
+}
+
+// TestUpdateIssue_WriteThroughUnmappedMemberStaysCacheOnly verifies that a
+// PATCH setting a member assignee whose Multica UUID has no
+// user_gitlab_connection mapping omits assignee_ids from the GitLab payload
+// (cache-only fallback) but still records the member on the cache row. This
+// mirrors the Create-side cache-only fallback introduced in T7.
+func TestUpdateIssue_WriteThroughUnmappedMemberStaysCacheOnly(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody map[string]any
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":9304,"iid":502,"title":"T","state":"opened",
+			"labels":["status::todo","priority::none"],"assignees":[],
+			"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+	// NOTE: no seedUserGitlabConnection — the member has no PAT mapping.
+
+	// Seed an unassigned GitLab-connected issue.
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 3060, 'T', '', 'todo', 'none',
+		         502, 42, 9304, '2026-04-17T12:00:00Z',
+		         'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(fmt.Sprintf(`{"assignee_type":"member","assignee_id":"%s"}`, testUserID))
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	// assignee_ids must be absent from the GitLab payload (unmapped member).
+	if v, present := capturedBody["assignee_ids"]; present {
+		t.Errorf("assignee_ids should be absent for unmapped member, got %v", v)
+	}
+	// Cache row must still record the member assignment.
+	var (
+		cachedType string
+		cachedID   string
+	)
+	if err := testPool.QueryRow(ctx,
+		`SELECT assignee_type::text, assignee_id::text FROM issue WHERE id = $1::uuid`,
+		issueID).Scan(&cachedType, &cachedID); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if cachedType != "member" {
+		t.Errorf("cached assignee_type = %q, want member (cache-only fallback)", cachedType)
+	}
+	if cachedID != testUserID {
+		t.Errorf("cached assignee_id = %q, want %q", cachedID, testUserID)
 	}
 }
 

@@ -1498,7 +1498,31 @@ func (h *Handler) updateSingleIssueWriteThrough(
 			clear.DueDate = true
 		}
 	}
-	glInput := gitlabsync.BuildUpdateIssueInput(oldSnap, translatorReq, agentSlugByUUID, nil)
+
+	// Resolve member assignees (old + new) to GitLab user IDs so the
+	// translator can populate GitLab's native assignee_ids. We include the
+	// PREV member UUID so transitions off a member can participate in the
+	// map (the translator doesn't use it today, but keeping both sides is
+	// symmetric with Create and cheap). Unmapped members are absent from
+	// the map — translator leaves AssigneeIDs nil and the handler falls
+	// back to a cache-only write below.
+	memberUUIDs := []string{}
+	if prevIssue.AssigneeType.Valid && prevIssue.AssigneeType.String == "member" && prevIssue.AssigneeID.Valid {
+		memberUUIDs = append(memberUUIDs, uuidToString(prevIssue.AssigneeID))
+	}
+	if req.AssigneeType != nil && *req.AssigneeType == "member" && req.AssigneeID != nil && *req.AssigneeID != "" {
+		memberUUIDs = append(memberUUIDs, *req.AssigneeID)
+	}
+	memberGitlabMap, mapErr := h.buildMemberGitlabUserMap(ctx, prevIssue.WorkspaceID, memberUUIDs)
+	if mapErr != nil {
+		slog.Error("member gitlab user map", "error", mapErr)
+		return nil, db.Issue{}, &writeThroughError{
+			status: http.StatusInternalServerError,
+			msg:    "build member map failed",
+			err:    mapErr,
+		}
+	}
+	glInput := gitlabsync.BuildUpdateIssueInput(oldSnap, translatorReq, agentSlugByUUID, memberGitlabMap)
 
 	if !prevIssue.GitlabIid.Valid || !prevIssue.GitlabProjectID.Valid {
 		// Defensive: a cache row on a GitLab-connected workspace that
@@ -1603,16 +1627,21 @@ func (h *Handler) updateSingleIssueWriteThrough(
 			touched = true
 		}
 	}
-	// Member assignees are cache-only in Phase 3b (no GitLab user
-	// mapping yet — the translator currently drops member assignees
-	// from the GitLab payload). Apply them directly to the cache.
-	if req.AssigneeType != nil && *req.AssigneeType == "member" {
+	// Member assignees (Phase 4): the translator resolves mapped members to
+	// GitLab's native assignee_ids so GitLab holds the authoritative state.
+	// The cache, however, keys on Multica UUIDs — not GitLab user IDs —
+	// and TranslateIssue doesn't reverse-resolve on its own (it only
+	// surfaces GitlabAssigneeUserID for caller-side lookup). We patch the
+	// cache row from the REQUEST here so the Multica UUID lands in
+	// assignee_id. This covers both:
+	//   - Mapped members: GitLab received assignee_ids: [N]; we write the
+	//     member UUID so the cache matches the request (reverse-resolution
+	//     via user_gitlab_connection would yield the same UUID).
+	//   - Unmapped members: GitLab got nothing (assignee_ids omitted),
+	//     cache-only fallback preserves the member locally.
+	if req.AssigneeType != nil && *req.AssigneeType == "member" && req.AssigneeID != nil && *req.AssigneeID != "" {
 		updParams.AssigneeType = pgtype.Text{String: "member", Valid: true}
-		if req.AssigneeID != nil {
-			updParams.AssigneeID = parseUUID(*req.AssigneeID)
-		} else {
-			updParams.AssigneeID = pgtype.UUID{Valid: false}
-		}
+		updParams.AssigneeID = parseUUID(*req.AssigneeID)
 		touched = true
 	}
 	if touched {
