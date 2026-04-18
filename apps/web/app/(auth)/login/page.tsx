@@ -3,7 +3,7 @@
 import { Suspense, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
+import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths } from "@multica/core/paths";
 import type { Workspace } from "@multica/core/types";
@@ -25,8 +25,9 @@ function LoginPageContent() {
   // `next` carries a protected URL the user was originally headed to
   // (e.g. /invite/{id}). With URL-driven workspaces there is no legacy
   // "/issues" default — if `next` is absent we decide after login based on
-  // the user's workspace list.
-  const nextUrl = searchParams.get("next");
+  // the user's workspace list. Sanitize first so a crafted `?next=https://evil`
+  // cannot bounce the user off-origin after a successful login.
+  const nextUrl = sanitizeNextUrl(searchParams.get("next"));
 
   // Already authenticated — honor ?next= or fall back to first workspace
   // (or /workspaces/new if the user has none). Skip this entire path when

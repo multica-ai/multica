@@ -188,6 +188,7 @@ export function AgentDetail({
         {activeTab === "custom_args" && (
           <CustomArgsTab
             agent={agent}
+            runtimeDevice={runtimeDevice}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}

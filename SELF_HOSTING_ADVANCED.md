@@ -23,7 +23,7 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
-> **Note:** For local/development deployments without email configured, you can use the master verification code `888888` to log in.
+> **Note:** The dev master verification code `888888` is gated by `APP_ENV != "production"`. The Docker self-host stack defaults to `APP_ENV=production` (so `888888` is disabled), which protects publicly reachable instances. For local development without email configured, set `APP_ENV=development` in your `.env` to enable `888888` — never do this on a public instance.
 
 ### Google OAuth (Optional)
 

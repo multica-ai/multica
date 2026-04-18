@@ -11,6 +11,7 @@ export interface RuntimeDevice {
   name: string;
   runtime_mode: AgentRuntimeMode;
   provider: string;
+  launch_header: string;
   status: "online" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
