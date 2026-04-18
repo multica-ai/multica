@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -122,6 +124,58 @@ type SearchIssueResponse struct {
 	IssueResponse
 	MatchSource    string  `json:"match_source"`
 	MatchedSnippet *string `json:"matched_snippet,omitempty"`
+}
+
+// BatchWriteResult is the continue-on-error shape returned by
+// /api/issues/batch-update and /api/issues/batch-delete. HTTP 207
+// Multi-Status when both succeeded and failed items are present;
+// HTTP 200 when all succeeded or all failed (client inspects lists).
+// Individual item failures never abort the batch.
+type BatchWriteResult struct {
+	Succeeded []BatchSucceeded `json:"succeeded"`
+	Failed    []BatchFailed    `json:"failed"`
+}
+
+type BatchSucceeded struct {
+	ID    string         `json:"id"`
+	Issue *IssueResponse `json:"issue"` // nil for batch-delete
+}
+
+type BatchFailed struct {
+	ID        string `json:"id"`
+	ErrorCode string `json:"error_code"` // e.g. "GITLAB_403", "NOT_FOUND", "VALIDATION_FAILED"
+	Message   string `json:"message"`
+}
+
+// classifyBatchError maps a GitLab-or-handler error to a stable error_code
+// string for the BatchFailed response. Stability matters — clients key
+// retry logic off these codes. Uses errors.Is / errors.As so the
+// classification is invariant under wrapping (e.g. writeThroughError's
+// "gitlab update issue failed: %w" still matches the underlying sentinel).
+// Previous implementation used strings.Contains on the formatted error
+// message, which misclassified e.g. a 500 whose body happened to include
+// the substring "404".
+func classifyBatchError(err error) (code, msg string) {
+	if err == nil {
+		return "", ""
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "NOT_FOUND", "issue not found"
+	}
+	if errors.Is(err, gitlabapi.ErrForbidden) {
+		return "GITLAB_403", err.Error()
+	}
+	if errors.Is(err, gitlabapi.ErrNotFound) {
+		return "GITLAB_404", err.Error()
+	}
+	if errors.Is(err, gitlabapi.ErrUnauthorized) {
+		return "GITLAB_401", err.Error()
+	}
+	var apiErr *gitlabapi.APIError
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("GITLAB_%d", apiErr.StatusCode), err.Error()
+	}
+	return "WRITE_FAILED", err.Error()
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -1142,6 +1196,121 @@ func buildUpsertParamsFromCreate(wsUUID pgtype.UUID, projectID int64, issue gitl
 	}
 }
 
+// explicitClearFields captures which fields of a PATCH were present in the
+// request body with a `null` value. Derived from rawFields + the typed
+// request struct: when the JSON key is present but the parsed pointer is
+// nil, the user meant "clear". Used to drive explicit-clear semantics in
+// buildUpsertParamsForUpdate (so the cache upsert writes SQL NULL rather
+// than preserving prev values).
+type explicitClearFields struct {
+	Assignee bool // assignee_type OR assignee_id was present-and-null
+	DueDate  bool // due_date was present-and-null
+}
+
+// buildUpsertParamsForUpdate builds UpsertIssueFromGitlabParams for the PATCH
+// write-through path. The key difference from buildUpsertParamsFromCreate is
+// that UpsertIssueFromGitlab's DO UPDATE clause blindly overwrites
+// assignee_type / assignee_id / due_date with EXCLUDED values (no COALESCE).
+// On a pre-existing cache row, create-path params would wipe those fields
+// because the create-path leaves them zero — the translator only sets them
+// when GitLab returned an agent::<slug> label. For updates we preserve the
+// prevIssue values, and only override when:
+//   - The translator resolved an agent assignee from an agent::<slug> label
+//     (so the GitLab-side change wins).
+//   - The request explicitly sets a new due_date (rawFields makes the
+//     distinction between "absent" and "null"). A non-null value lands
+//     here; an explicit-null (clear.DueDate) zeroes the column via the
+//     upsert's bare EXCLUDED assignment.
+//   - The request explicitly clears the assignee (clear.Assignee) —
+//     we skip the member-preserve branch so the upsert writes NULL.
+//
+// Title / description / status / priority / gitlab_* / external_updated_at
+// come from the GitLab response (via values) as before — the upsert IS how
+// those reconcile after GitLab accepted the edit.
+func buildUpsertParamsForUpdate(
+	prevIssue db.Issue,
+	projectID int64,
+	issue gitlabapi.Issue,
+	values gitlabsync.IssueValues,
+	req UpdateIssueRequest,
+	clear explicitClearFields,
+) db.UpsertIssueFromGitlabParams {
+	// Default both to zero. We'll fill them in below per the following rules:
+	//   - Agent assignment: GitLab's labels are the source of truth. If the
+	//     translator resolved an agent::<slug> label on the response, use it;
+	//     otherwise the agent assignment is considered removed (a prior agent
+	//     label was dropped, either by this PATCH or by an outside actor).
+	//   - Member assignment: cache-only in Phase 3b (translator drops it).
+	//     Preserve the prev cache value so a GitLab-originated PATCH that
+	//     only touches labels doesn't wipe the member assignee — EXCEPT
+	//     when the request explicitly cleared the assignee, in which case
+	//     the zero (NULL) is what the user wants.
+	var assigneeType pgtype.Text
+	var assigneeID pgtype.UUID
+	dueDate := prevIssue.DueDate
+
+	switch {
+	case values.AssigneeType == "agent":
+		// Agent resolved from GitLab label — the GitLab-side state wins.
+		assigneeType = pgtype.Text{String: "agent", Valid: true}
+		var newID pgtype.UUID
+		_ = newID.Scan(values.AssigneeID)
+		assigneeID = newID
+	case clear.Assignee:
+		// Explicit-null clear: leave the zero values so the upsert writes
+		// SQL NULL for assignee_type / assignee_id (bare EXCLUDED). This
+		// branch must come before the member-preserve case below so the
+		// user's "Unassigned" click isn't silently reverted.
+	case prevIssue.AssigneeType.String == "member":
+		// Member assignee is cache-only (translator drops member assignees).
+		// Preserve it so non-assignee PATCHes don't wipe it.
+		assigneeType = prevIssue.AssigneeType
+		assigneeID = prevIssue.AssigneeID
+	default:
+		// Prev was unassigned OR prev was an agent that's no longer on the
+		// GitLab response (agent::<slug> label removed). In both cases the
+		// desired cache state is unassigned — leave the zero values.
+	}
+
+	// due_date: explicit-null clear wins over prev preservation; otherwise
+	// a non-empty new value replaces prev; otherwise we keep prev.
+	switch {
+	case clear.DueDate:
+		dueDate = pgtype.Timestamptz{Valid: false}
+	case req.DueDate != nil && *req.DueDate != "":
+		if t, err := time.Parse(time.RFC3339, *req.DueDate); err == nil {
+			dueDate = pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+
+	desc := pgtype.Text{}
+	if values.Description != "" {
+		desc = pgtype.Text{String: values.Description, Valid: true}
+	}
+	extUpdated := pgtype.Timestamptz{}
+	if values.UpdatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, values.UpdatedAt); err == nil {
+			extUpdated = pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+	return db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       prevIssue.WorkspaceID,
+		GitlabIid:         pgtype.Int4{Int32: int32(issue.IID), Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: projectID, Valid: true},
+		GitlabIssueID:     pgtype.Int8{Int64: issue.ID, Valid: issue.ID != 0},
+		Title:             values.Title,
+		Description:       desc,
+		Status:            values.Status,
+		Priority:          values.Priority,
+		AssigneeType:      assigneeType,
+		AssigneeID:        assigneeID,
+		CreatorType:       prevIssue.CreatorType,
+		CreatorID:         prevIssue.CreatorID,
+		DueDate:           dueDate,
+		ExternalUpdatedAt: extUpdated,
+	}
+}
+
 type UpdateIssueRequest struct {
 	Title              *string  `json:"title"`
 	Description        *string  `json:"description"`
@@ -1153,6 +1322,269 @@ type UpdateIssueRequest struct {
 	DueDate            *string  `json:"due_date"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
+}
+
+// writeThroughError is the internal error type returned by
+// updateSingleIssueWriteThrough. The `status` field lets the direct
+// UpdateIssue handler map the error back to the T4 status-code contract
+// (502 for GitLab-side failures, 500 for cache/tx failures). For batch
+// callers the status is ignored — BatchUpdateIssues uses
+// classifyBatchError on the underlying error message instead.
+type writeThroughError struct {
+	status int
+	msg    string
+	err    error
+}
+
+func (e *writeThroughError) Error() string {
+	if e.err != nil {
+		// Plain string concatenation — %w in fmt.Errorf is only useful
+		// when the result is returned as an error (so errors.Is/As can
+		// traverse), but here we immediately collapse to a string. The
+		// wrapped-chain traversal is provided by Unwrap() below, which
+		// lets classifyBatchError match sentinels through this wrapper.
+		return e.msg + ": " + e.err.Error()
+	}
+	return e.msg
+}
+
+func (e *writeThroughError) Unwrap() error { return e.err }
+
+// writeThroughStatus returns the HTTP status code for an error returned
+// by updateSingleIssueWriteThrough. Falls back to 500 for non-writeThrough
+// errors.
+func writeThroughStatus(err error) int {
+	var wt *writeThroughError
+	if errors.As(err, &wt) {
+		return wt.status
+	}
+	return http.StatusInternalServerError
+}
+
+// updateSingleIssueWriteThrough executes the Phase 3b PATCH write-through
+// for a single issue: PUT /projects/:id/issues/:iid on GitLab, upsert the
+// cache row from the GitLab response inside a transaction, apply
+// Multica-native fields (parent_issue_id, project_id, member assignee)
+// that GitLab doesn't track, and commit. Used by both UpdateIssue
+// (direct handler) and BatchUpdateIssues (loops over this). Callers
+// pre-resolve token/agentSlugByUUID once per request to avoid redundant
+// DB + GitLab work across a batch; the wsConn row they fetched is not
+// needed inside this helper because the GitLab identifiers already live
+// on prevIssue.
+//
+// workspaceID is threaded through purely for slog logging context (the
+// helper emits a warning when a GitLab-connected cache row is missing
+// GitLab identifiers — a bug upstream of this handler).
+//
+// On success returns the built IssueResponse and the post-commit cache
+// row. On error returns a *writeThroughError with a status hint that
+// the direct handler maps back to an HTTP status. The batch handler
+// ignores the status hint and classifies the error via
+// classifyBatchError, which uses errors.Is/As against GitLab sentinels
+// (ErrForbidden/ErrNotFound/ErrUnauthorized) and APIError.StatusCode —
+// classification is invariant under writeThroughError's %w wrapping.
+//
+// rawFields is optional: when non-nil it enables explicit-null semantics
+// for parent_issue_id / project_id / assignee_type / assignee_id (JSON
+// null clears the field). When nil — as in the batch path — those
+// fields fall back to "value present means set, absent or nil means
+// leave alone" (no explicit null).
+func (h *Handler) updateSingleIssueWriteThrough(
+	ctx context.Context,
+	prevIssue db.Issue,
+	req UpdateIssueRequest,
+	rawFields map[string]json.RawMessage,
+	workspaceID string,
+	token string,
+	agentSlugByUUID map[string]string,
+) (*IssueResponse, db.Issue, error) {
+	oldSnap := gitlabsync.OldIssueSnapshot{
+		Status:       prevIssue.Status,
+		Priority:     prevIssue.Priority,
+		AssigneeType: prevIssue.AssigneeType.String,
+		AssigneeUUID: uuidToString(prevIssue.AssigneeID),
+	}
+	translatorReq := gitlabsync.UpdateIssueRequest{
+		Title:        req.Title,
+		Description:  req.Description,
+		Status:       req.Status,
+		Priority:     req.Priority,
+		AssigneeType: req.AssigneeType,
+		AssigneeID:   req.AssigneeID,
+		DueDate:      req.DueDate,
+	}
+	// Explicit-null clearing. The req pointer fields arrive as nil *string
+	// for both "field absent" and "field: null" — we use rawFields (the
+	// raw JSON keys present in the body) to tell them apart.
+	//
+	//   - assignee_type / assignee_id: a PATCH of
+	//     {"assignee_type": null, "assignee_id": null} must remove the
+	//     agent::<slug> label on GitLab. Pass &"" so BuildUpdateIssueInput
+	//     diffs to "clear".
+	//   - due_date: a PATCH of {"due_date": null} must send due_date: ""
+	//     to GitLab (GitLab's clear-date signal).
+	//
+	// We also derive explicitClearFields here so buildUpsertParamsForUpdate
+	// knows to write SQL NULL via the upsert path rather than preserving
+	// prevIssue values.
+	var clear explicitClearFields
+	if rawFields != nil {
+		empty := ""
+		if _, present := rawFields["assignee_type"]; present && req.AssigneeType == nil {
+			translatorReq.AssigneeType = &empty
+			clear.Assignee = true
+		}
+		if _, present := rawFields["assignee_id"]; present && req.AssigneeID == nil {
+			translatorReq.AssigneeID = &empty
+			clear.Assignee = true
+		}
+		if _, present := rawFields["due_date"]; present && req.DueDate == nil {
+			translatorReq.DueDate = &empty
+			clear.DueDate = true
+		}
+	}
+	glInput := gitlabsync.BuildUpdateIssueInput(oldSnap, translatorReq, agentSlugByUUID)
+
+	if !prevIssue.GitlabIid.Valid || !prevIssue.GitlabProjectID.Valid {
+		// Defensive: a cache row on a GitLab-connected workspace that
+		// lacks GitLab identifiers is a bug upstream of this handler.
+		// Refuse the write-through rather than silently fall through.
+		slog.Error("gitlab-connected workspace issue missing gitlab identifiers",
+			"issue_id", uuidToString(prevIssue.ID), "workspace_id", workspaceID)
+		return nil, db.Issue{}, &writeThroughError{
+			status: http.StatusBadGateway,
+			msg:    "issue is missing gitlab identifiers",
+		}
+	}
+
+	glIssue, glErr := h.Gitlab.UpdateIssue(ctx, token, prevIssue.GitlabProjectID.Int64, int(prevIssue.GitlabIid.Int32), glInput)
+	if glErr != nil {
+		slog.Error("gitlab update issue", "error", glErr, "issue_id", uuidToString(prevIssue.ID))
+		return nil, db.Issue{}, &writeThroughError{
+			status: http.StatusBadGateway,
+			msg:    "gitlab update issue failed",
+			err:    glErr,
+		}
+	}
+
+	// Translate the GitLab response → cache values.
+	agentByLabel := make(map[string]string, len(agentSlugByUUID))
+	for uuidStr, slug := range agentSlugByUUID {
+		agentByLabel[slug] = uuidStr
+	}
+	values := gitlabsync.TranslateIssue(*glIssue, &gitlabsync.TranslateContext{AgentBySlug: agentByLabel})
+
+	glTx, txErr := h.TxStarter.Begin(ctx)
+	if txErr != nil {
+		slog.Error("begin gitlab update-through tx", "error", txErr)
+		return nil, db.Issue{}, &writeThroughError{
+			status: http.StatusInternalServerError,
+			msg:    "failed to update issue",
+			err:    txErr,
+		}
+	}
+	defer glTx.Rollback(ctx)
+	qtxGL := h.Queries.WithTx(glTx)
+
+	cacheRow, upErr := qtxGL.UpsertIssueFromGitlab(ctx,
+		buildUpsertParamsForUpdate(prevIssue, prevIssue.GitlabProjectID.Int64, *glIssue, values, req, clear))
+	if upErr != nil && !errors.Is(upErr, pgx.ErrNoRows) {
+		slog.Error("upsert gitlab cache row on update", "error", upErr)
+		return nil, db.Issue{}, &writeThroughError{
+			status: http.StatusInternalServerError,
+			msg:    "cache upsert failed",
+			err:    upErr,
+		}
+	}
+	if errors.Is(upErr, pgx.ErrNoRows) {
+		// Clobber guard rejected the upsert (cache row's
+		// external_updated_at is already >= GitLab's updated_at). A
+		// concurrent webhook superseded us — keep the current cache
+		// row as-is and just apply any Multica-native patches below.
+		cacheRow = prevIssue
+	}
+
+	// Apply Multica-native fields that GitLab doesn't track. Pre-fill
+	// the bare-narg slots (assignee_*, due_date, parent_issue_id,
+	// project_id) from cacheRow so we don't overwrite anything we
+	// aren't explicitly changing.
+	updParams := db.UpdateIssueParams{
+		ID:            cacheRow.ID,
+		AssigneeType:  cacheRow.AssigneeType,
+		AssigneeID:    cacheRow.AssigneeID,
+		DueDate:       cacheRow.DueDate,
+		ParentIssueID: cacheRow.ParentIssueID,
+		ProjectID:     cacheRow.ProjectID,
+	}
+	touched := false
+	// parent_issue_id / project_id support explicit-null only when rawFields
+	// is provided (direct PATCH). Batch callers pass rawFields=nil and fall
+	// back to "set when non-nil, otherwise leave alone" — explicit-null
+	// clearing is a single-issue feature today.
+	if rawFields != nil {
+		if _, ok := rawFields["parent_issue_id"]; ok {
+			if req.ParentIssueID != nil {
+				updParams.ParentIssueID = parseUUID(*req.ParentIssueID)
+			} else {
+				updParams.ParentIssueID = pgtype.UUID{Valid: false}
+			}
+			touched = true
+		}
+		if _, ok := rawFields["project_id"]; ok {
+			if req.ProjectID != nil {
+				updParams.ProjectID = parseUUID(*req.ProjectID)
+			} else {
+				updParams.ProjectID = pgtype.UUID{Valid: false}
+			}
+			touched = true
+		}
+	} else {
+		if req.ParentIssueID != nil {
+			updParams.ParentIssueID = parseUUID(*req.ParentIssueID)
+			touched = true
+		}
+		if req.ProjectID != nil {
+			updParams.ProjectID = parseUUID(*req.ProjectID)
+			touched = true
+		}
+	}
+	// Member assignees are cache-only in Phase 3b (no GitLab user
+	// mapping yet — the translator currently drops member assignees
+	// from the GitLab payload). Apply them directly to the cache.
+	if req.AssigneeType != nil && *req.AssigneeType == "member" {
+		updParams.AssigneeType = pgtype.Text{String: "member", Valid: true}
+		if req.AssigneeID != nil {
+			updParams.AssigneeID = parseUUID(*req.AssigneeID)
+		} else {
+			updParams.AssigneeID = pgtype.UUID{Valid: false}
+		}
+		touched = true
+	}
+	if touched {
+		updated, updErr := qtxGL.UpdateIssue(ctx, updParams)
+		if updErr != nil {
+			slog.Error("patch native fields on gitlab cache row", "error", updErr)
+			return nil, db.Issue{}, &writeThroughError{
+				status: http.StatusInternalServerError,
+				msg:    "failed to update issue",
+				err:    updErr,
+			}
+		}
+		cacheRow = updated
+	}
+
+	if err := glTx.Commit(ctx); err != nil {
+		slog.Error("commit gitlab update-through tx", "error", err)
+		return nil, db.Issue{}, &writeThroughError{
+			status: http.StatusInternalServerError,
+			msg:    "failed to update issue",
+			err:    err,
+		}
+	}
+
+	prefix := h.getIssuePrefix(ctx, cacheRow.WorkspaceID)
+	resp := issueToResponse(cacheRow, prefix)
+	return &resp, cacheRow, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1282,6 +1714,102 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, msg)
 			return
 		}
+	}
+
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// PATCH the GitLab issue first, then reconcile the cache row from the
+	// returned representation. On a GitLab-connected workspace the
+	// write-through is AUTHORITATIVE — on GitLab error we return a non-2xx
+	// status and never fall back to the legacy direct-DB path (that would
+	// produce orphaned cache rows).
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), prevIssue.WorkspaceID)
+		if wsErr == nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
+
+			agentSlugByUUID, agentErr := h.buildAgentUUIDSlugMap(r.Context(), prevIssue.WorkspaceID)
+			if agentErr != nil {
+				slog.Error("build agent slug map", "error", agentErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusInternalServerError, "build agent map failed")
+				return
+			}
+
+			resp, cacheRow, wtErr := h.updateSingleIssueWriteThrough(
+				r.Context(), prevIssue, req, rawFields,
+				workspaceID, token, agentSlugByUUID,
+			)
+			if wtErr != nil {
+				writeError(w, writeThroughStatus(wtErr), wtErr.Error())
+				return
+			}
+
+			// Detect side-effect-relevant changes by comparing the post-commit
+			// cache row to prevIssue. Using the cache row (not the request) is
+			// deliberate — the clobber-guard branch means the request may not
+			// have been applied, and we don't want to enqueue agent tasks for
+			// changes that didn't stick.
+			assigneeChanged := prevIssue.AssigneeType.String != cacheRow.AssigneeType.String ||
+				uuidToString(prevIssue.AssigneeID) != uuidToString(cacheRow.AssigneeID)
+			statusChanged := prevIssue.Status != cacheRow.Status
+			priorityChanged := prevIssue.Priority != cacheRow.Priority
+			descriptionChanged := textToPtr(prevIssue.Description) != resp.Description
+			titleChanged := prevIssue.Title != cacheRow.Title
+			prevDueDate := timestampToPtr(prevIssue.DueDate)
+			dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
+				(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
+
+			h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+				"issue":               resp,
+				"assignee_changed":    assigneeChanged,
+				"status_changed":      statusChanged,
+				"priority_changed":    priorityChanged,
+				"due_date_changed":    dueDateChanged,
+				"description_changed": descriptionChanged,
+				"title_changed":       titleChanged,
+				"prev_title":          prevIssue.Title,
+				"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
+				"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
+				"prev_status":         prevIssue.Status,
+				"prev_priority":       prevIssue.Priority,
+				"prev_due_date":       prevDueDate,
+				"prev_description":    textToPtr(prevIssue.Description),
+				"creator_type":        prevIssue.CreatorType,
+				"creator_id":          uuidToString(prevIssue.CreatorID),
+			})
+
+			// Reconcile task queue when assignee changes (matches legacy).
+			if assigneeChanged {
+				h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
+				if h.shouldEnqueueAgentTask(r.Context(), cacheRow) {
+					h.TaskService.EnqueueTaskForIssue(r.Context(), cacheRow)
+				}
+			}
+
+			// Trigger the assigned agent when a member moves an issue out of
+			// backlog (matches legacy).
+			if statusChanged && !assigneeChanged && actorType == "member" &&
+				prevIssue.Status == "backlog" && cacheRow.Status != "done" && cacheRow.Status != "cancelled" {
+				if h.isAgentAssigneeReady(r.Context(), cacheRow) {
+					h.TaskService.EnqueueTaskForIssue(r.Context(), cacheRow)
+				}
+			}
+
+			// Cancel active tasks on user-initiated cancellation (matches legacy).
+			if statusChanged && cacheRow.Status == "cancelled" {
+				h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
+			}
+
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		// wsErr != nil → fall through to legacy path (most likely
+		// pgx.ErrNoRows for non-connected workspaces).
 	}
 
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
@@ -1437,31 +1965,131 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	return true
 }
 
+// cleanupAndDeleteIssueRow performs the Multica-side cleanup for a deleted
+// issue: cancels agent tasks, fails autopilot runs, removes the cache row,
+// then deletes S3 attachments. Shared between the legacy DeleteIssue path and
+// the GitLab write-through branch — the write-through calls GitLab first,
+// then calls this to tear down the local state.
+func (h *Handler) cleanupAndDeleteIssueRow(ctx context.Context, issue db.Issue) error {
+	h.TaskService.CancelTasksForIssue(ctx, issue.ID)
+	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
+	h.Queries.FailAutopilotRunsByIssue(ctx, issue.ID)
+
+	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
+
+	if err := h.Queries.DeleteIssue(ctx, issue.ID); err != nil {
+		return err
+	}
+
+	h.deleteS3Objects(ctx, attachmentURLs)
+	return nil
+}
+
+// deleteSingleIssueWriteThrough executes the Phase 3b DELETE write-through
+// for a single issue: DELETE /projects/:id/issues/:iid on GitLab, then
+// cleanupAndDeleteIssueRow for the local state. Used by both DeleteIssue
+// (direct handler) and BatchDeleteIssues (loops over this). Callers
+// pre-resolve token once per request to avoid redundant work; the
+// workspace_gitlab_connection row they fetched is not needed here
+// because the GitLab identifiers already live on the issue row.
+//
+// workspaceID is threaded through purely for slog logging context.
+//
+// On error returns a *writeThroughError with a status hint that the direct
+// handler maps to an HTTP status. The batch handler ignores the status
+// hint and classifies the error via classifyBatchError, which uses
+// errors.Is/As against GitLab sentinels and APIError.StatusCode —
+// classification is invariant under writeThroughError's %w wrapping.
+//
+// Note: gitlab.Client.DeleteIssue swallows 404 (already-gone issues are
+// considered successfully deleted), so a missing GitLab issue will not
+// surface here — we'll proceed to clean up the cache row.
+func (h *Handler) deleteSingleIssueWriteThrough(
+	ctx context.Context,
+	issue db.Issue,
+	workspaceID string,
+	token string,
+) error {
+	// Defensive: a cache row on a GitLab-connected workspace that lacks
+	// GitLab identifiers is a bug upstream of this handler. Refuse the
+	// write-through rather than silently fall through.
+	if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
+		slog.Error("gitlab-connected workspace issue missing gitlab identifiers",
+			"issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)
+		return &writeThroughError{
+			status: http.StatusBadGateway,
+			msg:    "issue is missing gitlab identifiers",
+		}
+	}
+
+	if err := h.Gitlab.DeleteIssue(ctx, token, issue.GitlabProjectID.Int64, int(issue.GitlabIid.Int32)); err != nil {
+		slog.Error("gitlab delete issue", "error", err, "issue_id", uuidToString(issue.ID))
+		return &writeThroughError{
+			status: http.StatusBadGateway,
+			msg:    "gitlab delete issue failed",
+			err:    err,
+		}
+	}
+
+	if err := h.cleanupAndDeleteIssueRow(ctx, issue); err != nil {
+		slog.Error("cleanup issue row after gitlab delete", "error", err, "issue_id", uuidToString(issue.ID))
+		return &writeThroughError{
+			status: http.StatusInternalServerError,
+			msg:    "failed to delete issue",
+			err:    err,
+		}
+	}
+
+	return nil
+}
+
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
 		return
 	}
+	userID := requestUserID(r)
+	workspaceID := uuidToString(issue.WorkspaceID)
 
-	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
-	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// DELETE the GitLab issue first, then tear down the cache row. On a
+	// GitLab-connected workspace the write-through is AUTHORITATIVE — on
+	// GitLab error we return 502 and never fall back to legacy (that would
+	// leave GitLab and the cache diverged).
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
+		if wsErr == nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
 
-	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+			if err := h.deleteSingleIssueWriteThrough(r.Context(), issue, workspaceID, token); err != nil {
+				writeError(w, writeThroughStatus(err), err.Error())
+				return
+			}
 
-	err := h.Queries.DeleteIssue(r.Context(), parseUUID(id))
-	if err != nil {
+			h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": id})
+			slog.Info("issue deleted (gitlab write-through)", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// else: not connected → fall through to legacy
+	}
+
+	if err := h.cleanupAndDeleteIssueRow(r.Context(), issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
-	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": id})
-	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", uuidToString(issue.WorkspaceID))...)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": id})
+	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1497,6 +2125,147 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workspaceID := h.resolveWorkspaceID(r)
+
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// loop over each issue, attempting the PATCH write-through per item with
+	// continue-on-error semantics. Returns BatchWriteResult with 207 when
+	// mixed success/failure, 200 when all-success or all-failure. Non-
+	// connected workspaces fall through to the legacy direct-DB batch path.
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+		if wsErr == nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token for batch update", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
+			agentSlugByUUID, agentErr := h.buildAgentUUIDSlugMap(r.Context(), parseUUID(workspaceID))
+			if agentErr != nil {
+				slog.Error("build agent slug map for batch update", "error", agentErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusInternalServerError, "build agent map failed")
+				return
+			}
+
+			result := BatchWriteResult{
+				Succeeded: []BatchSucceeded{},
+				Failed:    []BatchFailed{},
+			}
+
+			for _, issueID := range req.IssueIDs {
+				prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          parseUUID(issueID),
+					WorkspaceID: parseUUID(workspaceID),
+				})
+				if err != nil {
+					code, msg := classifyBatchError(err)
+					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
+					continue
+				}
+
+				// Enforce agent visibility per-item (matches legacy batch).
+				if req.Updates.AssigneeType != nil && *req.Updates.AssigneeType == "agent" && req.Updates.AssigneeID != nil {
+					if ok, reason := h.canAssignAgent(r.Context(), r, *req.Updates.AssigneeID, workspaceID); !ok {
+						result.Failed = append(result.Failed, BatchFailed{
+							ID:        issueID,
+							ErrorCode: "FORBIDDEN_ASSIGNEE",
+							Message:   reason,
+						})
+						continue
+					}
+				}
+
+				resp, cacheRow, perr := h.updateSingleIssueWriteThrough(
+					r.Context(), prevIssue, req.Updates, nil,
+					workspaceID, token, agentSlugByUUID,
+				)
+				if perr != nil {
+					code, msg := classifyBatchError(perr)
+					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
+					continue
+				}
+
+				// Per-item side-effects (subset of single-UpdateIssue). Use
+				// post-commit cache row comparison — same rationale as the
+				// single-issue handler: the clobber guard may reject the
+				// upsert and we don't want to enqueue tasks for no-op changes.
+				assigneeChanged := prevIssue.AssigneeType.String != cacheRow.AssigneeType.String ||
+					uuidToString(prevIssue.AssigneeID) != uuidToString(cacheRow.AssigneeID)
+				statusChanged := prevIssue.Status != cacheRow.Status
+
+				if assigneeChanged {
+					h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
+					if h.shouldEnqueueAgentTask(r.Context(), cacheRow) {
+						h.TaskService.EnqueueTaskForIssue(r.Context(), cacheRow)
+					}
+				}
+				if statusChanged && !assigneeChanged && actorType == "member" &&
+					prevIssue.Status == "backlog" && cacheRow.Status != "done" && cacheRow.Status != "cancelled" {
+					if h.isAgentAssigneeReady(r.Context(), cacheRow) {
+						h.TaskService.EnqueueTaskForIssue(r.Context(), cacheRow)
+					}
+				}
+				if statusChanged && cacheRow.Status == "cancelled" {
+					h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
+				}
+
+				// Emit a simpler {"issue": resp} payload per-item on the batch
+				// path — intentionally omitting the prev_*/*_changed flags the
+				// single-issue PATCH emits. Rationale: subscribers that need
+				// fine-grained diff metadata (for activity-log authoring,
+				// inbox notifications, etc.) should drive off single-issue
+				// PATCH events; the batch path exists for bulk mutations where
+				// "some set of issues changed" is the useful signal and
+				// computing N rich payloads would balloon socket traffic.
+				// Single-issue PATCH remains available for callers that need
+				// the richer shape.
+				h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{"issue": resp})
+
+				result.Succeeded = append(result.Succeeded, BatchSucceeded{ID: issueID, Issue: resp})
+			}
+
+			// 207 when mixed; 200 when all-success OR all-failure (client
+			// inspects the lists either way).
+			status := http.StatusOK
+			if len(result.Failed) > 0 && len(result.Succeeded) > 0 {
+				status = http.StatusMultiStatus
+			}
+			slog.Info("batch update issues (gitlab write-through)",
+				append(logger.RequestAttrs(r),
+					"succeeded", len(result.Succeeded),
+					"failed", len(result.Failed))...)
+			// Response shape: BatchWriteResult = {succeeded: [...], failed: [...]}.
+			// This diverges from the legacy non-connected path below which
+			// returns {"updated": n} (counter only). The divergence is
+			// intentional — per-item continue-on-error semantics need the
+			// per-item detail — but NOT yet normalized across both paths.
+			// Frontends must key off the presence of "succeeded" vs "updated".
+			// Normalizing the legacy path to BatchWriteResult is a separate
+			// design decision (it would change the shape non-connected
+			// workspaces see today) and is out of scope for Phase 3b.
+			writeJSON(w, status, result)
+			return
+		}
+		// wsErr != nil → fall through to legacy path (non-connected workspace).
+	}
+
+	h.legacyBatchUpdateIssues(w, r, bodyBytes, req, userID, workspaceID)
+}
+
+// legacyBatchUpdateIssues is the pre-Phase-3b batch update behavior,
+// preserved verbatim for workspaces without a GitLab connection. Called by
+// BatchUpdateIssues after it determines the workspace is unconnected.
+// Body decode + auth + workspace resolution happen once in the caller,
+// so this function receives them as arguments.
+func (h *Handler) legacyBatchUpdateIssues(
+	w http.ResponseWriter,
+	r *http.Request,
+	bodyBytes []byte,
+	req BatchUpdateIssuesRequest,
+	userID, workspaceID string,
+) {
 	// Detect which fields in "updates" were explicitly set (including null).
 	var rawTop map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawTop)
@@ -1505,7 +2274,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(raw, &rawUpdates)
 	}
 
-	workspaceID := h.resolveWorkspaceID(r)
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -1663,6 +2431,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
+	// Response shape: {"updated": n}. Diverges from the connected write-through
+	// path above which returns BatchWriteResult {succeeded, failed}. This
+	// legacy shape is preserved verbatim (pre-Phase-3b behaviour) and is NOT
+	// yet normalized across the two paths — normalization would change the
+	// contract non-connected workspaces see today and is out of scope here.
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
 
@@ -1688,6 +2461,84 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+
+	// Phase 3b write-through: when the workspace has a GitLab connection,
+	// loop over each issue, attempting the DELETE write-through per item with
+	// continue-on-error semantics. Returns BatchWriteResult with 207 when
+	// mixed success/failure, 200 when all-success or all-failure. Non-
+	// connected workspaces fall through to the legacy direct-DB batch path.
+	if h.GitlabEnabled && h.GitlabResolver != nil {
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+		if wsErr == nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
+			if tokErr != nil {
+				slog.Error("resolve gitlab token for batch delete", "error", tokErr, "workspace_id", workspaceID)
+				writeError(w, http.StatusBadGateway, "could not resolve gitlab token")
+				return
+			}
+
+			result := BatchWriteResult{
+				Succeeded: []BatchSucceeded{},
+				Failed:    []BatchFailed{},
+			}
+
+			for _, issueID := range req.IssueIDs {
+				issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          parseUUID(issueID),
+					WorkspaceID: parseUUID(workspaceID),
+				})
+				if err != nil {
+					code, msg := classifyBatchError(err)
+					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
+					continue
+				}
+
+				if perr := h.deleteSingleIssueWriteThrough(r.Context(), issue, workspaceID, token); perr != nil {
+					code, msg := classifyBatchError(perr)
+					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
+					continue
+				}
+
+				h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})
+				result.Succeeded = append(result.Succeeded, BatchSucceeded{ID: issueID})
+			}
+
+			// 207 when mixed; 200 when all-success OR all-failure (client
+			// inspects the lists either way).
+			status := http.StatusOK
+			if len(result.Failed) > 0 && len(result.Succeeded) > 0 {
+				status = http.StatusMultiStatus
+			}
+			slog.Info("batch delete issues (gitlab write-through)",
+				append(logger.RequestAttrs(r),
+					"succeeded", len(result.Succeeded),
+					"failed", len(result.Failed))...)
+			// Response shape: BatchWriteResult = {succeeded: [...], failed: [...]}
+			// (with Succeeded.Issue == nil for batch-delete). Diverges from the
+			// legacy non-connected path below which returns {"deleted": n}.
+			// Divergence is intentional (per-item continue-on-error semantics)
+			// and NOT yet normalized — mirrors the batch-update split above.
+			writeJSON(w, status, result)
+			return
+		}
+		// wsErr != nil → fall through to legacy path (non-connected workspace).
+	}
+
+	h.legacyBatchDeleteIssues(w, r, req, userID, workspaceID)
+}
+
+// legacyBatchDeleteIssues is the pre-Phase-3b batch delete behavior,
+// preserved verbatim for workspaces without a GitLab connection. Called by
+// BatchDeleteIssues after it determines the workspace is unconnected.
+// Body decode + auth + workspace resolution happen once in the caller,
+// so this function receives them as arguments.
+func (h *Handler) legacyBatchDeleteIssues(
+	w http.ResponseWriter,
+	r *http.Request,
+	req BatchDeleteIssuesRequest,
+	userID, workspaceID string,
+) {
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -1717,5 +2568,9 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
+	// Response shape: {"deleted": n}. Diverges from the connected write-through
+	// path above which returns BatchWriteResult {succeeded, failed}. Preserved
+	// verbatim (pre-Phase-3b behaviour) and NOT yet normalized across the two
+	// paths — same rationale as batch-update.
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
 }

@@ -254,8 +254,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 				r.Post("/", h.CreateIssue)
 
 				// Other root writes — gated until Phase 3b migrates them.
-				r.With(gw).Post("/batch-update", h.BatchUpdateIssues)
-				r.With(gw).Post("/batch-delete", h.BatchDeleteIssues)
+				r.Post("/batch-update", h.BatchUpdateIssues)
+				r.Post("/batch-delete", h.BatchDeleteIssues)
 
 				r.Route("/{id}", func(r chi.Router) {
 					// Reads — always allowed.
@@ -270,8 +270,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 					r.Get("/children", h.ListChildIssues)
 
 					// Writes — gated until Phase 3b migrates them.
-					r.With(gw).Put("/", h.UpdateIssue)
-					r.With(gw).Delete("/", h.DeleteIssue)
+					r.Put("/", h.UpdateIssue)
+					r.Delete("/", h.DeleteIssue)
 					r.With(gw).Post("/comments", h.CreateComment)
 					r.With(gw).Post("/subscribe", h.SubscribeToIssue)
 					r.With(gw).Post("/unsubscribe", h.UnsubscribeFromIssue)
