@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/mention"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -862,6 +863,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Expand bare issue identifiers (e.g. FWU-56) into clickable mention links.
+	if req.Description != nil {
+		expanded := mention.ExpandIssueIdentifiers(r.Context(), h.Queries, parseUUID(workspaceID), *req.Description)
+		req.Description = &expanded
+	}
+
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
@@ -981,7 +988,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		expanded := mention.ExpandIssueIdentifiers(r.Context(), h.Queries, prevIssue.WorkspaceID, *req.Description)
+		params.Description = pgtype.Text{String: expanded, Valid: true}
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
