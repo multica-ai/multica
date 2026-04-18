@@ -82,7 +82,7 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 
 const getWorkspaceUsageByDay = `-- name: GetWorkspaceUsageByDay :many
 SELECT
-    DATE(tu.created_at) AS date,
+    (tu.created_at AT TIME ZONE 'UTC')::date AS date,
     tu.model,
     SUM(tu.input_tokens)::bigint AS total_input_tokens,
     SUM(tu.output_tokens)::bigint AS total_output_tokens,
@@ -93,9 +93,9 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
-GROUP BY DATE(tu.created_at), tu.model
-ORDER BY DATE(tu.created_at) DESC, tu.model
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz, 'UTC')
+GROUP BY (tu.created_at AT TIME ZONE 'UTC')::date, tu.model
+ORDER BY (tu.created_at AT TIME ZONE 'UTC')::date DESC, tu.model
 `
 
 type GetWorkspaceUsageByDayParams struct {
@@ -117,6 +117,9 @@ type GetWorkspaceUsageByDayRow struct {
 // atq.created_at (task enqueue time), so tasks that queue one day and execute
 // the next are attributed to the day tokens were actually produced. The since
 // cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+//
+// Bucketing is pinned to UTC (see ListRuntimeUsage for the rationale) so the
+// same row lands in the same bucket regardless of the DB server's session TZ.
 func (q *Queries) GetWorkspaceUsageByDay(ctx context.Context, arg GetWorkspaceUsageByDayParams) ([]GetWorkspaceUsageByDayRow, error) {
 	rows, err := q.db.Query(ctx, getWorkspaceUsageByDay, arg.WorkspaceID, arg.Since)
 	if err != nil {
@@ -157,7 +160,7 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz, 'UTC')
 GROUP BY tu.model
 ORDER BY (SUM(tu.input_tokens) + SUM(tu.output_tokens)) DESC
 `
@@ -178,6 +181,7 @@ type GetWorkspaceUsageSummaryRow struct {
 
 // Filter by tu.created_at (usage report time), aligned to start-of-day, so
 // `days=N` is interpreted as N full calendar days like the other usage queries.
+// Pinned to UTC for cross-environment stability (see GetWorkspaceUsageByDay).
 func (q *Queries) GetWorkspaceUsageSummary(ctx context.Context, arg GetWorkspaceUsageSummaryParams) ([]GetWorkspaceUsageSummaryRow, error) {
 	rows, err := q.db.Query(ctx, getWorkspaceUsageSummary, arg.WorkspaceID, arg.Since)
 	if err != nil {

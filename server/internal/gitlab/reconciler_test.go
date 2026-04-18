@@ -15,6 +15,18 @@ import (
 
 func TestReconciler_PicksUpDriftAndAdvancesCursor(t *testing.T) {
 	pool := connectTestPool(t)
+
+	// This test is the only one that drives tickOne(), which lists ALL
+	// connected workspaces. Orphaned connection rows from a previous crashed
+	// or interrupted test run survive (their workspace-owner cleanup never
+	// fired) and show up here as "unexpected path" errors against the mock.
+	// Clean them up so the mock only ever serves this test's own workspace.
+	// Other reconciler tests call reconcileOne/sweepDeletions directly and
+	// are immune.
+	if _, err := pool.Exec(context.Background(), `TRUNCATE workspace_gitlab_connection`); err != nil {
+		t.Fatalf("truncate connections: %v", err)
+	}
+
 	wsID := makeWorkspace(t, pool)
 	queries := db.New(pool)
 

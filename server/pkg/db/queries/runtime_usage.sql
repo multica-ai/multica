@@ -3,8 +3,13 @@
 -- atq.created_at (task enqueue time), so tasks that queue one day and execute
 -- the next are attributed to the day tokens were actually produced. The since
 -- cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+--
+-- Bucketing is pinned to UTC (`AT TIME ZONE 'UTC'` and DATE_TRUNC's three-arg
+-- form). Without this, DATE() and DATE_TRUNC() use the DB session timezone,
+-- so the same row lands in different buckets depending on the server's TZ
+-- config — producing nondeterministic results across environments.
 SELECT
-    DATE(tu.created_at) AS date,
+    (tu.created_at AT TIME ZONE 'UTC')::date AS date,
     tu.provider,
     tu.model,
     SUM(tu.input_tokens)::bigint AS input_tokens,
@@ -14,9 +19,9 @@ SELECT
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.runtime_id = $1
-  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
-GROUP BY DATE(tu.created_at), tu.provider, tu.model
-ORDER BY DATE(tu.created_at) DESC, tu.provider, tu.model;
+  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz, 'UTC')
+GROUP BY (tu.created_at AT TIME ZONE 'UTC')::date, tu.provider, tu.model
+ORDER BY (tu.created_at AT TIME ZONE 'UTC')::date DESC, tu.provider, tu.model;
 
 -- name: GetRuntimeTaskHourlyActivity :many
 SELECT EXTRACT(HOUR FROM started_at)::int AS hour, COUNT(*)::int AS count
