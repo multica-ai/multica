@@ -141,7 +141,7 @@ export function ListView({
                     >
                       <Plus className="size-3.5" />
                     </TooltipTrigger>
-                    <TooltipContent>Add issue</TooltipContent>
+                    <TooltipContent>添加任务</TooltipContent>
                   </Tooltip>
                 </div>
               </Accordion.Header>
@@ -157,7 +157,7 @@ export function ListView({
                   </>
                 ) : (
                   <p className="py-6 text-center text-xs text-muted-foreground">
-                    No issues
+                    暂无任务
                   </p>
                 )}
               </Accordion.Panel>

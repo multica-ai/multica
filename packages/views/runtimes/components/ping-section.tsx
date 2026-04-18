@@ -8,11 +8,11 @@ const pingStatusConfig: Record<
   RuntimePingStatus,
   { label: string; icon: typeof Loader2; color: string }
 > = {
-  pending: { label: "Waiting for daemon...", icon: Loader2, color: "text-muted-foreground" },
-  running: { label: "Running test...", icon: Loader2, color: "text-info" },
-  completed: { label: "Connected", icon: CheckCircle2, color: "text-success" },
-  failed: { label: "Failed", icon: XCircle, color: "text-destructive" },
-  timeout: { label: "Timeout", icon: XCircle, color: "text-warning" },
+  pending: { label: "等待守护进程...", icon: Loader2, color: "text-muted-foreground" },
+  running: { label: "正在测试...", icon: Loader2, color: "text-info" },
+  completed: { label: "已连接", icon: CheckCircle2, color: "text-success" },
+  failed: { label: "失败", icon: XCircle, color: "text-destructive" },
+  timeout: { label: "超时", icon: XCircle, color: "text-warning" },
 };
 
 export function PingSection({ runtimeId }: { runtimeId: string }) {
@@ -54,7 +54,7 @@ export function PingSection({ runtimeId }: { runtimeId: string }) {
             setTesting(false);
             cleanup();
           } else if (result.status === "failed" || result.status === "timeout") {
-            setError(result.error ?? "Unknown error");
+            setError(result.error ?? "未知错误");
             setDurationMs(result.duration_ms ?? null);
             setTesting(false);
             cleanup();
@@ -65,7 +65,7 @@ export function PingSection({ runtimeId }: { runtimeId: string }) {
       }, 2000);
     } catch {
       setStatus("failed");
-      setError("Failed to initiate test");
+      setError("测试发起失败");
       setTesting(false);
     }
   };
@@ -88,7 +88,7 @@ export function PingSection({ runtimeId }: { runtimeId: string }) {
           ) : (
             <Zap className="h-3 w-3" />
           )}
-          {testing ? "Testing..." : "Test Connection"}
+          {testing ? "测试中..." : "测试连接"}
         </Button>
 
         {config && Icon && (

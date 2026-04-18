@@ -62,7 +62,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
     return (
       <div className="flex flex-col items-center rounded-lg border border-dashed py-6">
         <BarChart3 className="h-5 w-5 text-muted-foreground/40" />
-        <p className="mt-2 text-xs text-muted-foreground">No usage data yet</p>
+        <p className="mt-2 text-xs text-muted-foreground">暂无使用数据</p>
       </div>
     );
   }
@@ -116,16 +116,16 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-3">
-        <TokenCard label="Input" value={formatTokens(totals.input)} />
-        <TokenCard label="Output" value={formatTokens(totals.output)} />
-        <TokenCard label="Cache Read" value={formatTokens(totals.cacheRead)} />
-        <TokenCard label="Cache Write" value={formatTokens(totals.cacheWrite)} />
+        <TokenCard label="输入" value={formatTokens(totals.input)} />
+        <TokenCard label="输出" value={formatTokens(totals.output)} />
+        <TokenCard label="缓存读取" value={formatTokens(totals.cacheRead)} />
+        <TokenCard label="缓存写入" value={formatTokens(totals.cacheWrite)} />
       </div>
 
       {totals.cost > 0 && (
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
           <span className="text-xs text-muted-foreground">
-            Estimated cost ({days}d):{" "}
+            预估费用（{days}天）：{" "}
           </span>
           <span className="text-sm font-semibold">
             ${totals.cost.toFixed(2)}
@@ -150,12 +150,12 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
       {/* Daily breakdown table */}
       <div className="rounded-lg border">
         <div className="grid grid-cols-[100px_1fr_80px_80px_80px_80px] gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-          <div>Date</div>
-          <div>Model</div>
-          <div className="text-right">Input</div>
-          <div className="text-right">Output</div>
-          <div className="text-right">Cache R</div>
-          <div className="text-right">Cache W</div>
+          <div>日期</div>
+          <div>模型</div>
+          <div className="text-right">输入</div>
+          <div className="text-right">输出</div>
+          <div className="text-right">缓存读</div>
+          <div className="text-right">缓存写</div>
         </div>
         <div className="max-h-64 overflow-y-auto divide-y">
           {[...byDate.entries()].map(([date, rows]) =>

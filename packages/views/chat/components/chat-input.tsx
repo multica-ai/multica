@@ -67,10 +67,10 @@ export function ChatInput({
   };
 
   const placeholder = disabled
-    ? "This session is archived"
+    ? "此会话已归档"
     : agentName
-      ? `Tell ${agentName} what to do…`
-      : "Tell me what to do…";
+      ? `告诉 ${agentName} 要做什么…`
+      : "告诉我要做什么…";
 
   return (
     <div className="px-5 pb-3 pt-0">

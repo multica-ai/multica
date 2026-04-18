@@ -5,7 +5,7 @@ import { formatTokens } from "../../utils";
 const HEATMAP_WEEKS = 13;
 const CELL_SIZE = 11;
 const CELL_GAP = 2;
-const DAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""];
+const DAY_LABELS = ["", "周一", "", "周三", "", "周五", ""];
 
 function getHeatmapColor(level: number): string {
   const colors = [
@@ -138,7 +138,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
                 {c.date}:{" "}
                 {c.tokens > 0
                   ? formatTokens(c.tokens) + " tokens"
-                  : "No activity"}
+                  : "无活动"}
               </title>
             </rect>
           ))}
@@ -146,7 +146,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
       </div>
       {/* Legend */}
       <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
-        <span>Less</span>
+        <span>少</span>
         {[0, 1, 2, 3, 4].map((level) => (
           <div
             key={level}
@@ -154,7 +154,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
             style={{ backgroundColor: getHeatmapColor(level) }}
           />
         ))}
-        <span>More</span>
+        <span>多</span>
       </div>
     </div>
   );

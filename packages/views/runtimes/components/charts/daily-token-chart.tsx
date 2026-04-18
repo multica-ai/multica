@@ -15,7 +15,7 @@ import type { DailyTokenData } from "../../utils";
 import { formatTokens } from "../../utils";
 
 const tokenChartConfig = {
-  total: { label: "Total", color: "hsl(var(--chart-1))" },
+  total: { label: "合计", color: "hsl(var(--chart-1))" },
 } satisfies ChartConfig;
 
 type DailyTokenRow = DailyTokenData & { total: number };
@@ -56,10 +56,10 @@ function TokenTooltipContent({
   const row = payload[0]!.payload;
 
   const items = [
-    { label: "Input", value: row.input },
-    { label: "Output", value: row.output },
-    { label: "Cache Read", value: row.cacheRead },
-    { label: "Cache Write", value: row.cacheWrite },
+    { label: "输入", value: row.input },
+    { label: "输出", value: row.output },
+    { label: "缓存读取", value: row.cacheRead },
+    { label: "缓存写入", value: row.cacheWrite },
   ];
 
   return (

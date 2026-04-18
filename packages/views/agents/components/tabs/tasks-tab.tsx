@@ -63,18 +63,18 @@ export function TasksTab({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Task Queue</h3>
+        <h3 className="text-sm font-semibold">任务队列</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Issues assigned to this agent and their execution status.
+          分配给该智能体的任务及其执行状态。
         </p>
       </div>
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <ListTodo className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">No tasks in queue</p>
+          <p className="mt-3 text-sm text-muted-foreground">队列中暂无任务</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Assign an issue to this agent to get started.
+            将一个任务分配给该智能体以开始工作。
           </p>
         </div>
       ) : (
@@ -113,14 +113,14 @@ export function TasksTab({ agent }: { agent: Agent }) {
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {isRunning && task.started_at
-                      ? `Started ${new Date(task.started_at).toLocaleString()}`
+                      ? `已开始 ${new Date(task.started_at).toLocaleString("zh-CN")}`
                       : task.status === "dispatched" && task.dispatched_at
-                        ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
+                        ? `已分派 ${new Date(task.dispatched_at).toLocaleString("zh-CN")}`
                         : task.status === "completed" && task.completed_at
-                          ? `Completed ${new Date(task.completed_at).toLocaleString()}`
+                          ? `已完成 ${new Date(task.completed_at).toLocaleString("zh-CN")}`
                           : task.status === "failed" && task.completed_at
-                            ? `Failed ${new Date(task.completed_at).toLocaleString()}`
-                            : `Queued ${new Date(task.created_at).toLocaleString()}`}
+                            ? `已失败 ${new Date(task.completed_at).toLocaleString("zh-CN")}`
+                            : `已排队 ${new Date(task.created_at).toLocaleString("zh-CN")}`}
                   </div>
                 </div>
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>

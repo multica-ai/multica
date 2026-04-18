@@ -38,7 +38,7 @@ export function NewWorkspacePage({
           onClick={onBack}
         >
           <ArrowLeft />
-          Back
+          返回
         </Button>
       )}
       <Button
@@ -48,17 +48,17 @@ export function NewWorkspacePage({
         onClick={logout}
       >
         <LogOut />
-        Log out
+        退出登录
       </Button>
 
       <div className="flex flex-1 flex-col items-center justify-center">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-3xl font-semibold tracking-tight">
-              Welcome to Multica
+              欢迎使用 Multica
             </h1>
             <p className="mt-2 text-muted-foreground">
-              Create your workspace to get started.
+              创建您的工作区以开始使用。
             </p>
           </div>
           <CreateWorkspaceForm onSuccess={onSuccess} />

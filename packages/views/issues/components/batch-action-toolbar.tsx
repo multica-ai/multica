@@ -39,9 +39,9 @@ export function BatchActionToolbar() {
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
       await batchUpdate.mutateAsync({ ids, updates });
-      toast.success(`Updated ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(`已更新 ${count} 条任务`);
     } catch {
-      toast.error("Failed to update issues");
+      toast.error("批量更新失败");
     }
   };
 
@@ -49,9 +49,9 @@ export function BatchActionToolbar() {
     try {
       await batchDelete.mutateAsync(ids);
       clear();
-      toast.success(`Deleted ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(`已删除 ${count} 条任务`);
     } catch {
-      toast.error("Failed to delete issues");
+      toast.error("批量删除失败");
     } finally {
       setDeleteOpen(false);
     }
@@ -61,7 +61,7 @@ export function BatchActionToolbar() {
     <>
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
-          <span className="text-sm font-medium">{count} selected</span>
+          <span className="text-sm font-medium">已选 {count} 条</span>
           <button
             type="button"
             onClick={clear}
@@ -78,7 +78,7 @@ export function BatchActionToolbar() {
           open={statusOpen}
           onOpenChange={setStatusOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Status"
+          trigger="状态"
           align="center"
         />
 
@@ -89,7 +89,7 @@ export function BatchActionToolbar() {
           open={priorityOpen}
           onOpenChange={setPriorityOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Priority"
+          trigger="优先级"
           align="center"
         />
 
@@ -101,7 +101,7 @@ export function BatchActionToolbar() {
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Assignee"
+          trigger="负责人"
           align="center"
         />
 
@@ -114,7 +114,7 @@ export function BatchActionToolbar() {
           className="text-destructive hover:text-destructive"
         >
           <Trash2 className="size-3.5 mr-1" />
-          Delete
+          删除
         </Button>
       </div>
 
@@ -122,20 +122,19 @@ export function BatchActionToolbar() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {count} issue{count > 1 ? "s" : ""}?
+              删除 {count} 条任务？
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the
-              selected issue{count > 1 ? "s" : ""} and all associated data.
+              此操作无法撤销，将永久删除选中的任务及所有相关数据。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleBatchDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

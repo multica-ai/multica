@@ -52,7 +52,7 @@ export function TokensTab() {
       const list = await api.listPersonalAccessTokens();
       setTokens(list);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load tokens");
+      toast.error(e instanceof Error ? e.message : "加载 Token 失败");
     } finally {
       setTokensLoading(false);
     }
@@ -70,7 +70,7 @@ export function TokensTab() {
       setTokenExpiry("90");
       await loadTokens();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to create token");
+      toast.error(e instanceof Error ? e.message : "创建 Token 失败");
     } finally {
       setTokenCreating(false);
     }
@@ -81,9 +81,9 @@ export function TokensTab() {
     try {
       await api.revokePersonalAccessToken(id);
       await loadTokens();
-      toast.success("Token revoked");
+      toast.success("Token 已撤销");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to revoke token");
+      toast.error(e instanceof Error ? e.message : "撤销 Token 失败");
     } finally {
       setTokenRevoking(null);
     }
@@ -101,32 +101,32 @@ export function TokensTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Key className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">API Tokens</h2>
+          <h2 className="text-sm font-semibold">API Token</h2>
         </div>
 
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Personal access tokens allow the CLI and external integrations to authenticate with your account.
+              个人访问 Token 允许 CLI 和外部集成工具向您的账户进行身份验证。
             </p>
             <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
               <Input
                 type="text"
                 value={tokenName}
                 onChange={(e) => setTokenName(e.target.value)}
-                placeholder="Token name (e.g. My CLI)"
+                placeholder="Token 名称（例如：我的 CLI）"
               />
               <Select value={tokenExpiry} onValueChange={(v) => { if (v) setTokenExpiry(v); }}>
                 <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="30">30 days</SelectItem>
-                  <SelectItem value="90">90 days</SelectItem>
-                  <SelectItem value="365">1 year</SelectItem>
-                  <SelectItem value="never">No expiry</SelectItem>
+                  <SelectItem value="30">30 天</SelectItem>
+                  <SelectItem value="90">90 天</SelectItem>
+                  <SelectItem value="365">1 年</SelectItem>
+                  <SelectItem value="never">永不过期</SelectItem>
                 </SelectContent>
               </Select>
               <Button onClick={handleCreateToken} disabled={tokenCreating || !tokenName.trim()}>
-                {tokenCreating ? "Creating..." : "Create"}
+                {tokenCreating ? "创建中..." : "创建"}
               </Button>
             </div>
           </CardContent>
@@ -154,8 +154,8 @@ export function TokensTab() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{t.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {t.token_prefix}... · Created {new Date(t.created_at).toLocaleDateString()} · {t.last_used_at ? `Last used ${new Date(t.last_used_at).toLocaleDateString()}` : "Never used"}
-                      {t.expires_at && ` · Expires ${new Date(t.expires_at).toLocaleDateString()}`}
+                      {t.token_prefix}... · 创建于 {new Date(t.created_at).toLocaleDateString("zh-CN")} · {t.last_used_at ? `上次使用 ${new Date(t.last_used_at).toLocaleDateString("zh-CN")}` : "从未使用"}
+                      {t.expires_at && ` · 到期 ${new Date(t.expires_at).toLocaleDateString("zh-CN")}`}
                     </div>
                   </div>
                   <Tooltip>
@@ -172,7 +172,7 @@ export function TokensTab() {
                         </Button>
                       }
                     />
-                    <TooltipContent>Revoke</TooltipContent>
+                    <TooltipContent>撤销</TooltipContent>
                   </Tooltip>
                 </CardContent>
               </Card>
@@ -184,13 +184,13 @@ export function TokensTab() {
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke token</AlertDialogTitle>
+            <AlertDialogTitle>撤销 Token</AlertDialogTitle>
             <AlertDialogDescription>
-              This token will be permanently revoked and can no longer be used. This cannot be undone.
+              该 Token 将被永久撤销，无法再使用。此操作无法撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={async () => {
@@ -198,7 +198,7 @@ export function TokensTab() {
                 setRevokeConfirmId(null);
               }}
             >
-              Revoke
+              撤销
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -207,9 +207,9 @@ export function TokensTab() {
       <Dialog open={!!newToken} onOpenChange={(v) => { if (!v) { setNewToken(null); setTokenCopied(false); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Token created</DialogTitle>
+            <DialogTitle>Token 已创建</DialogTitle>
             <DialogDescription>
-              Copy your personal access token now. You won&apos;t be able to see it again.
+              请立即复制您的个人访问 Token，之后将无法再次查看。
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -224,11 +224,11 @@ export function TokensTab() {
                   </Button>
                 }
               />
-              <TooltipContent>Copy token</TooltipContent>
+              <TooltipContent>复制 Token</TooltipContent>
             </Tooltip>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>Done</Button>
+            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>完成</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

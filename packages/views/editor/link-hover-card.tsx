@@ -170,9 +170,9 @@ function LinkHoverCard({
     e.preventDefault();
     try {
       await navigator.clipboard.writeText(href);
-      toast.success("Link copied");
+      toast.success("链接已复制");
     } catch {
-      toast.error("Failed to copy");
+      toast.error("复制失败");
     }
   };
 
@@ -207,7 +207,7 @@ function LinkHoverCard({
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleCopy}
-        title="Copy link"
+        title="复制链接"
       >
         <Copy className="size-3.5" />
       </Button>
@@ -216,7 +216,7 @@ function LinkHoverCard({
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleOpen}
-        title="Open link"
+        title="打开链接"
       >
         <ExternalLink className="size-3.5" />
       </Button>

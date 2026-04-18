@@ -21,7 +21,7 @@ export function StatusBadge({ status }: { status: string }) {
       ) : (
         <WifiOff className="h-3 w-3" />
       )}
-      {isOnline ? "Online" : "Offline"}
+      {isOnline ? "在线" : "离线"}
     </Badge>
   );
 }

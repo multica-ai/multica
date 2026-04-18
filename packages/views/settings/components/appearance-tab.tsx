@@ -79,9 +79,9 @@ function WindowMockup({
 }
 
 const themeOptions = [
-  { value: "light" as const, label: "Light" },
-  { value: "dark" as const, label: "Dark" },
-  { value: "system" as const, label: "System" },
+  { value: "light" as const, label: "浅色" },
+  { value: "dark" as const, label: "深色" },
+  { value: "system" as const, label: "跟随系统" },
 ];
 
 export function AppearanceTab() {
@@ -90,8 +90,8 @@ export function AppearanceTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Theme</h2>
-        <div className="flex gap-6" role="radiogroup" aria-label="Theme">
+        <h2 className="text-sm font-semibold">主题</h2>
+        <div className="flex gap-6" role="radiogroup" aria-label="主题">
           {themeOptions.map((opt) => {
             const active = theme === opt.value;
             return (
@@ -99,7 +99,7 @@ export function AppearanceTab() {
                 key={opt.value}
                 role="radio"
                 aria-checked={active}
-                aria-label={`Select ${opt.label} theme`}
+                aria-label={`选择${opt.label}主题`}
                 onClick={() => setTheme(opt.value)}
                 className="group flex flex-col items-center gap-2"
               >

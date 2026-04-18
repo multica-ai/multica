@@ -93,7 +93,7 @@ import { ProgressRing } from "./progress-ring";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
+  return new Date(date).toLocaleDateString("zh-CN", {
     month: "short",
     day: "numeric",
   });
@@ -114,34 +114,34 @@ function formatActivity(
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
-      return "created this issue";
+      return "创建了此任务";
     case "status_changed":
-      return `changed status from ${statusLabel(details.from ?? "?")} to ${statusLabel(details.to ?? "?")}`;
+      return `将状态从 ${statusLabel(details.from ?? "?")} 改为 ${statusLabel(details.to ?? "?")}`;
     case "priority_changed":
-      return `changed priority from ${priorityLabel(details.from ?? "?")} to ${priorityLabel(details.to ?? "?")}`;
+      return `将优先级从 ${priorityLabel(details.from ?? "?")} 改为 ${priorityLabel(details.to ?? "?")}`;
     case "assignee_changed": {
       const isSelfAssign = details.to_type === entry.actor_type && details.to_id === entry.actor_id;
-      if (isSelfAssign) return "self-assigned this issue";
+      if (isSelfAssign) return "自我分配了此任务";
       const toName = details.to_id && details.to_type && resolveActorName
         ? resolveActorName(details.to_type, details.to_id)
         : null;
-      if (toName) return `assigned to ${toName}`;
-      if (details.from_id && !details.to_id) return "removed assignee";
-      return "changed assignee";
+      if (toName) return `指派给 ${toName}`;
+      if (details.from_id && !details.to_id) return "移除了负责人";
+      return "更改了负责人";
     }
     case "due_date_changed": {
-      if (!details.to) return "removed due date";
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      return `set due date to ${formatted}`;
+      if (!details.to) return "移除了截止日期";
+      const formatted = new Date(details.to).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+      return `将截止日期设为 ${formatted}`;
     }
     case "title_changed":
-      return `renamed this issue from "${details.from ?? "?"}" to "${details.to ?? "?"}"`;
+      return `将标题从"${details.from ?? "?"}"改为"${details.to ?? "?"}"`;
     case "description_updated":
-      return "updated the description";
+      return "更新了描述";
     case "task_completed":
-      return "completed the task";
+      return "完成了任务";
     case "task_failed":
-      return "task failed";
+      return "任务失败";
     default:
       return entry.action ?? "";
   }
@@ -261,7 +261,7 @@ function IssuePickerDialog({
     >
       <Command shouldFilter={false}>
         <CommandInput
-          placeholder="Search issues..."
+          placeholder="搜索任务..."
           value={query}
           onValueChange={(v) => {
             setQuery(v);
@@ -271,15 +271,15 @@ function IssuePickerDialog({
         <CommandList>
           {isLoading && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Searching...
+              搜索中...
             </div>
           )}
           {!isLoading && query.trim() && results.length === 0 && (
-            <CommandEmpty>No issues found.</CommandEmpty>
+            <CommandEmpty>未找到任务。</CommandEmpty>
           )}
           {!isLoading && !query.trim() && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Type to search issues
+              输入关键词搜索任务
             </div>
           )}
           {results.length > 0 && (
@@ -455,7 +455,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       if (!issue) return;
       updateIssueMutation.mutate(
         { id, ...updates },
-        { onError: () => toast.error("Failed to update issue") },
+        { onError: () => toast.error("更新任务失败") },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
       // until the issue is moved to an active status.
@@ -487,11 +487,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     setDeleting(true);
     try {
       await deleteIssueMutation.mutateAsync(issue!.id);
-      toast.success("Issue deleted");
+      toast.success("任务已删除");
       if (onDelete) onDelete();
       else router.push(paths.issues());
     } catch {
-      toast.error("Failed to delete issue");
+      toast.error("删除任务失败");
       setDeleting(false);
     }
   };
@@ -549,11 +549,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   if (!issue) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-        <p>This issue does not exist or has been deleted in this workspace.</p>
+        <p>此任务不存在或已在工作区中被删除。</p>
         {!onDelete && (
           <Button variant="outline" size="sm" onClick={() => router.push(paths.issues())}>
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            Back to Issues
+            返回任务列表
           </Button>
         )}
       </div>
@@ -568,23 +568,23 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
-          Properties
+          属性
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label="Status">
+          <PropRow label="状态">
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label="Priority">
+          <PropRow label="优先级">
             <PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label="Assignee">
+          <PropRow label="负责人">
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label="Due date">
+          <PropRow label="截止日期">
             <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />
           </PropRow>
-          <PropRow label="Project">
+          <PropRow label="项目">
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
         </div>}
@@ -597,7 +597,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
-            Parent issue
+            父任务
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
@@ -619,18 +619,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
-          Details
+          详情
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
         {detailsOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label="Created by">
+          <PropRow label="创建者">
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} />
             <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
-          <PropRow label="Created">
+          <PropRow label="创建时间">
             <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
           </PropRow>
-          <PropRow label="Updated">
+          <PropRow label="更新时间">
             <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
           </PropRow>
         </div>}
@@ -643,24 +643,24 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
-            Token usage
+            Token 用量
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
           </button>
           {tokenUsageOpen && <div className="space-y-0.5 pl-2">
-            <PropRow label="Input">
+            <PropRow label="输入">
               <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
             </PropRow>
-            <PropRow label="Output">
+            <PropRow label="输出">
               <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
             </PropRow>
             {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label="Cache">
+              <PropRow label="缓存">
                 <span className="text-muted-foreground">
                   {formatTokenCount(usage.total_cache_read_tokens)} read / {formatTokenCount(usage.total_cache_write_tokens)} write
                 </span>
               </PropRow>
             )}
-            <PropRow label="Runs">
+            <PropRow label="运行次数">
               <span className="text-muted-foreground">{usage.task_count}</span>
             </PropRow>
           </div>}
@@ -721,7 +721,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">{isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
+              <TooltipContent side="bottom">{isPinned ? "从侧边栏取消固定" : "固定到侧边栏"}</TooltipContent>
             </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -736,7 +736,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
                     <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                    Status
+                    状态
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     {ALL_STATUSES.map((s) => (
@@ -756,7 +756,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
                     <PriorityIcon priority={issue.priority} />
-                    Priority
+                    优先级
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     {PRIORITY_ORDER.map((p) => (
@@ -778,14 +778,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
                     <UserMinus className="h-3.5 w-3.5" />
-                    Assignee
+                    负责人
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     <DropdownMenuItem
                       onClick={() => handleUpdateField({ assignee_type: null, assignee_id: null })}
                     >
                       <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                      Unassigned
+                      未分配
                       {!issue.assignee_type && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
                     </DropdownMenuItem>
                     {members.map((m) => (
@@ -815,29 +815,29 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
                     <Calendar className="h-3.5 w-3.5" />
-                    Due date
+                    截止日期
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     <DropdownMenuItem onClick={() => handleUpdateField({ due_date: new Date().toISOString() })}>
-                      Today
+                      今天
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
                       const d = new Date(); d.setDate(d.getDate() + 1);
                       handleUpdateField({ due_date: d.toISOString() });
                     }}>
-                      Tomorrow
+                      明天
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
                       const d = new Date(); d.setDate(d.getDate() + 7);
                       handleUpdateField({ due_date: d.toISOString() });
                     }}>
-                      Next week
+                      下周
                     </DropdownMenuItem>
                     {issue.due_date && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => handleUpdateField({ due_date: null })}>
-                          Clear date
+                          清除日期
                         </DropdownMenuItem>
                       </>
                     )}
@@ -854,19 +854,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   });
                 }}>
                   <Plus className="h-3.5 w-3.5" />
-                  Create sub-issue
+                  创建子任务
                 </DropdownMenuItem>
 
                 {/* Add as sub-issue of another issue */}
                 <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
                   <ArrowUp className="h-3.5 w-3.5" />
-                  Set parent issue...
+                  设置父任务...
                 </DropdownMenuItem>
 
                 {/* Add another issue as sub-issue */}
                 <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
                   <ArrowDown className="h-3.5 w-3.5" />
-                  Add sub-issue...
+                  添加子任务...
                 </DropdownMenuItem>
 
                 {/* Pin / Unpin */}
@@ -878,7 +878,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   }
                 }}>
                   {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                  {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                  {isPinned ? "从侧边栏取消固定" : "固定到侧边栏"}
                 </DropdownMenuItem>
 
                 {/* Copy link */}
@@ -887,10 +887,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     ? router.getShareableUrl(router.pathname)
                     : window.location.href;
                   navigator.clipboard.writeText(url);
-                  toast.success("Link copied");
+                  toast.success("链接已复制");
                 }}>
                   <Link2 className="h-3.5 w-3.5" />
-                  Copy link
+                  复制链接
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator />
@@ -901,7 +901,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   onClick={() => setDeleteDialogOpen(true)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Delete issue
+                  删除任务
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -927,7 +927,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+              <TooltipContent side="bottom">切换侧边栏</TooltipContent>
             </Tooltip>
           </div>
         </PageHeader>
@@ -936,19 +936,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Delete issue</AlertDialogTitle>
+                  <AlertDialogTitle>删除任务</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will permanently delete this issue and all its comments. This action cannot be undone.
+                    此操作将永久删除该任务及其所有评论，无法撤销。
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
                   <AlertDialogAction
                     onClick={handleDelete}
                     disabled={deleting}
                     className="bg-destructive text-white hover:bg-destructive/90"
                   >
-                    {deleting ? "Deleting..." : "Delete"}
+                    {deleting ? "删除中..." : "删除"}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -963,7 +963,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onMoveToTodo={() => {
                 updateIssueMutation.mutate(
                   { id, status: "todo" },
-                  { onError: () => toast.error("Failed to update status") },
+                  { onError: () => toast.error("更新状态失败") },
                 );
                 setBacklogHintOpen(false);
               }}
@@ -973,12 +973,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <IssuePickerDialog
               open={parentPickerOpen}
               onOpenChange={setParentPickerOpen}
-              title="Set parent issue"
-              description="Search for an issue to set as the parent of this issue"
+              title="设置父任务"
+              description="搜索一个任务设为此任务的父任务"
               excludeIds={[id, ...childIssues.map((c) => c.id)]}
               onSelect={(selected) => {
                 handleUpdateField({ parent_issue_id: selected.id });
-                toast.success(`Set ${selected.identifier} as parent issue`);
+                toast.success(`已将 ${selected.identifier} 设为父任务`);
               }}
             />
 
@@ -986,15 +986,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <IssuePickerDialog
               open={childPickerOpen}
               onOpenChange={setChildPickerOpen}
-              title="Add sub-issue"
-              description="Search for an issue to add as a sub-issue"
+              title="添加子任务"
+              description="搜索一个任务添加为子任务"
               excludeIds={[id, ...(parentIssueId ? [parentIssueId] : []), ...childIssues.map((c) => c.id)]}
               onSelect={(selected) => {
                 updateIssueMutation.mutate(
                   { id: selected.id, parent_issue_id: id },
-                  { onError: () => toast.error("Failed to add sub-issue") },
+                  { onError: () => toast.error("添加子任务失败") },
                 );
-                toast.success(`Added ${selected.identifier} as sub-issue`);
+                toast.success(`已添加 ${selected.identifier} 为子任务`);
               }}
             />
 
@@ -1004,7 +1004,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <TitleEditor
             key={`title-${id}`}
             defaultValue={issue.title}
-            placeholder="Issue title"
+            placeholder="任务标题"
             className="w-full text-2xl font-bold leading-snug tracking-tight"
             onBlur={(value) => {
               const trimmed = value.trim();
@@ -1017,7 +1017,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               href={paths.issueDetail(parentIssue.id)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
-              <span className="font-medium shrink-0">Sub-issue of</span>
+              <span className="font-medium shrink-0">子任务，父任务为</span>
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
               <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
               <span className="truncate group-hover/parent:text-foreground">
@@ -1042,7 +1042,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               ref={descEditorRef}
               key={id}
               defaultValue={issue.description || ""}
-              placeholder="Add description..."
+              placeholder="添加描述..."
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
@@ -1077,7 +1077,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 }
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span>Add sub-issues</span>
+                <span>添加子任务</span>
               </button>
             </div>
           )}
@@ -1098,7 +1098,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                         subIssuesCollapsed && "-rotate-90",
                       )}
                     />
-                    <span>Sub-issues</span>
+                    <span>子任务</span>
                   </button>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
@@ -1118,13 +1118,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                               parent_issue_identifier: issue.identifier,
                             })
                           }
-                          aria-label="Add sub-issue"
+                          aria-label="添加子任务"
                         >
                           <Plus className="h-4 w-4" />
                         </button>
                       }
                     />
-                    <TooltipContent side="bottom">Add sub-issue</TooltipContent>
+                    <TooltipContent side="bottom">添加子任务</TooltipContent>
                   </Tooltip>
                 </div>
 
@@ -1185,14 +1185,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">Activity</h2>
+                <h2 className="text-base font-semibold">动态</h2>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleToggleSubscribe}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {isSubscribed ? "Unsubscribe" : "Subscribe"}
+                  {isSubscribed ? "取消订阅" : "订阅"}
                 </button>
                 <Popover>
                   <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
@@ -1218,11 +1218,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </PopoverTrigger>
                   <PopoverContent align="end" className="w-64 p-0">
                     <Command>
-                      <CommandInput placeholder="Change subscribers..." />
+                      <CommandInput placeholder="更改订阅者..." />
                       <CommandList className="max-h-64">
-                        <CommandEmpty>No results found</CommandEmpty>
+                        <CommandEmpty>未找到结果</CommandEmpty>
                         {members.length > 0 && (
-                          <CommandGroup heading="Members">
+                          <CommandGroup heading="成员">
                             {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
                               const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
                               const isSubbed = !!sub;
@@ -1242,7 +1242,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                           </CommandGroup>
                         )}
                         {agents.filter((a) => !a.archived_at).length > 0 && (
-                          <CommandGroup heading="Agents">
+                          <CommandGroup heading="智能体">
                             {agents.filter((a) => !a.archived_at).map((a) => {
                               const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
                               const isSubbed = !!sub;

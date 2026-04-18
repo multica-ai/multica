@@ -218,7 +218,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send comment");
+        toast.error("发送评论失败");
       } finally {
         setSubmitting(false);
       }
@@ -237,7 +237,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send reply");
+        toast.error("发送回复失败");
       }
     },
     [userId, createCommentMutation],
@@ -248,7 +248,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await updateCommentMutation.mutateAsync({ commentId, content });
       } catch {
-        toast.error("Failed to update comment");
+        toast.error("更新评论失败");
       }
     },
     [updateCommentMutation],
@@ -259,7 +259,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await deleteCommentMutation.mutateAsync(commentId);
       } catch {
-        toast.error("Failed to delete comment");
+        toast.error("删除评论失败");
       }
     },
     [deleteCommentMutation],

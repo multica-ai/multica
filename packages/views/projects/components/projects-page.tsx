@@ -40,11 +40,11 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 function formatRelativeDate(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days < 1) return "Today";
-  if (days === 1) return "1d ago";
-  if (days < 30) return `${days}d ago`;
+  if (days < 1) return "今天";
+  if (days === 1) return "1天前";
+  if (days < 30) return `${days}天前`;
   const months = Math.floor(days / 30);
-  return `${months}mo ago`;
+  return `${months}个月前`;
 }
 
 function ProjectRow({ project }: { project: Project }) {
@@ -166,7 +166,7 @@ function ProjectRow({ project }: { project: Project }) {
               type="text"
               value={leadFilter}
               onChange={(e) => setLeadFilter(e.target.value)}
-              placeholder="Assign lead..."
+              placeholder="分配负责人..."
               className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
@@ -177,11 +177,11 @@ function ProjectRow({ project }: { project: Project }) {
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
             >
               <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">No lead</span>
+              <span className="text-muted-foreground">无负责人</span>
             </button>
             {filteredMembers.length > 0 && (
               <>
-                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</div>
+                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">成员</div>
                 {filteredMembers.map((m) => (
                   <button
                     type="button"
@@ -197,7 +197,7 @@ function ProjectRow({ project }: { project: Project }) {
             )}
             {filteredAgents.length > 0 && (
               <>
-                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Agents</div>
+                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">智能体</div>
                 {filteredAgents.map((a) => (
                   <button
                     type="button"
@@ -212,7 +212,7 @@ function ProjectRow({ project }: { project: Project }) {
               </>
             )}
             {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
-              <div className="px-2 py-3 text-center text-sm text-muted-foreground">No results</div>
+              <div className="px-2 py-3 text-center text-sm text-muted-foreground">无结果</div>
             )}
           </div>
         </PopoverContent>
@@ -238,14 +238,14 @@ export function ProjectsPage() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <FolderKanban className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Projects</h1>
+          <h1 className="text-sm font-medium">项目</h1>
           {!isLoading && projects.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">{projects.length}</span>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={openCreateProject}>
           <Plus className="h-3.5 w-3.5 mr-1" />
-          New project
+          新建项目
         </Button>
       </PageHeader>
 
@@ -271,9 +271,9 @@ export function ProjectsPage() {
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <FolderKanban className="h-10 w-10 mb-3 opacity-30" />
-            <p className="text-sm">No projects yet</p>
+            <p className="text-sm">暂无项目</p>
             <Button size="sm" variant="outline" className="mt-3" onClick={openCreateProject}>
-              Create your first project
+              创建第一个项目
             </Button>
           </div>
         ) : (
@@ -282,12 +282,12 @@ export function ProjectsPage() {
             <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground">
               {/* Icon spacer + Name */}
               <span className="shrink-0 w-[24px]" />
-              <span className="min-w-0 flex-1">Name</span>
-              <span className="w-24 text-center shrink-0">Priority</span>
-              <span className="w-28 text-center shrink-0">Status</span>
-              <span className="w-24 text-center shrink-0">Progress</span>
-              <span className="w-10 text-center shrink-0">Lead</span>
-              <span className="w-20 text-right shrink-0">Created</span>
+              <span className="min-w-0 flex-1">名称</span>
+              <span className="w-24 text-center shrink-0">优先级</span>
+              <span className="w-28 text-center shrink-0">状态</span>
+              <span className="w-24 text-center shrink-0">进度</span>
+              <span className="w-10 text-center shrink-0">负责人</span>
+              <span className="w-20 text-right shrink-0">创建时间</span>
             </div>
             {/* Rows */}
             {projects.map((project) => (

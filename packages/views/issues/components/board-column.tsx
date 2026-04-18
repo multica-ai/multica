@@ -76,7 +76,7 @@ export function BoardColumn({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
-                Hide column
+                隐藏列
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -93,7 +93,7 @@ export function BoardColumn({
                 </Button>
               }
             />
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>添加任务</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -110,7 +110,7 @@ export function BoardColumn({
         </SortableContext>
         {issueIds.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            No issues
+            暂无任务
           </p>
         )}
         {footer}

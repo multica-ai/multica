@@ -83,7 +83,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery),
   );
 
-  const leadLabel = leadType && leadId ? getActorName(leadType, leadId) : "Lead";
+  const leadLabel = leadType && leadId ? getActorName(leadType, leadId) : "负责人";
 
   const createProject = useCreateProject();
 
@@ -101,10 +101,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
       });
       onClose();
-      toast.success("Project created");
+      toast.success("项目已创建");
       router.push(wsPaths.projectDetail(project.id));
     } catch {
-      toast.error("Failed to create project");
+      toast.error("创建项目失败");
     } finally {
       setSubmitting(false);
     }
@@ -123,13 +123,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
         )}
       >
-        <DialogTitle className="sr-only">New Project</DialogTitle>
+        <DialogTitle className="sr-only">新建项目</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">New project</span>
+            <span className="font-medium">新建项目</span>
           </div>
           <div className="flex items-center gap-1">
             <Tooltip>
@@ -143,7 +143,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+              <TooltipContent side="bottom">{isExpanded ? "收起" : "展开"}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -156,7 +156,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">Close</TooltipContent>
+              <TooltipContent side="bottom">关闭</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -168,7 +168,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  title="Choose icon"
+                  title="选择图标"
                 >
                   {icon || "📁"}
                 </button>
@@ -186,7 +186,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <TitleEditor
             autoFocus
             defaultValue=""
-            placeholder="Project title"
+            placeholder="项目标题"
             className="text-lg font-semibold"
             onChange={(v) => setTitle(v)}
             onSubmit={handleSubmit}
@@ -197,7 +197,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <ContentEditor
             ref={descEditorRef}
             defaultValue=""
-            placeholder="Add description..."
+            placeholder="添加描述..."
             debounceMs={500}
           />
         </div>
@@ -257,7 +257,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       <span>{leadLabel}</span>
                     </>
                   ) : (
-                    <span className="text-muted-foreground">Lead</span>
+                    <span className="text-muted-foreground">负责人</span>
                   )}
                 </PillButton>
               }
@@ -268,7 +268,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   type="text"
                   value={leadFilter}
                   onChange={(e) => setLeadFilter(e.target.value)}
-                  placeholder="Assign lead..."
+                  placeholder="分配负责人..."
                   className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
                 />
               </div>
@@ -283,12 +283,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
                 >
                   <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">No lead</span>
+                  <span className="text-muted-foreground">无负责人</span>
                 </button>
                 {filteredMembers.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Members
+                      成员
                     </div>
                     {filteredMembers.map((m) => (
                       <button
@@ -310,7 +310,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {filteredAgents.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Agents
+                      智能体
                     </div>
                     {filteredAgents.map((a) => (
                       <button
@@ -333,7 +333,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   filteredAgents.length === 0 &&
                   leadFilter && (
                     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                      No results
+                      无结果
                     </div>
                   )}
               </div>
@@ -343,7 +343,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-end px-4 py-3 border-t shrink-0">
           <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-            {submitting ? "Creating..." : "Create Project"}
+            {submitting ? "创建中..." : "创建项目"}
           </Button>
         </div>
       </DialogContent>

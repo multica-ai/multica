@@ -239,7 +239,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
           task={firstEntry.task}
           items={firstEntry.items}
           issueId={issueId}
-          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : "Agent"}
+          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : "智能体"}
         />
       </div>
       {/* Additional agents — scroll with the page */}
@@ -251,7 +251,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               task={task}
               items={items}
               issueId={issueId}
-              agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+              agentName={task.agent_id ? getActorName("agent", task.agent_id) : "智能体"}
             />
           ))}
         </div>
@@ -309,7 +309,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     try {
       await api.cancelTask(issueId, task.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      toast.error(e instanceof Error ? e.message : "取消任务失败");
       setCancelling(false);
     }
   }, [task.id, issueId, cancelling]);
@@ -341,17 +341,17 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          <span className="font-medium text-foreground truncate">{agentName} 正在工作</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+            <span className="text-muted-foreground shrink-0">{toolCount} 次工具调用</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setTranscriptOpen(true); }}
             className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-            title="Expand transcript"
+            title="展开完整记录"
           >
             <Maximize2 className="h-3 w-3" />
           </button>
@@ -359,10 +359,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             onClick={(e) => { e.stopPropagation(); handleCancel(); }}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            title="Stop agent"
+            title="停止智能体"
           >
             {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-            <span>Stop</span>
+            <span>停止</span>
           </button>
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
         </div>
@@ -398,14 +398,14 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
                   className="sticky bottom-0 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full bg-background border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground shadow-sm"
                 >
                   <ArrowDown className="h-3 w-3" />
-                  Latest
+                  最新
                 </button>
               )}
             </div>
           ) : (
             <div className="border-t border-info/10 px-3 py-3">
               <p className="text-xs text-muted-foreground">
-                Live log is not available for this agent provider. Results will appear when the task completes.
+                此智能体提供商不支持实时日志，任务完成后将显示结果。
               </p>
             </div>
           )}
@@ -476,7 +476,7 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
       <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1">
         <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
         <Clock className="h-3 w-3" />
-        <span>Execution history ({completedTasks.length})</span>
+        <span>执行历史（{completedTasks.length}）</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 space-y-2">
@@ -526,8 +526,8 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           {new Date(task.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
         {duration && <span className="text-muted-foreground">{duration}</span>}
-        <span className={cn("ml-auto capitalize", task.status === "completed" ? "text-success" : "text-destructive")}>
-          {task.status}
+        <span className={cn("ml-auto", task.status === "completed" ? "text-success" : "text-destructive")}>
+          {task.status === "completed" ? "已完成" : task.status === "failed" ? "已失败" : task.status === "cancelled" ? "已取消" : task.status}
         </span>
         <span
           role="button"
@@ -552,7 +552,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
             }
           }}
           className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-          title="Expand transcript"
+          title="展开完整记录"
         >
           <Maximize2 className="h-3 w-3" />
         </span>
@@ -562,10 +562,10 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           {items === null ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Loading...
+              加载中...
             </div>
           ) : items.length === 0 ? (
-            <p className="text-xs text-muted-foreground py-2">No execution data recorded.</p>
+            <p className="text-xs text-muted-foreground py-2">暂无执行数据。</p>
           ) : (
             items.map((item, idx) => (
               <TimelineRow key={`${item.seq}-${idx}`} item={item} />
@@ -581,7 +581,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           onOpenChange={setTranscriptOpen}
           task={task}
           items={items}
-          agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+          agentName={task.agent_id ? getActorName("agent", task.agent_id) : "智能体"}
         />
       )}
     </Collapsible>
@@ -650,12 +650,12 @@ function ToolResultRow({ item }: { item: TimelineItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
         <span className="text-muted-foreground/70 truncate">
-          {item.tool ? `${item.tool} result: ` : "result: "}{preview}
+          {item.tool ? `${item.tool} 结果：` : "结果："}{preview}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
+          {output.length > 4000 ? output.slice(0, 4000) + "\n...（已截断）" : output}
         </pre>
       </CollapsibleContent>
     </Collapsible>

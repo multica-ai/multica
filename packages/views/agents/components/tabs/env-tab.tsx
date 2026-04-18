@@ -99,16 +99,16 @@ export function EnvTab({
     const keys = envEntries.filter((e) => e.key.trim()).map((e) => e.key.trim());
     const uniqueKeys = new Set(keys);
     if (uniqueKeys.size < keys.length) {
-      toast.error("Duplicate environment variable keys");
+      toast.error("环境变量键名重复");
       return;
     }
 
     setSaving(true);
     try {
       await onSave({ custom_env: currentEnvMap });
-      toast.success("Environment variables saved");
+      toast.success("环境变量已保存");
     } catch {
-      toast.error("Failed to save environment variables");
+      toast.error("保存环境变量失败");
     } finally {
       setSaving(false);
     }
@@ -119,10 +119,10 @@ export function EnvTab({
       <div className="max-w-lg space-y-4">
         <div>
           <Label className="text-xs text-muted-foreground">
-            Environment Variables
+            环境变量
           </Label>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.
+            在启动时注入到智能体进程中。值已隐藏——仅智能体所有者或工作区管理员可查看和编辑。
           </p>
         </div>
         {envEntries.length > 0 ? (
@@ -147,7 +147,7 @@ export function EnvTab({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground italic">No environment variables configured.</p>
+          <p className="text-xs text-muted-foreground italic">尚未配置环境变量。</p>
         )}
       </div>
     );
@@ -158,11 +158,10 @@ export function EnvTab({
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-xs text-muted-foreground">
-            Environment Variables
+            环境变量
           </Label>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Injected into the agent process at launch (e.g. ANTHROPIC_API_KEY,
-            ANTHROPIC_BASE_URL)
+            在启动时注入到智能体进程（例如 ANTHROPIC_API_KEY、ANTHROPIC_BASE_URL）
           </p>
         </div>
         <Button
@@ -173,7 +172,7 @@ export function EnvTab({
           className="h-7 gap-1 text-xs"
         >
           <Plus className="h-3 w-3" />
-          Add
+          添加
         </Button>
       </div>
       {envEntries.length > 0 && (
@@ -226,7 +225,7 @@ export function EnvTab({
         ) : (
           <Save className="h-3.5 w-3.5 mr-1.5" />
         )}
-        Save
+        保存
       </Button>
     </div>
   );

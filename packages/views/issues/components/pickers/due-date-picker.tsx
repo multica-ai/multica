@@ -39,10 +39,10 @@ export function DueDatePicker({
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span className={isOverdue ? "text-destructive" : ""}>
-                {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}
               </span>
             ) : (
-              <span className="text-muted-foreground">Due date</span>
+              <span className="text-muted-foreground">截止日期</span>
             )}
           </>
         )}
@@ -67,7 +67,7 @@ export function DueDatePicker({
               }}
               className="text-muted-foreground hover:text-foreground"
             >
-              Clear date
+              清除日期
             </Button>
           </div>
         )}

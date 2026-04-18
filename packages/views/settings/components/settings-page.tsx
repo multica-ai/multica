@@ -12,15 +12,15 @@ import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 
 const accountTabs = [
-  { value: "profile", label: "Profile", icon: User },
-  { value: "appearance", label: "Appearance", icon: Palette },
-  { value: "tokens", label: "API Tokens", icon: Key },
+  { value: "profile", label: "个人资料", icon: User },
+  { value: "appearance", label: "外观", icon: Palette },
+  { value: "tokens", label: "API Token", icon: Key },
 ];
 
 const workspaceTabs = [
-  { value: "workspace", label: "General", icon: Settings },
-  { value: "repositories", label: "Repositories", icon: FolderGit2 },
-  { value: "members", label: "Members", icon: Users },
+  { value: "workspace", label: "常规", icon: Settings },
+  { value: "repositories", label: "仓库", icon: FolderGit2 },
+  { value: "members", label: "成员", icon: Users },
 ];
 
 export interface ExtraSettingsTab {
@@ -42,11 +42,11 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
       {/* Left nav */}
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
-        <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
+        <h1 className="text-sm font-semibold mb-4 px-2">设置</h1>
         <TabsList variant="line" className="flex-col items-stretch">
           {/* My Account group */}
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
-            My Account
+            我的账号
           </span>
           {accountTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
@@ -63,7 +63,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
           {/* Workspace group */}
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
-            {workspaceName ?? "Workspace"}
+            {workspaceName ?? "工作区"}
           </span>
           {workspaceTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>

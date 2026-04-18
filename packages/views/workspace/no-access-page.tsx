@@ -18,18 +18,18 @@ export function NoAccessPage() {
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 px-6 text-center">
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Workspace not available
+          工作区不可用
         </h1>
         <p className="max-w-md text-muted-foreground">
-          This workspace doesn't exist or you don't have access.
+          该工作区不存在或您没有访问权限。
         </p>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button onClick={() => nav.push(paths.root())}>
-          Go to my workspaces
+          前往我的工作区
         </Button>
         <Button variant="outline" onClick={logout}>
-          Sign in as a different user
+          以其他用户身份登录
         </Button>
       </div>
     </div>

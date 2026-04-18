@@ -79,17 +79,17 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
 function getEventLabel(item: TimelineItem): string {
   switch (item.type) {
     case "text":
-      return "Agent";
+      return "智能体";
     case "thinking":
-      return "Thinking";
+      return "思考中";
     case "tool_use":
-      return item.tool ?? "Tool";
+      return item.tool ?? "工具";
     case "tool_result":
-      return item.tool ? `${item.tool}` : "Result";
+      return item.tool ? `${item.tool}` : "结果";
     case "error":
-      return "Error";
+      return "错误";
     default:
-      return "Event";
+      return "事件";
   }
 }
 
@@ -241,20 +241,20 @@ export function AgentTranscriptDialog({
   const statusBadge = isLive ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
       <Loader2 className="h-3 w-3 animate-spin" />
-      Running
+      运行中
     </span>
   ) : task.status === "completed" ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
       <CheckCircle2 className="h-3 w-3" />
-      Completed
+      已完成
     </span>
   ) : task.status === "failed" ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
       <XCircle className="h-3 w-3" />
-      Failed
+      已失败
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
       {task.status}
     </span>
   );
@@ -265,7 +265,7 @@ export function AgentTranscriptDialog({
         className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
       >
-        <DialogTitle className="sr-only">Agent Execution Transcript</DialogTitle>
+        <DialogTitle className="sr-only">智能体执行记录</DialogTitle>
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="border-b px-4 py-3 shrink-0 space-y-2">
@@ -290,7 +290,7 @@ export function AgentTranscriptDialog({
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? "Copied" : "Copy all"}
+                {copied ? "已复制" : "全部复制"}
               </button>
               <button
                 onClick={() => onOpenChange(false)}
@@ -336,9 +336,9 @@ export function AgentTranscriptDialog({
 
             {/* Event counts */}
             {toolCount > 0 && (
-              <MetadataChip>{toolCount} tool calls</MetadataChip>
+              <MetadataChip>{toolCount} 次工具调用</MetadataChip>
             )}
-            <MetadataChip>{items.length} events</MetadataChip>
+            <MetadataChip>{items.length} 条事件</MetadataChip>
 
             {/* Created time */}
             {task.created_at && (
@@ -375,10 +375,10 @@ export function AgentTranscriptDialog({
               {isLive ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for events...
+                  等待事件中...
                 </div>
               ) : (
-                "No execution data recorded."
+                "暂无执行数据。"
               )}
             </div>
           ) : (
@@ -459,7 +459,7 @@ function TimelineBar({
   }
 
   return (
-    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
+    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="时间轴">
       {segments.map((seg, segIdx) => {
         const isSelected = selectedIdx !== null && selectedIdx >= seg.startIdx && selectedIdx <= seg.endIdx;
         const color = colorClasses[seg.color];
@@ -476,7 +476,7 @@ function TimelineBar({
             )}
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
             onClick={() => onSegmentClick(seg.startIdx)}
-            title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
+            title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (另 +${seg.count - 1})` : ""}`}
           >
             {/* Tooltip on hover */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
@@ -560,7 +560,7 @@ const TranscriptEventRow = ({
                   )}
                 />
               )}
-              <span className="truncate">{summary || "(empty)"}</span>
+              <span className="truncate">{summary || "（空）"}</span>
             </div>
           </CollapsibleTrigger>
 
@@ -600,7 +600,7 @@ function EventDetailContent({ item }: { item: TimelineItem }) {
         <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
           {item.output
             ? item.output.length > 4000
-              ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
+              ? redactSecrets(item.output.slice(0, 4000)) + "\n...（已截断）"
               : redactSecrets(item.output)
             : ""}
         </pre>
