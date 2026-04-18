@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import {
@@ -9,15 +9,31 @@ import {
 } from "@multica/core/workspace/queries";
 import { paths } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
+import { useLogout } from "../auth";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
-import { Users, Check, X } from "lucide-react";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { ArrowLeft, LogOut, Users, Check, X } from "lucide-react";
 
 export interface InvitePageProps {
   invitationId: string;
+  /**
+   * Optional "go back" handler. Caller passes it only when there's a
+   * sensible destination (user has at least one workspace, or arrived
+   * from an in-app flow). Omitted on first-invite/zero-workspace paths
+   * where Back would have nowhere to go — Log out is then the only exit.
+   */
+  onBack?: () => void;
 }
 
-export function InvitePage({ invitationId }: InvitePageProps) {
+/**
+ * Full-page shell for the "accept invitation" transition. Shared between
+ * web (Next.js route `/invite/[id]`) and desktop (window-overlay).
+ * Top-bar affordances (Back, Log out) live here so both platforms get
+ * identical UX. Platform chrome (window drag region, immersive mode) is
+ * layered on by the desktop overlay; web just renders the page directly.
+ */
+export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   const { push } = useNavigation();
   const qc = useQueryClient();
   const [accepting, setAccepting] = useState(false);
@@ -78,15 +94,22 @@ export function InvitePage({ invitationId }: InvitePageProps) {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-sm text-muted-foreground">Loading invitation...</div>
-      </div>
+      <InviteShell onBack={onBack}>
+        <Card className="w-full max-w-md">
+          <CardContent className="flex flex-col items-center gap-4 py-12">
+            <Skeleton className="h-12 w-12 rounded-full" />
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-9 w-32 rounded-md" />
+          </CardContent>
+        </Card>
+      </InviteShell>
     );
   }
 
   if (fetchError || !invitation) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -101,13 +124,13 @@ export function InvitePage({ invitationId }: InvitePageProps) {
             </Button>
           </CardContent>
         </Card>
-      </div>
+      </InviteShell>
     );
   }
 
   if (done === "accepted") {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
@@ -117,13 +140,13 @@ export function InvitePage({ invitationId }: InvitePageProps) {
             <p className="text-sm text-muted-foreground">Redirecting to workspace...</p>
           </CardContent>
         </Card>
-      </div>
+      </InviteShell>
     );
   }
 
   if (done === "declined") {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <h2 className="text-lg font-semibold">Invitation declined</h2>
@@ -133,7 +156,7 @@ export function InvitePage({ invitationId }: InvitePageProps) {
             </Button>
           </CardContent>
         </Card>
-      </div>
+      </InviteShell>
     );
   }
 
@@ -141,7 +164,7 @@ export function InvitePage({ invitationId }: InvitePageProps) {
   const isAlreadyHandled = invitation.status === "accepted" || invitation.status === "declined";
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <InviteShell onBack={onBack}>
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center gap-6 py-12">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
@@ -191,6 +214,46 @@ export function InvitePage({ invitationId }: InvitePageProps) {
           )}
         </CardContent>
       </Card>
+    </InviteShell>
+  );
+}
+
+/**
+ * Shared chrome for every InvitePage render state (loading, error,
+ * default, accepted, declined). Keeps Back + Log out buttons in a
+ * consistent position across all branches and across platforms.
+ */
+function InviteShell({
+  onBack,
+  children,
+}: {
+  onBack?: () => void;
+  children: ReactNode;
+}) {
+  const logout = useLogout();
+  return (
+    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-6 py-12">
+      {onBack && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute top-12 left-12 text-muted-foreground"
+          onClick={onBack}
+        >
+          <ArrowLeft />
+          Back
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="absolute top-12 right-12 text-muted-foreground hover:text-destructive"
+        onClick={logout}
+      >
+        <LogOut />
+        Log out
+      </Button>
+      {children}
     </div>
   );
 }

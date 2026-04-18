@@ -50,7 +50,6 @@
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
-    "@tiptap/extension-bubble-menu": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",
     "@tiptap/extension-image": "^3.22.1",

@@ -67,7 +67,7 @@ func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request
 		return db.AgentTaskQueue{}, false
 	}
 
-	wsID := h.resolveTaskWorkspaceID(r, task)
+	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" {
 		writeError(w, http.StatusNotFound, "task not found")
 		return db.AgentTaskQueue{}, false
@@ -96,21 +96,6 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	return err == nil
 }
 
-// resolveTaskWorkspaceID derives the workspace ID from a task's issue or chat session.
-func (h *Handler) resolveTaskWorkspaceID(r *http.Request, task db.AgentTaskQueue) string {
-	if task.IssueID.Valid {
-		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-			return uuidToString(issue.WorkspaceID)
-		}
-	}
-	if task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			return uuidToString(cs.WorkspaceID)
-		}
-	}
-	return ""
-}
-
 // ---------------------------------------------------------------------------
 // Daemon Registration & Heartbeat
 // ---------------------------------------------------------------------------
@@ -118,10 +103,15 @@ func (h *Handler) resolveTaskWorkspaceID(r *http.Request, task db.AgentTaskQueue
 type DaemonRegisterRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	DaemonID    string `json:"daemon_id"`
-	DeviceName  string `json:"device_name"`
-	CLIVersion  string `json:"cli_version"` // multica CLI version
-	LaunchedBy  string `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes    []struct {
+	// LegacyDaemonIDs lists prior hostname-derived daemon_ids this machine
+	// may have registered under before switching to a persistent UUID. The
+	// handler merges any matching runtime rows into the new row so agents
+	// and tasks keep working without manual intervention.
+	LegacyDaemonIDs []string `json:"legacy_daemon_ids"`
+	DeviceName      string   `json:"device_name"`
+	CLIVersion      string   `json:"cli_version"` // multica CLI version
+	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -287,26 +277,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Migrate agents from old offline runtimes on the same machine to the
-		// newly registered runtime. Uses the runtime's owner_id (preserved via
-		// COALESCE on upsert) so migration works with both PAT and daemon tokens.
-		// Scoped by daemon_id prefix so that only old profile-suffixed runtimes
-		// (e.g. "hostname-staging") from this machine are affected.
-		effectiveOwnerID := registered.OwnerID
-		if effectiveOwnerID.Valid {
-			migrated, err := h.Queries.MigrateAgentsToRuntime(r.Context(), db.MigrateAgentsToRuntimeParams{
-				NewRuntimeID:   registered.ID,
-				WorkspaceID:    parseUUID(req.WorkspaceID),
-				Provider:       provider,
-				OwnerID:        effectiveOwnerID,
-				DaemonIDPrefix: strToText(req.DaemonID),
-			})
-			if err != nil {
-				slog.Warn("failed to migrate agents to new runtime", "runtime_id", uuidToString(registered.ID), "error", err)
-			} else if migrated > 0 {
-				slog.Info("migrated agents to new runtime", "runtime_id", uuidToString(registered.ID), "provider", provider, "migrated_count", migrated)
-			}
-		}
+		// Seamless migration from the previous hostname-derived identity. The
+		// daemon sends every legacy daemon_id it may have registered under
+		// (e.g. "host.local", "host", "host-staging"); for each match we
+		// reassign agents + tasks onto the new UUID-keyed row, then delete
+		// the stale row so there's only ever one runtime per machine.
+		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 
 		resp = append(resp, runtimeToResponse(registered))
 	}
@@ -323,6 +299,88 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
 	})
+}
+
+// mergeLegacyRuntimes folds every runtime row keyed on a prior hostname-derived
+// daemon_id into the newly registered UUID-keyed row. For each legacy id the
+// lookup is case-insensitive and returns *all* matching rows — case-only drift
+// may have already minted duplicates historically (e.g. `Foo.local` AND
+// `foo.local` coexisting), and we need to consolidate every one of them, not
+// just the first. Per match we reassign agents and tasks, record the legacy
+// id on the new row for audit, then delete the stale row.
+//
+// Scoping by (workspace_id, provider) is sufficient since provider is single-
+// runtime-per-daemon; `unique (workspace_id, daemon_id, provider)` prevents
+// any two *exact* matches but the `LOWER(...)` comparison crosses that bound
+// precisely when case-duplicate rows exist — which is the bug we're fixing.
+// We also dedupe across legacy ids so overlapping candidates (e.g. `foo` and
+// `foo.local` both resolving to the same stored row) don't double-process.
+func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntime, provider string, legacyIDs []string) {
+	newID := uuidToString(registered.ID)
+	merged := make(map[string]struct{})
+
+	for _, legacyID := range legacyIDs {
+		legacyID = strings.TrimSpace(legacyID)
+		if legacyID == "" {
+			continue
+		}
+
+		matches, err := h.Queries.FindLegacyRuntimesByDaemonID(r.Context(), db.FindLegacyRuntimesByDaemonIDParams{
+			WorkspaceID: registered.WorkspaceID,
+			Provider:    provider,
+			DaemonID:    legacyID,
+		})
+		if err != nil {
+			slog.Warn("legacy runtime merge: lookup failed", "legacy_daemon_id", legacyID, "error", err)
+			continue
+		}
+		for _, old := range matches {
+			oldID := uuidToString(old.ID)
+			if oldID == newID {
+				continue
+			}
+			if _, seen := merged[oldID]; seen {
+				continue
+			}
+			merged[oldID] = struct{}{}
+
+			agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
+				NewRuntimeID: registered.ID,
+				OldRuntimeID: old.ID,
+			})
+			if err != nil {
+				slog.Warn("legacy runtime merge: reassign agents failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				continue
+			}
+			tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
+				NewRuntimeID: registered.ID,
+				OldRuntimeID: old.ID,
+			})
+			if err != nil {
+				slog.Warn("legacy runtime merge: reassign tasks failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				continue
+			}
+			if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
+				ID:             registered.ID,
+				LegacyDaemonID: strToText(legacyID),
+			}); err != nil {
+				slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
+			}
+			if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
+				slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
+				continue
+			}
+
+			slog.Info("legacy runtime merged",
+				"legacy_daemon_id", legacyID,
+				"old_runtime_id", oldID,
+				"new_runtime_id", newID,
+				"provider", provider,
+				"agents_reassigned", agents,
+				"tasks_reassigned", tasks,
+			)
+		}
+	}
 }
 
 func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
@@ -476,6 +534,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
+		var mcpConfig json.RawMessage
+		if agent.McpConfig != nil {
+			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
@@ -483,6 +545,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Skills:       skills,
 			CustomEnv:    customEnv,
 			CustomArgs:   customArgs,
+			McpConfig:    mcpConfig,
 		}
 	}
 
@@ -545,6 +608,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					if msgs[i].Role == "user" {
 						resp.ChatMessage = msgs[i].Content
 						break
+					}
+				}
+			}
+		}
+	}
+
+	// Autopilot run_only task: resolve workspace from autopilot_run → autopilot.
+	if task.AutopilotRunID.Valid && resp.WorkspaceID == "" {
+		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
+			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
+				resp.WorkspaceID = uuidToString(ap.WorkspaceID)
+				if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
 					}
 				}
 			}
@@ -984,7 +1062,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Verify the task belongs to the caller's workspace.
-	wsID := h.resolveTaskWorkspaceID(r, task)
+	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" || wsID != middleware.WorkspaceIDFromContext(r.Context()) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return

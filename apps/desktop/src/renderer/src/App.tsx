@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
@@ -11,6 +11,8 @@ import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
+import { useWindowOverlayStore } from "./stores/window-overlay-store";
+
 
 function AppContent() {
   const user = useAuthStore((s) => s.user);
@@ -29,6 +31,17 @@ function AppContent() {
   // can pick the matching CLI profile (server_url from ~/.multica config).
   useEffect(() => {
     window.daemonAPI.setTargetApiUrl(DAEMON_TARGET_API_URL);
+  }, []);
+
+  // Listen for invite IDs delivered via deep link (multica://invite/<id>).
+  // We open the overlay regardless of login state — if the user isn't logged
+  // in, InvitePage's queries will fail and render the "not found" state,
+  // which is acceptable; the expected pre-flight happens in the web app
+  // (login + next=/invite/... dance) before the deep link is ever dispatched.
+  useEffect(() => {
+    return window.desktopAPI.onInviteOpen((invitationId) => {
+      useWindowOverlayStore.getState().open({ type: "invite", invitationId });
+    });
   }, []);
 
   // Listen for auth token delivered via deep link (multica://auth/callback?token=...).
@@ -83,22 +96,40 @@ function AppContent() {
   });
   const wsCount = workspaces?.length ?? 0;
 
-  // Validate persisted tab paths against the current user's workspace list.
-  // Tabs survive across app restarts and account switches (persisted to
-  // localStorage `multica_tabs`), so a tab path like `/naiyuan/issues` may
-  // reference a workspace the current user can't access — showing
-  // NoAccessPage every time they open the app.
-  //
-  // Run synchronously in render phase rather than in useEffect so the first
-  // render already sees validated tabs. useEffect runs AFTER commit, which
-  // means the initial render would briefly show NoAccessPage before the
-  // effect resets the tab. Zustand supports render-phase setState; the
-  // validator is idempotent (exits early if nothing changed) so this
-  // doesn't loop.
-  if (workspaces) {
+  // Validate persisted tab state against the current user's workspace list,
+  // and pick an active workspace if none is set. Runs in useLayoutEffect
+  // (synchronously after render, before paint) rather than the render
+  // phase — the original render-phase pattern triggered React's
+  // "Cannot update a component while rendering a different component"
+  // warning because `switchWorkspace` is a Zustand setState that the
+  // TabBar is subscribed to. useLayoutEffect flushes both renders before
+  // the user sees anything, so there's no visible flicker.
+  useLayoutEffect(() => {
+    if (!workspaces) return;
     const validSlugs = new Set(workspaces.map((w) => w.slug));
-    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
-  }
+    const tabStore = useTabStore.getState();
+    tabStore.validateWorkspaceSlugs(validSlugs);
+    if (!tabStore.activeWorkspaceSlug && workspaces.length > 0) {
+      tabStore.switchWorkspace(workspaces[0].slug);
+    }
+  }, [workspaces]);
+
+  // Bidirectional new-workspace overlay: visible when there are no
+  // workspaces to enter, hidden as soon as one exists. Gated on
+  // `workspaceListFetched` so the initial render doesn't flash the
+  // overlay before the list arrives. The overlay's own `invite` type is
+  // not touched here — that's an in-flight task owned by the user.
+  useEffect(() => {
+    if (!user) return;
+    if (!workspaceListFetched) return;
+    const { overlay, open, close } = useWindowOverlayStore.getState();
+    const isEmpty = wsCount === 0;
+    if (isEmpty) {
+      if (!overlay) open({ type: "new-workspace" });
+    } else if (overlay?.type === "new-workspace") {
+      close();
+    }
+  }, [user, workspaceListFetched, wsCount]);
   // null = undecided (pre-login or list hasn't settled yet)
   // true  = session started with zero workspaces; next transition to >=1 triggers restart
   // false = session started with >=1 workspace, OR we've already restarted; skip
@@ -135,9 +166,14 @@ function AppContent() {
 const DAEMON_TARGET_API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:8080";
 
-// On logout, clear any cached PAT and stop the daemon so that a subsequent
-// login as a different user never inherits the previous user's credentials.
+// On logout, wipe desktop-only in-memory state and stop the daemon so that
+// a subsequent login as a different user never inherits the previous user's
+// tabs, overlay, or credentials. Zustand persist only writes to localStorage;
+// useLogout clears the storage key, but the live stores stay populated until
+// we explicitly reset them here.
 async function handleDaemonLogout() {
+  useTabStore.getState().reset();
+  useWindowOverlayStore.getState().close();
   try {
     await window.daemonAPI.clearToken();
   } catch {

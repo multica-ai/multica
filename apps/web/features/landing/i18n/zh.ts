@@ -280,6 +280,31 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.2.5",
+        date: "2026-04-17",
+        title: "CLI Autopilot、Cmd+K 与 Daemon 身份",
+        changes: [],
+        features: [
+          "CLI `autopilot` 命令，管理定时和触发式自动化",
+          "CLI `issue subscriber` 订阅管理命令",
+          "Cmd+K 命令面板扩展——主题切换、快速创建 Issue/项目、复制链接、切换工作区",
+          "Issue 列表卡片可选显示项目和子 Issue 进度",
+          "Daemon 持久化 UUID 身份——CLI 和桌面应用共用同一个 daemon，跨重启和机器迁移保持一致",
+          "唯一所有者退出工作区的前置检查",
+          "评论折叠状态跨会话持久化",
+        ],
+        fixes: [
+          "Agent 现在在任意 Issue 状态下都会响应评论触发",
+          "修复 Codex 沙箱在 macOS 上的网络访问配置",
+          "编辑器气泡菜单改用 @floating-ui/dom 重写，滚动时正确隐藏",
+          "Autopilot 创建者自动订阅其生成的 Issue",
+          "Autopilot run-only 任务正确解析工作区 ID",
+          "桌面应用 `shell.openExternal` 限制仅允许 http/https 协议（安全）",
+          "重名 Agent 创建返回 409 而非静默失败",
+          "桌面应用新建标签页继承当前工作区",
+        ],
+      },
+      {
         version: "0.2.1",
         date: "2026-04-16",
         title: "新增 Agent 运行时",

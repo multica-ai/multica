@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { issueKeys, CLOSED_PAGE_SIZE, type MyIssuesFilter } from "./queries";
 import { useWorkspaceId } from "../hooks";
+import { useRecentIssuesStore } from "./stores";
 import type { Issue, IssueReaction } from "../types";
 import type {
   CreateIssueRequest,
@@ -94,6 +95,9 @@ export function useCreateIssue() {
             }
           : old,
       );
+      // Surface the just-created issue in cmd+k's Recent list without
+      // requiring the user to open it first.
+      useRecentIssuesStore.getState().recordVisit(newIssue.id);
       // Invalidate parent's children query so sub-issues list updates immediately
       if (newIssue.parent_issue_id) {
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });

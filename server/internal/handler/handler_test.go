@@ -23,6 +23,7 @@ var testHandler *Handler
 var testPool *pgxpool.Pool
 var testUserID string
 var testWorkspaceID string
+var testRuntimeID string
 
 const (
 	handlerTestEmail         = "handler-test@multica.ai"
@@ -114,6 +115,7 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	`, workspaceID, "Handler Test Runtime", "handler_test_runtime", "Handler test runtime").Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
+	testRuntimeID = runtimeID
 
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent (
@@ -154,6 +156,81 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add(key, value)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func handlerTestRuntimeID(t *testing.T) string {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent_runtime WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("failed to load handler test runtime: %v", err)
+	}
+
+	return runtimeID
+}
+
+func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string {
+	t.Helper()
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5)
+		RETURNING id
+	`, testWorkspaceID, name, handlerTestRuntimeID(t), testUserID, mcpConfig).Scan(&agentID); err != nil {
+		t.Fatalf("failed to create handler test agent: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	return agentID
+}
+
+func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
+	t.Helper()
+
+	var mcpConfig []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT mcp_config FROM agent WHERE id = $1`, agentID).Scan(&mcpConfig); err != nil {
+		t.Fatalf("failed to load agent mcp_config: %v", err)
+	}
+
+	return mcpConfig
+}
+
+func assertJSONEqual(t *testing.T, got []byte, want string) {
+	t.Helper()
+
+	var gotValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("failed to unmarshal got JSON %q: %v", string(got), err)
+	}
+
+	var wantValue any
+	if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
+		t.Fatalf("failed to unmarshal want JSON %q: %v", want, err)
+	}
+
+	gotJSON, err := json.Marshal(gotValue)
+	if err != nil {
+		t.Fatalf("failed to marshal normalized got JSON: %v", err)
+	}
+	wantJSON, err := json.Marshal(wantValue)
+	if err != nil {
+		t.Fatalf("failed to marshal normalized want JSON: %v", err)
+	}
+
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("expected JSON %s, got %s", string(wantJSON), string(gotJSON))
+	}
 }
 
 func TestIssueCRUD(t *testing.T) {
@@ -533,6 +610,99 @@ func TestAgentCRUD(t *testing.T) {
 	}
 	if updated.Name != agents[0].Name {
 		t.Fatalf("UpdateAgent: name should be preserved, got '%s'", updated.Name)
+	}
+}
+
+func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"preset":"keep"}`))
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"name": "Handler Mcp Preserve Updated",
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	assertJSONEqual(t, updated.McpConfig, `{"preset":"keep"}`)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"keep"}`)
+}
+
+func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"preset":"clear"}`))
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"mcp_config": nil,
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	assertJSONEqual(t, updated.McpConfig, `null`)
+	if fetchAgentMcpConfig(t, agentID) != nil {
+		t.Fatalf("UpdateAgent: expected DB mcp_config to be SQL NULL")
+	}
+}
+
+func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"preset":"old"}`))
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"mcp_config": map[string]any{"preset": "new"},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
+}
+
+func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":        "Handler Mcp Create Null",
+		"runtime_id":  handlerTestRuntimeID(t),
+		"mcp_config":  nil,
+		"custom_env":  map[string]string{},
+		"custom_args": []string{},
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateAgent: decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	assertJSONEqual(t, created.McpConfig, `null`)
+	if fetchAgentMcpConfig(t, created.ID) != nil {
+		t.Fatalf("CreateAgent: expected DB mcp_config to be SQL NULL")
 	}
 }
 

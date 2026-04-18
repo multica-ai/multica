@@ -61,6 +61,22 @@ export function InboxPage() {
     setSelectedKeyState(urlIssue);
   }, [urlIssue]);
 
+  const wsId = useWorkspaceId();
+  const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
+  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+
+  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+
+  // Shared inbox links (?issue=<id>) may point to notifications not in this
+  // user's inbox (archived, or never received). Fall back to the issue page
+  // so the URL still resolves to something meaningful.
+  useEffect(() => {
+    if (loading) return;
+    if (!selectedKey) return;
+    if (selected) return;
+    replace(wsPaths.issueDetail(selectedKey));
+  }, [loading, selectedKey, selected, replace, wsPaths]);
+
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
     const inboxPath = wsPaths.inbox();
@@ -68,16 +84,11 @@ export function InboxPage() {
     replace(url);
   }, [replace, wsPaths]);
 
-  const wsId = useWorkspaceId();
-  const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
-  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
-
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
   });
 
   const isMobile = useIsMobile();
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const unreadCount = items.filter((i) => !i.read).length;
 
   const markReadMutation = useMarkInboxRead();

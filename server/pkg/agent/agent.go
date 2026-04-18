@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -25,8 +26,9 @@ type ExecOptions struct {
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration
-	ResumeSessionID string   // if non-empty, resume a previous agent session
-	CustomArgs      []string // additional CLI arguments appended to the agent command
+	ResumeSessionID string          // if non-empty, resume a previous agent session
+	CustomArgs      []string        // additional CLI arguments appended to the agent command
+	McpConfig       json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 }
 
 // Session represents a running agent execution.
@@ -122,4 +124,29 @@ func New(agentType string, cfg Config) (Backend, error) {
 // DetectVersion runs the agent CLI with --version and returns the output.
 func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 	return detectCLIVersion(ctx, executablePath)
+}
+
+// launchHeaders maps each supported agent type to the user-visible skeleton
+// that the daemon spawns before any custom_args are appended. This is
+// intentionally minimal — only the command + subcommand (or a short mode
+// label when there is no subcommand). Internal flags, transport values, and
+// environment variables are deliberately omitted so the string is a hint
+// about *what* users are extending, not a dump of the full command line.
+var launchHeaders = map[string]string{
+	"claude":   "claude (stream-json)",
+	"codex":    "codex app-server",
+	"copilot":  "copilot (json)",
+	"cursor":   "cursor-agent (stream-json)",
+	"gemini":   "gemini (stream-json)",
+	"hermes":   "hermes acp",
+	"openclaw": "openclaw agent (json)",
+	"opencode": "opencode run (json)",
+	"pi":       "pi (json mode)",
+}
+
+// LaunchHeader returns the user-visible launch skeleton for agentType, or an
+// empty string if the type is unknown. Callers render this as a preview so
+// users understand which command their custom_args get appended to.
+func LaunchHeader(agentType string) string {
+	return launchHeaders[agentType]
 }

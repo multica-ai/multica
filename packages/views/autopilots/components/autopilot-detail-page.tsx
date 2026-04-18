@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Zap, Play, Pause, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -20,6 +20,7 @@ import { PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import {
@@ -51,9 +52,9 @@ function formatDate(date: string): string {
   });
 }
 
-const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
+const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { label: "Issue Created", color: "text-blue-500", icon: Clock },
-  running: { label: "Running", color: "text-blue-500", icon: Loader2 },
+  running: { label: "Running", color: "text-blue-500", icon: Loader2, spin: true },
   completed: { label: "Completed", color: "text-emerald-500", icon: CheckCircle2 },
   failed: { label: "Failed", color: "text-destructive", icon: XCircle },
 };
@@ -65,7 +66,7 @@ function RunRow({ run }: { run: AutopilotRun }) {
 
   const content = (
     <>
-      <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color)} />
+      <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color, cfg.spin && "animate-spin")} />
       <span className={cn("w-24 shrink-0 text-xs font-medium", cfg.color)}>{cfg.label}</span>
       <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
@@ -384,9 +385,39 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-40 w-full" />
+      <div className="flex h-full flex-col">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+          <Skeleton className="h-4 w-4" />
+          <span className="text-muted-foreground">/</span>
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-4xl mx-auto p-6 space-y-8">
+            <section className="space-y-4">
+              <Skeleton className="h-3 w-20" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-5 w-32" />
+                </div>
+                <div className="space-y-1">
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-5 w-24" />
+                </div>
+              </div>
+            </section>
+            <section className="space-y-3">
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-10 w-full rounded-md" />
+            </section>
+            <section className="space-y-3">
+              <Skeleton className="h-4 w-24" />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </section>
+          </div>
+        </div>
       </div>
     );
   }
@@ -420,9 +451,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     }
   };
 
-  const handleToggleStatus = () => {
-    const newStatus = autopilot.status === "active" ? "paused" : "active";
-    updateAutopilot.mutate({ id: autopilotId, status: newStatus });
+  const handleToggleStatus = (checked: boolean) => {
+    updateAutopilot.mutate({ id: autopilotId, status: checked ? "active" : "paused" });
   };
 
   return (
@@ -435,26 +465,28 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </AppLink>
           <span className="text-muted-foreground">/</span>
           <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
-          <span className={cn(
-            "ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium",
-            autopilot.status === "active" ? "bg-emerald-500/10 text-emerald-500" :
-            autopilot.status === "paused" ? "bg-amber-500/10 text-amber-500" :
-            "bg-muted text-muted-foreground",
-          )}>
-            {autopilot.status}
-          </span>
+          <div className="ml-1 flex items-center gap-1.5">
+            <Switch
+              size="sm"
+              checked={autopilot.status === "active"}
+              onCheckedChange={handleToggleStatus}
+              disabled={autopilot.status === "archived"}
+              aria-label={autopilot.status === "active" ? "Pause autopilot" : "Activate autopilot"}
+            />
+            <span className={cn(
+              "text-xs font-medium capitalize",
+              autopilot.status === "active" ? "text-emerald-500" :
+              autopilot.status === "paused" ? "text-amber-500" :
+              "text-muted-foreground",
+            )}>
+              {autopilot.status}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
             Edit
-          </Button>
-          <Button size="sm" variant="outline" onClick={handleToggleStatus}>
-            {autopilot.status === "active" ? (
-              <><Pause className="h-3.5 w-3.5 mr-1" /> Pause</>
-            ) : (
-              <><Play className="h-3.5 w-3.5 mr-1" /> Activate</>
-            )}
           </Button>
           <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
             <Play className="h-3.5 w-3.5 mr-1" />
