@@ -20,15 +20,46 @@ type TxStarter interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+// AutopilotIssueCreateRequest is the write-through-agnostic shape autopilot
+// passes to the IssueCreator. It mirrors the handler.CreateIssueRequest fields
+// autopilot needs. Kept in the service package to avoid an import cycle
+// (handler already depends on service).
+type AutopilotIssueCreateRequest struct {
+	Title        string
+	Description  string
+	Status       string
+	Priority     string
+	AssigneeType string
+	AssigneeID   string
+}
+
+// IssueCreator is the narrow interface AutopilotService uses to create issues.
+// In production the handler's CreateIssueInternal satisfies this via a tiny
+// adapter wired from cmd/server. Keeping the interface narrow avoids pulling
+// the whole handler surface into the service package and sidesteps the
+// service → handler import that would create a cycle.
+type IssueCreator interface {
+	CreateIssueForAutopilot(ctx context.Context, workspaceID, actorType, actorID string, req AutopilotIssueCreateRequest) (db.Issue, error)
+}
+
 type AutopilotService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Bus       *events.Bus
-	TaskSvc   *TaskService
+	Queries      *db.Queries
+	TxStarter    TxStarter
+	Bus          *events.Bus
+	TaskSvc      *TaskService
+	IssueCreator IssueCreator
 }
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+}
+
+// SetIssueCreator wires the HTTP-agnostic issue-creation entry point. Called
+// from cmd/server once the handler exists. When nil, dispatchCreateIssue falls
+// back to the legacy direct-DB path (preserves pre-Phase-4 behavior for tests
+// that don't wire the handler).
+func (s *AutopilotService) SetIssueCreator(ic IssueCreator) {
+	s.IssueCreator = ic
 }
 
 // DispatchAutopilot is the core execution entry point.
@@ -94,7 +125,99 @@ func (s *AutopilotService) DispatchAutopilot(
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
+//
+// Phase 4 rewires this through the handler's CreateIssueInternal so connected
+// workspaces see autopilot-generated issues on GitLab. The handler owns the
+// full write-through path (GitLab POST → cache upsert → event publish →
+// task enqueue), so this function's job is reduced to:
+//
+//  1. Build the create request from the autopilot template.
+//  2. Use the agent as the acting identity (agent actor → service PAT
+//     for the GitLab call).
+//  3. After the handler returns, record the autopilot_issue mapping keyed
+//     by workspace_id + gitlab_iid (so listeners can resolve the run from
+//     a plain GitLab-synced cache row without origin_type/origin_id
+//     markers). Mapping is skipped on non-GitLab workspaces — the legacy
+//     autopilot_run.issue_id link stays authoritative there.
+//
+// Falls back to the legacy direct-DB path when IssueCreator isn't wired
+// (production always wires it; some tests don't bother when they're not
+// exercising the write path).
 func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+	if s.IssueCreator == nil {
+		return s.dispatchCreateIssueLegacy(ctx, ap, run)
+	}
+
+	title := s.interpolateTemplate(ap)
+	description := s.buildIssueDescription(ap)
+
+	// Autopilot impersonates the assignee agent for the GitLab call —
+	// the handler's resolveActor semantics ("agent" actor → service PAT)
+	// match exactly what we want here. The creator-type field on the
+	// underlying cache row is set from the actor, so "agent" is also the
+	// accurate creator for autopilot-generated issues (human who set up
+	// the autopilot is recorded as ap.CreatedByID on the autopilot row).
+	req := AutopilotIssueCreateRequest{
+		Title:        title,
+		Description:  description.String,
+		Status:       "todo",
+		Priority:     ap.Priority,
+		AssigneeType: "agent",
+		AssigneeID:   util.UUIDToString(ap.AssigneeID),
+	}
+
+	issue, err := s.IssueCreator.CreateIssueForAutopilot(
+		ctx,
+		util.UUIDToString(ap.WorkspaceID),
+		"agent",
+		util.UUIDToString(ap.AssigneeID),
+		req,
+	)
+	if err != nil {
+		return fmt.Errorf("create issue: %w", err)
+	}
+
+	// Update run with the linked issue.
+	updatedRun, err := s.Queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+		ID:      run.ID,
+		IssueID: issue.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("link run to issue: %w", err)
+	}
+	*run = updatedRun
+
+	// Record the autopilot_issue mapping for connected workspaces. For legacy
+	// (non-GitLab) workspaces the cache row has no gitlab_iid and listeners
+	// resolve the run via autopilot_run.issue_id — skip the mapping.
+	if issue.GitlabIid.Valid {
+		if _, err := s.Queries.UpsertAutopilotIssue(ctx, db.UpsertAutopilotIssueParams{
+			AutopilotRunID: run.ID,
+			WorkspaceID:    ap.WorkspaceID,
+			GitlabIid:      issue.GitlabIid.Int32,
+		}); err != nil {
+			return fmt.Errorf("autopilot_issue mapping: %w", err)
+		}
+	}
+
+	// Note: CreateIssueInternal already published issue:created AND enqueued
+	// the agent task (shouldEnqueueAgentTask gates on status != backlog, and
+	// autopilot always creates issues in "todo"). We deliberately do NOT
+	// re-emit either — double-publishing breaks subscriber/notification
+	// listeners that assume a single create event.
+
+	slog.Info("autopilot dispatched (create_issue)",
+		"autopilot_id", util.UUIDToString(ap.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"run_id", util.UUIDToString(run.ID),
+	)
+	return nil
+}
+
+// dispatchCreateIssueLegacy is the pre-Phase-4 direct-DB path. Preserved as a
+// fallback for tests that construct AutopilotService without wiring an
+// IssueCreator. Production always wires it via cmd/server.
+func (s *AutopilotService) dispatchCreateIssueLegacy(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -166,7 +289,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
 
-	slog.Info("autopilot dispatched (create_issue)",
+	slog.Info("autopilot dispatched (create_issue, legacy direct-DB)",
 		"autopilot_id", util.UUIDToString(ap.ID),
 		"issue_id", util.UUIDToString(issue.ID),
 		"run_id", util.UUIDToString(run.ID),

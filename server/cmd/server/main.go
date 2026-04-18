@@ -103,12 +103,18 @@ func main() {
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	defer cancelServer()
 
-	// NewRouter constructs the GitLab resolver internally when gitlabEnabled
-	// is true, so the handler has a live resolver reference by the time routes
-	// are registered. (Previously the resolver was declared here as nil and
-	// only assigned after NewRouter returned, which made the write-through
-	// guard always false in production.)
-	r := NewRouter(pool, hub, bus, secretsCipher, gitlabClient, gitlabEnabled, serverCtx, publicURL)
+	// NewRouterWithHandler constructs the handler and router — we need both
+	// because the autopilot service (registered below) must share the same
+	// AutopilotService instance the HTTP trigger-autopilot endpoint uses, and
+	// must also get an IssueCreator wired to the handler's CreateIssueInternal
+	// so autopilot-generated issues flow through GitLab write-through on
+	// connected workspaces (Phase 4).
+	//
+	// Previously main.go constructed a second AutopilotService for the
+	// scheduler / listeners, which left the one on the handler without
+	// listeners wired. The consolidation is intentional: one service, one
+	// wired IssueCreator, one set of listeners.
+	r, h := NewRouterWithHandler(pool, hub, bus, secretsCipher, gitlabClient, gitlabEnabled, serverCtx, publicURL)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -118,8 +124,13 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
+	// taskSvc is constructed separately from the handler's internal TaskService
+	// because the webhook worker needs an enqueuer reference at startup; the
+	// handler's task service is behind h and would require an extra accessor.
+	// Both write to the same DB table — functionally equivalent.
 	taskSvc := service.NewTaskService(queries, hub, bus)
-	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	autopilotSvc := h.AutopilotService
+	autopilotSvc.SetIssueCreator(h)
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Start background sweeper to mark stale runtimes as offline.
