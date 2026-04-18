@@ -79,11 +79,18 @@ func ApplyIssueHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 	}
 	updatedAt, _ := time.Parse(time.RFC3339, p.ObjectAttributes.UpdatedAt)
 
-	// Stale-event check: if cache row exists and is at least as new, skip.
+	// Load prior cache state (for stale-event check + post-upsert
+	// change-detection used by the agent-task enqueue gate). pgx.ErrNoRows
+	// means the issue is brand-new in cache; any other error is a real DB
+	// problem and must be propagated rather than silently masked.
 	existing, err := deps.Queries.GetIssueByGitlabIID(ctx, db.GetIssueByGitlabIIDParams{
 		WorkspaceID: deps.WorkspaceID,
 		GitlabIid:   pgtype.Int4{Int32: int32(p.ObjectAttributes.IID), Valid: true},
 	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("load existing issue cache row: %w", err)
+	}
+	// Stale-event check: if cache row exists and is at least as new, skip.
 	if err == nil && existing.ExternalUpdatedAt.Valid && !existing.ExternalUpdatedAt.Time.Before(updatedAt) {
 		return nil
 	}

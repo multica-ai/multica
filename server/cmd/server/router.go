@@ -66,16 +66,10 @@ func allowedOrigins() []string {
 // resolver on the handler. Previously the resolver was passed in from main.go
 // and could be nil at the time SetGitlabResolver ran; the write-through guard
 // then silently fell back to the legacy direct-DB path in production.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCipher *secrets.Cipher, gitlabClient *gitlab.Client, gitlabEnabled bool, serverCtx context.Context, publicURL string) chi.Router {
-	r, _ := NewRouterWithHandler(pool, hub, bus, secretsCipher, gitlabClient, gitlabEnabled, serverCtx, publicURL)
-	return r
-}
-
-// NewRouterWithHandler is the full constructor — returns both the router and
-// the underlying handler. main.go uses the handler to wire cross-cutting
-// dependencies (AutopilotService.SetIssueCreator) that need a reference to
-// the HTTP-agnostic create path. Tests that don't need the handler can call
-// NewRouter.
+//
+// Returns both the router and the underlying handler. main.go uses the
+// handler to wire cross-cutting dependencies (AutopilotService.SetIssueCreator)
+// that need a reference to the HTTP-agnostic create path.
 func NewRouterWithHandler(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCipher *secrets.Cipher, gitlabClient *gitlab.Client, gitlabEnabled bool, serverCtx context.Context, publicURL string) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()

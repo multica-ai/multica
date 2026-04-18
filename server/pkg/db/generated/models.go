@@ -300,19 +300,10 @@ type Issue struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
-	OriginType         pgtype.Text        `json:"origin_type"`
-	OriginID           pgtype.UUID        `json:"origin_id"`
 	GitlabIid          pgtype.Int4        `json:"gitlab_iid"`
 	GitlabProjectID    pgtype.Int8        `json:"gitlab_project_id"`
 	ExternalUpdatedAt  pgtype.Timestamptz `json:"external_updated_at"`
 	GitlabIssueID      pgtype.Int8        `json:"gitlab_issue_id"`
-}
-
-type IssueDependency struct {
-	ID               pgtype.UUID `json:"id"`
-	IssueID          pgtype.UUID `json:"issue_id"`
-	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
-	Type             string      `json:"type"`
 }
 
 type IssueGitlabLabel struct {

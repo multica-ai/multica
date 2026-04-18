@@ -118,14 +118,14 @@ func TestGitlabWriteThrough_RealProductionWiring(t *testing.T) {
 
 	// ---- Boot the real router EXACTLY the way main.go does. This is the
 	// production wiring check: we don't touch SetGitlabResolver manually. If
-	// NewRouter forgets to wire it, the test MUST fail. ----
+	// NewRouterWithHandler forgets to wire it, the test MUST fail. ----
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
 	registerListeners(bus, hub)
 
 	gitlabClient := gitlab.NewClient(fake.URL, &http.Client{Timeout: 5 * time.Second})
-	router := NewRouter(testPool, hub, bus, cipher, gitlabClient, true, context.Background(), "")
+	router, _ := NewRouterWithHandler(testPool, hub, bus, cipher, gitlabClient, true, context.Background(), "")
 	srv := httptest.NewServer(router)
 	defer srv.Close()
 

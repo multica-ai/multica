@@ -136,9 +136,9 @@ func (s *AutopilotService) DispatchAutopilot(
 //     for the GitLab call).
 //  3. After the handler returns, record the autopilot_issue mapping keyed
 //     by workspace_id + gitlab_iid (so listeners can resolve the run from
-//     a plain GitLab-synced cache row without origin_type/origin_id
-//     markers). Mapping is skipped on non-GitLab workspaces — the legacy
-//     autopilot_run.issue_id link stays authoritative there.
+//     a plain GitLab-synced cache row). Mapping is skipped on non-GitLab
+//     workspaces — the legacy autopilot_run.issue_id link stays
+//     authoritative there.
 //
 // Falls back to the legacy direct-DB path when IssueCreator isn't wired
 // (production always wires it; some tests don't bother when they're not
@@ -191,7 +191,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// (non-GitLab) workspaces the cache row has no gitlab_iid and listeners
 	// resolve the run via autopilot_run.issue_id — skip the mapping.
 	if issue.GitlabIid.Valid {
-		if _, err := s.Queries.UpsertAutopilotIssue(ctx, db.UpsertAutopilotIssueParams{
+		if err := s.Queries.UpsertAutopilotIssue(ctx, db.UpsertAutopilotIssueParams{
 			AutopilotRunID: run.ID,
 			WorkspaceID:    ap.WorkspaceID,
 			GitlabIid:      issue.GitlabIid.Int32,
@@ -235,7 +235,7 @@ func (s *AutopilotService) dispatchCreateIssueLegacy(ctx context.Context, ap db.
 	title := s.interpolateTemplate(ap)
 	description := s.buildIssueDescription(ap)
 
-	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
+	issue, err := qtx.CreateIssue(ctx, db.CreateIssueParams{
 		WorkspaceID:   ap.WorkspaceID,
 		Title:         title,
 		Description:   description,
@@ -250,8 +250,6 @@ func (s *AutopilotService) dispatchCreateIssueLegacy(ctx context.Context, ap db.
 		DueDate:       pgtype.Timestamptz{},
 		Number:        issueNumber,
 		ProjectID:     ap.ProjectID,
-		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:      ap.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
@@ -370,40 +368,26 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	}
 }
 
-// resolveActiveRunForIssue finds the active autopilot run that owns an issue.
-// It prefers the Phase 4 autopilot_issue mapping (workspace_id + gitlab_iid),
-// which is the forward-looking path — it works for issues created via GitLab
-// write-through that do not carry an origin marker. It falls back to the legacy
-// origin_type/origin_id path for rows created before the mapping existed.
-// Phase 5 will drop the origin_type/origin_id columns and remove the fallback.
-//
-// Only returns runs in an active status (issue_created / running) — matches the
-// existing GetAutopilotRunByIssue semantics, so terminal runs are never
-// re-synced.
+// resolveActiveRunForIssue finds the active autopilot run that owns an issue
+// via the autopilot_issue mapping (workspace_id + gitlab_iid). Only returns
+// runs in an active status (issue_created / running) so terminal runs are
+// never re-synced.
 func (s *AutopilotService) resolveActiveRunForIssue(ctx context.Context, issue db.Issue) (db.AutopilotRun, bool) {
-	// Phase 4 path: mapping keyed by workspace_id + gitlab_iid.
-	if issue.GitlabIid.Valid {
-		mapping, err := s.Queries.GetAutopilotIssueByIID(ctx, db.GetAutopilotIssueByIIDParams{
-			WorkspaceID: issue.WorkspaceID,
-			GitlabIid:   issue.GitlabIid.Int32,
-		})
-		if err == nil {
-			run, err := s.Queries.GetAutopilotRun(ctx, mapping.AutopilotRunID)
-			if err == nil && isActiveRunStatus(run.Status) {
-				return run, true
-			}
-		}
+	if !issue.GitlabIid.Valid {
+		return db.AutopilotRun{}, false
 	}
-
-	// Legacy fallback: origin_type/origin_id. Remove in Phase 5.
-	if issue.OriginType.Valid && issue.OriginType.String == "autopilot" {
-		run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
-		if err == nil {
-			return run, true
-		}
+	mapping, err := s.Queries.GetAutopilotIssueByIID(ctx, db.GetAutopilotIssueByIIDParams{
+		WorkspaceID: issue.WorkspaceID,
+		GitlabIid:   issue.GitlabIid.Int32,
+	})
+	if err != nil {
+		return db.AutopilotRun{}, false
 	}
-
-	return db.AutopilotRun{}, false
+	run, err := s.Queries.GetAutopilotRun(ctx, mapping.AutopilotRunID)
+	if err != nil || !isActiveRunStatus(run.Status) {
+		return db.AutopilotRun{}, false
+	}
+	return run, true
 }
 
 // isActiveRunStatus reports whether an autopilot run is still open for

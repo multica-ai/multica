@@ -65,11 +65,10 @@ func (q *Queries) ListAutopilotIssuesByRun(ctx context.Context, autopilotRunID p
 	return items, nil
 }
 
-const upsertAutopilotIssue = `-- name: UpsertAutopilotIssue :one
+const upsertAutopilotIssue = `-- name: UpsertAutopilotIssue :exec
 INSERT INTO autopilot_issue (autopilot_run_id, workspace_id, gitlab_iid)
 VALUES ($1, $2, $3)
 ON CONFLICT (autopilot_run_id, workspace_id, gitlab_iid) DO NOTHING
-RETURNING autopilot_run_id, workspace_id, gitlab_iid, created_at
 `
 
 type UpsertAutopilotIssueParams struct {
@@ -79,15 +78,9 @@ type UpsertAutopilotIssueParams struct {
 }
 
 // Record that an autopilot run created (or is tracking) a specific GitLab
-// issue. Idempotent on the composite key.
-func (q *Queries) UpsertAutopilotIssue(ctx context.Context, arg UpsertAutopilotIssueParams) (AutopilotIssue, error) {
-	row := q.db.QueryRow(ctx, upsertAutopilotIssue, arg.AutopilotRunID, arg.WorkspaceID, arg.GitlabIid)
-	var i AutopilotIssue
-	err := row.Scan(
-		&i.AutopilotRunID,
-		&i.WorkspaceID,
-		&i.GitlabIid,
-		&i.CreatedAt,
-	)
-	return i, err
+// issue. Idempotent on the composite key. Callers discard the row, so :exec
+// avoids a spurious pgx.ErrNoRows on conflict.
+func (q *Queries) UpsertAutopilotIssue(ctx context.Context, arg UpsertAutopilotIssueParams) error {
+	_, err := q.db.Exec(ctx, upsertAutopilotIssue, arg.AutopilotRunID, arg.WorkspaceID, arg.GitlabIid)
+	return err
 }
