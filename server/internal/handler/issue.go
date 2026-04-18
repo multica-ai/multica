@@ -1187,6 +1187,82 @@ func buildUpsertParamsFromCreate(wsUUID pgtype.UUID, projectID int64, issue gitl
 	}
 }
 
+// buildUpsertParamsForUpdate builds UpsertIssueFromGitlabParams for the PATCH
+// write-through path. The key difference from buildUpsertParamsFromCreate is
+// that UpsertIssueFromGitlab's DO UPDATE clause blindly overwrites
+// assignee_type / assignee_id / due_date with EXCLUDED values (no COALESCE).
+// On a pre-existing cache row, create-path params would wipe those fields
+// because the create-path leaves them zero — the translator only sets them
+// when GitLab returned an agent::<slug> label. For updates we preserve the
+// prevIssue values, and only override when:
+//   - The translator resolved an agent assignee from an agent::<slug> label
+//     (so the GitLab-side change wins).
+//   - The request explicitly sets a new due_date (rawFields makes the
+//     distinction between "absent" and "null"; we only write a new non-null
+//     value here — clearing continues to happen via the later UpdateIssue
+//     patch so we don't zero the column via the upsert path).
+//
+// Title / description / status / priority / gitlab_* / external_updated_at
+// come from the GitLab response (via values) as before — the upsert IS how
+// those reconcile after GitLab accepted the edit.
+func buildUpsertParamsForUpdate(
+	prevIssue db.Issue,
+	projectID int64,
+	issue gitlabapi.Issue,
+	values gitlabsync.IssueValues,
+	req UpdateIssueRequest,
+) db.UpsertIssueFromGitlabParams {
+	// Start with prev values for the fields the upsert would otherwise wipe.
+	assigneeType := prevIssue.AssigneeType
+	assigneeID := prevIssue.AssigneeID
+	dueDate := prevIssue.DueDate
+
+	// If the translator resolved an agent assignee from the GitLab response,
+	// that wins — the label change on GitLab is the source of truth.
+	if values.AssigneeType == "agent" {
+		assigneeType = pgtype.Text{String: "agent", Valid: true}
+		var newID pgtype.UUID
+		_ = newID.Scan(values.AssigneeID)
+		assigneeID = newID
+	}
+
+	// If the PATCH body set a non-empty due_date, use it. (Explicit null
+	// clearing is applied via the later UpdateIssue narg-patch, which COALESCE
+	// handles — we avoid zeroing the column through the upsert path here.)
+	if req.DueDate != nil && *req.DueDate != "" {
+		if t, err := time.Parse(time.RFC3339, *req.DueDate); err == nil {
+			dueDate = pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+
+	desc := pgtype.Text{}
+	if values.Description != "" {
+		desc = pgtype.Text{String: values.Description, Valid: true}
+	}
+	extUpdated := pgtype.Timestamptz{}
+	if values.UpdatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, values.UpdatedAt); err == nil {
+			extUpdated = pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+	return db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       prevIssue.WorkspaceID,
+		GitlabIid:         pgtype.Int4{Int32: int32(issue.IID), Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: projectID, Valid: true},
+		GitlabIssueID:     pgtype.Int8{Int64: issue.ID, Valid: issue.ID != 0},
+		Title:             values.Title,
+		Description:       desc,
+		Status:            values.Status,
+		Priority:          values.Priority,
+		AssigneeType:      assigneeType,
+		AssigneeID:        assigneeID,
+		CreatorType:       prevIssue.CreatorType,
+		CreatorID:         prevIssue.CreatorID,
+		DueDate:           dueDate,
+		ExternalUpdatedAt: extUpdated,
+	}
+}
+
 type UpdateIssueRequest struct {
 	Title              *string  `json:"title"`
 	Description        *string  `json:"description"`
@@ -1325,7 +1401,7 @@ func (h *Handler) updateSingleIssueWriteThrough(
 	qtxGL := h.Queries.WithTx(glTx)
 
 	cacheRow, upErr := qtxGL.UpsertIssueFromGitlab(ctx,
-		buildUpsertParamsFromCreate(prevIssue.WorkspaceID, prevIssue.GitlabProjectID.Int64, *glIssue, values))
+		buildUpsertParamsForUpdate(prevIssue, prevIssue.GitlabProjectID.Int64, *glIssue, values, req))
 	if upErr != nil && !errors.Is(upErr, pgx.ErrNoRows) {
 		slog.Error("upsert gitlab cache row on update", "error", upErr)
 		return nil, db.Issue{}, &writeThroughError{

@@ -1094,3 +1094,183 @@ func TestBatchDeleteIssues_ContinueOnError(t *testing.T) {
 		t.Errorf("bad issue unexpectedly deleted, count = %d", badCount)
 	}
 }
+
+// TestUpdateIssue_WriteThroughPreservesAssigneeAndDueDateOnTitleOnlyPatch
+// guards the B1 regression: UpsertIssueFromGitlab's DO UPDATE clause has no
+// COALESCE for assignee_type/assignee_id/due_date. A PATCH that only touches
+// the title must not wipe member-typed assignees or due dates stored on the
+// cache row (the translator only resolves agent assignees from GitLab labels,
+// so member + due_date have to be threaded through via the PATCH path).
+func TestUpdateIssue_WriteThroughPreservesAssigneeAndDueDateOnTitleOnlyPatch(t *testing.T) {
+	ctx := context.Background()
+
+	// Capture the body sent to GitLab so we can confirm it's a title-only
+	// update. The GitLab response intentionally has NO agent::<slug> label and
+	// no assignees — this exercises the worst case where the GitLab response
+	// has nothing that would reconstruct assignee/due_date.
+	var gitlabBody map[string]any
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gitlabBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":9210,"iid":210,"title":"new","state":"opened",
+			"labels":["status::in_progress","priority::none"],"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	// issue.assignee_id has no FK constraint — use a fresh UUID as the
+	// member-assignee identifier. The cache row stores the UUID verbatim.
+	memberUserID := uuid.New().String()
+
+	// Seed the issue with member assignee + due date (both things the upsert
+	// would wipe if we used buildUpsertParamsFromCreate).
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 assignee_type, assignee_id, due_date,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 3001, 'old', '', 'in_progress', 'none',
+		         'member', $3::uuid, '2026-05-01T00:00:00Z',
+		         210, 42, 9210, '2026-04-17T12:00:00Z',
+		         'member', $4::uuid, 0)`,
+		issueID, testWorkspaceID, memberUserID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(`{"title":"new"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	// Title only — no label diff, no state_event.
+	if _, ok := gitlabBody["add_labels"]; ok {
+		t.Errorf("add_labels sent on title-only PATCH: %v", gitlabBody["add_labels"])
+	}
+	if _, ok := gitlabBody["remove_labels"]; ok {
+		t.Errorf("remove_labels sent on title-only PATCH: %v", gitlabBody["remove_labels"])
+	}
+	if _, ok := gitlabBody["state_event"]; ok {
+		t.Errorf("state_event sent on title-only PATCH: %v", gitlabBody["state_event"])
+	}
+	if got, _ := gitlabBody["title"].(string); got != "new" {
+		t.Errorf("GitLab PATCH title = %q, want %q", got, "new")
+	}
+
+	// Cache row MUST still have the member assignee and the due date after
+	// write-through — this is the B1 invariant.
+	var (
+		assigneeType string
+		assigneeID   string
+		dueDate      *time.Time
+		title        string
+	)
+	if err := testPool.QueryRow(ctx,
+		`SELECT title, assignee_type, assignee_id, due_date FROM issue WHERE id = $1::uuid`,
+		issueID).Scan(&title, &assigneeType, &assigneeID, &dueDate); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if title != "new" {
+		t.Errorf("cached title = %q, want %q", title, "new")
+	}
+	if assigneeType != "member" {
+		t.Errorf("cached assignee_type = %q, want %q (B1 regression)", assigneeType, "member")
+	}
+	if assigneeID != memberUserID {
+		t.Errorf("cached assignee_id = %q, want %q (B1 regression)", assigneeID, memberUserID)
+	}
+	if dueDate == nil {
+		t.Errorf("cached due_date = NULL, want 2026-05-01 (B1 regression)")
+	} else if dueDate.UTC().Format("2006-01-02") != "2026-05-01" {
+		t.Errorf("cached due_date = %s, want 2026-05-01", dueDate.UTC().Format("2006-01-02"))
+	}
+}
+
+// TestUpdateIssue_WriteThroughWritesDueDateWhenExplicitlySet guards the other
+// half of B1: an explicit due_date in the PATCH body must reach GitLab AND
+// land in the cache row (previously req.DueDate was silently dropped on
+// connected workspaces because the upsert hard-coded DueDate to zero).
+func TestUpdateIssue_WriteThroughWritesDueDateWhenExplicitlySet(t *testing.T) {
+	ctx := context.Background()
+
+	var gitlabBody map[string]any
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gitlabBody)
+		w.Header().Set("Content-Type", "application/json")
+		// Echo the same due date so TranslateIssue doesn't drop it.
+		_, _ = w.Write([]byte(`{"id":9211,"iid":211,"title":"T","state":"opened",
+			"labels":["status::todo","priority::none"],"due_date":"2026-05-01",
+			"updated_at":"2026-04-17T13:00:00Z"}`))
+	}))
+	defer fake.Close()
+
+	h := buildHandlerWithGitlab(t, fake.URL)
+	seedGitlabWriteThroughFixture(t, h)
+	t.Cleanup(func() {
+		h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
+	})
+
+	// Seed with NO due_date to prove the PATCH introduces it.
+	issueID := uuid.New().String()
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO issue (id, workspace_id, number, title, description, status, priority,
+		 gitlab_iid, gitlab_project_id, gitlab_issue_id, external_updated_at,
+		 creator_type, creator_id, position)
+		 VALUES ($1::uuid, $2::uuid, 3002, 'T', '', 'todo', 'none',
+		         211, 42, 9211, '2026-04-17T12:00:00Z',
+		         'member', $3::uuid, 0)`,
+		issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+
+	body := []byte(`{"due_date":"2026-05-01T00:00:00Z"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/issues/"+issueID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", issueID)
+	rec := httptest.NewRecorder()
+
+	h.UpdateIssue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	if got, ok := gitlabBody["due_date"].(string); !ok || got == "" {
+		t.Errorf("GitLab PATCH due_date = %v, want non-empty (B1: req.DueDate must reach GitLab)", gitlabBody["due_date"])
+	} else if got != "2026-05-01T00:00:00Z" {
+		t.Errorf("GitLab PATCH due_date = %q, want 2026-05-01T00:00:00Z", got)
+	}
+
+	// Cache row should now have the posted due_date.
+	var dueDate *time.Time
+	if err := testPool.QueryRow(ctx,
+		`SELECT due_date FROM issue WHERE id = $1::uuid`, issueID).Scan(&dueDate); err != nil {
+		t.Fatalf("scan cache: %v", err)
+	}
+	if dueDate == nil {
+		t.Errorf("cached due_date = NULL, want 2026-05-01 (B1: req.DueDate must land in cache)")
+	} else if dueDate.UTC().Format("2006-01-02") != "2026-05-01" {
+		t.Errorf("cached due_date = %s, want 2026-05-01", dueDate.UTC().Format("2006-01-02"))
+	}
+}
