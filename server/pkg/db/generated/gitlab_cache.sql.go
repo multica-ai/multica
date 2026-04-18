@@ -90,6 +90,31 @@ func (q *Queries) DeleteWorkspaceGitlabMembers(ctx context.Context, workspaceID 
 	return err
 }
 
+const getCommentReactionByGitlabAwardID = `-- name: GetCommentReactionByGitlabAwardID :one
+SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at, gitlab_award_id, external_updated_at, gitlab_actor_user_id FROM comment_reaction WHERE gitlab_award_id = $1 LIMIT 1
+`
+
+// Used by the write-through path when the clobber guard short-circuits
+// (pgx.ErrNoRows from the upsert) to load the row the concurrent webhook
+// already wrote.
+func (q *Queries) GetCommentReactionByGitlabAwardID(ctx context.Context, gitlabAwardID pgtype.Int8) (CommentReaction, error) {
+	row := q.db.QueryRow(ctx, getCommentReactionByGitlabAwardID, gitlabAwardID)
+	var i CommentReaction
+	err := row.Scan(
+		&i.ID,
+		&i.CommentID,
+		&i.WorkspaceID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Emoji,
+		&i.CreatedAt,
+		&i.GitlabAwardID,
+		&i.ExternalUpdatedAt,
+		&i.GitlabActorUserID,
+	)
+	return i, err
+}
+
 const getGitlabLabelByName = `-- name: GetGitlabLabelByName :one
 SELECT workspace_id, gitlab_label_id, name, color, description, external_updated_at FROM gitlab_label
 WHERE workspace_id = $1 AND name = $2
