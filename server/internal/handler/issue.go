@@ -1345,35 +1345,37 @@ func writeThroughStatus(err error) int {
 // Multica-native fields (parent_issue_id, project_id, member assignee)
 // that GitLab doesn't track, and commit. Used by both UpdateIssue
 // (direct handler) and BatchUpdateIssues (loops over this). Callers
-// pre-resolve wsConn/token/agentSlugByUUID once per request to avoid
-// redundant DB + GitLab work across a batch.
+// pre-resolve token/agentSlugByUUID once per request to avoid redundant
+// DB + GitLab work across a batch; the wsConn row they fetched is not
+// needed inside this helper because the GitLab identifiers already live
+// on prevIssue.
+//
+// workspaceID is threaded through purely for slog logging context (the
+// helper emits a warning when a GitLab-connected cache row is missing
+// GitLab identifiers — a bug upstream of this handler).
 //
 // On success returns the built IssueResponse and the post-commit cache
 // row. On error returns a *writeThroughError with a status hint that
 // the direct handler maps back to an HTTP status. The batch handler
 // ignores the status hint and classifies the error via
-// classifyBatchError, which keys off the embedded error message (the
-// GitLab client preserves "(403)" / "(404)" / "(429)" etc. in the
-// error string).
+// classifyBatchError, which uses errors.Is/As against GitLab sentinels
+// (ErrForbidden/ErrNotFound/ErrUnauthorized) and APIError.StatusCode —
+// classification is invariant under writeThroughError's %w wrapping.
 //
 // rawFields is optional: when non-nil it enables explicit-null semantics
-// for parent_issue_id / project_id (JSON null clears the field). When
-// nil — as in the batch path — those fields fall back to "value present
-// means set, absent or nil means leave alone" (no explicit null).
+// for parent_issue_id / project_id / assignee_type / assignee_id (JSON
+// null clears the field). When nil — as in the batch path — those
+// fields fall back to "value present means set, absent or nil means
+// leave alone" (no explicit null).
 func (h *Handler) updateSingleIssueWriteThrough(
 	ctx context.Context,
 	prevIssue db.Issue,
 	req UpdateIssueRequest,
 	rawFields map[string]json.RawMessage,
-	actorType, actorID, workspaceID string,
-	wsConn db.WorkspaceGitlabConnection,
+	workspaceID string,
 	token string,
 	agentSlugByUUID map[string]string,
 ) (*IssueResponse, db.Issue, error) {
-	_ = wsConn // kept in signature so callers document that they've resolved it
-	_ = actorID
-	_ = actorType
-
 	oldSnap := gitlabsync.OldIssueSnapshot{
 		Status:       prevIssue.Status,
 		Priority:     prevIssue.Priority,
@@ -1684,7 +1686,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// status and never fall back to the legacy direct-DB path (that would
 	// produce orphaned cache rows).
 	if h.GitlabEnabled && h.GitlabResolver != nil {
-		wsConn, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), prevIssue.WorkspaceID)
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), prevIssue.WorkspaceID)
 		if wsErr == nil {
 			actorType, actorID := h.resolveActor(r, userID, workspaceID)
 			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
@@ -1703,7 +1705,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 			resp, cacheRow, wtErr := h.updateSingleIssueWriteThrough(
 				r.Context(), prevIssue, req, rawFields,
-				actorType, actorID, workspaceID, wsConn, token, agentSlugByUUID,
+				workspaceID, token, agentSlugByUUID,
 			)
 			if wtErr != nil {
 				writeError(w, writeThroughStatus(wtErr), wtErr.Error())
@@ -1951,24 +1953,27 @@ func (h *Handler) cleanupAndDeleteIssueRow(ctx context.Context, issue db.Issue) 
 // for a single issue: DELETE /projects/:id/issues/:iid on GitLab, then
 // cleanupAndDeleteIssueRow for the local state. Used by both DeleteIssue
 // (direct handler) and BatchDeleteIssues (loops over this). Callers
-// pre-resolve wsConn/token once per request to avoid redundant work.
+// pre-resolve token once per request to avoid redundant work; the
+// workspace_gitlab_connection row they fetched is not needed here
+// because the GitLab identifiers already live on the issue row.
+//
+// workspaceID is threaded through purely for slog logging context.
 //
 // On error returns a *writeThroughError with a status hint that the direct
 // handler maps to an HTTP status. The batch handler ignores the status
-// hint and classifies the error via classifyBatchError, which keys off
-// the embedded error message (the GitLab client preserves "(403)" /
-// "(404)" / "(429)" etc. in the error string).
+// hint and classifies the error via classifyBatchError, which uses
+// errors.Is/As against GitLab sentinels and APIError.StatusCode —
+// classification is invariant under writeThroughError's %w wrapping.
+//
+// Note: gitlab.Client.DeleteIssue swallows 404 (already-gone issues are
+// considered successfully deleted), so a missing GitLab issue will not
+// surface here — we'll proceed to clean up the cache row.
 func (h *Handler) deleteSingleIssueWriteThrough(
 	ctx context.Context,
 	issue db.Issue,
-	actorType, actorID, workspaceID string,
-	wsConn db.WorkspaceGitlabConnection,
+	workspaceID string,
 	token string,
 ) error {
-	_ = wsConn // kept in signature so callers document that they've resolved it
-	_ = actorID
-	_ = actorType
-
 	// Defensive: a cache row on a GitLab-connected workspace that lacks
 	// GitLab identifiers is a bug upstream of this handler. Refuse the
 	// write-through rather than silently fall through.
@@ -2017,7 +2022,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// GitLab error we return 502 and never fall back to legacy (that would
 	// leave GitLab and the cache diverged).
 	if h.GitlabEnabled && h.GitlabResolver != nil {
-		wsConn, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
 		if wsErr == nil {
 			actorType, actorID := h.resolveActor(r, userID, workspaceID)
 			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
@@ -2027,7 +2032,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			if err := h.deleteSingleIssueWriteThrough(r.Context(), issue, actorType, actorID, workspaceID, wsConn, token); err != nil {
+			if err := h.deleteSingleIssueWriteThrough(r.Context(), issue, workspaceID, token); err != nil {
 				writeError(w, writeThroughStatus(err), err.Error())
 				return
 			}
@@ -2091,7 +2096,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// mixed success/failure, 200 when all-success or all-failure. Non-
 	// connected workspaces fall through to the legacy direct-DB batch path.
 	if h.GitlabEnabled && h.GitlabResolver != nil {
-		wsConn, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
 		if wsErr == nil {
 			actorType, actorID := h.resolveActor(r, userID, workspaceID)
 			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
@@ -2137,7 +2142,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 				resp, cacheRow, perr := h.updateSingleIssueWriteThrough(
 					r.Context(), prevIssue, req.Updates, nil,
-					actorType, actorID, workspaceID, wsConn, token, agentSlugByUUID,
+					workspaceID, token, agentSlugByUUID,
 				)
 				if perr != nil {
 					code, msg := classifyBatchError(perr)
@@ -2169,8 +2174,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					h.TaskService.CancelTasksForIssue(r.Context(), cacheRow.ID)
 				}
 
-				// Simple per-item WS event — callers that need the rich
-				// prev_*/*_changed payload should use the single-issue PATCH.
+				// Emit a simpler {"issue": resp} payload per-item on the batch
+				// path — intentionally omitting the prev_*/*_changed flags the
+				// single-issue PATCH emits. Rationale: subscribers that need
+				// fine-grained diff metadata (for activity-log authoring,
+				// inbox notifications, etc.) should drive off single-issue
+				// PATCH events; the batch path exists for bulk mutations where
+				// "some set of issues changed" is the useful signal and
+				// computing N rich payloads would balloon socket traffic.
+				// Single-issue PATCH remains available for callers that need
+				// the richer shape.
 				h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{"issue": resp})
 
 				result.Succeeded = append(result.Succeeded, BatchSucceeded{ID: issueID, Issue: resp})
@@ -2186,6 +2199,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				append(logger.RequestAttrs(r),
 					"succeeded", len(result.Succeeded),
 					"failed", len(result.Failed))...)
+			// Response shape: BatchWriteResult = {succeeded: [...], failed: [...]}.
+			// This diverges from the legacy non-connected path below which
+			// returns {"updated": n} (counter only). The divergence is
+			// intentional — per-item continue-on-error semantics need the
+			// per-item detail — but NOT yet normalized across both paths.
+			// Frontends must key off the presence of "succeeded" vs "updated".
+			// Normalizing the legacy path to BatchWriteResult is a separate
+			// design decision (it would change the shape non-connected
+			// workspaces see today) and is out of scope for Phase 3b.
 			writeJSON(w, status, result)
 			return
 		}
@@ -2372,6 +2394,11 @@ func (h *Handler) legacyBatchUpdateIssues(
 	}
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
+	// Response shape: {"updated": n}. Diverges from the connected write-through
+	// path above which returns BatchWriteResult {succeeded, failed}. This
+	// legacy shape is preserved verbatim (pre-Phase-3b behaviour) and is NOT
+	// yet normalized across the two paths — normalization would change the
+	// contract non-connected workspaces see today and is out of scope here.
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
 
@@ -2404,7 +2431,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	// mixed success/failure, 200 when all-success or all-failure. Non-
 	// connected workspaces fall through to the legacy direct-DB batch path.
 	if h.GitlabEnabled && h.GitlabResolver != nil {
-		wsConn, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
+		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), parseUUID(workspaceID))
 		if wsErr == nil {
 			actorType, actorID := h.resolveActor(r, userID, workspaceID)
 			token, _, tokErr := h.GitlabResolver.ResolveTokenForWrite(r.Context(), workspaceID, actorType, actorID)
@@ -2430,7 +2457,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 
-				if perr := h.deleteSingleIssueWriteThrough(r.Context(), issue, actorType, actorID, workspaceID, wsConn, token); perr != nil {
+				if perr := h.deleteSingleIssueWriteThrough(r.Context(), issue, workspaceID, token); perr != nil {
 					code, msg := classifyBatchError(perr)
 					result.Failed = append(result.Failed, BatchFailed{ID: issueID, ErrorCode: code, Message: msg})
 					continue
@@ -2450,6 +2477,11 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 				append(logger.RequestAttrs(r),
 					"succeeded", len(result.Succeeded),
 					"failed", len(result.Failed))...)
+			// Response shape: BatchWriteResult = {succeeded: [...], failed: [...]}
+			// (with Succeeded.Issue == nil for batch-delete). Diverges from the
+			// legacy non-connected path below which returns {"deleted": n}.
+			// Divergence is intentional (per-item continue-on-error semantics)
+			// and NOT yet normalized — mirrors the batch-update split above.
 			writeJSON(w, status, result)
 			return
 		}
@@ -2499,5 +2531,9 @@ func (h *Handler) legacyBatchDeleteIssues(
 	}
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
+	// Response shape: {"deleted": n}. Diverges from the connected write-through
+	// path above which returns BatchWriteResult {succeeded, failed}. Preserved
+	// verbatim (pre-Phase-3b behaviour) and NOT yet normalized across the two
+	// paths — same rationale as batch-update.
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
 }
