@@ -152,6 +152,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, and hyphens")
 		return
 	}
+	if isReservedSlug(req.Slug) {
+		writeError(w, http.StatusBadRequest, "slug is reserved")
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {

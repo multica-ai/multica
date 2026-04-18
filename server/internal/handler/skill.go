@@ -123,7 +123,7 @@ func validateFilePath(p string) bool {
 }
 
 func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return db.Skill{}, false
@@ -143,7 +143,7 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 // --- Skill CRUD ---
 
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	skills, err := h.Queries.ListSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
@@ -184,7 +184,7 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	creatorID, ok := requireUserID(w, r)
 	if !ok {
@@ -381,7 +381,7 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		SkillResponse: skillToResponse(skill),
 		Files:         fileResps,
 	}
-	wsID := resolveWorkspaceID(r)
+	wsID := h.resolveWorkspaceID(r)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
 	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
 	writeJSON(w, http.StatusOK, resp)
@@ -812,7 +812,7 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 // --- Import handler ---
 
 func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	creatorID, ok := requireUserID(w, r)
 	if !ok {

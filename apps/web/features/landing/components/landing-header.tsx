@@ -54,7 +54,7 @@ export function LandingHeader({
             {t.header.github}
           </Link>
           <Link
-            href={user ? "/issues" : "/login"}
+            href={user ? "/" : "/login"}
             className={headerButtonClassName("solid", variant)}
           >
             {user ? t.header.dashboard : t.header.login}

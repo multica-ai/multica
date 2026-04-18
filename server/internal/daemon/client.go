@@ -140,12 +140,6 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 	return resp.Status, nil
 }
 
-func (c *Client) ReportUsage(ctx context.Context, runtimeID string, entries []map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/usage", runtimeID), map[string]any{
-		"entries": entries,
-	}, nil)
-}
-
 // HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
 type HeartbeatResponse struct {
 	Status        string         `json:"status"`

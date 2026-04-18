@@ -15,8 +15,9 @@ export const zh: LandingDict = {
     headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
     subheading:
       "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 Agent \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + Agent \u56e2\u961f\u3002",
-    cta: "\u514d\u8d39\u5f00\u59cb",
-    worksWith: "\u652f\u6301",
+    cta: "免费开始",
+    downloadDesktop: "下载桌面端",
+    worksWith: "支持",
     imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c Agent \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
   },
 
@@ -225,7 +226,8 @@ export const zh: LandingDict = {
         links: [
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
-          { label: "\u66f4\u65b0\u65e5\u5fd7", href: "/changelog" },
+          { label: "更新日志", href: "/changelog" },
+          { label: "桌面端", href: "https://github.com/multica-ai/multica/releases/latest" },
         ],
       },
       resources: {
@@ -280,6 +282,52 @@ export const zh: LandingDict = {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.2.5",
+        date: "2026-04-17",
+        title: "CLI Autopilot、Cmd+K 与 Daemon 身份",
+        changes: [],
+        features: [
+          "CLI `autopilot` 命令，管理定时和触发式自动化",
+          "CLI `issue subscriber` 订阅管理命令",
+          "Cmd+K 命令面板扩展——主题切换、快速创建 Issue/项目、复制链接、切换工作区",
+          "Issue 列表卡片可选显示项目和子 Issue 进度",
+          "Daemon 持久化 UUID 身份——CLI 和桌面应用共用同一个 daemon，跨重启和机器迁移保持一致",
+          "唯一所有者退出工作区的前置检查",
+          "评论折叠状态跨会话持久化",
+        ],
+        fixes: [
+          "Agent 现在在任意 Issue 状态下都会响应评论触发",
+          "修复 Codex 沙箱在 macOS 上的网络访问配置",
+          "编辑器气泡菜单改用 @floating-ui/dom 重写，滚动时正确隐藏",
+          "Autopilot 创建者自动订阅其生成的 Issue",
+          "Autopilot run-only 任务正确解析工作区 ID",
+          "桌面应用 `shell.openExternal` 限制仅允许 http/https 协议（安全）",
+          "重名 Agent 创建返回 409 而非静默失败",
+          "桌面应用新建标签页继承当前工作区",
+        ],
+      },
+      {
+        version: "0.2.1",
+        date: "2026-04-16",
+        title: "新增 Agent 运行时",
+        changes: [],
+        features: [
+          "支持 GitHub Copilot CLI 运行时",
+          "支持 Cursor Agent CLI 运行时",
+          "支持 Pi Agent 运行时",
+          "工作区 URL 改造——slug 优先路由（`/{slug}/issues`），旧链接自动重定向",
+        ],
+        fixes: [
+          "Codex 同一 Issue 下跨任务恢复会话线程",
+          "Codex 回合错误正确抛出，不再报告空输出",
+          "工作区用量按任务完成时间正确分桶",
+          "Autopilot 运行历史行整行可点击",
+          "Daemon 和 GC 端点加强工作区隔离校验（安全）",
+          "邀请邮件中的工作区和邀请人名称进行 HTML 转义",
+          "桌面应用开发版和生产版现在可以同时运行",
+        ],
+      },
       {
         version: "0.2.0",
         date: "2026-04-15",

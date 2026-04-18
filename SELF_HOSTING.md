@@ -85,6 +85,9 @@ You also need at least one AI agent CLI installed:
 - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
 - [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
 - [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
+- Gemini (`gemini` on PATH)
+- [Pi](https://pi.dev/) (`pi` on PATH)
+- [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
 
 ### b) One-command setup
 

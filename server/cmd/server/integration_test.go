@@ -347,7 +347,7 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 	}
 	readJSON(t, resp, &loginResp)
 
-	// New users should have no workspaces (onboarding creates one)
+	// New users should have no workspaces (/workspaces/new creates one)
 	req, _ := http.NewRequest("GET", testServer.URL+"/api/workspaces", nil)
 	req.Header.Set("Authorization", "Bearer "+loginResp.Token)
 	workspacesResp, err := http.DefaultClient.Do(req)

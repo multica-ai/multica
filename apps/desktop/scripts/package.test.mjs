@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeGitVersion } from "./package.mjs";
+import { normalizeGitVersion, stripLeadingSeparator } from "./package.mjs";
 
 describe("normalizeGitVersion", () => {
   it("returns null for empty / nullish input", () => {
@@ -35,5 +35,27 @@ describe("normalizeGitVersion", () => {
     // when there are no tags in the history at all.
     expect(normalizeGitVersion("f1415e96")).toBe("0.0.0-f1415e96");
     expect(normalizeGitVersion("abc1234")).toBe("0.0.0-abc1234");
+  });
+});
+
+describe("stripLeadingSeparator", () => {
+  it("removes the leading -- inserted by npm/pnpm", () => {
+    expect(stripLeadingSeparator(["--", "--mac", "--arm64", "--publish", "always"])).toEqual([
+      "--mac", "--arm64", "--publish", "always",
+    ]);
+  });
+
+  it("leaves args untouched when there is no leading --", () => {
+    expect(stripLeadingSeparator(["--mac", "--arm64"])).toEqual(["--mac", "--arm64"]);
+  });
+
+  it("does not strip a -- that appears mid-argv", () => {
+    expect(stripLeadingSeparator(["--mac", "--", "--arm64"])).toEqual([
+      "--mac", "--", "--arm64",
+    ]);
+  });
+
+  it("handles an empty array", () => {
+    expect(stripLeadingSeparator([])).toEqual([]);
   });
 });

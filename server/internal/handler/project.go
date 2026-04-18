@@ -77,7 +77,7 @@ type UpdateProjectRequest struct {
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	var statusFilter pgtype.Text
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
@@ -124,7 +124,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
 	})
@@ -147,7 +147,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -189,7 +189,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	prevProject, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
 	})
@@ -270,7 +270,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
 	}); err != nil {
@@ -427,7 +427,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	q := r.URL.Query().Get("q")
 	if q == "" {

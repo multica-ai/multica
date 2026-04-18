@@ -444,7 +444,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -556,7 +556,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID := parseUUID(workspaceID)
 
 	// Parse optional filter params
@@ -728,7 +728,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
-	wsID := resolveWorkspaceID(r)
+	wsID := h.resolveWorkspaceID(r)
 	wsUUID := parseUUID(wsID)
 
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
@@ -780,7 +780,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	// Get creator from context (set by auth middleware)
 	creatorID, ok := requireUserID(w, r)
@@ -1185,13 +1185,10 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 }
 
 // shouldEnqueueOnComment returns true if a member comment on this issue should
-// trigger the assigned agent. Fires for any non-terminal status — comments are
-// conversational and can happen at any stage of active work.
+// trigger the assigned agent. Fires for any status — comments are
+// conversational and can happen at any stage, including after completion
+// (e.g. follow-up questions on a done issue).
 func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
-	// Don't trigger on terminal statuses (done, cancelled).
-	if issue.Status == "done" || issue.Status == "cancelled" {
-		return false
-	}
 	if !h.isAgentAssigneeReady(ctx, issue) {
 		return false
 	}
@@ -1291,7 +1288,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(raw, &rawUpdates)
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -1473,7 +1470,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{

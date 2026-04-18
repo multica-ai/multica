@@ -28,12 +28,13 @@ const (
 type Config struct {
 	ServerBaseURL      string
 	DaemonID           string
+	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
 	DeviceName         string
 	RuntimeName        string
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini
+	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini, pi
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -120,8 +121,29 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_GEMINI_MODEL")),
 		}
 	}
+	piPath := envOrDefault("MULTICA_PI_PATH", "pi")
+	if _, err := exec.LookPath(piPath); err == nil {
+		agents["pi"] = AgentEntry{
+			Path:  piPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_PI_MODEL")),
+		}
+	}
+	cursorPath := envOrDefault("MULTICA_CURSOR_PATH", "cursor-agent")
+	if _, err := exec.LookPath(cursorPath); err == nil {
+		agents["cursor"] = AgentEntry{
+			Path:  cursorPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_CURSOR_MODEL")),
+		}
+	}
+	copilotPath := envOrDefault("MULTICA_COPILOT_PATH", "copilot")
+	if _, err := exec.LookPath(copilotPath); err == nil {
+		agents["copilot"] = AgentEntry{
+			Path:  copilotPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_COPILOT_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, openclaw, hermes, or gemini and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, or cursor-agent and ensure it is on PATH")
 	}
 
 	// Host info
@@ -166,15 +188,40 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Profile
 	profile := overrides.Profile
 
-	// String overrides
-	daemonID := envOrDefault("MULTICA_DAEMON_ID", host)
+	// daemon_id resolution: override > env > persistent UUID on disk.
+	// The persistent UUID is written once to `<profile-dir>/daemon.id` and
+	// then reused forever so hostname drift (.local suffix, system rename,
+	// mDNS state, profile switch) no longer mints a new runtime identity.
+	// Callers may still pin a specific id via MULTICA_DAEMON_ID or the
+	// override field (e.g. for tests or embedded environments).
+	daemonID := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_ID"))
 	if overrides.DaemonID != "" {
 		daemonID = overrides.DaemonID
 	}
-	// NOTE: daemon_id is intentionally stable (hostname or explicit override).
-	// The unique constraint (workspace_id, daemon_id, provider) already prevents
-	// collisions within the same workspace. Appending the profile name caused
-	// duplicate runtimes when users switched profiles.
+	if daemonID == "" {
+		persisted, err := EnsureDaemonID(profile)
+		if err != nil {
+			return Config{}, fmt.Errorf("ensure daemon id: %w", err)
+		}
+		daemonID = persisted
+	}
+	// Historical daemon_ids derived from the current hostname/profile. The
+	// server uses these at register time to merge any pre-UUID runtime rows
+	// for this machine into the new UUID-keyed row and delete the stale ones.
+	legacyDaemonIDs := LegacyDaemonIDs(host, profile)
+	// Pre-change (#1220) daemon identity was stored per profile, which means
+	// the same machine could end up with multiple leftover daemon.id files
+	// — e.g. ~/.multica/daemon.id (default) plus ~/.multica/profiles/<x>/
+	// daemon.id. Surface those UUIDs so the server can merge their runtime
+	// rows into the canonical machine UUID. Fatal-free: a broken profiles
+	// dir shouldn't block startup.
+	if uuids, err := LegacyDaemonUUIDs(); err == nil {
+		legacyDaemonIDs = append(legacyDaemonIDs, uuids...)
+	}
+	// Strip anything that collides with the resolved daemon_id (e.g. when
+	// the user explicitly pins MULTICA_DAEMON_ID=<hostname>, or when the
+	// canonical id was itself promoted from a pre-change profile file).
+	legacyDaemonIDs = filterLegacyIDs(legacyDaemonIDs, daemonID)
 
 	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", host)
 	if overrides.DeviceName != "" {
@@ -237,6 +284,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	return Config{
 		ServerBaseURL:      serverBaseURL,
 		DaemonID:           daemonID,
+		LegacyDaemonIDs:    legacyDaemonIDs,
 		DeviceName:         deviceName,
 		RuntimeName:        runtimeName,
 		Profile:            profile,

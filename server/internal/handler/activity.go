@@ -130,7 +130,7 @@ func (h *Handler) GetAssigneeFrequency(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	// Aggregate frequency from both data sources.
 	freq := map[string]int64{} // key: "type:id"

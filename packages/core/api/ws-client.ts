@@ -7,7 +7,7 @@ export class WSClient {
   private ws: WebSocket | null = null;
   private baseUrl: string;
   private token: string | null = null;
-  private workspaceId: string | null = null;
+  private workspaceSlug: string | null = null;
   private cookieAuth = false;
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -22,9 +22,9 @@ export class WSClient {
     this.cookieAuth = options?.cookieAuth ?? false;
   }
 
-  setAuth(token: string | null, workspaceId: string) {
+  setAuth(token: string | null, workspaceSlug: string) {
     this.token = token;
-    this.workspaceId = workspaceId;
+    this.workspaceSlug = workspaceSlug;
   }
 
   connect() {
@@ -33,8 +33,8 @@ export class WSClient {
     // proxies, CDNs, and browser history.  In cookie mode the HttpOnly cookie
     // is sent automatically with the upgrade request.  In token mode the token
     // is delivered as the first WebSocket message after the connection opens.
-    if (this.workspaceId)
-      url.searchParams.set("workspace_id", this.workspaceId);
+    if (this.workspaceSlug)
+      url.searchParams.set("workspace_slug", this.workspaceSlug);
 
     this.ws = new WebSocket(url.toString());
 

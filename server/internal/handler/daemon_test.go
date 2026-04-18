@@ -201,6 +201,346 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 }
 
+func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// Create an issue in the test workspace. The daemon GC endpoint returns
+	// only status + updated_at, so a "done" issue exercises the typical path.
+	var issueID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'gc-check-auth-test-issue', 'done', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID)
+	if err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+
+	// Cross-workspace daemon token must be rejected with 404 — same status
+	// code as "issue not found" so there is no UUID enumeration oracle.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+issueID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "issueId", issueID)
+
+	testHandler.GetIssueGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GetIssueGCCheck with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace daemon token succeeds and returns status + updated_at.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/issues/"+issueID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "issueId", issueID)
+
+	testHandler.GetIssueGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueGCCheck with correct workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Status    string `json:"status"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "done" {
+		t.Fatalf("expected status %q, got %q", "done", resp.Status)
+	}
+	if resp.UpdatedAt == "" {
+		t.Fatal("expected updated_at to be set")
+	}
+}
+
+// withURLParams merges the given chi URL parameters into the request context.
+// Unlike calling withURLParam twice (which replaces the whole chi.RouteContext
+// and loses earlier params), this preserves previously-added params.
+func withURLParams(req *http.Request, kv ...string) *http.Request {
+	rctx := chi.NewRouteContext()
+	if existing, ok := req.Context().Value(chi.RouteCtxKey).(*chi.Context); ok && existing != nil {
+		for i, key := range existing.URLParams.Keys {
+			rctx.URLParams.Add(key, existing.URLParams.Values[i])
+		}
+	}
+	for i := 0; i+1 < len(kv); i += 2 {
+		rctx.URLParams.Add(kv[i], kv[i+1])
+	}
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+// setupForeignWorkspaceFixture creates an isolated workspace (not reachable
+// from testUserID) with its own agent, runtime, issue, and queued task.
+// Returns (issueID, taskID). All rows are cleaned up when the test ends.
+func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+
+	var foreignWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "Foreign Workspace", "foreign-idor-tests", "Cross-tenant IDOR test workspace", "FOR").Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("setup: create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		RETURNING id
+	`, foreignWorkspaceID, "Foreign Runtime", "foreign_runtime", "Foreign runtime").Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create foreign runtime: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1)
+		RETURNING id
+	`, foreignWorkspaceID, "Foreign Agent", runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create foreign agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'foreign-workspace-issue', 'todo', 'medium', $2, 'agent')
+		RETURNING id
+	`, foreignWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create foreign issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'queued', $3)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create foreign task: %v", err)
+	}
+
+	return issueID, taskID
+}
+
+// TestGetActiveTaskForIssue_CrossWorkspace_Returns404 verifies that a member of
+// workspace A cannot discover tasks for an issue in workspace B by passing
+// B's issue UUID in the URL while keeping A in X-Workspace-ID.
+func TestGetActiveTaskForIssue_CrossWorkspace_Returns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/active-task", nil)
+	req = withURLParam(req, "id", foreignIssueID)
+
+	testHandler.GetActiveTaskForIssue(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GetActiveTaskForIssue with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCancelTask_CrossWorkspace_Returns404 verifies that a member of workspace
+// A cannot cancel a task that lives in workspace B. Critically, the task must
+// remain in its original status — no side effect before the access check.
+func TestCancelTask_CrossWorkspace_Returns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	foreignIssueID, foreignTaskID := setupForeignWorkspaceFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+foreignIssueID+"/tasks/"+foreignTaskID+"/cancel", nil)
+	req = withURLParams(req, "id", foreignIssueID, "taskId", foreignTaskID)
+
+	testHandler.CancelTask(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CancelTask with cross-workspace issueId/taskId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The foreign task must not have been cancelled.
+	var status string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM agent_task_queue WHERE id = $1`, foreignTaskID,
+	).Scan(&status); err != nil {
+		t.Fatalf("read foreign task status: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("foreign task status was mutated: expected 'queued', got %q", status)
+	}
+}
+
+// TestCancelTask_TaskBelongsToDifferentIssue_Returns404 verifies that a task
+// UUID belonging to a *different* issue in the *same* accessible workspace
+// cannot be cancelled by routing it through another issue's URL. This guards
+// against the weaker fix that only validates the issue→workspace binding.
+func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Issue X — the task's real parent.
+	var issueXID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'cancel-crossissue-x', 'todo', 'medium', $2, 'member', 91001, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueXID); err != nil {
+		t.Fatalf("setup: create issue X: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueXID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'queued', $3)
+		RETURNING id
+	`, agentID, issueXID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	// Issue Y — a sibling in the same workspace, used only as the URL cover.
+	var issueYID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'cancel-crossissue-y', 'todo', 'medium', $2, 'member', 91002, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueYID); err != nil {
+		t.Fatalf("setup: create issue Y: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueYID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueYID+"/tasks/"+taskID+"/cancel", nil)
+	req = withURLParams(req, "id", issueYID, "taskId", taskID)
+
+	testHandler.CancelTask(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CancelTask with mismatched issueId/taskId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status); err != nil {
+		t.Fatalf("read task status: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("task status was mutated: expected 'queued', got %q", status)
+	}
+}
+
+// TestCancelTask_SameIssue_Succeeds is the happy-path companion to the two
+// negative tests above — same workspace, correct issue→task pairing → 200.
+func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'cancel-happy-path', 'todo', 'medium', $2, 'member', 91003, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'queued', $3)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
+	req = withURLParams(req, "id", issueID, "taskId", taskID)
+
+	testHandler.CancelTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CancelTask with matching issueId/taskId: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestListTasksByIssue_CrossWorkspace_Returns404 verifies that task history
+// is not readable across workspaces via a bare issue UUID.
+func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/task-runs", nil)
+	req = withURLParam(req, "id", foreignIssueID)
+
+	testHandler.ListTasksByIssue(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ListTasksByIssue with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetIssueUsage_CrossWorkspace_Returns404 verifies that per-issue token
+// usage is not readable across workspaces via a bare issue UUID.
+func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/usage", nil)
+	req = withURLParam(req, "id", foreignIssueID)
+
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GetIssueUsage with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -302,5 +642,498 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 	version3 := getReposVersion()
 	if strings.EqualFold(version2, version3) {
 		t.Fatalf("expected repos_version to change when URL set changes, got %s", version3)
+	}
+}
+
+// TestDaemonRegister_MergesLegacyDaemonIDRuntime simulates the migration path
+// for an existing user whose runtime was previously keyed on a hostname-derived
+// daemon_id (e.g. "MacBook-Pro.local"). After the daemon switches to a stable
+// UUID, the registration payload lists the old id under `legacy_daemon_ids`.
+// The server must:
+//
+//   - reassign every agent pointing at the old runtime row to the new row,
+//   - reassign every task (agent_task_queue.runtime_id) onto the new row,
+//   - delete the stale old row so there's exactly one runtime per machine,
+//   - record the legacy daemon_id on the new row for traceability.
+//
+// This is the acceptance path from MUL-975: hostname drift must no longer
+// orphan agents on stale runtime rows.
+func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const legacyDaemonID = "TestMachine.local"
+	const newDaemonID = "0192a7a0-9ab3-7c3f-9f1c-4a6fe8c4e801"
+
+	// Seed a legacy runtime row keyed on the hostname-derived id.
+	var legacyRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'legacy-runtime', 'local', 'claude', 'offline', 'TestMachine.local', '{}'::jsonb, $3, now() - interval '1 hour')
+		RETURNING id
+	`, testWorkspaceID, legacyDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
+		t.Fatalf("seed legacy runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+	})
+
+	// An agent bound to the legacy runtime.
+	var legacyAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1, 'legacy-agent', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		RETURNING id
+	`, testWorkspaceID, legacyRuntimeID).Scan(&legacyAgentID); err != nil {
+		t.Fatalf("seed legacy agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, legacyAgentID)
+	})
+
+	// An issue + task also bound to the legacy runtime (tasks have ON DELETE
+	// CASCADE, so without reassignment deleting the legacy row would silently
+	// drop historical tasks).
+	var legacyIssueID, legacyTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'legacy-task-owner', 'todo', 'medium', $2, 'member', 97501, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&legacyIssueID); err != nil {
+		t.Fatalf("seed legacy issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, legacyIssueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'completed', $3)
+		RETURNING id
+	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID); err != nil {
+		t.Fatalf("seed legacy task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID) })
+
+	// Register under the new stable UUID, declaring the prior hostname-derived
+	// id as legacy. The handler should merge the legacy row into the new one.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id":      testWorkspaceID,
+		"daemon_id":         newDaemonID,
+		"legacy_daemon_ids": []string{legacyDaemonID},
+		"device_name":       "TestMachine",
+		"runtimes": []map[string]any{
+			{"name": "test-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes := resp["runtimes"].([]any)
+	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	if newRuntimeID == legacyRuntimeID {
+		t.Fatalf("expected a new runtime row, got the legacy id back")
+	}
+
+	// Agent should now point at the new runtime.
+	var agentRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, legacyAgentID).Scan(&agentRuntimeID); err != nil {
+		t.Fatalf("read agent runtime_id: %v", err)
+	}
+	if agentRuntimeID != newRuntimeID {
+		t.Fatalf("agent not reassigned: got runtime_id=%s, want %s", agentRuntimeID, newRuntimeID)
+	}
+
+	// Task should be reassigned (not dropped).
+	var taskRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, legacyTaskID).Scan(&taskRuntimeID); err != nil {
+		t.Fatalf("read task runtime_id: %v", err)
+	}
+	if taskRuntimeID != newRuntimeID {
+		t.Fatalf("task not reassigned: got runtime_id=%s, want %s", taskRuntimeID, newRuntimeID)
+	}
+
+	// Legacy runtime row must be gone — no more "online + offline" duplicates
+	// for the same machine.
+	var legacyCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
+		t.Fatalf("count legacy runtime: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected legacy runtime row to be deleted, still present")
+	}
+
+	// New row should record which legacy id it subsumed, for debug/audit.
+	var legacyTrace *string
+	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
+		t.Fatalf("read legacy_daemon_id: %v", err)
+	}
+	if legacyTrace == nil || *legacyTrace != legacyDaemonID {
+		t.Fatalf("expected legacy_daemon_id=%q, got %v", legacyDaemonID, legacyTrace)
+	}
+}
+
+// TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal covers the
+// direction missed by the initial implementation: the stored runtime row is
+// `host` (no `.local`) but the daemon's current `os.Hostname()` now returns
+// `host.local`. The daemon must emit the bare variant as a legacy candidate
+// and the server must match it.
+func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const legacyDaemonID = "ReverseDotLocalHost"                          // stored without .local
+	const emittedLegacyID = "ReverseDotLocalHost.local"                    // daemon now reports with .local
+	const newDaemonID = "0192a7b0-0011-7ee9-9c21-30a5bcf86aa2"
+
+	var legacyRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'legacy-runtime-reverse', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now())
+		RETURNING id
+	`, testWorkspaceID, legacyDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
+		t.Fatalf("seed legacy runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id":      testWorkspaceID,
+		"daemon_id":         newDaemonID,
+		"legacy_daemon_ids": []string{"ReverseDotLocalHost", emittedLegacyID},
+		"device_name":       "ReverseDotLocalHost",
+		"runtimes": []map[string]any{
+			{"name": "reverse-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	newRuntimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	var legacyCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
+		t.Fatalf("count legacy runtime: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected legacy row to be merged and deleted, still present")
+	}
+}
+
+// TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift verifies that
+// case-only drift in os.Hostname() output (e.g. `Jiayuans-MacBook-Pro.local`
+// vs `jiayuans-macbook-pro.local`) still merges the legacy row. The daemon
+// emits the id in its current casing; the server-side lookup uses LOWER() on
+// both sides so stored and emitted casings can differ without orphaning.
+func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const storedDaemonID = "Jiayuans-MacBook-Pro.local"     // DB has original mixed case
+	const emittedLegacyID = "jiayuans-macbook-pro.local"    // Daemon now reports lowercased
+	const newDaemonID = "0192a7b0-0022-7ee9-9c21-30a5bcf86aa3"
+
+	var legacyRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'legacy-runtime-case', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now())
+		RETURNING id
+	`, testWorkspaceID, storedDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
+		t.Fatalf("seed legacy runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id":      testWorkspaceID,
+		"daemon_id":         newDaemonID,
+		"legacy_daemon_ids": []string{emittedLegacyID},
+		"device_name":       "jiayuans-macbook-pro",
+		"runtimes": []map[string]any{
+			{"name": "case-drift-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	newRuntimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	var legacyCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
+		t.Fatalf("count legacy runtime: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected case-drift legacy row to be merged and deleted, still present")
+	}
+
+	var legacyTrace *string
+	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
+		t.Fatalf("read legacy_daemon_id: %v", err)
+	}
+	if legacyTrace == nil || *legacyTrace != emittedLegacyID {
+		t.Fatalf("expected legacy_daemon_id trace = %q, got %v", emittedLegacyID, legacyTrace)
+	}
+}
+
+// TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes covers the case
+// where the DB already holds *two* legacy runtime rows that differ only in
+// casing (e.g. `Jiayuans-MacBook-Pro.local` AND `jiayuans-macbook-pro.local`
+// coexist under the same workspace+provider because earlier hostname drift
+// already minted a duplicate). A single-row lookup would merge only one of
+// them and leave the other orphaned; the lookup must return every row whose
+// daemon_id case-insensitively matches and the handler must consolidate them
+// all. This is the acceptance-standard path: after registration there must
+// not be two runtime rows for the same machine.
+func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const storedUpperID = "DupHost.local"
+	const storedLowerID = "duphost.local"
+	const newDaemonID = "0192a7b0-0033-7ee9-9c21-30a5bcf86aa4"
+
+	var legacyUpperID, legacyLowerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'legacy-upper', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now() - interval '2 hours')
+		RETURNING id
+	`, testWorkspaceID, storedUpperID, testUserID).Scan(&legacyUpperID); err != nil {
+		t.Fatalf("seed upper-case legacy runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyUpperID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'legacy-lower', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now() - interval '1 hour')
+		RETURNING id
+	`, testWorkspaceID, storedLowerID, testUserID).Scan(&legacyLowerID); err != nil {
+		t.Fatalf("seed lower-case legacy runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyLowerID) })
+
+	// Bind one agent to each legacy row to verify both sides get reassigned.
+	var upperAgentID, lowerAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1, 'dup-agent-upper', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		RETURNING id
+	`, testWorkspaceID, legacyUpperID).Scan(&upperAgentID); err != nil {
+		t.Fatalf("seed upper agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, upperAgentID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1, 'dup-agent-lower', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		RETURNING id
+	`, testWorkspaceID, legacyLowerID).Scan(&lowerAgentID); err != nil {
+		t.Fatalf("seed lower agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, lowerAgentID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id":      testWorkspaceID,
+		"daemon_id":         newDaemonID,
+		"legacy_daemon_ids": []string{storedLowerID}, // a single candidate must resolve both stored casings
+		"device_name":       "DupHost",
+		"runtimes": []map[string]any{
+			{"name": "dup-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	newRuntimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	// Both case-duplicate legacy rows must be gone — not just one.
+	var stillPresent int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_runtime WHERE id = ANY($1)
+	`, []string{legacyUpperID, legacyLowerID}).Scan(&stillPresent); err != nil {
+		t.Fatalf("count legacy runtimes: %v", err)
+	}
+	if stillPresent != 0 {
+		t.Fatalf("expected both case-duplicate legacy rows merged and deleted, %d still present", stillPresent)
+	}
+
+	// Both agents must point at the new runtime.
+	for _, agentID := range []string{upperAgentID, lowerAgentID} {
+		var runtimeID string
+		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+			t.Fatalf("read agent runtime_id: %v", err)
+		}
+		if runtimeID != newRuntimeID {
+			t.Fatalf("agent %s not reassigned: runtime_id=%s, want %s", agentID, runtimeID, newRuntimeID)
+		}
+	}
+}
+
+// TestDaemonRegister_LegacyIDNoMatchIsNoop guards the common case where the
+// daemon sends legacy candidates but no matching row exists (e.g. first
+// registration on a fresh machine). Registration must still succeed, the new
+// row must not have a spurious legacy_daemon_id recorded, and no unrelated
+// rows may be touched.
+func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id":      testWorkspaceID,
+		"daemon_id":         "0192a7a1-5e3c-7be9-9a7d-6e0f1cb3deab",
+		"legacy_daemon_ids": []string{"NeverSeenHost", "NeverSeenHost.local"},
+		"device_name":       "NeverSeenHost",
+		"runtimes": []map[string]any{
+			{"name": "fresh-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	runtimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	var legacy *string
+	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&legacy); err != nil {
+		t.Fatalf("read legacy_daemon_id: %v", err)
+	}
+	if legacy != nil {
+		t.Fatalf("expected legacy_daemon_id to stay NULL when no merge occurred, got %q", *legacy)
+	}
+}
+
+// Regression test for #1224: tasks linked only via AutopilotRunID (run_only
+// autopilots) must resolve to the autopilot's workspace. Before the fix,
+// resolveTaskWorkspaceID fell through and every StartTask call returned 404.
+func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode,
+			created_by_type, created_by_id
+		)
+		VALUES ($1, 'run_only fixture', $2, 'run_only', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("setup: create autopilot: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status)
+		VALUES ($1, 'manual', 'running')
+		RETURNING id
+	`, autopilotID).Scan(&runID); err != nil {
+		t.Fatalf("setup: create autopilot_run: %v", err)
+	}
+
+	// issue_id is explicitly NULL — the condition that used to trigger 404.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
+		)
+		VALUES ($1, $2, NULL, 'dispatched', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create autopilot task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	// Cross-workspace daemon token must still 404.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.StartTask(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("StartTask with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace daemon token must succeed — this is the bug in #1224.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", nil,
+		testWorkspaceID, "legit-daemon")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.StartTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("StartTask for run_only autopilot task: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+		t.Fatalf("post-check: read task status: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("expected task status 'running' after StartTask, got %q", status)
 	}
 }

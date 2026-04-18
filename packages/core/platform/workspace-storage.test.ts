@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createWorkspaceAwareStorage, setCurrentWorkspaceId } from "./workspace-storage";
+import {
+  createWorkspaceAwareStorage,
+  setCurrentWorkspace,
+  registerForWorkspaceRehydration,
+} from "./workspace-storage";
 import type { StorageAdapter } from "../types/storage";
 
 function mockAdapter(): StorageAdapter {
@@ -12,50 +16,104 @@ function mockAdapter(): StorageAdapter {
 }
 
 afterEach(() => {
-  setCurrentWorkspaceId(null);
+  setCurrentWorkspace(null, null);
 });
 
 describe("workspace-aware storage", () => {
   it("uses plain key when no workspace is set", () => {
     const adapter = mockAdapter();
-    setCurrentWorkspaceId(null);
+    setCurrentWorkspace(null, null);
     const storage = createWorkspaceAwareStorage(adapter);
 
     storage.setItem("draft", "data");
     expect(adapter.setItem).toHaveBeenCalledWith("draft", "data");
   });
 
-  it("namespaces key when workspace is set", () => {
+  it("namespaces key with slug when workspace is set", () => {
     const adapter = mockAdapter();
-    setCurrentWorkspaceId("ws_abc");
+    setCurrentWorkspace("acme", "ws_abc");
     const storage = createWorkspaceAwareStorage(adapter);
 
     storage.setItem("draft", "data");
-    expect(adapter.setItem).toHaveBeenCalledWith("draft:ws_abc", "data");
+    expect(adapter.setItem).toHaveBeenCalledWith("draft:acme", "data");
 
     storage.getItem("draft");
-    expect(adapter.getItem).toHaveBeenCalledWith("draft:ws_abc");
+    expect(adapter.getItem).toHaveBeenCalledWith("draft:acme");
   });
 
   it("follows workspace changes dynamically", () => {
     const adapter = mockAdapter();
     const storage = createWorkspaceAwareStorage(adapter);
 
-    setCurrentWorkspaceId("ws_1");
+    setCurrentWorkspace("team-a", "ws_1");
     storage.setItem("draft", "v1");
-    expect(adapter.setItem).toHaveBeenCalledWith("draft:ws_1", "v1");
+    expect(adapter.setItem).toHaveBeenCalledWith("draft:team-a", "v1");
 
-    setCurrentWorkspaceId("ws_2");
+    setCurrentWorkspace("team-b", "ws_2");
     storage.setItem("draft", "v2");
-    expect(adapter.setItem).toHaveBeenCalledWith("draft:ws_2", "v2");
+    expect(adapter.setItem).toHaveBeenCalledWith("draft:team-b", "v2");
   });
 
-  it("removeItem uses current workspace", () => {
+  it("removeItem uses current workspace slug", () => {
     const adapter = mockAdapter();
-    setCurrentWorkspaceId("ws_x");
+    setCurrentWorkspace("dev", "ws_x");
     const storage = createWorkspaceAwareStorage(adapter);
 
     storage.removeItem("draft");
-    expect(adapter.removeItem).toHaveBeenCalledWith("draft:ws_x");
+    expect(adapter.removeItem).toHaveBeenCalledWith("draft:dev");
+  });
+});
+
+describe("setCurrentWorkspace — rehydrate side effect", () => {
+  const flush = () => new Promise((resolve) => queueMicrotask(() => resolve(null)));
+
+  it("runs registered fns once when slug changes", async () => {
+    const fn = vi.fn();
+    registerForWorkspaceRehydration(fn);
+
+    setCurrentWorkspace("team-a", "ws_a");
+    await flush();
+
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a no-op when slug is unchanged — repeat calls with same slug skip the side effect", async () => {
+    const fn = vi.fn();
+    registerForWorkspaceRehydration(fn);
+
+    setCurrentWorkspace("team-a", "ws_a");
+    await flush();
+    setCurrentWorkspace("team-a", "ws_a");
+    setCurrentWorkspace("team-a", "ws_a");
+    setCurrentWorkspace("team-a", "ws_a");
+    await flush();
+
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs again on real workspace switch", async () => {
+    const fn = vi.fn();
+    registerForWorkspaceRehydration(fn);
+
+    setCurrentWorkspace("team-a", "ws_a");
+    await flush();
+    setCurrentWorkspace("team-b", "ws_b");
+    await flush();
+
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs again after logout → re-entry into same workspace", async () => {
+    const fn = vi.fn();
+    registerForWorkspaceRehydration(fn);
+
+    setCurrentWorkspace("team-a", "ws_a");
+    await flush();
+    setCurrentWorkspace(null, null);
+    await flush();
+    setCurrentWorkspace("team-a", "ws_a");
+    await flush();
+
+    expect(fn).toHaveBeenCalledTimes(3);
   });
 });

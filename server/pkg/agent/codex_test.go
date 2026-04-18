@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -349,6 +352,80 @@ func TestCodexRawTurnCompletedAborted(t *testing.T) {
 	}
 }
 
+func TestCodexRawTurnCompletedFailedCapturesError(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var wasAborted bool
+	c.onTurnDone = func(aborted bool) {
+		wasAborted = aborted
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-f","status":"failed","error":{"message":"unexpected status 401 Unauthorized"}}}}`)
+
+	if wasAborted {
+		t.Fatal("failed is distinct from aborted")
+	}
+	if got := c.getTurnError(); got != "unexpected status 401 Unauthorized" {
+		t.Fatalf("expected error captured from turn.error.message, got %q", got)
+	}
+}
+
+func TestCodexRawTurnCompletedFailedWithoutMessageFallsBack(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.onTurnDone = func(aborted bool) {}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-f","status":"failed"}}}`)
+
+	if got := c.getTurnError(); got != "codex turn failed" {
+		t.Fatalf("expected fallback message, got %q", got)
+	}
+}
+
+func TestCodexRawErrorNotificationTerminal(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"boom"},"willRetry":false}}`)
+
+	if got := c.getTurnError(); got != "boom" {
+		t.Fatalf("expected terminal error captured, got %q", got)
+	}
+}
+
+func TestCodexRawErrorNotificationRetryingIgnored(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"reconnecting"},"willRetry":true}}`)
+
+	if got := c.getTurnError(); got != "" {
+		t.Fatalf("retrying error should not be captured, got %q", got)
+	}
+}
+
+func TestCodexSetTurnErrorFirstWins(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+
+	c.setTurnError("first")
+	c.setTurnError("second")
+
+	if got := c.getTurnError(); got != "first" {
+		t.Fatalf("expected first-wins semantics, got %q", got)
+	}
+}
+
 func TestCodexRawItemCommandExecution(t *testing.T) {
 	t.Parallel()
 
@@ -421,6 +498,63 @@ func TestCodexRawThreadStatusIdle(t *testing.T) {
 
 	if !turnDone {
 		t.Fatal("expected onTurnDone for idle status")
+	}
+}
+
+// Regression for #1181: subagent threads (e.g. memory consolidation)
+// are multiplexed on the same stdio pipe. Their turn/completed must not
+// terminate the main turn.
+func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub","status":"completed"}}}`)
+
+	if doneCount != 0 {
+		t.Fatalf("subagent turn/completed must not trigger onTurnDone, got %d calls", doneCount)
+	}
+
+	// Sanity check: a matching threadId still drives completion.
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+	if doneCount != 1 {
+		t.Fatalf("matching threadId should trigger onTurnDone exactly once, got %d", doneCount)
+	}
+}
+
+// Regression for #1181: subagent agentMessage/final_answer must not
+// trigger turn completion or leak text into the main output stream.
+func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.turnStarted = true
+
+	var messages []Message
+	var doneCount int
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_subagent","item":{"type":"agentMessage","id":"sub-1","text":"subagent leakage","phase":"final_answer"}}}`)
+
+	if len(messages) != 0 {
+		t.Fatalf("subagent text must not leak into output builder, got %+v", messages)
+	}
+	if doneCount != 0 {
+		t.Fatalf("subagent final_answer must not trigger onTurnDone, got %d calls", doneCount)
 	}
 }
 
@@ -515,6 +649,240 @@ func TestNilIfEmpty(t *testing.T) {
 	}
 	if nilIfEmpty("hello") != "hello" {
 		t.Fatal("expected 'hello'")
+	}
+}
+
+// runRPCScript feeds JSON-RPC responses back to the codexClient by matching
+// each method call written to stdin against the script, and emitting the
+// scripted response via c.handleLine. It returns once all scripted calls have
+// been served.
+type rpcResponse struct {
+	method   string          // expected request method
+	result   json.RawMessage // success result body (mutually exclusive with errMsg)
+	errMsg   string          // non-empty → respond with JSON-RPC error object
+	errCode  int             // JSON-RPC error code when errMsg is set
+	assertFn func(t *testing.T, params map[string]any)
+}
+
+// drainRPCScript spins up a goroutine that watches fs.Lines() for new outbound
+// requests and, for each one, injects the scripted response via c.handleLine.
+// It returns a stop function that blocks until the script is exhausted or the
+// test terminates.
+func drainRPCScript(t *testing.T, c *codexClient, fs *fakeStdin, script []rpcResponse) func() {
+	t.Helper()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		seen := 0
+		deadline := time.Now().Add(2 * time.Second)
+		for seen < len(script) {
+			lines := fs.Lines()
+			for seen < len(lines) && seen < len(script) {
+				var req struct {
+					ID     int             `json:"id"`
+					Method string          `json:"method"`
+					Params json.RawMessage `json:"params"`
+				}
+				if err := json.Unmarshal([]byte(lines[seen]), &req); err != nil {
+					t.Errorf("drainRPCScript: unmarshal request %d: %v", seen, err)
+					return
+				}
+				expected := script[seen]
+				if req.Method != expected.method {
+					t.Errorf("drainRPCScript: call %d method = %q, want %q", seen, req.Method, expected.method)
+					return
+				}
+				if expected.assertFn != nil {
+					var params map[string]any
+					_ = json.Unmarshal(req.Params, &params)
+					expected.assertFn(t, params)
+				}
+				var resp string
+				if expected.errMsg != "" {
+					resp = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"error":{"code":%d,"message":%q}}`, req.ID, expected.errCode, expected.errMsg)
+				} else {
+					resp = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":%s}`, req.ID, string(expected.result))
+				}
+				c.handleLine(resp)
+				seen++
+			}
+			if seen < len(script) {
+				if time.Now().After(deadline) {
+					t.Errorf("drainRPCScript: timed out after %d/%d responses", seen, len(script))
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}()
+
+	return func() {
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("drainRPCScript did not finish")
+		}
+	}
+}
+
+func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["cwd"] != "/work" {
+					t.Errorf("cwd = %v, want /work", params["cwd"])
+				}
+				if params["persistExtendedHistory"] != true {
+					t.Error("expected persistExtendedHistory=true on thread/start")
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(context.Background(), ExecOptions{Cwd: "/work"}, slog.Default())
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_fresh" {
+		t.Errorf("threadID = %q, want thr_fresh", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
+func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["threadId"] != "thr_prior" {
+					t.Errorf("threadId = %v, want thr_prior", params["threadId"])
+				}
+				if params["cwd"] != "/work" {
+					t.Errorf("cwd = %v, want /work", params["cwd"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prior" {
+		t.Errorf("threadID = %q, want thr_prior", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true when thread/resume succeeded")
+	}
+}
+
+func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:  "thread/resume",
+			errMsg:  "unknown thread",
+			errCode: -32602,
+		},
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_new"}}`),
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_new" {
+		t.Errorf("threadID = %q, want thr_new (fresh thread after fallback)", threadID)
+	}
+	if resumed {
+		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
+func TestCodexStartOrResumeThreadFallsBackWhenResumeReturnsNoID(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{}}`),
+		},
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_new"}}`),
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{ResumeSessionID: "thr_prior"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_new" {
+		t.Errorf("threadID = %q, want thr_new", threadID)
+	}
+	if resumed {
+		t.Error("expected resumed=false when resume yielded no thread ID")
+	}
+}
+
+func TestCodexStartOrResumeThreadStartFailureSurfaces(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:  "thread/start",
+			errMsg:  "boom",
+			errCode: -32000,
+		},
+	})
+	defer wait()
+
+	_, _, err := c.startOrResumeThread(context.Background(), ExecOptions{}, slog.Default())
+	if err == nil {
+		t.Fatal("expected error when thread/start fails")
+	}
+	if !strings.Contains(err.Error(), "thread/start") {
+		t.Errorf("error should mention thread/start, got %v", err)
 	}
 }
 

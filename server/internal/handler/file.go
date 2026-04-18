@@ -80,7 +80,7 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 	if len(commentIDs) == 0 {
 		return nil
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	attachments, err := h.Queries.ListAttachmentsByCommentIDs(r.Context(), db.ListAttachmentsByCommentIDsParams{
 		Column1:     commentIDs,
 		WorkspaceID: parseUUID(workspaceID),
@@ -112,7 +112,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 
@@ -279,7 +279,7 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	attachmentID := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
@@ -303,7 +303,7 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	attachmentID := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return

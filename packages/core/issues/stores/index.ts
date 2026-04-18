@@ -7,6 +7,7 @@ export {
   useViewStoreApi,
 } from "./view-store-context";
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
+export { useCommentCollapseStore } from "./comment-collapse-store";
 export {
   myIssuesViewStore,
   type MyIssuesViewState,
@@ -17,8 +18,7 @@ export {
   createIssueViewStore,
   viewStoreSlice,
   viewStorePersistOptions,
-  registerViewStoreForWorkspaceSync,
-  initFilterWorkspaceSync,
+  useClearFiltersOnWorkspaceChange,
   SORT_OPTIONS,
   CARD_PROPERTY_OPTIONS,
   type ViewMode,

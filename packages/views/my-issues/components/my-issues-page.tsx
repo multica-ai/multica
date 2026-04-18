@@ -7,7 +7,7 @@ import { ChevronRight, ListTodo } from "lucide-react";
 import type { IssueStatus } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useQuery } from "@tanstack/react-query";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -18,16 +18,17 @@ import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-st
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
-import { registerViewStoreForWorkspaceSync } from "@multica/core/issues/stores/view-store";
+import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue, useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
+import { PageHeader } from "../../layout/page-header";
 import { MyIssuesHeader } from "./my-issues-header";
 
 export function MyIssuesPage() {
   const user = useAuthStore((s) => s.user);
-  const workspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
@@ -36,9 +37,8 @@ export function MyIssuesPage() {
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
 
-  useEffect(() => {
-    registerViewStoreForWorkspaceSync(myIssuesViewStore);
-  }, []);
+  // Clear filter state when switching between workspaces (URL-driven).
+  useClearFiltersOnWorkspaceChange(myIssuesViewStore, wsId);
 
   useEffect(() => {
     useIssueSelectionStore.getState().clear();
@@ -129,19 +129,35 @@ export function MyIssuesPage() {
           <Skeleton className="h-5 w-5 rounded" />
           <Skeleton className="h-4 w-32" />
         </div>
-        <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
-          <Skeleton className="h-5 w-24" />
-          <Skeleton className="h-8 w-24" />
+        <div className="flex h-12 shrink-0 items-center justify-between px-4">
+          <div className="flex items-center gap-1">
+            <Skeleton className="h-8 w-14 rounded-md" />
+            <Skeleton className="h-8 w-20 rounded-md" />
+            <Skeleton className="h-8 w-16 rounded-md" />
+          </div>
+          <div className="flex items-center gap-1">
+            <Skeleton className="h-8 w-8 rounded-md" />
+            <Skeleton className="h-8 w-8 rounded-md" />
+            <Skeleton className="h-8 w-8 rounded-md" />
+          </div>
         </div>
-        <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-24 w-full rounded-lg" />
-              <Skeleton className="h-24 w-full rounded-lg" />
-            </div>
-          ))}
-        </div>
+        {viewMode === "list" ? (
+          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-24 w-full rounded-lg" />
+                <Skeleton className="h-24 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -149,14 +165,14 @@ export function MyIssuesPage() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* Header 1: Workspace breadcrumb */}
-      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-4">
+      <PageHeader className="gap-1.5">
         <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
         <span className="text-sm text-muted-foreground">
           {workspace?.name ?? "Workspace"}
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="text-sm font-medium">My Issues</span>
-      </div>
+      </PageHeader>
 
       {/* Header: scope tabs (left) + controls (right) */}
       <MyIssuesHeader allIssues={myIssues} />

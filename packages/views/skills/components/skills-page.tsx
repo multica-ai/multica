@@ -34,10 +34,10 @@ import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { api } from "@multica/core/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 
+import { PageHeader } from "../../layout/page-header";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
 
@@ -496,7 +496,7 @@ function SkillDetail({
                   render={
                     <Button
                       variant="ghost"
-                      size="icon-xs"
+                      size="icon-sm"
                       onClick={() => setShowAddFile(true)}
                       className="text-muted-foreground"
                     >
@@ -512,7 +512,7 @@ function SkillDetail({
                     render={
                       <Button
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon-sm"
                         onClick={handleDeleteFile}
                         className="text-muted-foreground hover:text-destructive"
                       >
@@ -613,10 +613,9 @@ function SkillDetail({
 // ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
-  const isLoading = useAuthStore((s) => s.isLoading);
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  const { data: skills = [] } = useQuery(skillListOptions(wsId));
+  const { data: skills = [], isLoading } = useQuery(skillListOptions(wsId));
   const [selectedId, setSelectedId] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -699,7 +698,7 @@ export default function SkillsPage() {
             <Skeleton className="h-8 w-56" />
           </div>
           <div className="flex flex-1 min-h-0">
-            <div className="w-48 border-r p-3 space-y-2">
+            <div className="w-52 border-r p-3 space-y-2">
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-3/4" />
             </div>
@@ -724,14 +723,14 @@ export default function SkillsPage() {
       <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
         {/* Left column — skill list */}
         <div className="overflow-y-auto h-full border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
+          <PageHeader className="justify-between">
             <h1 className="text-sm font-semibold">Skills</h1>
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     variant="ghost"
-                    size="icon-xs"
+                    size="icon-sm"
                     onClick={() => setShowCreate(true)}
                   >
                     <Plus className="h-4 w-4 text-muted-foreground" />
@@ -740,7 +739,7 @@ export default function SkillsPage() {
               />
               <TooltipContent side="bottom">Create skill</TooltipContent>
             </Tooltip>
-          </div>
+          </PageHeader>
           {skills.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Sparkles className="h-8 w-8 text-muted-foreground/40" />

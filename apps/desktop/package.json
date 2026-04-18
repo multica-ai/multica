@@ -5,7 +5,8 @@
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
-    "dev": "pnpm run bundle-cli && electron-vite dev",
+    "brand-dev-electron": "node scripts/brand-dev-electron.mjs",
+    "dev": "pnpm run bundle-cli && pnpm run brand-dev-electron && electron-vite dev",
     "build": "pnpm run bundle-cli && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",

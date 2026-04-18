@@ -19,11 +19,9 @@ import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
-import { OnboardingWizard } from "@multica/views/onboarding";
-import { InvitePage } from "@multica/views/invite";
-import { useNavigation } from "@multica/views/navigation";
 import { Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
+import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 
 /**
  * Sets document.title from the deepest matched route's handle.title.
@@ -55,88 +53,89 @@ function PageShell() {
   );
 }
 
-function OnboardingRoute() {
-  const nav = useNavigation();
-  return <OnboardingWizard onComplete={() => nav.push("/issues")} />;
-}
-
-function InviteRoute() {
-  const matches = useMatches();
-  const match = matches.find((m) => (m.params as { id?: string }).id);
-  const id = (match?.params as { id?: string })?.id ?? "";
-  return <InvitePage invitationId={id} />;
-}
-
-/** Route definitions shared by all tabs (no layout wrapper). */
+/**
+ * Route definitions shared by all tabs.
+ *
+ * Every tab path is workspace-scoped: `/{slug}/{route}/...`. Pre-workspace
+ * flows (create workspace, accept invite) are NOT routes — they render as a
+ * window-level overlay via `WindowOverlay`, dispatched by the navigation
+ * adapter's transition-path interception. The `activeWorkspaceSlug` in the
+ * tab store decides which workspace's tabs are visible in the TabBar;
+ * workspace-less state (zero-workspace user) shows the overlay instead.
+ *
+ * The root index route stays as a harmless safety net. With per-workspace
+ * tabs, nothing should construct a tab at `/` — but if one ever slips
+ * through (malformed persisted state that dodges the migration, direct
+ * router.navigate from unforeseen code), the index falls back to null
+ * rather than 404; App.tsx's bootstrap repoints activeWorkspaceSlug on the
+ * next render pass.
+ */
 export const appRoutes: RouteObject[] = [
   {
     element: <PageShell />,
     children: [
-      { index: true, element: <Navigate to="/issues" replace /> },
-      { path: "issues", element: <IssuesPage />, handle: { title: "Issues" } },
+      { index: true, element: null },
       {
-        path: "issues/:id",
-        element: <IssueDetailPage />,
-        handle: { title: "Issue" },
-      },
-      {
-        path: "projects",
-        element: <ProjectsPage />,
-        handle: { title: "Projects" },
-      },
-      {
-        path: "projects/:id",
-        element: <ProjectDetailPage />,
-        handle: { title: "Project" },
-      },
-      {
-        path: "autopilots",
-        element: <AutopilotsPage />,
-        handle: { title: "Autopilot" },
-      },
-      {
-        path: "autopilots/:id",
-        element: <AutopilotDetailPage />,
-        handle: { title: "Autopilot" },
-      },
-      {
-        path: "my-issues",
-        element: <MyIssuesPage />,
-        handle: { title: "My Issues" },
-      },
-      {
-        path: "runtimes",
-        element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
-        handle: { title: "Runtimes" },
-      },
-      { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
-      { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
-      { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
-      {
-        path: "onboarding",
-        element: <OnboardingRoute />,
-        handle: { title: "Get Started" },
-      },
-      {
-        path: "invite/:id",
-        element: <InviteRoute />,
-        handle: { title: "Accept Invite" },
-      },
-      {
-        path: "settings",
-        element: (
-          <SettingsPage
-            extraAccountTabs={[
-              {
-                value: "daemon",
-                label: "Daemon",
-                icon: Server,
-                content: <DaemonSettingsTab />,
-              },
-            ]}
-          />
-        ),
-        handle: { title: "Settings" },
+        path: ":workspaceSlug",
+        element: <WorkspaceRouteLayout />,
+        children: [
+          { index: true, element: <Navigate to="issues" replace /> },
+          { path: "issues", element: <IssuesPage />, handle: { title: "Issues" } },
+          {
+            path: "issues/:id",
+            element: <IssueDetailPage />,
+            handle: { title: "Issue" },
+          },
+          {
+            path: "projects",
+            element: <ProjectsPage />,
+            handle: { title: "Projects" },
+          },
+          {
+            path: "projects/:id",
+            element: <ProjectDetailPage />,
+            handle: { title: "Project" },
+          },
+          {
+            path: "autopilots",
+            element: <AutopilotsPage />,
+            handle: { title: "Autopilot" },
+          },
+          {
+            path: "autopilots/:id",
+            element: <AutopilotDetailPage />,
+            handle: { title: "Autopilot" },
+          },
+          {
+            path: "my-issues",
+            element: <MyIssuesPage />,
+            handle: { title: "My Issues" },
+          },
+          {
+            path: "runtimes",
+            element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
+            handle: { title: "Runtimes" },
+          },
+          { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
+          { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
+          { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+          {
+            path: "settings",
+            element: (
+              <SettingsPage
+                extraAccountTabs={[
+                  {
+                    value: "daemon",
+                    label: "Daemon",
+                    icon: Server,
+                    content: <DaemonSettingsTab />,
+                  },
+                ]}
+              />
+            ),
+            handle: { title: "Settings" },
+          },
+        ],
       },
     ],
   },

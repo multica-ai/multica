@@ -1,10 +1,15 @@
 "use client";
 
 import { memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 
@@ -29,6 +34,19 @@ export const ListRow = memo(function ListRow({
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
+  const p = useWorkspacePaths();
+  const storeProperties = useViewStore((s) => s.cardProperties);
+  const wsId = useWorkspaceId();
+  const { data: projects = [] } = useQuery({
+    ...projectListOptions(wsId),
+    enabled: storeProperties.project && !!issue.project_id,
+  });
+  const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+
+  const showProject = storeProperties.project && project;
+  const showChildProgress = storeProperties.childProgress && childProgress;
+  const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showDueDate = storeProperties.dueDate && issue.due_date;
 
   return (
     <div
@@ -51,7 +69,7 @@ export const ListRow = memo(function ListRow({
         />
       </div>
       <AppLink
-        href={`/issues/${issue.id}`}
+        href={p.issueDetail(issue.id)}
         className="flex flex-1 items-center gap-2 min-w-0"
       >
         <span className="w-16 shrink-0 text-xs text-muted-foreground">
@@ -59,24 +77,30 @@ export const ListRow = memo(function ListRow({
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="truncate">{issue.title}</span>
-          {childProgress && (
+          {showChildProgress && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-              <ProgressRing done={childProgress.done} total={childProgress.total} size={14} />
+              <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
               <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                {childProgress.done}/{childProgress.total}
+                {childProgress!.done}/{childProgress!.total}
               </span>
             </span>
           )}
         </span>
-        {issue.due_date && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatDate(issue.due_date)}
+        {showProject && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
+            <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
+            <span className="truncate">{project!.title}</span>
           </span>
         )}
-        {issue.assignee_type && issue.assignee_id && (
+        {showDueDate && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {formatDate(issue.due_date!)}
+          </span>
+        )}
+        {showAssignee && (
           <ActorAvatar
-            actorType={issue.assignee_type}
-            actorId={issue.assignee_id}
+            actorType={issue.assignee_type!}
+            actorId={issue.assignee_id!}
             size={20}
           />
         )}

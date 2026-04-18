@@ -77,7 +77,7 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 
 	if len(workspaces) == 0 {
 		var err error
-		workspaces, err = waitForOnboarding(cmd, client)
+		workspaces, err = waitForWorkspaceCreation(cmd, client)
 		if err != nil {
 			return err
 		}
@@ -110,9 +110,9 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	return nil
 }
 
-// waitForOnboarding opens the web onboarding page and polls until the user
-// creates a workspace, returning the new workspace list.
-func waitForOnboarding(cmd *cobra.Command, client *cli.APIClient) ([]struct {
+// waitForWorkspaceCreation opens the web workspace-creation page and polls
+// until the user creates a workspace, returning the new workspace list.
+func waitForWorkspaceCreation(cmd *cobra.Command, client *cli.APIClient) ([]struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }, error) {
@@ -125,13 +125,13 @@ func waitForOnboarding(cmd *cobra.Command, client *cli.APIClient) ([]struct {
 		return nil, nil
 	}
 
-	onboardingURL := appURL + "/onboarding"
+	createWorkspaceURL := appURL + "/workspaces/new"
 
-	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening onboarding in your browser...")
-	if err := openBrowser(onboardingURL); err != nil {
+	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening workspace creation in your browser...")
+	if err := openBrowser(createWorkspaceURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
 	}
-	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n", onboardingURL)
+	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n", createWorkspaceURL)
 	fmt.Fprintln(os.Stderr, "\nWaiting for workspace creation...")
 
 	// Poll until a workspace appears or timeout (5 minutes).

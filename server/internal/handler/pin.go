@@ -56,7 +56,7 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	pins, err := h.Queries.ListPinnedItems(r.Context(), db.ListPinnedItemsParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -102,7 +102,7 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	var req CreatePinRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -172,7 +172,7 @@ func (h *Handler) DeletePin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	itemType := chi.URLParam(r, "itemType")
 	itemID := chi.URLParam(r, "itemId")
 
@@ -199,7 +199,7 @@ func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	var req ReorderPinsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

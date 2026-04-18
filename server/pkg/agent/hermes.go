@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// hermesBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args. `acp` is the protocol
+// subcommand that drives the ACP JSON-RPC transport; overriding it
+// would break the daemon↔Hermes communication contract.
+var hermesBlockedArgs = map[string]blockedArgMode{
+	"acp": blockedStandalone,
+}
+
 // hermesBackend implements Backend by spawning `hermes acp` and communicating
 // via the ACP (Agent Communication Protocol) JSON-RPC 2.0 over stdin/stdout.
 // This is the same pattern as Codex but with the ACP protocol instead of
@@ -34,7 +42,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	hermesArgs := append([]string{"acp"}, opts.CustomArgs...)
+	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", hermesArgs)
 	if opts.Cwd != "" {

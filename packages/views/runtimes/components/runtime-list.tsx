@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PageHeader } from "../../layout/page-header";
 import { ProviderLogo } from "./provider-logo";
 
 type RuntimeFilter = "mine" | "all";
@@ -120,13 +121,13 @@ export function RuntimeList({
 
   return (
     <div className="overflow-y-auto h-full border-r">
-      <div className="flex h-12 items-center justify-between border-b px-4">
+      <PageHeader className="justify-between">
         <h1 className="text-sm font-semibold">Runtimes</h1>
         <span className="text-xs text-muted-foreground">
           {filteredRuntimes.filter((r) => r.status === "online").length}/
           {filteredRuntimes.length} online
         </span>
-      </div>
+      </PageHeader>
 
       {/* Filter bar */}
       <div className="flex items-center justify-between border-b px-4 py-2">

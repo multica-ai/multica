@@ -13,7 +13,10 @@ import (
 //
 // Claude:   skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
 // Codex:    skills → handled separately in Prepare via codex-home
+// Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode: skills → {workDir}/.config/opencode/skills/{name}/SKILL.md  (native discovery)
+// Pi:       skills → {workDir}/.pi/agent/skills/{name}/SKILL.md  (native discovery)
+// Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	contextDir := filepath.Join(workDir, ".agent_context")
@@ -51,9 +54,21 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".claude", "skills")
+	case "copilot":
+		// GitHub Copilot CLI natively discovers project-level skills from
+		// .github/skills/<name>/SKILL.md (takes precedence over user-level
+		// skills in ~/.copilot/skills/).
+		// See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
+		skillsDir = filepath.Join(workDir, ".github", "skills")
 	case "opencode":
 		// OpenCode natively discovers skills from .config/opencode/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".config", "opencode", "skills")
+	case "pi":
+		// Pi natively discovers skills from .pi/agent/skills/ in the workdir.
+		skillsDir = filepath.Join(workDir, ".pi", "agent", "skills")
+	case "cursor":
+		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
+		skillsDir = filepath.Join(workDir, ".cursor", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

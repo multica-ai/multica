@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Zap, Play, Pause, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -13,11 +13,14 @@ import {
 } from "@multica/core/autopilots/mutations";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useNavigation, AppLink } from "../../navigation";
+import { PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import {
@@ -57,19 +60,18 @@ const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: ty
 };
 
 function RunRow({ run }: { run: AutopilotRun }) {
+  const wsPaths = useWorkspacePaths();
   const cfg = (RUN_STATUS_CONFIG[run.status] ?? RUN_STATUS_CONFIG["issue_created"])!;
   const StatusIcon = cfg.icon;
 
-  return (
-    <div className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors">
+  const content = (
+    <>
       <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color)} />
       <span className={cn("w-24 shrink-0 text-xs font-medium", cfg.color)}>{cfg.label}</span>
       <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
         {run.issue_id ? (
-          <AppLink href={`/issues/${run.issue_id}`} className="hover:underline">
-            Issue linked
-          </AppLink>
+          "Issue linked"
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
@@ -77,8 +79,20 @@ function RunRow({ run }: { run: AutopilotRun }) {
       <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {formatDate(run.triggered_at || run.created_at)}
       </span>
-    </div>
+    </>
   );
+
+  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+
+  if (run.issue_id) {
+    return (
+      <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
+        {content}
+      </AppLink>
+    );
+  }
+
+  return <div className={rowClass}>{content}</div>;
 }
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
@@ -355,6 +369,7 @@ function AddTriggerDialog({
 
 export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const { getActorName } = useActorName();
 
@@ -370,9 +385,39 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-40 w-full" />
+      <div className="flex h-full flex-col">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+          <Skeleton className="h-4 w-4" />
+          <span className="text-muted-foreground">/</span>
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-4xl mx-auto p-6 space-y-8">
+            <section className="space-y-4">
+              <Skeleton className="h-3 w-20" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-5 w-32" />
+                </div>
+                <div className="space-y-1">
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-5 w-24" />
+                </div>
+              </div>
+            </section>
+            <section className="space-y-3">
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-10 w-full rounded-md" />
+            </section>
+            <section className="space-y-3">
+              <Skeleton className="h-4 w-24" />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </section>
+          </div>
+        </div>
       </div>
     );
   }
@@ -400,54 +445,55 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     try {
       await deleteAutopilot.mutateAsync(autopilotId);
       toast.success("Autopilot deleted");
-      router.push("/autopilots");
+      router.push(wsPaths.autopilots());
     } catch {
       toast.error("Failed to delete autopilot");
     }
   };
 
-  const handleToggleStatus = () => {
-    const newStatus = autopilot.status === "active" ? "paused" : "active";
-    updateAutopilot.mutate({ id: autopilotId, status: newStatus });
+  const handleToggleStatus = (checked: boolean) => {
+    updateAutopilot.mutate({ id: autopilotId, status: checked ? "active" : "paused" });
   };
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-5">
+      <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
-          <AppLink href="/autopilots" className="text-muted-foreground hover:text-foreground transition-colors">
+          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors">
             <Zap className="h-4 w-4" />
           </AppLink>
           <span className="text-muted-foreground">/</span>
           <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
-          <span className={cn(
-            "ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium",
-            autopilot.status === "active" ? "bg-emerald-500/10 text-emerald-500" :
-            autopilot.status === "paused" ? "bg-amber-500/10 text-amber-500" :
-            "bg-muted text-muted-foreground",
-          )}>
-            {autopilot.status}
-          </span>
+          <div className="ml-1 flex items-center gap-1.5">
+            <Switch
+              size="sm"
+              checked={autopilot.status === "active"}
+              onCheckedChange={handleToggleStatus}
+              disabled={autopilot.status === "archived"}
+              aria-label={autopilot.status === "active" ? "Pause autopilot" : "Activate autopilot"}
+            />
+            <span className={cn(
+              "text-xs font-medium capitalize",
+              autopilot.status === "active" ? "text-emerald-500" :
+              autopilot.status === "paused" ? "text-amber-500" :
+              "text-muted-foreground",
+            )}>
+              {autopilot.status}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
             Edit
           </Button>
-          <Button size="sm" variant="outline" onClick={handleToggleStatus}>
-            {autopilot.status === "active" ? (
-              <><Pause className="h-3.5 w-3.5 mr-1" /> Pause</>
-            ) : (
-              <><Play className="h-3.5 w-3.5 mr-1" /> Activate</>
-            )}
-          </Button>
           <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
             <Play className="h-3.5 w-3.5 mr-1" />
             {triggerAutopilot.isPending ? "Running..." : "Run now"}
           </Button>
         </div>
-      </div>
+      </PageHeader>
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-8">

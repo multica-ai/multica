@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
@@ -17,29 +17,34 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
   const [isEmpty, setIsEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
     if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+      uploadMapRef.current.set(result.link, result.id);
     }
     return result;
-  };
+  }, [uploadWithToast, issueId]);
 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // Only send attachment IDs for uploads still present in the content.
+    const activeIds: string[] = [];
+    for (const [url, id] of uploadMapRef.current) {
+      if (content.includes(url)) activeIds.push(id);
+    }
     setSubmitting(true);
     try {
-      await onSubmit(content, attachmentIds.length > 0 ? attachmentIds : undefined);
+      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
-      setAttachmentIds([]);
+      uploadMapRef.current.clear();
     } finally {
       setSubmitting(false);
     }

@@ -5,10 +5,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
-import type { WorkspaceStore } from "../workspace/store";
 import { createLogger } from "../logger";
 import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
+import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
@@ -23,6 +23,7 @@ import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged } from "../inb
 import { inboxKeys } from "../inbox/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
+import { paths } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -54,7 +55,6 @@ const logger = createLogger("realtime-sync");
 
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
-  workspaceStore: UseBoundStore<StoreApi<WorkspaceStore>>;
 }
 
 /**
@@ -79,7 +79,7 @@ export function useRealtimeSync(
   stores: RealtimeSyncStores,
   onToast?: (message: string, type?: "info" | "error") => void,
 ) {
-  const { authStore, workspaceStore } = stores;
+  const { authStore } = stores;
   const qc = useQueryClient();
   // Main sync: onAny -> refreshMap with debounce
   useEffect(() => {
@@ -87,39 +87,39 @@ export function useRealtimeSync(
 
     const refreshMap: Record<string, () => void> = {
       inbox: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) onInboxInvalidate(qc, wsId);
       },
       agent: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       },
       member: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
       },
       workspace: () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       },
       skill: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
       },
       project: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
       pin: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         const userId = authStore.getState().user?.id;
         if (wsId && userId) qc.invalidateQueries({ queryKey: pinKeys.all(wsId, userId) });
       },
       daemon: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
       },
       autopilot: () => {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
       },
     };
@@ -166,7 +166,7 @@ export function useRealtimeSync(
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const { issue } = p as IssueUpdatedPayload;
       if (!issue?.id) return;
-      const wsId = workspaceStore.getState().workspace?.id;
+      const wsId = getCurrentWsId();
       if (wsId) {
         onIssueUpdated(qc, wsId, issue);
         if (issue.status) {
@@ -178,21 +178,21 @@ export function useRealtimeSync(
     const unsubIssueCreated = ws.on("issue:created", (p) => {
       const { issue } = p as IssueCreatedPayload;
       if (!issue) return;
-      const wsId = workspaceStore.getState().workspace?.id;
+      const wsId = getCurrentWsId();
       if (wsId) onIssueCreated(qc, wsId, issue);
     });
 
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
       const { issue_id } = p as IssueDeletedPayload;
       if (!issue_id) return;
-      const wsId = workspaceStore.getState().workspace?.id;
+      const wsId = getCurrentWsId();
       if (wsId) onIssueDeleted(qc, wsId, issue_id);
     });
 
     const unsubInboxNew = ws.on("inbox:new", (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
-      const wsId = workspaceStore.getState().workspace?.id;
+      const wsId = getCurrentWsId();
       if (wsId) onInboxNew(qc, wsId, item);
     });
 
@@ -260,16 +260,35 @@ export function useRealtimeSync(
 
     // --- Side-effect handlers (toast, navigation) ---
 
+    // After the current workspace disappears (deleted or we were kicked out),
+    // navigate to another workspace the user still has access to, or to the
+    // create-workspace page. We use a full-page navigation: this reliably
+    // tears down any in-flight queries / subscriptions tied to the dead
+    // workspace without relying on framework-specific routers from here in
+    // core.
+    const relocateAfterWorkspaceLoss = async (lostWsId: string) => {
+      const wsList = await qc.fetchQuery({
+        ...workspaceListOptions(),
+        staleTime: 0,
+      });
+      const next = wsList.find((w) => w.id !== lostWsId);
+      const target = next ? paths.workspace(next.slug).issues() : paths.newWorkspace();
+      if (typeof window !== "undefined") {
+        window.location.assign(target);
+      }
+    };
+
     const unsubWsDeleted = ws.on("workspace:deleted", (p) => {
       const { workspace_id } = p as WorkspaceDeletedPayload;
-      clearWorkspaceStorage(defaultStorage, workspace_id);
-      const currentWs = workspaceStore.getState().workspace;
-      if (currentWs?.id === workspace_id) {
+      // Event payload has UUID; look up slug from cached workspace list
+      // since clearWorkspaceStorage keys are namespaced by slug.
+      const wsList = qc.getQueryData<{ id: string; slug: string }[]>(workspaceKeys.list()) ?? [];
+      const deletedSlug = wsList.find((w) => w.id === workspace_id)?.slug;
+      if (deletedSlug) clearWorkspaceStorage(defaultStorage, deletedSlug);
+      if (getCurrentWsId() === workspace_id) {
         logger.warn("current workspace deleted, switching");
         onToast?.("This workspace was deleted", "info");
-        qc.fetchQuery({ ...workspaceListOptions(), staleTime: 0 }).then((wsList) => {
-          workspaceStore.getState().hydrateWorkspace(wsList);
-        });
+        relocateAfterWorkspaceLoss(workspace_id);
       }
     });
 
@@ -277,13 +296,14 @@ export function useRealtimeSync(
       const { user_id } = p as MemberRemovedPayload;
       const myUserId = authStore.getState().user?.id;
       if (user_id === myUserId) {
-        const wsId = workspaceStore.getState().workspace?.id;
-        if (wsId) clearWorkspaceStorage(defaultStorage, wsId);
-        logger.warn("removed from workspace, switching");
-        onToast?.("You were removed from this workspace", "info");
-        qc.fetchQuery({ ...workspaceListOptions(), staleTime: 0 }).then((wsList) => {
-          workspaceStore.getState().hydrateWorkspace(wsList);
-        });
+        const slug = getCurrentSlug();
+        const wsId = getCurrentWsId();
+        if (slug && wsId) {
+          clearWorkspaceStorage(defaultStorage, slug);
+          logger.warn("removed from workspace, switching");
+          onToast?.("You were removed from this workspace", "info");
+          relocateAfterWorkspaceLoss(wsId);
+        }
       }
     });
 
@@ -312,14 +332,14 @@ export function useRealtimeSync(
 
     // invitation:accepted / declined / revoked — refresh invitation lists
     const unsubInvitationAccepted = ws.on("invitation:accepted", () => {
-      const currentWsId = workspaceStore.getState().workspace?.id;
+      const currentWsId = getCurrentWsId();
       if (currentWsId) {
         qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
         qc.invalidateQueries({ queryKey: workspaceKeys.members(currentWsId) });
       }
     });
     const unsubInvitationDeclined = ws.on("invitation:declined", () => {
-      const currentWsId = workspaceStore.getState().workspace?.id;
+      const currentWsId = getCurrentWsId();
       if (currentWsId) {
         qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
       }
@@ -357,11 +377,11 @@ export function useRealtimeSync(
 
     // Helpers reused by chat lifecycle handlers.
     const invalidatePendingAggregate = () => {
-      const id = workspaceStore.getState().workspace?.id;
+      const id = getCurrentWsId();
       if (id) qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(id) });
     };
     const invalidateSessionLists = () => {
-      const id = workspaceStore.getState().workspace?.id;
+      const id = getCurrentWsId();
       if (id) {
         qc.invalidateQueries({ queryKey: chatKeys.sessions(id) });
         qc.invalidateQueries({ queryKey: chatKeys.allSessions(id) });
@@ -457,7 +477,7 @@ export function useRealtimeSync(
       timers.forEach(clearTimeout);
       timers.clear();
     };
-  }, [ws, qc, authStore, workspaceStore, onToast]);
+  }, [ws, qc, authStore, onToast]);
 
   // Reconnect -> refetch all data to recover missed events
   useEffect(() => {
@@ -466,7 +486,7 @@ export function useRealtimeSync(
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, refetching all data");
       try {
-        const wsId = workspaceStore.getState().workspace?.id;
+        const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
@@ -484,5 +504,5 @@ export function useRealtimeSync(
     });
 
     return unsub;
-  }, [ws, qc, workspaceStore]);
+  }, [ws, qc]);
 }

@@ -13,9 +13,9 @@ function getDesktopAPI(): ImmersiveCapableAPI | undefined {
  * Enter "immersive" mode for the lifetime of the component that calls it.
  *
  * On macOS desktop this hides the traffic-light window controls so full-screen
- * modals (create-workspace, onboarding, etc.) can place UI in the top-left
- * corner without fighting the native controls' hit-test. On web or non-macOS
- * desktop this is a no-op.
+ * modals (e.g. create-workspace) can place UI in the top-left corner without
+ * fighting the native controls' hit-test. On web or non-macOS desktop this
+ * is a no-op.
  */
 export function useImmersiveMode(): void {
   useEffect(() => {

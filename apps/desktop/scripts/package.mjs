@@ -40,6 +40,18 @@ function sh(cmd) {
 }
 
 /**
+ * Strip the leading `--` that npm/pnpm insert to separate their own
+ * flags from the ones meant for the underlying script.  Without this,
+ * `pnpm package -- --mac --arm64 --publish always` forwards the bare
+ * `--` into electron-builder's argv, which terminates option parsing
+ * and turns `--publish always` into ignored positional arguments.
+ */
+export function stripLeadingSeparator(argv) {
+  if (argv.length > 0 && argv[0] === "--") return argv.slice(1);
+  return argv;
+}
+
+/**
  * Pure transformation from the `git describe --tags --always --dirty`
  * output to the value we feed into electron-builder's extraMetadata.version.
  *
@@ -102,7 +114,7 @@ function main() {
   }
 
   // Step 4: assemble electron-builder args.
-  const passthrough = process.argv.slice(2);
+  const passthrough = stripLeadingSeparator(process.argv.slice(2));
   const builderArgs = [];
   if (version) builderArgs.push(`-c.extraMetadata.version=${version}`);
 

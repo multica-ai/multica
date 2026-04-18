@@ -24,10 +24,12 @@ test.describe("Authentication", () => {
     await page.goto("/login");
     await page.evaluate(() => {
       localStorage.removeItem("multica_token");
-      localStorage.removeItem("multica_workspace_id");
     });
 
-    await page.goto("/issues");
+    // Visit a workspace-scoped route; DashboardGuard should redirect to /login.
+    // The slug here need not exist — the guard runs before workspace resolution
+    // for unauthenticated users.
+    await page.goto("/e2e-workspace/issues");
     await page.waitForURL("**/login", { timeout: 10000 });
   });
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import {
   inboxListOptions,
   deduplicateInboxItems,
@@ -44,12 +45,14 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
 
 export function InboxPage() {
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
+  const wsPaths = useWorkspacePaths();
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
 
@@ -58,22 +61,34 @@ export function InboxPage() {
     setSelectedKeyState(urlIssue);
   }, [urlIssue]);
 
-  const setSelectedKey = useCallback((key: string) => {
-    setSelectedKeyState(key);
-    const url = key ? `/inbox?issue=${key}` : "/inbox";
-    replace(url);
-  }, [replace]);
-
   const wsId = useWorkspaceId();
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+
+  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+
+  // Shared inbox links (?issue=<id>) may point to notifications not in this
+  // user's inbox (archived, or never received). Fall back to the issue page
+  // so the URL still resolves to something meaningful.
+  useEffect(() => {
+    if (loading) return;
+    if (!selectedKey) return;
+    if (selected) return;
+    replace(wsPaths.issueDetail(selectedKey));
+  }, [loading, selectedKey, selected, replace, wsPaths]);
+
+  const setSelectedKey = useCallback((key: string) => {
+    setSelectedKeyState(key);
+    const inboxPath = wsPaths.inbox();
+    const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
+    replace(url);
+  }, [replace, wsPaths]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
   });
 
   const isMobile = useIsMobile();
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const unreadCount = items.filter((i) => !i.read).length;
 
   const markReadMutation = useMarkInboxRead();
@@ -133,7 +148,7 @@ export function InboxPage() {
   // -- Shared sub-components --------------------------------------------------
 
   const listHeader = (
-    <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+    <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold">Inbox</h1>
         {unreadCount > 0 && (
@@ -147,7 +162,7 @@ export function InboxPage() {
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               className="text-muted-foreground"
             />
           }
@@ -174,7 +189,7 @@ export function InboxPage() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </PageHeader>
   );
 
   const listBody = items.length === 0 ? (

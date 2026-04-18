@@ -44,6 +44,12 @@ var daemonStatusCmd = &cobra.Command{
 	RunE:  runDaemonStatus,
 }
 
+var daemonRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the running daemon (stop + start)",
+	RunE:  runDaemonRestart,
+}
+
 var daemonLogsCmd = &cobra.Command{
 	Use:   "logs",
 	Short: "Show daemon logs",
@@ -66,8 +72,20 @@ func init() {
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// restart shares all the same flags as start
+	rf := daemonRestartCmd.Flags()
+	rf.Bool("foreground", false, "Run in the foreground instead of background")
+	rf.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
+	rf.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
+	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
+	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
+	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
+	rf.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
+
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
+	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 }
@@ -128,7 +146,8 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
 		}
-		return fmt.Errorf("%s is already running (pid %v)", label, health["pid"])
+		pid, _ := health["pid"].(float64)
+		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
 	}
 
 	// Resolve current executable.
@@ -326,6 +345,39 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 
 	return nil
+}
+
+// --- daemon restart ---
+
+func runDaemonRestart(cmd *cobra.Command, args []string) error {
+	profile := resolveProfile(cmd)
+	healthPort := healthPortForProfile(profile)
+
+	// Stop if running.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if health["status"] == "running" {
+		pid, _ := health["pid"].(float64)
+		if pid > 0 {
+			if p, err := os.FindProcess(int(pid)); err == nil {
+				fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+				_ = stopDaemonProcess(p)
+				for i := 0; i < 10; i++ {
+					time.Sleep(500 * time.Millisecond)
+					sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
+					h := checkDaemonHealthOnPort(sctx, healthPort)
+					scancel()
+					if h["status"] != "running" {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Start fresh.
+	return runDaemonStart(cmd, args)
 }
 
 // --- daemon stop ---

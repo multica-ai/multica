@@ -82,7 +82,7 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 
 const getWorkspaceUsageByDay = `-- name: GetWorkspaceUsageByDay :many
 SELECT
-    DATE(atq.created_at) AS date,
+    DATE(tu.created_at) AS date,
     tu.model,
     SUM(tu.input_tokens)::bigint AS total_input_tokens,
     SUM(tu.output_tokens)::bigint AS total_output_tokens,
@@ -93,9 +93,9 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.created_at >= $2::timestamptz
-GROUP BY DATE(atq.created_at), tu.model
-ORDER BY DATE(atq.created_at) DESC, tu.model
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY DATE(tu.created_at), tu.model
+ORDER BY DATE(tu.created_at) DESC, tu.model
 `
 
 type GetWorkspaceUsageByDayParams struct {
@@ -113,6 +113,10 @@ type GetWorkspaceUsageByDayRow struct {
 	TaskCount             int32       `json:"task_count"`
 }
 
+// Bucket by tu.created_at (usage report time, ~= task completion time), not
+// atq.created_at (task enqueue time), so tasks that queue one day and execute
+// the next are attributed to the day tokens were actually produced. The since
+// cutoff is truncated to start-of-day so `days=N` yields full calendar days.
 func (q *Queries) GetWorkspaceUsageByDay(ctx context.Context, arg GetWorkspaceUsageByDayParams) ([]GetWorkspaceUsageByDayRow, error) {
 	rows, err := q.db.Query(ctx, getWorkspaceUsageByDay, arg.WorkspaceID, arg.Since)
 	if err != nil {
@@ -153,7 +157,7 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.created_at >= $2::timestamptz
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
 GROUP BY tu.model
 ORDER BY (SUM(tu.input_tokens) + SUM(tu.output_tokens)) DESC
 `
@@ -172,6 +176,8 @@ type GetWorkspaceUsageSummaryRow struct {
 	TaskCount             int32  `json:"task_count"`
 }
 
+// Filter by tu.created_at (usage report time), aligned to start-of-day, so
+// `days=N` is interpreted as N full calendar days like the other usage queries.
 func (q *Queries) GetWorkspaceUsageSummary(ctx context.Context, arg GetWorkspaceUsageSummaryParams) ([]GetWorkspaceUsageSummaryRow, error) {
 	rows, err := q.db.Query(ctx, getWorkspaceUsageSummary, arg.WorkspaceID, arg.Since)
 	if err != nil {

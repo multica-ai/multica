@@ -31,6 +31,21 @@ if (typeof globalThis.localStorage?.clear !== "function") {
   });
 }
 
+// jsdom doesn't provide matchMedia; useIsMobile() relies on it.
+if (typeof window.matchMedia !== "function") {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
 // jsdom doesn't provide ResizeObserver; stub it so components that rely on it
 // (e.g. input-otp) can render in tests.
 if (typeof globalThis.ResizeObserver === "undefined") {

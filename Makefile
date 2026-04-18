@@ -182,7 +182,7 @@ server:
 	cd server && go run ./cmd/server
 
 daemon:
-	@$(MAKE) multica MULTICA_ARGS="daemon"
+	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
 
 cli:
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"

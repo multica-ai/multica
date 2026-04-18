@@ -44,112 +44,29 @@ func (q *Queries) GetRuntimeTaskHourlyActivity(ctx context.Context, runtimeID pg
 	return items, nil
 }
 
-const getRuntimeUsageSummary = `-- name: GetRuntimeUsageSummary :many
-SELECT provider, model,
-    SUM(input_tokens)::bigint AS total_input_tokens,
-    SUM(output_tokens)::bigint AS total_output_tokens,
-    SUM(cache_read_tokens)::bigint AS total_cache_read_tokens,
-    SUM(cache_write_tokens)::bigint AS total_cache_write_tokens
-FROM runtime_usage
-WHERE runtime_id = $1
-GROUP BY provider, model
-ORDER BY provider, model
-`
-
-type GetRuntimeUsageSummaryRow struct {
-	Provider              string `json:"provider"`
-	Model                 string `json:"model"`
-	TotalInputTokens      int64  `json:"total_input_tokens"`
-	TotalOutputTokens     int64  `json:"total_output_tokens"`
-	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
-	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
-}
-
-func (q *Queries) GetRuntimeUsageSummary(ctx context.Context, runtimeID pgtype.UUID) ([]GetRuntimeUsageSummaryRow, error) {
-	rows, err := q.db.Query(ctx, getRuntimeUsageSummary, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetRuntimeUsageSummaryRow{}
-	for rows.Next() {
-		var i GetRuntimeUsageSummaryRow
-		if err := rows.Scan(
-			&i.Provider,
-			&i.Model,
-			&i.TotalInputTokens,
-			&i.TotalOutputTokens,
-			&i.TotalCacheReadTokens,
-			&i.TotalCacheWriteTokens,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
-SELECT id, runtime_id, date, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at FROM runtime_usage
-WHERE runtime_id = $1
-  AND date >= $2
-ORDER BY date DESC
+SELECT
+    DATE(tu.created_at) AS date,
+    tu.provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY DATE(tu.created_at), tu.provider, tu.model
+ORDER BY DATE(tu.created_at) DESC, tu.provider, tu.model
 `
 
 type ListRuntimeUsageParams struct {
-	RuntimeID pgtype.UUID `json:"runtime_id"`
-	Date      pgtype.Date `json:"date"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Since     pgtype.Timestamptz `json:"since"`
 }
 
-func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]RuntimeUsage, error) {
-	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Date)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []RuntimeUsage{}
-	for rows.Next() {
-		var i RuntimeUsage
-		if err := rows.Scan(
-			&i.ID,
-			&i.RuntimeID,
-			&i.Date,
-			&i.Provider,
-			&i.Model,
-			&i.InputTokens,
-			&i.OutputTokens,
-			&i.CacheReadTokens,
-			&i.CacheWriteTokens,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const upsertRuntimeUsage = `-- name: UpsertRuntimeUsage :exec
-INSERT INTO runtime_usage (runtime_id, date, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (runtime_id, date, provider, model)
-DO UPDATE SET
-    input_tokens = EXCLUDED.input_tokens,
-    output_tokens = EXCLUDED.output_tokens,
-    cache_read_tokens = EXCLUDED.cache_read_tokens,
-    cache_write_tokens = EXCLUDED.cache_write_tokens,
-    updated_at = now()
-`
-
-type UpsertRuntimeUsageParams struct {
-	RuntimeID        pgtype.UUID `json:"runtime_id"`
+type ListRuntimeUsageRow struct {
 	Date             pgtype.Date `json:"date"`
 	Provider         string      `json:"provider"`
 	Model            string      `json:"model"`
@@ -159,16 +76,34 @@ type UpsertRuntimeUsageParams struct {
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 }
 
-func (q *Queries) UpsertRuntimeUsage(ctx context.Context, arg UpsertRuntimeUsageParams) error {
-	_, err := q.db.Exec(ctx, upsertRuntimeUsage,
-		arg.RuntimeID,
-		arg.Date,
-		arg.Provider,
-		arg.Model,
-		arg.InputTokens,
-		arg.OutputTokens,
-		arg.CacheReadTokens,
-		arg.CacheWriteTokens,
-	)
-	return err
+// Bucket by tu.created_at (usage report time, ~= task completion time), not
+// atq.created_at (task enqueue time), so tasks that queue one day and execute
+// the next are attributed to the day tokens were actually produced. The since
+// cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]ListRuntimeUsageRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimeUsageRow{}
+	for rows.Next() {
+		var i ListRuntimeUsageRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

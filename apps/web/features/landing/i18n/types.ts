@@ -26,6 +26,7 @@ export type LandingDict = {
     headlineLine2: string;
     subheading: string;
     cta: string;
+    downloadDesktop: string;
     worksWith: string;
     imageAlt: string;
   };

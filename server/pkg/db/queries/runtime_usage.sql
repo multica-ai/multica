@@ -1,30 +1,22 @@
--- name: UpsertRuntimeUsage :exec
-INSERT INTO runtime_usage (runtime_id, date, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (runtime_id, date, provider, model)
-DO UPDATE SET
-    input_tokens = EXCLUDED.input_tokens,
-    output_tokens = EXCLUDED.output_tokens,
-    cache_read_tokens = EXCLUDED.cache_read_tokens,
-    cache_write_tokens = EXCLUDED.cache_write_tokens,
-    updated_at = now();
-
 -- name: ListRuntimeUsage :many
-SELECT * FROM runtime_usage
-WHERE runtime_id = $1
-  AND date >= $2
-ORDER BY date DESC;
-
--- name: GetRuntimeUsageSummary :many
-SELECT provider, model,
-    SUM(input_tokens)::bigint AS total_input_tokens,
-    SUM(output_tokens)::bigint AS total_output_tokens,
-    SUM(cache_read_tokens)::bigint AS total_cache_read_tokens,
-    SUM(cache_write_tokens)::bigint AS total_cache_write_tokens
-FROM runtime_usage
-WHERE runtime_id = $1
-GROUP BY provider, model
-ORDER BY provider, model;
+-- Bucket by tu.created_at (usage report time, ~= task completion time), not
+-- atq.created_at (task enqueue time), so tasks that queue one day and execute
+-- the next are attributed to the day tokens were actually produced. The since
+-- cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+SELECT
+    DATE(tu.created_at) AS date,
+    tu.provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
+GROUP BY DATE(tu.created_at), tu.provider, tu.model
+ORDER BY DATE(tu.created_at) DESC, tu.provider, tu.model;
 
 -- name: GetRuntimeTaskHourlyActivity :many
 SELECT EXTRACT(HOUR FROM started_at)::int AS hour, COUNT(*)::int AS count

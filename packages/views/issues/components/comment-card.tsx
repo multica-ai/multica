@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -36,6 +36,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
+import { useCommentCollapseStore } from "@multica/core/issues/stores";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,9 +98,24 @@ function DeleteCommentDialog({
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   if (!attachments?.length) return null;
-  // Skip attachments whose URL is already referenced in the markdown content
+  // Skip attachments whose URL is already referenced in the markdown content,
+  // and duplicates of the same file (same name/type/size) that are referenced.
   const standalone = content
-    ? attachments.filter((a) => !content.includes(a.url))
+    ? attachments.filter((a) => {
+        if (content.includes(a.url)) return false;
+        // Dedup: if another attachment with the same file identity is already
+        // inline in the content, this is a duplicate upload — skip it.
+        const hasSiblingInContent = attachments.some(
+          (other) =>
+            other.id !== a.id &&
+            other.filename === a.filename &&
+            other.content_type === a.content_type &&
+            other.size_bytes === a.size_bytes &&
+            content.includes(other.url),
+        );
+        if (hasSiblingInContent) return false;
+        return true;
+      })
     : attachments;
   if (!standalone.length) return null;
 
@@ -223,7 +239,7 @@ function CommentRow({
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon-xs" className="text-muted-foreground">
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               }
@@ -328,7 +344,10 @@ function CommentCard({
 }: CommentCardProps) {
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
-  const [open, setOpen] = useState(true);
+  const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
+  const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
+  const open = !isCollapsed;
+  const handleOpenChange = useCallback((_open: boolean) => toggleCollapse(issueId, entry.id), [toggleCollapse, issueId, entry.id]);
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
@@ -390,7 +409,7 @@ function CommentCard({
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
-      <Collapsible open={open} onOpenChange={setOpen}>
+      <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
         <div className="px-4 py-3">
           <div className="flex items-center gap-2.5">
@@ -434,7 +453,7 @@ function CommentCard({
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="ghost" size="icon-xs" className="text-muted-foreground">
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   }

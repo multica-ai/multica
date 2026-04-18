@@ -17,7 +17,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, Fil
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -54,7 +54,8 @@ function PillButton({
 
 export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?: Record<string, unknown> | null }) {
   const router = useNavigation();
-  const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const p = useWorkspacePaths();
+  const workspaceName = useCurrentWorkspace()?.name;
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -144,7 +145,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
               type="button"
               className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
               onClick={() => {
-                router.push(`/issues/${issue.id}`);
+                router.push(p.issueDetail(issue.id));
                 toast.dismiss(t);
               }}
             >

@@ -12,7 +12,10 @@ export default defineConfig({
   },
   renderer: {
     server: {
-      port: 5173,
+      // Allow parallel worktrees to run `pnpm dev:desktop` side-by-side
+      // (e.g. Multica Canary alongside a primary checkout) by overriding
+      // the renderer port via env. Falls back to 5173 for the common case.
+      port: Number(process.env.DESKTOP_RENDERER_PORT) || 5173,
       strictPort: true,
     },
     plugins: [react(), tailwindcss()],

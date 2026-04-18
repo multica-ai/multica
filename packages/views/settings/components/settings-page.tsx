@@ -3,7 +3,7 @@
 import React from "react";
 import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
 import { TokensTab } from "./tokens-tab";
@@ -36,7 +36,7 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
-  const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const workspaceName = useCurrentWorkspace()?.name;
 
   return (
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
