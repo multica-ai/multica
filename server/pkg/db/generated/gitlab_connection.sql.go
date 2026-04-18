@@ -125,6 +125,34 @@ func (q *Queries) GetUserGitlabConnection(ctx context.Context, arg GetUserGitlab
 	return i, err
 }
 
+const getUserGitlabConnectionByGitlabUserID = `-- name: GetUserGitlabConnectionByGitlabUserID :one
+SELECT user_id, workspace_id, gitlab_user_id, gitlab_username, pat_encrypted, created_at FROM user_gitlab_connection
+WHERE workspace_id = $1 AND gitlab_user_id = $2
+LIMIT 1
+`
+
+type GetUserGitlabConnectionByGitlabUserIDParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	GitlabUserID int64       `json:"gitlab_user_id"`
+}
+
+// Reverse lookup: who (Multica user) is this GitLab user in this workspace?
+// Phase 4 uses this to resolve webhook author/actor/assignee gitlab_user_id
+// back to Multica's user_id.
+func (q *Queries) GetUserGitlabConnectionByGitlabUserID(ctx context.Context, arg GetUserGitlabConnectionByGitlabUserIDParams) (UserGitlabConnection, error) {
+	row := q.db.QueryRow(ctx, getUserGitlabConnectionByGitlabUserID, arg.WorkspaceID, arg.GitlabUserID)
+	var i UserGitlabConnection
+	err := row.Scan(
+		&i.UserID,
+		&i.WorkspaceID,
+		&i.GitlabUserID,
+		&i.GitlabUsername,
+		&i.PatEncrypted,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getWorkspaceGitlabConnection = `-- name: GetWorkspaceGitlabConnection :one
 SELECT workspace_id, gitlab_project_id, gitlab_project_path, service_token_encrypted, service_token_user_id, webhook_secret, webhook_gitlab_id, last_sync_cursor, connection_status, status_message, created_at, updated_at, last_webhook_received_at FROM workspace_gitlab_connection
 WHERE workspace_id = $1

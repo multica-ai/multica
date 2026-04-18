@@ -37,6 +37,14 @@ RETURNING *;
 SELECT * FROM user_gitlab_connection
 WHERE user_id = $1 AND workspace_id = $2;
 
+-- name: GetUserGitlabConnectionByGitlabUserID :one
+-- Reverse lookup: who (Multica user) is this GitLab user in this workspace?
+-- Phase 4 uses this to resolve webhook author/actor/assignee gitlab_user_id
+-- back to Multica's user_id.
+SELECT * FROM user_gitlab_connection
+WHERE workspace_id = $1 AND gitlab_user_id = $2
+LIMIT 1;
+
 -- name: DeleteUserGitlabConnection :exec
 DELETE FROM user_gitlab_connection
 WHERE user_id = $1 AND workspace_id = $2;

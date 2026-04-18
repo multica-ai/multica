@@ -118,6 +118,13 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AutopilotIssue struct {
+	AutopilotRunID pgtype.UUID        `json:"autopilot_run_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	GitlabIid      int32              `json:"gitlab_iid"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type AutopilotRun struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
@@ -192,7 +199,7 @@ type CommentReaction struct {
 	ID                pgtype.UUID        `json:"id"`
 	CommentID         pgtype.UUID        `json:"comment_id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	ActorType         string             `json:"actor_type"`
+	ActorType         pgtype.Text        `json:"actor_type"`
 	ActorID           pgtype.UUID        `json:"actor_id"`
 	Emoji             string             `json:"emoji"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
@@ -237,6 +244,7 @@ type GitlabProjectMember struct {
 	Name              string             `json:"name"`
 	AvatarUrl         string             `json:"avatar_url"`
 	ExternalUpdatedAt pgtype.Timestamptz `json:"external_updated_at"`
+	ID                pgtype.UUID        `json:"id"`
 }
 
 type GitlabWebhookEvent struct {

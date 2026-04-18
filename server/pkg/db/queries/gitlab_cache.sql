@@ -65,6 +65,17 @@ SELECT * FROM gitlab_project_member
 WHERE workspace_id = $1
 ORDER BY username;
 
+-- name: GetGitlabProjectMember :one
+-- Reverse lookup of a GitLab user in a workspace's cached project-member list.
+SELECT * FROM gitlab_project_member
+WHERE workspace_id = $1 AND gitlab_user_id = $2
+LIMIT 1;
+
+-- name: GetGitlabProjectMemberByID :one
+-- Lookup by the UUID id (used when resolving an issue.assignee_id where
+-- assignee_type='gitlab_user').
+SELECT * FROM gitlab_project_member WHERE id = $1 LIMIT 1;
+
 -- name: DeleteWorkspaceGitlabMembers :exec
 DELETE FROM gitlab_project_member WHERE workspace_id = $1;
 

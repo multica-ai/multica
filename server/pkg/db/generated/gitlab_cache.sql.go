@@ -139,6 +139,54 @@ func (q *Queries) GetGitlabLabelByName(ctx context.Context, arg GetGitlabLabelBy
 	return i, err
 }
 
+const getGitlabProjectMember = `-- name: GetGitlabProjectMember :one
+SELECT workspace_id, gitlab_user_id, username, name, avatar_url, external_updated_at, id FROM gitlab_project_member
+WHERE workspace_id = $1 AND gitlab_user_id = $2
+LIMIT 1
+`
+
+type GetGitlabProjectMemberParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	GitlabUserID int64       `json:"gitlab_user_id"`
+}
+
+// Reverse lookup of a GitLab user in a workspace's cached project-member list.
+func (q *Queries) GetGitlabProjectMember(ctx context.Context, arg GetGitlabProjectMemberParams) (GitlabProjectMember, error) {
+	row := q.db.QueryRow(ctx, getGitlabProjectMember, arg.WorkspaceID, arg.GitlabUserID)
+	var i GitlabProjectMember
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.GitlabUserID,
+		&i.Username,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.ExternalUpdatedAt,
+		&i.ID,
+	)
+	return i, err
+}
+
+const getGitlabProjectMemberByID = `-- name: GetGitlabProjectMemberByID :one
+SELECT workspace_id, gitlab_user_id, username, name, avatar_url, external_updated_at, id FROM gitlab_project_member WHERE id = $1 LIMIT 1
+`
+
+// Lookup by the UUID id (used when resolving an issue.assignee_id where
+// assignee_type='gitlab_user').
+func (q *Queries) GetGitlabProjectMemberByID(ctx context.Context, id pgtype.UUID) (GitlabProjectMember, error) {
+	row := q.db.QueryRow(ctx, getGitlabProjectMemberByID, id)
+	var i GitlabProjectMember
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.GitlabUserID,
+		&i.Username,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.ExternalUpdatedAt,
+		&i.ID,
+	)
+	return i, err
+}
+
 const getIssueByGitlabID = `-- name: GetIssueByGitlabID :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
 WHERE workspace_id = $1 AND gitlab_issue_id = $2
@@ -287,7 +335,7 @@ func (q *Queries) ListGitlabLabels(ctx context.Context, workspaceID pgtype.UUID)
 }
 
 const listGitlabProjectMembers = `-- name: ListGitlabProjectMembers :many
-SELECT workspace_id, gitlab_user_id, username, name, avatar_url, external_updated_at FROM gitlab_project_member
+SELECT workspace_id, gitlab_user_id, username, name, avatar_url, external_updated_at, id FROM gitlab_project_member
 WHERE workspace_id = $1
 ORDER BY username
 `
@@ -308,6 +356,7 @@ func (q *Queries) ListGitlabProjectMembers(ctx context.Context, workspaceID pgty
 			&i.Name,
 			&i.AvatarUrl,
 			&i.ExternalUpdatedAt,
+			&i.ID,
 		); err != nil {
 			return nil, err
 		}
@@ -455,7 +504,7 @@ RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at,
 type UpsertCommentReactionFromGitlabParams struct {
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
 	CommentID         pgtype.UUID        `json:"comment_id"`
-	ActorType         string             `json:"actor_type"`
+	ActorType         pgtype.Text        `json:"actor_type"`
 	ActorID           pgtype.UUID        `json:"actor_id"`
 	GitlabActorUserID pgtype.Int8        `json:"gitlab_actor_user_id"`
 	Emoji             string             `json:"emoji"`
@@ -546,7 +595,7 @@ ON CONFLICT (workspace_id, gitlab_user_id) DO UPDATE SET
     name = EXCLUDED.name,
     avatar_url = EXCLUDED.avatar_url,
     external_updated_at = EXCLUDED.external_updated_at
-RETURNING workspace_id, gitlab_user_id, username, name, avatar_url, external_updated_at
+RETURNING workspace_id, gitlab_user_id, username, name, avatar_url, external_updated_at, id
 `
 
 type UpsertGitlabProjectMemberParams struct {
@@ -576,6 +625,7 @@ func (q *Queries) UpsertGitlabProjectMember(ctx context.Context, arg UpsertGitla
 		&i.Name,
 		&i.AvatarUrl,
 		&i.ExternalUpdatedAt,
+		&i.ID,
 	)
 	return i, err
 }

@@ -21,7 +21,7 @@ RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at,
 type AddReactionParams struct {
 	CommentID   pgtype.UUID `json:"comment_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ActorType   string      `json:"actor_type"`
+	ActorType   pgtype.Text `json:"actor_type"`
 	ActorID     pgtype.UUID `json:"actor_id"`
 	Emoji       string      `json:"emoji"`
 }
@@ -67,7 +67,7 @@ LIMIT 1
 
 type GetCommentReactionByKeyParams struct {
 	CommentID pgtype.UUID `json:"comment_id"`
-	ActorType string      `json:"actor_type"`
+	ActorType pgtype.Text `json:"actor_type"`
 	ActorID   pgtype.UUID `json:"actor_id"`
 	Emoji     string      `json:"emoji"`
 }
@@ -141,7 +141,7 @@ WHERE comment_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
 
 type RemoveReactionParams struct {
 	CommentID pgtype.UUID `json:"comment_id"`
-	ActorType string      `json:"actor_type"`
+	ActorType pgtype.Text `json:"actor_type"`
 	ActorID   pgtype.UUID `json:"actor_id"`
 	Emoji     string      `json:"emoji"`
 }

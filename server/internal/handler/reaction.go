@@ -27,7 +27,7 @@ func reactionToResponse(r db.CommentReaction) ReactionResponse {
 	return ReactionResponse{
 		ID:        uuidToString(r.ID),
 		CommentID: uuidToString(r.CommentID),
-		ActorType: r.ActorType,
+		ActorType: r.ActorType.String,
 		ActorID:   uuidToString(r.ActorID),
 		Emoji:     r.Emoji,
 		CreatedAt: timestampToString(r.CreatedAt),
@@ -96,7 +96,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	reaction, err := h.Queries.AddReaction(r.Context(), db.AddReactionParams{
 		CommentID:   comment.ID,
 		WorkspaceID: parseUUID(workspaceID),
-		ActorType:   actorType,
+		ActorType:   pgtype.Text{String: actorType, Valid: actorType != ""},
 		ActorID:     parseUUID(actorID),
 		Emoji:       req.Emoji,
 	})
@@ -175,7 +175,7 @@ func (h *Handler) addCommentReactionWriteThrough(
 	row, upErr := h.Queries.UpsertCommentReactionFromGitlab(ctx, db.UpsertCommentReactionFromGitlabParams{
 		WorkspaceID:       comment.WorkspaceID,
 		CommentID:         comment.ID,
-		ActorType:         actorType,
+		ActorType:         pgtype.Text{String: actorType, Valid: actorType != ""},
 		ActorID:           parseUUID(actorID),
 		GitlabActorUserID: glActor,
 		Emoji:             award.Name,
@@ -261,7 +261,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 		if wsErr == nil {
 			existing, exErr := h.Queries.GetCommentReactionByKey(r.Context(), db.GetCommentReactionByKeyParams{
 				CommentID: comment.ID,
-				ActorType: actorType,
+				ActorType: pgtype.Text{String: actorType, Valid: actorType != ""},
 				ActorID:   parseUUID(actorID),
 				Emoji:     req.Emoji,
 			})
@@ -329,7 +329,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.Queries.RemoveReaction(r.Context(), db.RemoveReactionParams{
 		CommentID: comment.ID,
-		ActorType: actorType,
+		ActorType: pgtype.Text{String: actorType, Valid: actorType != ""},
 		ActorID:   parseUUID(actorID),
 		Emoji:     req.Emoji,
 	}); err != nil {
