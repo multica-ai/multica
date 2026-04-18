@@ -833,6 +833,27 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	default:
 	}
 
+	// Rate-limit fallback: if the primary provider hit a rate limit, retry
+	// with an alternative provider from the same daemon. The fallback order
+	// is determined by providerFallbackOrder.
+	if isRateLimitError(err, result) {
+		fallback := d.pickFallbackProvider(provider)
+		if fallback != "" {
+			taskLog.Warn("rate limit detected, retrying with fallback provider",
+				"original", provider, "fallback", fallback)
+			_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Rate limited on %s, retrying with %s", provider, fallback), 1, 2)
+			result, err = d.runTask(runCtx, task, fallback, taskLog)
+
+			// Check cancellation again after retry.
+			select {
+			case <-cancelledByPoll:
+				taskLog.Info("task cancelled during fallback execution, discarding result")
+				return
+			default:
+			}
+		}
+	}
+
 	if err != nil {
 		taskLog.Error("task failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, err.Error()); failErr != nil {
@@ -1088,6 +1109,57 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 		return TaskResult{Status: "blocked", Comment: errMsg, EnvRoot: env.RootDir, Usage: usageEntries}, nil
 	}
+}
+
+// providerFallbackOrder defines the preferred fallback chain when a provider
+// hits a rate limit. Each provider maps to an ordered list of alternatives.
+var providerFallbackOrder = map[string][]string{
+	"claude":   {"codex", "copilot", "opencode"},
+	"codex":    {"claude", "copilot", "opencode"},
+	"copilot":  {"claude", "codex", "opencode"},
+	"opencode": {"claude", "codex", "copilot"},
+	"gemini":   {"claude", "codex", "copilot", "opencode"},
+	"cursor":   {"claude", "codex", "copilot", "opencode"},
+}
+
+// isRateLimitError returns true if the task result or error indicates a rate limit.
+func isRateLimitError(err error, result TaskResult) bool {
+	if err != nil {
+		errStr := strings.ToLower(err.Error())
+		if strings.Contains(errStr, "rate limit") ||
+			strings.Contains(errStr, "rate_limit") ||
+			strings.Contains(errStr, "ratelimit") ||
+			strings.Contains(errStr, "hit your limit") ||
+			strings.Contains(errStr, "429") ||
+			strings.Contains(errStr, "overloaded") {
+			return true
+		}
+	}
+	comment := strings.ToLower(result.Comment)
+	if strings.Contains(comment, "rate limit") ||
+		strings.Contains(comment, "hit your limit") ||
+		strings.Contains(comment, "rate_limit") ||
+		strings.Contains(comment, "ratelimit") ||
+		strings.Contains(comment, "429") ||
+		strings.Contains(comment, "overloaded") {
+		return true
+	}
+	return false
+}
+
+// pickFallbackProvider returns the first available fallback provider for the
+// given provider, or "" if none is available.
+func (d *Daemon) pickFallbackProvider(provider string) string {
+	candidates, ok := providerFallbackOrder[provider]
+	if !ok {
+		return ""
+	}
+	for _, candidate := range candidates {
+		if _, exists := d.cfg.Agents[candidate]; exists {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
