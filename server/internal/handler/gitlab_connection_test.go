@@ -479,10 +479,15 @@ func TestGitlabConnectedWorkspace_WriteReturns501(t *testing.T) {
 	}
 }
 
-// I-1 fix: comment write routes also need the 501 stopgap.
+// Comment reaction routes still need the 501 stopgap (Phase 3d scope).
+// PUT/DELETE on /api/comments/{id} were unmounted in Phase 3c — their
+// write-through implementation is covered by TestUpdateComment_WriteThrough*
+// and TestDeleteComment_WriteThrough* in comment_test.go.
+//
 // The /api/comments/{commentId} subrouter doesn't carry a workspace ID in
 // its URL — the middleware falls back to the X-Workspace-ID header (set by
-// the workspace-scoped middleware groups in the real router).
+// the workspace-scoped middleware groups in the real router). This test
+// mirrors production's per-route `r.With(gw)` pattern on the reaction routes.
 func TestGitlabConnectedWorkspace_CommentWriteReturns501(t *testing.T) {
 	h := buildHandlerWithGitlab(t, "http://unused")
 	h.Queries.DeleteWorkspaceGitlabConnection(context.Background(), parseUUID(testWorkspaceID))
@@ -498,11 +503,9 @@ func TestGitlabConnectedWorkspace_CommentWriteReturns501(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Route("/api/comments/{commentId}", func(r chi.Router) {
-		r.Use(middleware.GitlabWritesBlocked(h.Queries))
-		r.Put("/", h.UpdateComment)
-		r.Delete("/", h.DeleteComment)
-		r.Post("/reactions", h.AddReaction)
-		r.Delete("/reactions", h.RemoveReaction)
+		gw := middleware.GitlabWritesBlocked(h.Queries)
+		r.With(gw).Post("/reactions", h.AddReaction)
+		r.With(gw).Delete("/reactions", h.RemoveReaction)
 	})
 
 	for _, tc := range []struct {
@@ -511,8 +514,6 @@ func TestGitlabConnectedWorkspace_CommentWriteReturns501(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{"update", http.MethodPut, "/api/comments/00000000-0000-0000-0000-000000000000/", `{"content":"x"}`},
-		{"delete", http.MethodDelete, "/api/comments/00000000-0000-0000-0000-000000000000/", ``},
 		{"add reaction", http.MethodPost, "/api/comments/00000000-0000-0000-0000-000000000000/reactions", `{"emoji":"thumbsup"}`},
 		{"remove reaction", http.MethodDelete, "/api/comments/00000000-0000-0000-0000-000000000000/reactions", `{"emoji":"thumbsup"}`},
 	} {
