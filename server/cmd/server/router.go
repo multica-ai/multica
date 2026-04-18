@@ -240,25 +240,18 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
-			// Issues — POST uses GitLab write-through (Phase 3a). All other writes
-			// still 501 while connected; Phase 3b migrates them one by one.
+			// Issues — all writes use the GitLab write-through path when the
+			// workspace is connected, falling back to legacy direct-DB otherwise.
 			r.Route("/api/issues", func(r chi.Router) {
-				gw := middleware.GitlabWritesBlocked(queries)
-
-				// Reads — always allowed.
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/", h.ListIssues)
 
-				// POST root is the only write migrated to write-through (Phase 3a).
 				r.Post("/", h.CreateIssue)
-
-				// Other root writes — gated until Phase 3b migrates them.
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 
 				r.Route("/{id}", func(r chi.Router) {
-					// Reads — always allowed.
 					r.Get("/", h.GetIssue)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
@@ -269,15 +262,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
 
-					// Writes — gated until Phase 3b migrates them.
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
-					r.With(gw).Post("/subscribe", h.SubscribeToIssue)
-					r.With(gw).Post("/unsubscribe", h.UnsubscribeFromIssue)
+					r.Post("/subscribe", h.SubscribeToIssue)
+					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
-					r.With(gw).Post("/reactions", h.AddIssueReaction)
-					r.With(gw).Delete("/reactions", h.RemoveIssueReaction)
+					r.Post("/reactions", h.AddIssueReaction)
+					r.Delete("/reactions", h.RemoveIssueReaction)
 				})
 			})
 
@@ -328,11 +320,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, secretsCi
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
-				gw := middleware.GitlabWritesBlocked(queries)
-				r.Put("/", h.UpdateComment)          // unmounted (Phase 3c)
-				r.Delete("/", h.DeleteComment)       // unmounted (Phase 3c)
-				r.With(gw).Post("/reactions", h.AddReaction)       // 501 (Phase 3d)
-				r.With(gw).Delete("/reactions", h.RemoveReaction)  // 501 (Phase 3d)
+				r.Put("/", h.UpdateComment)
+				r.Delete("/", h.DeleteComment)
+				r.Post("/reactions", h.AddReaction)
+				r.Delete("/reactions", h.RemoveReaction)
 			})
 
 			// Agents
