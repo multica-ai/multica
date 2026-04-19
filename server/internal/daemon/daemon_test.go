@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -235,6 +236,10 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
 	}
+}
+
+func discardTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
@@ -476,5 +481,130 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	// must serialize them so the server is only called once.
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
+	}
+}
+
+func TestResolveControlPlaneCheckoutMatchesRepo(t *testing.T) {
+	sourceRepo := createDaemonTestRepo(t)
+	repoName := repocache.RepoNameFromURL(sourceRepo)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+	})
+	d.cfg.ControlPlaneRepoName = repoName
+	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("seed repo cache: %v", err)
+	}
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+
+	workDir := t.TempDir()
+	path, ok := d.resolveControlPlaneCheckout(context.Background(), Task{
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+		Repos:       []RepoData{{URL: sourceRepo}},
+		Agent:       &AgentData{Name: "Code Executor"},
+	}, workDir, discardTestLogger())
+
+	if !ok {
+		t.Fatal("expected control-plane checkout to succeed")
+	}
+	if want := filepath.Join(workDir, repoName); path != want {
+		t.Fatalf("expected path %q, got %q", want, path)
+	}
+	if !filepath.IsAbs(path) {
+		t.Fatalf("expected absolute path, got %q", path)
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		t.Fatalf("expected checked-out directory at %q, info=%v err=%v", path, info, err)
+	}
+}
+
+func TestResolveControlPlaneCheckoutSkipsEmptyName(t *testing.T) {
+	sourceRepo := createDaemonTestRepo(t)
+	var refreshCalls atomic.Int32
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		refreshCalls.Add(1)
+		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+	})
+
+	path, ok := d.resolveControlPlaneCheckout(context.Background(), Task{
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+		Repos:       []RepoData{{URL: sourceRepo}},
+	}, t.TempDir(), discardTestLogger())
+
+	if ok || path != "" {
+		t.Fatalf("expected no checkout, got ok=%v path=%q", ok, path)
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("expected no refresh calls, got %d", got)
+	}
+}
+
+func TestResolveControlPlaneCheckoutSkipsNoMatch(t *testing.T) {
+	sourceRepo := createDaemonTestRepo(t)
+	var refreshCalls atomic.Int32
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		refreshCalls.Add(1)
+		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+	})
+	d.cfg.ControlPlaneRepoName = "not-" + repocache.RepoNameFromURL(sourceRepo)
+
+	path, ok := d.resolveControlPlaneCheckout(context.Background(), Task{
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+		Repos:       []RepoData{{URL: sourceRepo}},
+	}, t.TempDir(), discardTestLogger())
+
+	if ok || path != "" {
+		t.Fatalf("expected no checkout, got ok=%v path=%q", ok, path)
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("expected no refresh calls, got %d", got)
+	}
+}
+
+func TestResolveControlPlaneCheckoutReturnsFalseWhenEnsureRepoReadyFails(t *testing.T) {
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "refresh failed", http.StatusInternalServerError)
+	})
+	d.cfg.ControlPlaneRepoName = repocache.RepoNameFromURL(sourceRepo)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+
+	path, ok := d.resolveControlPlaneCheckout(context.Background(), Task{
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+		Repos:       []RepoData{{URL: sourceRepo}},
+	}, t.TempDir(), discardTestLogger())
+
+	if ok || path != "" {
+		t.Fatalf("expected ensure failure to skip checkout, got ok=%v path=%q", ok, path)
+	}
+}
+
+func TestResolveControlPlaneCheckoutReturnsFalseWhenCreateWorktreeFails(t *testing.T) {
+	sourceRepo := createDaemonTestRepo(t)
+	repoName := repocache.RepoNameFromURL(sourceRepo)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+	})
+	d.cfg.ControlPlaneRepoName = repoName
+	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("seed repo cache: %v", err)
+	}
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+
+	workDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workDir, repoName), 0o755); err != nil {
+		t.Fatalf("create path collision: %v", err)
+	}
+	path, ok := d.resolveControlPlaneCheckout(context.Background(), Task{
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+		Repos:       []RepoData{{URL: sourceRepo}},
+	}, workDir, discardTestLogger())
+
+	if ok || path != "" {
+		t.Fatalf("expected worktree failure to skip checkout, got ok=%v path=%q", ok, path)
 	}
 }

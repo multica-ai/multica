@@ -492,7 +492,7 @@ func TestCreateWorktreePathCollisionDoesNotLeakBranch(t *testing.T) {
 
 	// Pre-create the target worktree path as a plain non-empty directory.
 	workDir := t.TempDir()
-	dirName := repoNameFromURL(sourceRepo)
+	dirName := RepoNameFromURL(sourceRepo)
 	worktreePath := filepath.Join(workDir, dirName)
 	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 		t.Fatalf("pre-create worktree path: %v", err)

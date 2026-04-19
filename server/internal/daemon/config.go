@@ -20,32 +20,34 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
+	DefaultControlPlaneRepoName  = "shared-ai-context"
 )
 
 // Config holds all daemon configuration.
 type Config struct {
-	ServerBaseURL      string
-	DaemonID           string
-	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
-	DeviceName         string
-	RuntimeName        string
-	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
-	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
-	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini, pi
-	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
-	KeepEnvAfterTask   bool                  // preserve env after task for debugging
-	HealthPort         int                   // local HTTP port for health checks (default: 19514)
-	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
-	GCEnabled          bool                  // enable periodic workspace garbage collection (default: true)
-	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
-	GCOrphanTTL        time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
-	PollInterval       time.Duration
-	HeartbeatInterval  time.Duration
-	AgentTimeout       time.Duration
+	ServerBaseURL        string
+	DaemonID             string
+	LegacyDaemonIDs      []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	DeviceName           string
+	RuntimeName          string
+	CLIVersion           string                // multica CLI version (e.g. "0.1.13")
+	LaunchedBy           string                // "desktop" when spawned by the Electron app, empty for standalone
+	Profile              string                // profile name (empty = default)
+	Agents               map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini, pi
+	WorkspacesRoot       string                // base path for execution envs (default: ~/multica_workspaces)
+	KeepEnvAfterTask     bool                  // preserve env after task for debugging
+	HealthPort           int                   // local HTTP port for health checks (default: 19514)
+	MaxConcurrentTasks   int                   // max tasks running in parallel (default: 20)
+	GCEnabled            bool                  // enable periodic workspace garbage collection (default: true)
+	GCInterval           time.Duration         // how often the GC loop runs (default: 1h)
+	GCTTL                time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
+	GCOrphanTTL          time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
+	ControlPlaneRepoName string                // repo basename used for MULTICA_CONTEXT_REPO auto-checkout
+	PollInterval         time.Duration
+	HeartbeatInterval    time.Duration
+	AgentTimeout         time.Duration
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -280,26 +282,28 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	controlPlaneRepoName := envOrDefault("MULTICA_CONTEXT_REPO_NAME", DefaultControlPlaneRepoName)
 
 	return Config{
-		ServerBaseURL:      serverBaseURL,
-		DaemonID:           daemonID,
-		LegacyDaemonIDs:    legacyDaemonIDs,
-		DeviceName:         deviceName,
-		RuntimeName:        runtimeName,
-		Profile:            profile,
-		Agents:             agents,
-		WorkspacesRoot:     workspacesRoot,
-		KeepEnvAfterTask:   keepEnv,
-		GCEnabled:          gcEnabled,
-		GCInterval:         gcInterval,
-		GCTTL:              gcTTL,
-		GCOrphanTTL:        gcOrphanTTL,
-		HealthPort:         healthPort,
-		MaxConcurrentTasks: maxConcurrentTasks,
-		PollInterval:       pollInterval,
-		HeartbeatInterval:  heartbeatInterval,
-		AgentTimeout:       agentTimeout,
+		ServerBaseURL:        serverBaseURL,
+		DaemonID:             daemonID,
+		LegacyDaemonIDs:      legacyDaemonIDs,
+		DeviceName:           deviceName,
+		RuntimeName:          runtimeName,
+		Profile:              profile,
+		Agents:               agents,
+		WorkspacesRoot:       workspacesRoot,
+		KeepEnvAfterTask:     keepEnv,
+		GCEnabled:            gcEnabled,
+		GCInterval:           gcInterval,
+		GCTTL:                gcTTL,
+		GCOrphanTTL:          gcOrphanTTL,
+		ControlPlaneRepoName: controlPlaneRepoName,
+		HealthPort:           healthPort,
+		MaxConcurrentTasks:   maxConcurrentTasks,
+		PollInterval:         pollInterval,
+		HeartbeatInterval:    heartbeatInterval,
+		AgentTimeout:         agentTimeout,
 	}, nil
 }
 

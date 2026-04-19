@@ -65,6 +65,8 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
+| `MULTICA_CONTEXT_REPO_NAME` | `shared-ai-context` | Repo basename the daemon auto-checks out as the agent control-plane repo |
+| `MULTICA_CONTEXT_REPO` | Auto-injected | Absolute path to the checked-out control-plane repo in each agent session; do not set manually. See [`shared-ai-context/AGENTS.md#control-plane`](https://github.com/n-leezy/shared-ai-context/blob/main/AGENTS.md#control-plane). |
 
 Agent-specific overrides:
 

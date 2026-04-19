@@ -940,6 +940,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
+	controlPlaneRepoPath, hasControlPlaneRepo := d.resolveControlPlaneCheckout(ctx, task, env.WorkDir, taskLog)
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
@@ -956,6 +957,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+	}
+	if hasControlPlaneRepo {
+		agentEnv["MULTICA_CONTEXT_REPO"] = controlPlaneRepoPath
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
@@ -1088,6 +1092,57 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 		return TaskResult{Status: "blocked", Comment: errMsg, EnvRoot: env.RootDir, Usage: usageEntries}, nil
 	}
+}
+
+func (d *Daemon) resolveControlPlaneCheckout(ctx context.Context, task Task, workDir string, taskLog *slog.Logger) (string, bool) {
+	repoName := strings.TrimSpace(d.cfg.ControlPlaneRepoName)
+	if repoName == "" {
+		taskLog.Debug("control-plane repo checkout skipped: repo name is empty")
+		return "", false
+	}
+
+	for _, repo := range task.Repos {
+		repoURL := strings.TrimSpace(repo.URL)
+		if repoURL == "" || repocache.RepoNameFromURL(repoURL) != repoName {
+			continue
+		}
+
+		if err := d.ensureRepoReady(ctx, task.WorkspaceID, repoURL); err != nil {
+			taskLog.Debug("control-plane repo readiness failed",
+				"url", repoURL,
+				"error", err,
+			)
+			return "", false
+		}
+
+		agentName := "agent"
+		if task.Agent != nil && strings.TrimSpace(task.Agent.Name) != "" {
+			agentName = task.Agent.Name
+		}
+		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: task.WorkspaceID,
+			RepoURL:     repoURL,
+			WorkDir:     workDir,
+			AgentName:   agentName,
+			TaskID:      task.ID,
+		})
+		if err != nil {
+			taskLog.Debug("control-plane repo checkout failed",
+				"url", repoURL,
+				"error", err,
+			)
+			return "", false
+		}
+		if result == nil || result.Path == "" {
+			taskLog.Debug("control-plane repo checkout returned no path", "url", repoURL)
+			return "", false
+		}
+
+		return result.Path, true
+	}
+
+	taskLog.Debug("control-plane repo not configured", "repo_name", repoName)
+	return "", false
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the

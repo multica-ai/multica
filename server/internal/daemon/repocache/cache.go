@@ -336,7 +336,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
 
 	// Derive directory name from repo URL.
-	dirName := repoNameFromURL(params.RepoURL)
+	dirName := RepoNameFromURL(params.RepoURL)
 	worktreePath := filepath.Join(params.WorkDir, dirName)
 
 	// If worktree already exists (reused environment from a prior task),
@@ -636,9 +636,9 @@ func excludeFromGit(worktreePath, pattern string) error {
 	return nil
 }
 
-// repoNameFromURL extracts a short directory name from a git remote URL.
+// RepoNameFromURL extracts a short directory name from a git remote URL.
 // e.g. "https://github.com/org/my-repo.git" → "my-repo"
-func repoNameFromURL(url string) string {
+func RepoNameFromURL(url string) string {
 	url = strings.TrimRight(url, "/")
 	url = strings.TrimSuffix(url, ".git")
 
