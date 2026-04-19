@@ -135,8 +135,10 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	runtimeID, err := s.Queries.SelectRuntimeForAgent(ctx, agent.ID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", "agent has no runtimes")
 			return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtimes")
 		}
+		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("select runtime: %w", err)
 	}
 

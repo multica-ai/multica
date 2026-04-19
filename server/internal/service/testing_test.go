@@ -18,9 +18,13 @@ import (
 var (
 	testPool        *pgxpool.Pool
 	testWorkspaceID pgtype.UUID
+	testUserID      pgtype.UUID
 )
 
-const serviceTestWorkspaceSlug = "service-tests"
+const (
+	serviceTestWorkspaceSlug = "service-tests"
+	serviceTestUserEmail     = "service-test@multica.ai"
+)
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
@@ -42,9 +46,25 @@ func TestMain(m *testing.M) {
 
 	testPool = pool
 
-	// Setup a persistent test workspace for service tests.
+	// Setup a persistent test workspace and user for service tests.
 	if err := cleanupServiceTestWorkspace(ctx, pool); err != nil {
 		fmt.Printf("Failed to pre-clean service test workspace: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+
+	var userID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Service Test User", serviceTestUserEmail).Scan(&userID); err != nil {
+		fmt.Printf("Failed to create service test user: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	if err := testUserID.Scan(userID); err != nil {
+		fmt.Printf("Failed to scan user UUID: %v\n", err)
 		pool.Close()
 		os.Exit(1)
 	}
@@ -79,7 +99,10 @@ func TestMain(m *testing.M) {
 }
 
 func cleanupServiceTestWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, serviceTestWorkspaceSlug)
+	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, serviceTestWorkspaceSlug); err != nil {
+		return err
+	}
+	_, err := pool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, serviceTestUserEmail)
 	return err
 }
 
@@ -213,12 +236,11 @@ func (tc *testContext) seedTaskRow(t *testing.T, runtimeID pgtype.UUID, at time.
 	var issueIDStr string
 	if err := testPool.QueryRow(tc.ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
-		SELECT $1, $2, 'done', 'none', 'member',
-		       (SELECT id FROM "user" LIMIT 1),
-		       COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
-		       0
+		VALUES ($1, $2, 'done', 'none', 'member', $3,
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
+		        0)
 		RETURNING id
-	`, tc.workspaceID, issueTitle).Scan(&issueIDStr); err != nil {
+	`, tc.workspaceID, issueTitle, testUserID).Scan(&issueIDStr); err != nil {
 		t.Fatalf("seedTaskRow create issue: %v", err)
 	}
 
