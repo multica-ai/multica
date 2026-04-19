@@ -59,6 +59,7 @@ export const mockAgents: Agent[] = [
         last_used_at: null,
       },
     ],
+    groups: [],
     name: "Claude Agent",
     description: "",
     instructions: "",

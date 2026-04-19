@@ -33,6 +33,56 @@ export interface AgentRuntimeRef {
   last_used_at: string | null;
 }
 
+export interface RuntimeGroupOverride {
+  id: string;
+  group_id: string;
+  runtime_id: string;
+  runtime_name: string;
+  starts_at: string;
+  ends_at: string;
+  created_by: string | null;
+}
+
+export interface RuntimeGroup {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string;
+  runtimes: AgentRuntimeRef[];
+  active_override: RuntimeGroupOverride | null;
+  member_agent_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentRuntimeGroupRef {
+  id: string;
+  name: string;
+  active_override: {
+    runtime_id: string;
+    runtime_name: string;
+    ends_at: string;
+  } | null;
+}
+
+export interface CreateRuntimeGroupRequest {
+  name: string;
+  description?: string;
+  runtime_ids: string[];
+}
+
+export interface UpdateRuntimeGroupRequest {
+  name?: string;
+  description?: string;
+  runtime_ids?: string[];
+}
+
+export interface SetRuntimeGroupOverrideRequest {
+  runtime_id: string;
+  ends_at: string;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -53,6 +103,7 @@ export interface Agent {
   workspace_id: string;
   runtime_ids: string[];
   runtimes: AgentRuntimeRef[];
+  groups: AgentRuntimeGroupRef[];
   name: string;
   description: string;
   instructions: string;
@@ -79,6 +130,7 @@ export interface CreateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_ids: string[];
+  group_ids?: string[];
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];
@@ -92,6 +144,7 @@ export interface UpdateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_ids?: string[];
+  group_ids?: string[];
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];

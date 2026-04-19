@@ -52,6 +52,7 @@ const agent = (runtimeIds: string[]): Agent => ({
     owner_id: "user-1",
     last_used_at: null,
   })),
+  groups: [],
   name: "Test Agent",
   description: "",
   instructions: "",

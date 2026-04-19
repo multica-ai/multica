@@ -55,6 +55,7 @@ const agent: Agent = {
       last_used_at: null,
     },
   ],
+  groups: [],
   name: "Agent",
   description: "",
   instructions: "",
