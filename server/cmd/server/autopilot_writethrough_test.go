@@ -75,12 +75,18 @@ func seedAutopilotWriteThroughFixture(t *testing.T, ctx context.Context, h *hand
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
+			visibility, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, 'autopilot-test-agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+		VALUES ($1, 'autopilot-test-agent', '', 'cloud', '{}'::jsonb, 'workspace', 1, $2)
 		RETURNING id
-	`, wsID, runtimeID, userID).Scan(&agentID); err != nil {
+	`, wsID, userID).Scan(&agentID); err != nil {
 		t.Fatalf("insert agent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id)
+		VALUES ($1, $2)
+	`, agentID, runtimeID); err != nil {
+		t.Fatalf("insert agent_runtime_assignment: %v", err)
 	}
 
 	// Workspace GitLab connection (service PAT only — autopilot resolves to

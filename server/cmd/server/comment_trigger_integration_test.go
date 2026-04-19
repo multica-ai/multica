@@ -74,19 +74,23 @@ func getAgentID(t *testing.T) string {
 // It reuses the same runtime as the first agent.
 func createSecondAgent(t *testing.T) string {
 	t.Helper()
-	// Fetch the first agent to get its runtime_id.
+	// Fetch the first agent to get a runtime to reuse.
 	resp := authRequest(t, "GET", "/api/agents?workspace_id="+testWorkspaceID, nil)
 	var agents []map[string]any
 	readJSON(t, resp, &agents)
 	if len(agents) == 0 {
 		t.Fatal("no agents in test workspace")
 	}
-	runtimeID := agents[0]["runtime_id"].(string)
+	runtimes, _ := agents[0]["runtimes"].([]any)
+	if len(runtimes) == 0 {
+		t.Fatal("first agent has no runtimes")
+	}
+	runtimeID := runtimes[0].(map[string]any)["id"].(string)
 
 	resp = authRequest(t, "POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
-		"name":       "Second Test Agent",
-		"runtime_id": runtimeID,
-		"visibility": "workspace",
+		"name":        "Second Test Agent",
+		"runtime_ids": []string{runtimeID},
+		"visibility":  "workspace",
 	})
 	if resp.StatusCode != 201 {
 		body, _ := io.ReadAll(resp.Body)

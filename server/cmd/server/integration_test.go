@@ -136,13 +136,21 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
-	if _, err := pool.Exec(ctx, `
+	var agentID string
+	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
+			visibility, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
-	`, workspaceID, "Integration Test Agent", runtimeID, userID); err != nil {
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, 'workspace', 1, $3)
+		RETURNING id
+	`, workspaceID, "Integration Test Agent", userID).Scan(&agentID); err != nil {
+		return "", "", err
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id)
+		VALUES ($1, $2)
+	`, agentID, runtimeID); err != nil {
 		return "", "", err
 	}
 
