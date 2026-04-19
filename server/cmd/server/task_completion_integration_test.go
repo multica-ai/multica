@@ -67,3 +67,52 @@ func TestCompleteTaskAutoInReviewPublishesStatusChange(t *testing.T) {
 		t.Fatalf("expected published issue status 'in_review', got %q", got)
 	}
 }
+
+func TestCompleteTaskKeepsNonActiveIssueStatus(t *testing.T) {
+	tests := []string{"backlog", "blocked"}
+
+	for _, status := range tests {
+		t.Run(status, func(t *testing.T) {
+			bus := events.New()
+			queries := db.New(testPool)
+			taskSvc := service.NewTaskService(queries, nil, bus)
+
+			var issueUpdatedEvents []events.Event
+			bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+				issueUpdatedEvents = append(issueUpdatedEvents, e)
+			})
+
+			agentID := getAgentID(t)
+			issueID := createIssueAssignedToAgent(t, "Complete task preserves "+status, agentID)
+			t.Cleanup(func() {
+				clearTasks(t, issueID)
+				resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+				resp.Body.Close()
+			})
+
+			clearTasks(t, issueID)
+			resp := authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{"status": status})
+			resp.Body.Close()
+
+			taskID := insertRunningTask(t, agentID, issueID)
+			result, err := json.Marshal(protocol.TaskCompletedPayload{Output: "Travail terminé"})
+			if err != nil {
+				t.Fatalf("marshal task result: %v", err)
+			}
+			if _, err := taskSvc.CompleteTask(context.Background(), util.ParseUUID(taskID), result, "", ""); err != nil {
+				t.Fatalf("CompleteTask: %v", err)
+			}
+
+			issue, err := queries.GetIssue(context.Background(), util.ParseUUID(issueID))
+			if err != nil {
+				t.Fatalf("GetIssue: %v", err)
+			}
+			if issue.Status != status {
+				t.Fatalf("expected issue status %q to be preserved, got %q", status, issue.Status)
+			}
+			if len(issueUpdatedEvents) != 0 {
+				t.Fatalf("expected no issue.updated event for preserved %q status, got %d", status, len(issueUpdatedEvents))
+			}
+		})
+	}
+}
