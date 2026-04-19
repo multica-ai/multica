@@ -3,7 +3,9 @@ package execenv
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -20,13 +22,13 @@ import (
 // whose mcp_config was cleared between runs no longer sees previously
 // authorized servers. The file is created if absent.
 //
-// Scope note: only the multica-managed block is authoritative. Any
-// [mcp_servers.*] entries the user has in their own ~/.codex/config.toml
-// survive the copy and are still loaded by codex unless their name collides
-// with one we render (in which case the later TOML definition wins). This
-// matches the design brief from #1111 — we authorize per-agent servers, not
-// strip everything the user configured globally.
-func syncMcpServersToml(configPath string, raw json.RawMessage) error {
+// Scope note: the daemon authorizes per-agent MCP servers via the managed
+// block; user-managed [mcp_servers.*] entries in the copied global config
+// survive UNLESS their name collides with one we render. TOML 1.0 rejects
+// duplicate key definitions (the `toml` crate that Codex uses errors on
+// load), so collisions are stripped from the user copy before the managed
+// block is appended — this is required for the generated file to parse.
+func syncMcpServersToml(configPath string, raw json.RawMessage, logger *slog.Logger) error {
 	existing, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read codex config.toml: %w", err)
@@ -55,10 +57,16 @@ func syncMcpServersToml(configPath string, raw json.RawMessage) error {
 		return nil
 	}
 
-	rendered, err := renderMcpServersToml(raw)
+	names, rendered, err := renderMcpServersWithNames(raw, logger)
 	if err != nil {
 		return err
 	}
+
+	// Strip any user-managed [mcp_servers.<name>] sections or
+	// mcp_servers.<name>.* dotted keys for names the managed block will
+	// redefine — TOML 1.0 rejects duplicate table definitions, so the
+	// merged file must not contain both.
+	body = stripUserMcpServerEntries(body, names, logger)
 
 	if !strings.HasSuffix(body, "\n") && len(body) > 0 {
 		body += "\n"
@@ -121,23 +129,43 @@ func findLineAnchored(s, marker string, pos int) int {
 	return -1
 }
 
-// renderMcpServersToml translates the Claude-shaped MCP config JSON into a
-// Codex-shaped TOML fragment with one [mcp_servers.<name>] table per server.
+// renderMcpServersToml is a thin wrapper for callers (and tests) that only
+// need the rendered body.
 func renderMcpServersToml(raw json.RawMessage) (string, error) {
+	_, rendered, err := renderMcpServersWithNames(raw, nil)
+	return rendered, err
+}
+
+// renderMcpServersWithNames translates the Claude-shaped MCP config JSON into
+// a Codex-shaped TOML fragment and returns the sorted set of server names
+// rendered into it. Entries without a `command` field (e.g. HTTP/SSE-transport
+// MCP servers carrying a `url`) are skipped with a warning — Codex currently
+// only supports stdio-transport MCP servers via config.toml.
+func renderMcpServersWithNames(raw json.RawMessage, logger *slog.Logger) ([]string, string, error) {
+	type serverEntry struct {
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+		Cwd     string            `json:"cwd"`
+		URL     string            `json:"url"`
+		Type    string            `json:"type"`
+	}
 	var parsed struct {
-		McpServers map[string]struct {
-			Command string            `json:"command"`
-			Args    []string          `json:"args"`
-			Env     map[string]string `json:"env"`
-			Cwd     string            `json:"cwd"`
-		} `json:"mcpServers"`
+		McpServers map[string]serverEntry `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", fmt.Errorf("parse mcp config: %w", err)
+		return nil, "", fmt.Errorf("parse mcp config: %w", err)
 	}
 
 	names := make([]string, 0, len(parsed.McpServers))
-	for name := range parsed.McpServers {
+	for name, srv := range parsed.McpServers {
+		if srv.Command == "" {
+			if logger != nil {
+				logger.Warn("execenv: skipping non-stdio MCP server (Codex config.toml supports stdio transport only)",
+					"name", name, "type", srv.Type, "url_set", srv.URL != "")
+			}
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -181,7 +209,7 @@ func renderMcpServersToml(raw json.RawMessage) (string, error) {
 			fmt.Fprintf(&b, "cwd = %s\n", quoteTomlString(srv.Cwd))
 		}
 	}
-	return b.String(), nil
+	return names, b.String(), nil
 }
 
 // quoteTomlKey returns a TOML-safe key, quoted when it contains characters
@@ -232,5 +260,112 @@ func quoteTomlString(s string) string {
 		}
 	}
 	b.WriteByte('"')
+	return b.String()
+}
+
+// userMcpServerSectionRe matches a top-level section header of the form
+// `[mcp_servers.<name>]`, capturing <name> either as a bare key (group 1) or
+// a double-quoted key (group 2). Whitespace is allowed inside the brackets
+// per TOML. Single-quoted (literal-string) keys are not matched — they're
+// permitted by TOML but vanishingly rare in practice.
+var userMcpServerSectionRe = regexp.MustCompile(
+	`^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")[ \t]*\][ \t]*$`,
+)
+
+// userMcpServerDottedKeyRe matches a top-level dotted-key assignment of the
+// form `mcp_servers.<name>.<anything> = ...`, capturing <name> the same way
+// as userMcpServerSectionRe.
+var userMcpServerDottedKeyRe = regexp.MustCompile(
+	`^[ \t]*mcp_servers[ \t]*\.[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")[ \t]*\.[^=\s]+[ \t]*=`,
+)
+
+// stripUserMcpServerEntries removes top-level `[mcp_servers.<name>]` sections
+// and standalone `mcp_servers.<name>.*` dotted-key lines from src for any
+// <name> in blocked. Needed because the copied user config.toml can define
+// entries whose names collide with those rendered by the managed block, and
+// TOML 1.0 rejects duplicate table / key definitions — without this strip,
+// the merged file fails to load and Codex refuses to start the task.
+//
+// Name matching uses the TOML-key semantics both writers share: bare keys
+// and double-quoted basic strings. For the double-quoted form, `\"` and
+// `\\` escapes are unquoted before comparison; other escapes are left as-is
+// (Codex/toml crate canonicalizes identically).
+func stripUserMcpServerEntries(src string, blocked []string, logger *slog.Logger) string {
+	if len(blocked) == 0 || src == "" {
+		return src
+	}
+	blockedSet := make(map[string]bool, len(blocked))
+	for _, n := range blocked {
+		blockedSet[n] = true
+	}
+
+	lines := strings.Split(src, "\n")
+	out := make([]string, 0, len(lines))
+	inBlockedSection := false
+	strippedSections := 0
+	strippedDotted := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			// Entering a new section — reset blocked-section state.
+			if m := userMcpServerSectionRe.FindStringSubmatch(line); m != nil {
+				name := m[1]
+				if name == "" {
+					name = unescapeTomlBasic(m[2])
+				}
+				if blockedSet[name] {
+					inBlockedSection = true
+					strippedSections++
+					continue
+				}
+			}
+			inBlockedSection = false
+			out = append(out, line)
+			continue
+		}
+		if inBlockedSection {
+			continue
+		}
+		if m := userMcpServerDottedKeyRe.FindStringSubmatch(line); m != nil {
+			name := m[1]
+			if name == "" {
+				name = unescapeTomlBasic(m[2])
+			}
+			if blockedSet[name] {
+				strippedDotted++
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	if logger != nil && (strippedSections > 0 || strippedDotted > 0) {
+		logger.Info("execenv: stripped colliding user mcp_servers entries from copied codex config.toml",
+			"sections", strippedSections, "dotted_keys", strippedDotted, "names", blocked)
+	}
+	return strings.Join(out, "\n")
+}
+
+// unescapeTomlBasic decodes the two escape sequences we need for key
+// comparison in double-quoted TOML basic strings: `\"` and `\\`. Other
+// escapes are preserved as-written so they round-trip identically to how
+// the TOML parser would interpret them — which is fine for equality
+// comparison against names we renderMcpServersWithNames emits.
+func unescapeTomlBasic(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			if next == '"' || next == '\\' {
+				b.WriteByte(next)
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
 	return b.String()
 }

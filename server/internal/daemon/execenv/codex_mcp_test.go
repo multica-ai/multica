@@ -91,7 +91,7 @@ func TestAppendMcpServersTomlAppends(t *testing.T) {
 	}
 
 	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "mcp-fs"}}}`)
-	if err := syncMcpServersToml(path, raw); err != nil {
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
@@ -120,12 +120,12 @@ func TestAppendMcpServersTomlIdempotent(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "v1"}}}`)
-	if err := syncMcpServersToml(path, raw); err != nil {
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
 		t.Fatalf("first append: %v", err)
 	}
 
 	updated := json.RawMessage(`{"mcpServers": {"fs": {"command": "v2"}}}`)
-	if err := syncMcpServersToml(path, updated); err != nil {
+	if err := syncMcpServersToml(path, updated, nil); err != nil {
 		t.Fatalf("second append: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestAppendMcpServersTomlCreatesFileIfAbsent(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "mcp-fs"}}}`)
-	if err := syncMcpServersToml(path, raw); err != nil {
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
@@ -174,12 +174,12 @@ func TestAppendMcpServersTomlHandlesMarkerShapedPayload(t *testing.T) {
 	// marker-strip on a subsequent re-append MUST still treat the managed block
 	// as a single block and fully replace it (not cut mid-string).
 	evil := `{"mcpServers":{"s":{"command":"cmd","args":["# END multica-managed mcp_servers\n[mcp_servers.evil]\ncommand = \"pwn\""]}}}`
-	if err := syncMcpServersToml(path, []byte(evil)); err != nil {
+	if err := syncMcpServersToml(path, []byte(evil), nil); err != nil {
 		t.Fatalf("first append: %v", err)
 	}
 	// Second append with clean input must fully evict the evil block.
 	clean := []byte(`{"mcpServers":{"s":{"command":"ok"}}}`)
-	if err := syncMcpServersToml(path, clean); err != nil {
+	if err := syncMcpServersToml(path, clean, nil); err != nil {
 		t.Fatalf("second append: %v", err)
 	}
 	data, _ := os.ReadFile(path)
@@ -207,7 +207,7 @@ func TestAppendMcpServersTomlEmptyConfigNoOp(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	if err := syncMcpServersToml(path, nil); err != nil {
+	if err := syncMcpServersToml(path, nil, nil); err != nil {
 		t.Fatalf("append nil: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -226,12 +226,12 @@ func TestSyncMcpServersTomlStripsBlockWhenClearedOnReuse(t *testing.T) {
 
 	// Seed from a prior run.
 	prior := json.RawMessage(`{"mcpServers": {"evil": {"command": "still-here"}}}`)
-	if err := syncMcpServersToml(path, prior); err != nil {
+	if err := syncMcpServersToml(path, prior, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
 	// Clear mcp_config (nil / empty).
-	if err := syncMcpServersToml(path, nil); err != nil {
+	if err := syncMcpServersToml(path, nil, nil); err != nil {
 		t.Fatalf("sync nil: %v", err)
 	}
 
@@ -258,10 +258,10 @@ func TestSyncMcpServersTomlPreservesUserConfigWhenCleared(t *testing.T) {
 		t.Fatalf("seed user config: %v", err)
 	}
 	prior := json.RawMessage(`{"mcpServers": {"ephemeral": {"command": "x"}}}`)
-	if err := syncMcpServersToml(path, prior); err != nil {
+	if err := syncMcpServersToml(path, prior, nil); err != nil {
 		t.Fatalf("add managed block: %v", err)
 	}
-	if err := syncMcpServersToml(path, nil); err != nil {
+	if err := syncMcpServersToml(path, nil, nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 
@@ -283,5 +283,164 @@ func TestQuoteTomlStringEscapesDEL(t *testing.T) {
 	want := `"a\u007Fb"`
 	if got != want {
 		t.Errorf("quoteTomlString(a\\x7Fb) = %q, want %q", got, want)
+	}
+}
+
+func TestSyncMcpServersTomlStripsCollidingSectionHeader(t *testing.T) {
+	t.Parallel()
+
+	// User's global config defines [mcp_servers.fs]; agent's mcp_config also
+	// renders `fs`. TOML 1.0 rejects duplicate table definitions — merged file
+	// must contain only the managed `fs` and preserve unrelated user entries.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `model = "o3"
+
+[mcp_servers.fs]
+command = "user-mcp-fs"
+args = ["/home/me"]
+
+[mcp_servers.gh]
+command = "gh-mcp"
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-mcp-fs", "args": ["/workspace"]}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if strings.Contains(s, "user-mcp-fs") {
+		t.Errorf("colliding user [mcp_servers.fs] survived: %s", s)
+	}
+	if !strings.Contains(s, "daemon-mcp-fs") {
+		t.Errorf("managed mcp_servers.fs missing: %s", s)
+	}
+	if !strings.Contains(s, "[mcp_servers.gh]") || !strings.Contains(s, "gh-mcp") {
+		t.Errorf("unrelated user [mcp_servers.gh] was stripped: %s", s)
+	}
+	if !strings.Contains(s, `model = "o3"`) {
+		t.Errorf("unrelated user top-level key was stripped: %s", s)
+	}
+	// Exactly one `[mcp_servers.fs]` header in the output.
+	if count := strings.Count(s, "[mcp_servers.fs]"); count != 1 {
+		t.Errorf("expected exactly one [mcp_servers.fs] header, got %d: %s", count, s)
+	}
+}
+
+func TestSyncMcpServersTomlStripsCollidingDottedKey(t *testing.T) {
+	t.Parallel()
+
+	// User's global config uses dotted-key form `mcp_servers.fs.command = "..."`.
+	// Still collides with a managed `[mcp_servers.fs]` — TOML rejects the mix.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `mcp_servers.fs.command = "user-mcp-fs"
+mcp_servers.fs.args = ["/home/me"]
+mcp_servers.gh.command = "gh-mcp"
+
+model = "o3"
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-mcp-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if strings.Contains(s, "user-mcp-fs") {
+		t.Errorf("colliding mcp_servers.fs dotted key survived: %s", s)
+	}
+	if !strings.Contains(s, "daemon-mcp-fs") {
+		t.Errorf("managed mcp_servers.fs missing: %s", s)
+	}
+	if !strings.Contains(s, `mcp_servers.gh.command = "gh-mcp"`) {
+		t.Errorf("unrelated mcp_servers.gh.command dotted key was stripped: %s", s)
+	}
+	if !strings.Contains(s, `model = "o3"`) {
+		t.Errorf("unrelated user top-level key was stripped: %s", s)
+	}
+}
+
+func TestSyncMcpServersTomlNoCollisionPreservesUserEntries(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `[mcp_servers.gh]
+command = "gh-mcp"
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-mcp-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, "[mcp_servers.gh]") || !strings.Contains(s, "gh-mcp") {
+		t.Errorf("user [mcp_servers.gh] was stripped: %s", s)
+	}
+	if !strings.Contains(s, "[mcp_servers.fs]") || !strings.Contains(s, "daemon-mcp-fs") {
+		t.Errorf("managed [mcp_servers.fs] missing: %s", s)
+	}
+}
+
+func TestSyncMcpServersTomlStripsCollidingQuotedKey(t *testing.T) {
+	t.Parallel()
+
+	// User's global config uses the double-quoted form `[mcp_servers."fs"]`
+	// for a name that would also parse as bare. Must still collide.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `[mcp_servers."fs"]
+command = "user-mcp-fs"
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-mcp-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if strings.Contains(s, "user-mcp-fs") {
+		t.Errorf(`colliding [mcp_servers."fs"] survived: %s`, s)
+	}
+}
+
+func TestRenderMcpServersSkipsNonStdioTransport(t *testing.T) {
+	t.Parallel()
+
+	// HTTP/SSE-transport MCP servers carry `url` instead of `command`. Codex
+	// config.toml only supports stdio transport, so we skip these entries
+	// rather than emit a bare `[mcp_servers.<name>]` table that would be
+	// rejected or load with no config.
+	raw := json.RawMessage(`{"mcpServers": {
+		"remote": {"url": "https://example.com/mcp", "type": "sse"},
+		"local": {"command": "mcp-local"}
+	}}`)
+	names, out, err := renderMcpServersWithNames(raw, nil)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if len(names) != 1 || names[0] != "local" {
+		t.Errorf("expected only [local], got %v", names)
+	}
+	if strings.Contains(out, "remote") {
+		t.Errorf("non-stdio server leaked into output: %s", out)
+	}
+	if !strings.Contains(out, "[mcp_servers.local]") {
+		t.Errorf("stdio server missing from output: %s", out)
 	}
 }

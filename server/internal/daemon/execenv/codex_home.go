@@ -108,7 +108,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// mcp_config on Reuse actually evicts previously authorized servers.
 	// This is the Codex counterpart to Claude's --mcp-config; see
 	// multica-ai/multica#674 for design context.
-	if err := syncMcpServersToml(filepath.Join(codexHome, "config.toml"), opts.McpConfig); err != nil {
+	if err := syncMcpServersToml(filepath.Join(codexHome, "config.toml"), opts.McpConfig, logger); err != nil {
 		logger.Warn("execenv: codex-home sync mcp_servers failed", "error", err)
 	}
 
