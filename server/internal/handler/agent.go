@@ -57,6 +57,7 @@ type AgentResponse struct {
 	MaxConcurrentTasks int32                  `json:"max_concurrent_tasks"`
 	OwnerID            *string                `json:"owner_id"`
 	Skills             []SkillResponse        `json:"skills"`
+	RuntimeIDs         []string               `json:"runtime_ids"`
 	Runtimes           []AgentRuntimeRef      `json:"runtimes"`
 	Groups             []AgentRuntimeGroupRef `json:"groups"`
 	CreatedAt          string                 `json:"created_at"`
@@ -110,6 +111,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []SkillResponse{},
+		RuntimeIDs:         []string{},
 		Runtimes:           []AgentRuntimeRef{},
 		Groups:             []AgentRuntimeGroupRef{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -144,7 +146,9 @@ func (h *Handler) buildAgentResponse(ctx context.Context, a db.Agent) (AgentResp
 		return resp, fmt.Errorf("list assignments: %w", err)
 	}
 	resp.Runtimes = make([]AgentRuntimeRef, len(assignments))
+	resp.RuntimeIDs = make([]string, len(assignments))
 	for i, asn := range assignments {
+		resp.RuntimeIDs[i] = uuidToString(asn.RuntimeID)
 		resp.Runtimes[i] = AgentRuntimeRef{
 			ID:          uuidToString(asn.RuntimeID),
 			Name:        asn.RuntimeName,
@@ -345,6 +349,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		if rts := runtimesByAgent[aid]; rts != nil {
 			resp.Runtimes = rts
+			ids := make([]string, len(rts))
+			for i, rt := range rts {
+				ids[i] = rt.ID
+			}
+			resp.RuntimeIDs = ids
 		}
 		if grps := groupsByAgent[aid]; grps != nil {
 			resp.Groups = grps
@@ -537,6 +546,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			AgentID: agent.ID,
 			GroupID: gid,
 		}); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				writeError(w, http.StatusBadRequest, "invalid group_id")
+				return
+			}
 			slog.Warn("add agent runtime group failed", "agent_id", uuidToString(agent.ID), "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to assign group")
 			return
@@ -708,6 +722,32 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RuntimeIDs != nil && len(runtimeUUIDs) > 0 && primaryMode != "" {
 		params.RuntimeMode = pgtype.Text{String: primaryMode, Valid: true}
+	} else if req.RuntimeIDs != nil && len(runtimeUUIDs) == 0 {
+		// runtime_ids set to empty — derive mode from groups instead.
+		var groupIDsToCheck []pgtype.UUID
+		if req.GroupIDs != nil {
+			for _, gid := range *req.GroupIDs {
+				groupIDsToCheck = append(groupIDsToCheck, parseUUID(gid))
+			}
+		} else {
+			existing, _ := h.Queries.ListAgentRuntimeGroupsByAgent(r.Context(), parseUUID(id))
+			for _, g := range existing {
+				groupIDsToCheck = append(groupIDsToCheck, g.GroupID)
+			}
+		}
+		for _, gid := range groupIDsToCheck {
+			members, _ := h.Queries.ListRuntimeGroupMembers(r.Context(), gid)
+			if len(members) > 0 {
+				rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+					ID:          members[0].RuntimeID,
+					WorkspaceID: agent.WorkspaceID,
+				})
+				if err == nil {
+					params.RuntimeMode = pgtype.Text{String: rt.RuntimeMode, Valid: true}
+				}
+				break
+			}
+		}
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -781,6 +821,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				AgentID: agent.ID,
 				GroupID: gid,
 			}); err != nil {
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+					writeError(w, http.StatusBadRequest, "invalid group_id")
+					return
+				}
+				slog.Warn("add agent runtime group failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 				writeError(w, http.StatusInternalServerError, "failed to add group link")
 				return
 			}

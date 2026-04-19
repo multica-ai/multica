@@ -17,6 +17,8 @@ import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
 import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
+import { RuntimeGroupsListPage } from "@multica/views/runtime-groups/runtime-groups-list-page";
+import { RuntimeGroupDetailPageRoute } from "./pages/runtime-group-detail-page-route";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage, GitlabTab } from "@multica/views/settings";
 import { Server, GitBranch } from "lucide-react";
@@ -115,6 +117,16 @@ export const appRoutes: RouteObject[] = [
             path: "runtimes",
             element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
             handle: { title: "Runtimes" },
+          },
+          {
+            path: "runtime-groups",
+            element: <RuntimeGroupsListPage />,
+            handle: { title: "Runtime Groups" },
+          },
+          {
+            path: "runtime-groups/:groupId",
+            element: <RuntimeGroupDetailPageRoute />,
+            handle: { title: "Runtime Group" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },

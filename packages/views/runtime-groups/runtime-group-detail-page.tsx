@@ -5,6 +5,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { UpdateRuntimeGroupRequest, SetRuntimeGroupOverrideRequest } from "@multica/core/types";
 import { useNavigation } from "../navigation";
 import { RuntimeGroupDetail } from "./runtime-group-detail";
@@ -46,6 +47,7 @@ export function RuntimeGroupDetailPage({ groupId }: { groupId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runtimeGroupKeys.detail(groupId) });
       qc.invalidateQueries({ queryKey: runtimeGroupKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     },
   });
 
@@ -54,6 +56,7 @@ export function RuntimeGroupDetailPage({ groupId }: { groupId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runtimeGroupKeys.detail(groupId) });
       qc.invalidateQueries({ queryKey: runtimeGroupKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     },
   });
 

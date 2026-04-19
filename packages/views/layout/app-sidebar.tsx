@@ -18,6 +18,7 @@ import {
   ListTodo,
   Bot,
   Monitor,
+  Layers,
   ChevronDown,
   ChevronRight,
   Settings,
@@ -89,6 +90,7 @@ type NavKey =
   | "autopilots"
   | "agents"
   | "runtimes"
+  | "runtimeGroups"
   | "skills"
   | "settings";
 
@@ -106,6 +108,7 @@ const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
 
 const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "runtimes", label: "Runtimes", icon: Monitor },
+  { key: "runtimeGroups", label: "Runtime Groups", icon: Layers },
   { key: "skills", label: "Skills", icon: BookOpenText },
   { key: "settings", label: "Settings", icon: Settings },
 ];
