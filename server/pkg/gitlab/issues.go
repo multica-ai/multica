@@ -85,6 +85,18 @@ func (c *Client) UpdateIssue(ctx context.Context, token string, projectID int64,
 	return &out, nil
 }
 
+// GetIssue fetches a single issue by IID. Returns ErrNotFound (wrapped) when
+// the issue has been destroyed on GitLab, letting callers distinguish the
+// "definitely gone" case from transient errors.
+func (c *Client) GetIssue(ctx context.Context, token string, projectID int64, iid int) (*Issue, error) {
+	var out Issue
+	path := fmt.Sprintf("/projects/%d/issues/%d", projectID, iid)
+	if err := c.do(ctx, http.MethodGet, token, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // DeleteIssue sends DELETE /api/v4/projects/:id/issues/:iid. Treats 404 as
 // success (idempotent delete — if the issue is already gone, that's the
 // desired terminal state).

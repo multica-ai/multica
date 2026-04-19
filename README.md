@@ -171,6 +171,130 @@ See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference
 | Database | PostgreSQL 17 with pgvector |
 | Agent Runtime | Local daemon executing Claude Code, Codex, OpenClaw, OpenCode, Hermes, Gemini, Pi, or Cursor Agent |
 
+## GitLab Integration
+
+Multica can mirror a GitLab project's issues into its own UI. This section explains exactly how that sync works in each direction so you know what updates land instantly, what has latency, and when you need to reach for GitLab labels to express Multica-specific concepts.
+
+### The mental model: GitLab is the source of truth
+
+When a workspace is connected to a GitLab project, the Multica database becomes a **read-through cache** of that project's issues, comments, reactions, labels, and members. GitLab always wins. That means:
+
+- Every write you make in the Multica UI is sent to GitLab **first**, then the cache row is updated with GitLab's response. If GitLab rejects the write (permissions, validation, network), the Multica UI surfaces the failure instead of silently diverging.
+- Every read from the Multica UI is served from the local cache, so the board feels instant. Freshness comes from two backfill paths (below), not from synchronous GitLab calls.
+- If you disconnect a workspace, the cache is wiped. There is no local-only history that outlives the connection.
+
+### Outbound: Multica → GitLab (write-through)
+
+User actions in the Multica UI hit the GitLab REST API before touching the local DB. The write-through covers:
+
+| Action | GitLab API | Notes |
+|---|---|---|
+| Create issue | `POST /projects/:id/issues` | Title, description, assignee, due date, status/priority/agent labels |
+| Update issue (title/description/due) | `PUT /projects/:id/issues/:iid` | Sent on every edit |
+| Change status / priority / agent | `PUT /projects/:id/issues/:iid` | Expressed as label add/remove — see [Label conventions](#label-conventions) |
+| Close / reopen issue | `PUT /projects/:id/issues/:iid` | `state_event=close` / `reopen` |
+| Delete issue | `DELETE /projects/:id/issues/:iid` | Authoritative on connected workspaces — we do **not** fall back to local-only delete if GitLab rejects, because that would leave GitLab and the cache diverged |
+| Add / edit / delete comment | `POST/PUT/DELETE /projects/:id/issues/:iid/notes/:note_id` | |
+| Add / remove reaction (issue) | `POST/DELETE /projects/:id/issues/:iid/award_emoji` | [Emoji translation](#emoji-translation) applies |
+| Add / remove reaction (comment) | `POST/DELETE /projects/:id/issues/:iid/notes/:note_id/award_emoji` | [Emoji translation](#emoji-translation) applies |
+| Subscribe / unsubscribe | `POST /projects/:id/issues/:iid/subscribe` / `unsubscribe` | |
+
+**What you can count on:** a successful save in the Multica UI means the change is already on GitLab. There is no "eventually syncs" delay for outbound writes.
+
+**Token model:** a workspace connects with a **service account PAT** (Maintainer on the project). That token is used for writes by default, so edits attribute to the service account on GitLab. Users can optionally connect their **personal PAT** in Settings — when present, their writes attribute to them on GitLab instead of to the service account. Agents always write through the service account.
+
+### Inbound: GitLab → Multica (webhooks + reconciler)
+
+Two mechanisms keep the cache fresh. They're layered on purpose: the webhook is the fast path, the reconciler is the safety net.
+
+#### 1. Project webhooks (real-time, seconds)
+
+Connect-time registration adds a project webhook subscribed to **Issues events**, **Confidential Issues events**, **Note events**, **Confidential Note events**, **Emoji events**, and **Label events**. Each delivery is persisted to `gitlab_webhook_event` first, then a background worker pool drains the queue and applies events to the cache with a stale-event guard (compare `external_updated_at` to skip replays / out-of-order deliveries).
+
+| Webhook | Applies to cache |
+|---|---|
+| Issue Hook (open/update/close/reopen) | Upsert `issues` row; diff labels; resolve assignee (label-first, then GitLab's native assignee). |
+| Issue Hook (action="delete") | Tear down the cache row (cancel agent tasks, fail autopilot runs, clear attachments). **See caveat below.** |
+| Note Hook | Upsert `comments` row. Non-issue notes (MR / snippet) are ignored. |
+| Emoji Hook | Upsert `issue_reactions` (awardable=Issue) or `comment_reactions` (awardable=Note). |
+| Label Hook | Maintain the workspace's `gitlab_label` directory. |
+
+**Caveat — issue deletion:** project-level webhooks in gitlab.com **do not currently emit destroy events** (this is a system-hook-only capability). The webhook code path is wired and ready, but in practice the reconciler sweep (below) is what catches deletions today.
+
+#### 2. Reconciler sweep (drift catcher, ≤5 min)
+
+A reconciler tick runs every 5 minutes per connected workspace. Each tick does two things:
+
+1. **Incremental upsert**: `ListIssues(state=all, updated_after=<cursor>)` to pick up any webhook deliveries we missed (network loss, worker restart). Stale-event guard prevents clobbering fresher cache rows.
+2. **Deletion sweep**: full `ListIssues(state=all)` → diff cached IIDs against the returned set → for each cached row not in the list, do a targeted `GET /projects/:id/issues/:iid`. Only a confirmed **404** triggers the cache teardown. `200` (the list was stale), `403` (token flake), and `5xx` all skip this pass and retry on the next tick.
+
+The per-issue 404 verification is important: it lets genuinely-empty projects be swept (all the "previously cached" rows 404) while preventing a transient API hiccup from wiping your cache.
+
+### Label conventions
+
+Multica expresses three first-class concepts that GitLab doesn't model directly. They ride on the issue's label list. On connect, Multica bootstraps these labels in the project (the colors are applied to fresh projects; existing labels are left untouched):
+
+| Multica concept | GitLab label | Values |
+|---|---|---|
+| **Status** | `status::<name>` | `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled` |
+| **Priority** | `priority::<name>` | `urgent`, `high`, `medium`, `low`, `none` |
+| **Agent assignee** | `agent::<slug>` | An agent's slug (lowercased name, spaces → hyphens). Mutually exclusive with a human assignee. |
+
+**Sync behavior:**
+
+- **From Multica → GitLab**: changing status in the Multica UI adds the new `status::<new>` label and removes the old one on GitLab. Same for priority and agent assignment.
+- **From GitLab → Multica**: a webhook / reconciler delivery with a new label set recomputes status/priority/agent and updates the cache row. **Adding `~status::in_progress` in the GitLab UI moves the issue in Multica** — no separate workflow needed.
+- **Agent labels win over native assignees**: if an issue carries both `~agent::builder` and a human GitLab assignee, Multica treats it as agent-assigned. This is intentional — the agent label is how Multica expresses "run this autonomously," and the human assignee stays visible on GitLab for audit.
+- **Unlabeled issues**: an issue with no `status::*` label lands in Multica as `backlog`. No priority label → `none`.
+- **Unknown values**: `status::shipping-it` (not in the table above) is passed through to the cache as-is and renders on the issue, but it won't match any Multica column. Stick to the documented values to have the issue appear on your board.
+
+### Emoji translation
+
+Multica's reaction UI emits **unicode** (e.g. `👍`), but GitLab's `award_emoji` API expects **named shortcodes** (e.g. `thumbsup`). Multica maintains a curated translation table of the ~40 emojis surfaced by the default picker (thumbs, heart, reactions, common feelings, status symbols). Translation happens at the wire boundary:
+
+- **Outbound**: the unicode is translated to a shortcode before `POST /award_emoji`. Unicode outside the table falls through to a local-only reaction — it persists in Multica but isn't round-tripped to GitLab.
+- **Inbound**: the shortcode is translated back to unicode before the cache upsert, so the Multica UI always renders the icon.
+
+If you need an emoji that isn't round-tripping, open an issue — the map is extended as new reactions surface.
+
+### What's NOT synced
+
+Being explicit so nothing is a surprise:
+
+- **Merge requests, commits, pipelines, wikis, boards**: not mirrored. Multica's scope is issues + their comments + reactions + subscribers.
+- **Issue due dates**: synced.
+- **Issue weight, milestones, time tracking, custom fields**: not mirrored (yet).
+- **Confidential issues**: respected — if your service token can read confidential issues, they sync; otherwise they don't appear in Multica.
+- **Cross-project references / linked issues**: not mirrored. The cache row stores the parsed markdown in `description`, so `#123` renders as text, not a typed link.
+- **File attachments on issues**: the upload URL is preserved in the description text, so the GitLab-hosted file stays reachable — but Multica doesn't mirror the bytes or re-host them.
+
+### Latency expectations
+
+| Event | Typical visibility in the other system |
+|---|---|
+| Create / edit / close / reopen issue in Multica | Immediate on GitLab (write-through) |
+| Add comment / reaction in Multica | Immediate on GitLab (write-through) |
+| Change status / priority / agent in Multica | Immediate on GitLab (label edit) |
+| Delete issue in Multica | Immediate on GitLab (write-through) |
+| Create / edit / close issue on GitLab | Seconds (webhook) |
+| Add comment / reaction on GitLab | Seconds (webhook) |
+| Add / remove label on GitLab | Seconds (webhook) |
+| **Delete issue on GitLab** | **Up to 5 minutes** (reconciler sweep — webhook doesn't fire) |
+| Add / remove project member on GitLab | Up to 5 minutes (reconciler) |
+| Re-sync after a webhook outage | Self-heals on the next reconciler tick |
+
+If the reconciler notices the webhook stream has gone silent for more than 15 minutes, it flips the connection to `status=error` with a message so the Settings tab can surface it.
+
+### Connection state and failures
+
+A workspace's GitLab connection has three possible states:
+
+- **`connecting`** — initial sync is still running. The cache isn't fully populated yet.
+- **`connected`** — healthy. Webhooks flowing, reconciler ticking.
+- **`error`** — something is wrong. The Settings tab shows the error as a banner and keeps the **Disconnect** button reachable so you can reset. Common causes: service token lost Maintainer access, webhook registration 403'd at connect time, or the webhook stream went silent for 15+ minutes.
+
+Clicking **Disconnect** removes the project webhook from GitLab (best-effort — failure is logged but doesn't block), then cascade-drops the local `workspace_gitlab_connection` row and all its cached issues/comments/reactions/labels.
+
 ## Development
 
 For contributors working on the Multica codebase, see the [Contributing Guide](CONTRIBUTING.md).

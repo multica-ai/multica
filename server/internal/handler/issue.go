@@ -2152,6 +2152,15 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	return true
 }
 
+// CleanupAndDeleteIssue is the exported adapter that satisfies
+// gitlab.IssueDeleter for the webhook worker. The worker can't call the
+// unexported method directly (and handler imports of gitlab would cycle if
+// the interface lived there), so we expose a thin forwarder. No extra logic
+// belongs here — all cleanup responsibilities stay in cleanupAndDeleteIssueRow.
+func (h *Handler) CleanupAndDeleteIssue(ctx context.Context, issue db.Issue) error {
+	return h.cleanupAndDeleteIssueRow(ctx, issue)
+}
+
 // cleanupAndDeleteIssueRow performs the Multica-side cleanup for a deleted
 // issue: cancels agent tasks, fails autopilot runs, removes the cache row,
 // then deletes S3 attachments. Shared between the legacy DeleteIssue path and

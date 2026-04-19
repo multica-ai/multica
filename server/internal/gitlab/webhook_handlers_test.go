@@ -257,8 +257,10 @@ func TestApplyEmojiHookEvent_UpsertsReaction(t *testing.T) {
 	pool.QueryRow(context.Background(),
 		`SELECT emoji FROM issue_reaction WHERE issue_id = $1::uuid AND gitlab_award_id = 500`,
 		uuidString(row.ID)).Scan(&emoji)
-	if emoji != "thumbsup" {
-		t.Errorf("emoji = %q", emoji)
+	// Webhook delivers GitLab's shortcode; cache stores the translated unicode
+	// so the frontend renders natively.
+	if emoji != "👍" {
+		t.Errorf("emoji = %q, want 👍 (translated from 'thumbsup')", emoji)
 	}
 }
 
@@ -611,8 +613,9 @@ func TestApplyEmojiHookEvent_NoteLevelAwardUpsertsCommentReaction(t *testing.T) 
 	if err != nil {
 		t.Fatalf("select comment_reaction: %v", err)
 	}
-	if emoji != "tada" {
-		t.Errorf("emoji = %q, want tada", emoji)
+	// Webhook delivers "tada"; cache stores translated unicode 🎉.
+	if emoji != "🎉" {
+		t.Errorf("emoji = %q, want 🎉 (translated from 'tada')", emoji)
 	}
 	if actorType.Valid {
 		t.Errorf("actor_type = %+v, want NULL for unmapped user", actorType)
@@ -905,5 +908,223 @@ func TestApplyIssueHookEvent_DoesNotEnqueueOnBacklogAgentAssignment(t *testing.T
 
 	if got := enq.callCount(); got != 0 {
 		t.Fatalf("EnqueueTaskForIssue calls = %d, want 0 (backlog status should park the agent)", got)
+	}
+}
+
+// recordingDeleter implements IssueDeleter. It records each issue handed to
+// it; returning nil matches the happy path so tests can assert on call shape
+// without touching the real handler's S3 / autopilot / task cleanup.
+type recordingDeleter struct {
+	mu    sync.Mutex
+	calls []string
+	err   error
+}
+
+func (r *recordingDeleter) CleanupAndDeleteIssue(_ context.Context, issue db.Issue) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, uuidString(issue.ID))
+	return r.err
+}
+
+func (r *recordingDeleter) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+// TestApplyIssueHookEvent_DeleteActionCallsIssueDeleter asserts the "proper"
+// R7 fix: when GitLab sends an Issue Hook with object_attributes.action =
+// "delete", the handler hands the cached row to the injected IssueDeleter
+// (which in production forwards to handler.cleanupAndDeleteIssueRow). This
+// closes the gap where issues deleted on gitlab.com lingered in the Multica
+// cache indefinitely.
+func TestApplyIssueHookEvent_DeleteActionCallsIssueDeleter(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	// Seed a cache row to delete.
+	seeded, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 950, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 7, Valid: true},
+		Title:             "To be deleted",
+		Status:            "todo",
+		Priority:          "none",
+		ExternalUpdatedAt: parseTS("2026-04-17T09:00:00Z"),
+	})
+	if err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+
+	del := &recordingDeleter{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  wsUUID,
+		ProjectID:    7,
+		IssueDeleter: del,
+	}
+
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 950,
+			"title": "To be deleted",
+			"state": "opened",
+			"action": "delete",
+			"updated_at": "2026-04-17T10:00:00Z"
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := del.callCount(); got != 1 {
+		t.Fatalf("CleanupAndDeleteIssue calls = %d, want 1", got)
+	}
+	if del.calls[0] != uuidString(seeded.ID) {
+		t.Errorf("deleted issue_id = %q, want %q", del.calls[0], uuidString(seeded.ID))
+	}
+}
+
+// TestApplyIssueHookEvent_DeleteActionNoOpWhenRowMissing asserts that a delete
+// event for an uncached issue (GitLab sent a delete for something Multica
+// never saw, or the cache row was already torn down) is silently acknowledged.
+// Returning a non-nil error would trap the event in retry loops forever.
+func TestApplyIssueHookEvent_DeleteActionNoOpWhenRowMissing(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	queries := db.New(pool)
+
+	del := &recordingDeleter{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  mustPGUUID(t, wsID),
+		ProjectID:    7,
+		IssueDeleter: del,
+	}
+
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 951,
+			"action": "delete",
+			"updated_at": "2026-04-17T10:00:00Z"
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := del.callCount(); got != 0 {
+		t.Fatalf("CleanupAndDeleteIssue calls = %d, want 0 (missing cache row)", got)
+	}
+}
+
+// TestApplyIssueHookEvent_DeleteActionSkipsStaleGuard asserts that a delete
+// event is NOT suppressed by the stale-event check. The incoming payload's
+// updated_at may be older than the cached row's external_updated_at (GitLab
+// batches updates, or a late delivery races with a recent write-through),
+// but a delete is terminal: we must tear the row down regardless. Without
+// this guard bypass, a delete arriving after the last update would be a
+// no-op and the row would linger indefinitely.
+func TestApplyIssueHookEvent_DeleteActionSkipsStaleGuard(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	// Cache row is newer than the incoming delete event.
+	seeded, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 952, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 7, Valid: true},
+		Title:             "Newer in cache",
+		Status:            "todo",
+		Priority:          "none",
+		ExternalUpdatedAt: parseTS("2026-04-17T12:00:00Z"),
+	})
+	if err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+
+	del := &recordingDeleter{}
+	deps := WebhookDeps{
+		Queries:      queries,
+		WorkspaceID:  wsUUID,
+		ProjectID:    7,
+		IssueDeleter: del,
+	}
+
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 952,
+			"action": "delete",
+			"updated_at": "2026-04-17T09:00:00Z"
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	if got := del.callCount(); got != 1 {
+		t.Fatalf("CleanupAndDeleteIssue calls = %d, want 1 (stale guard must not suppress delete)", got)
+	}
+	if del.calls[0] != uuidString(seeded.ID) {
+		t.Errorf("deleted issue_id = %q, want %q", del.calls[0], uuidString(seeded.ID))
+	}
+}
+
+// TestApplyIssueHookEvent_DeleteActionNoOpWhenDeleterUnwired asserts backward
+// compatibility: if the worker wasn't wired with an IssueDeleter (e.g. an
+// older deployment or a test fixture that only cares about upserts), a delete
+// event is acknowledged without error. The cache row stays in place — same
+// behavior as before this fix — rather than trapping the event in retries.
+func TestApplyIssueHookEvent_DeleteActionNoOpWhenDeleterUnwired(t *testing.T) {
+	pool := connectTestPool(t)
+	wsID := makeWorkspace(t, pool)
+	wsUUID := mustPGUUID(t, wsID)
+	queries := db.New(pool)
+
+	if _, err := queries.UpsertIssueFromGitlab(context.Background(), db.UpsertIssueFromGitlabParams{
+		WorkspaceID:       wsUUID,
+		GitlabIid:         pgtype.Int4{Int32: 953, Valid: true},
+		GitlabProjectID:   pgtype.Int8{Int64: 7, Valid: true},
+		Title:             "Will survive — deleter unwired",
+		Status:            "todo",
+		Priority:          "none",
+		ExternalUpdatedAt: parseTS("2026-04-17T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+
+	// No IssueDeleter wired.
+	deps := WebhookDeps{
+		Queries:     queries,
+		WorkspaceID: wsUUID,
+		ProjectID:   7,
+	}
+
+	body := []byte(`{
+		"object_kind": "issue",
+		"object_attributes": {
+			"iid": 953,
+			"action": "delete",
+			"updated_at": "2026-04-17T10:00:00Z"
+		}
+	}`)
+	if err := ApplyIssueHookEvent(context.Background(), deps, body); err != nil {
+		t.Fatalf("ApplyIssueHookEvent: %v", err)
+	}
+
+	// Cache row should still exist.
+	if _, err := queries.GetIssueByGitlabIID(context.Background(), db.GetIssueByGitlabIIDParams{
+		WorkspaceID: wsUUID,
+		GitlabIid:   pgtype.Int4{Int32: 953, Valid: true},
+	}); err != nil {
+		t.Fatalf("cache row should survive when IssueDeleter is nil: %v", err)
 	}
 }

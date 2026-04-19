@@ -297,6 +297,60 @@ func (q *Queries) GetIssueReactionByGitlabAwardID(ctx context.Context, gitlabAwa
 	return i, err
 }
 
+const listCachedGitlabIssues = `-- name: ListCachedGitlabIssues :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, gitlab_iid, gitlab_project_id, external_updated_at, gitlab_issue_id FROM issue
+WHERE workspace_id = $1 AND gitlab_iid IS NOT NULL
+`
+
+// Used by the reconciler's deletion sweep: we diff the returned IIDs against
+// the set currently present in GitLab and tear down any cached rows that have
+// no counterpart upstream. Returns full issue rows because the deleter needs
+// the row to cancel agent tasks, fail autopilot runs, and clean up S3 before
+// the DELETE itself runs.
+func (q *Queries) ListCachedGitlabIssues(ctx context.Context, workspaceID pgtype.UUID) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listCachedGitlabIssues, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.GitlabIid,
+			&i.GitlabProjectID,
+			&i.ExternalUpdatedAt,
+			&i.GitlabIssueID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGitlabLabels = `-- name: ListGitlabLabels :many
 SELECT workspace_id, gitlab_label_id, name, color, description, external_updated_at FROM gitlab_label
 WHERE workspace_id = $1
@@ -628,6 +682,21 @@ func (q *Queries) UpsertGitlabProjectMember(ctx context.Context, arg UpsertGitla
 
 const upsertIssueFromGitlab = `-- name: UpsertIssueFromGitlab :one
 
+WITH existing AS (
+    SELECT number FROM issue
+    WHERE workspace_id = $1 AND gitlab_iid = $2
+),
+next_num AS (
+    UPDATE workspace SET issue_counter = issue_counter + 1
+    WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM existing)
+    RETURNING issue_counter
+),
+assigned AS (
+    SELECT COALESCE(
+        (SELECT number FROM existing),
+        (SELECT issue_counter FROM next_num)
+    )::int AS num
+)
 INSERT INTO issue (
     workspace_id,
     gitlab_iid,
@@ -642,9 +711,10 @@ INSERT INTO issue (
     creator_type,
     creator_id,
     due_date,
-    external_updated_at
+    external_updated_at,
+    number
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, (SELECT num FROM assigned))
 ON CONFLICT (workspace_id, gitlab_iid) WHERE gitlab_iid IS NOT NULL DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
@@ -680,6 +750,14 @@ type UpsertIssueFromGitlabParams struct {
 }
 
 // issue cache upserts ------------------------------------------------------
+// On INSERT: atomically allocate issue.number by incrementing the workspace's
+// issue_counter. The `next_num` CTE only fires when `existing` is empty
+// (new row), so re-upserts of an already-cached issue don't consume counter
+// values. On UPDATE: `number` is omitted from the SET clause so the value
+// assigned on first insert is preserved.
+//
+// Without this, INSERTs fell back to the column DEFAULT of 0 and the second
+// GitLab-synced issue in any workspace collided on uq_issue_workspace_number.
 func (q *Queries) UpsertIssueFromGitlab(ctx context.Context, arg UpsertIssueFromGitlabParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, upsertIssueFromGitlab,
 		arg.WorkspaceID,

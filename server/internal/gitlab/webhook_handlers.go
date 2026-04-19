@@ -22,6 +22,14 @@ type TaskEnqueuer interface {
 	EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
+// IssueDeleter is the minimal surface the webhook handlers need to tear down
+// a locally cached issue when GitLab reports the source issue as destroyed.
+// Kept as an interface to avoid importing internal/handler (which would be
+// a package cycle) and to let tests supply a recording stub.
+type IssueDeleter interface {
+	CleanupAndDeleteIssue(ctx context.Context, issue db.Issue) error
+}
+
 // WebhookDeps is what every per-event handler needs. The worker constructs
 // this once per event.
 //
@@ -35,12 +43,18 @@ type TaskEnqueuer interface {
 // agent task after the upsert if the assignment changed to a (new) agent
 // — mirroring the write-through path in handler/issue.go. When nil, the
 // webhook path applies cache changes but does NOT spawn agent work.
+//
+// IssueDeleter is optional: when non-nil, ApplyIssueHookEvent tears down the
+// cache row (agent tasks, autopilot runs, S3 attachments) when the hook
+// reports action="delete". When nil, delete hooks are no-ops — matching
+// pre-Phase-5 behavior where cache rows lingered after GitLab deletions.
 type WebhookDeps struct {
 	Queries      *db.Queries
 	WorkspaceID  pgtype.UUID
 	ProjectID    int64
 	Resolver     *Resolver
 	TaskEnqueuer TaskEnqueuer
+	IssueDeleter IssueDeleter
 }
 
 // issueHookPayload is the subset of the Issue Hook body we read.
@@ -52,7 +66,12 @@ type issueHookPayload struct {
 		State       string `json:"state"`
 		UpdatedAt   string `json:"updated_at"`
 		DueDate     string `json:"due_date"`
-		Labels      []struct {
+		// Action values GitLab sends: "open", "close", "reopen", "update",
+		// "delete". We only branch on "delete" — everything else falls through
+		// to the shared upsert path so create/update/reopen/close all go
+		// through TranslateIssue as before.
+		Action string `json:"action"`
+		Labels []struct {
 			Title string `json:"title"`
 		} `json:"labels"`
 	} `json:"object_attributes"`
@@ -90,6 +109,26 @@ func ApplyIssueHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("load existing issue cache row: %w", err)
 	}
+
+	// Deletion is terminal: once GitLab destroys the issue the IID can be
+	// reused for a fresh issue, so we must tear down the cache row before any
+	// other handling (no stale-event gate, no upsert fallthrough). Missing
+	// cache row or missing IssueDeleter → no-op: either there's nothing to
+	// delete locally, or the worker wasn't wired with a deleter and we
+	// preserve pre-wiring behavior. Returning non-nil would retry forever.
+	if p.ObjectAttributes.Action == "delete" {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if deps.IssueDeleter == nil {
+			return nil
+		}
+		if err := deps.IssueDeleter.CleanupAndDeleteIssue(ctx, existing); err != nil {
+			return fmt.Errorf("delete issue from webhook: %w", err)
+		}
+		return nil
+	}
+
 	// Stale-event check: if cache row exists and is at least as new, skip.
 	if err == nil && existing.ExternalUpdatedAt.Valid && !existing.ExternalUpdatedAt.Time.Before(updatedAt) {
 		return nil
@@ -357,6 +396,15 @@ func ApplyEmojiHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 		glUser = pgtype.Int8{Int64: p.User.ID, Valid: true}
 	}
 
+	// Translate GitLab's named shortcode back to the unicode Multica stores.
+	// Unmapped shortcodes fall back to the raw shortcode string — the cache
+	// row still persists, the frontend just renders the literal text until
+	// the shortcode is added to emojiUnicodeToShortcode.
+	cacheEmoji := p.ObjectAttributes.Name
+	if unicode, ok := EmojiShortcodeToUnicode(p.ObjectAttributes.Name); ok {
+		cacheEmoji = unicode
+	}
+
 	switch p.ObjectAttributes.AwardableType {
 	case "Issue":
 		parent, err := deps.Queries.GetIssueByGitlabID(ctx, db.GetIssueByGitlabIDParams{
@@ -372,7 +420,7 @@ func ApplyEmojiHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 			ActorType:         actorType,
 			ActorID:           actorID,
 			GitlabActorUserID: glUser,
-			Emoji:             p.ObjectAttributes.Name,
+			Emoji:             cacheEmoji,
 			GitlabAwardID:     pgtype.Int8{Int64: p.ObjectAttributes.ID, Valid: true},
 			ExternalUpdatedAt: parseTS(p.ObjectAttributes.UpdatedAt),
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -391,7 +439,7 @@ func ApplyEmojiHookEvent(ctx context.Context, deps WebhookDeps, body []byte) err
 			ActorType:         actorType,
 			ActorID:           actorID,
 			GitlabActorUserID: glUser,
-			Emoji:             p.ObjectAttributes.Name,
+			Emoji:             cacheEmoji,
 			GitlabAwardID:     pgtype.Int8{Int64: p.ObjectAttributes.ID, Valid: true},
 			ExternalUpdatedAt: parseTS(p.ObjectAttributes.UpdatedAt),
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {

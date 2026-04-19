@@ -18,8 +18,11 @@ ORDER BY model;
 -- atq.created_at (task enqueue time), so tasks that queue one day and execute
 -- the next are attributed to the day tokens were actually produced. The since
 -- cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+--
+-- Bucketing is pinned to UTC (see ListRuntimeUsage for the rationale) so the
+-- same row lands in the same bucket regardless of the DB server's session TZ.
 SELECT
-    DATE(tu.created_at) AS date,
+    (tu.created_at AT TIME ZONE 'UTC')::date AS date,
     tu.model,
     SUM(tu.input_tokens)::bigint AS total_input_tokens,
     SUM(tu.output_tokens)::bigint AS total_output_tokens,
@@ -30,13 +33,14 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
-GROUP BY DATE(tu.created_at), tu.model
-ORDER BY DATE(tu.created_at) DESC, tu.model;
+  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz, 'UTC')
+GROUP BY (tu.created_at AT TIME ZONE 'UTC')::date, tu.model
+ORDER BY (tu.created_at AT TIME ZONE 'UTC')::date DESC, tu.model;
 
 -- name: GetWorkspaceUsageSummary :many
 -- Filter by tu.created_at (usage report time), aligned to start-of-day, so
 -- `days=N` is interpreted as N full calendar days like the other usage queries.
+-- Pinned to UTC for cross-environment stability (see GetWorkspaceUsageByDay).
 SELECT
     tu.model,
     SUM(tu.input_tokens)::bigint AS total_input_tokens,
@@ -48,7 +52,7 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz, 'UTC')
 GROUP BY tu.model
 ORDER BY (SUM(tu.input_tokens) + SUM(tu.output_tokens)) DESC;
 

@@ -46,7 +46,9 @@ func TestAddReaction_WriteThroughHumanCallsGitLab(t *testing.T) {
 		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"heart"}`))
+	// Frontend sends the unicode emoji; backend translates to GitLab's
+	// "heart" shortcode before the API call. Cache stores the unicode.
+	req := httptest.NewRequest(http.MethodPost, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"❤️"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
@@ -66,13 +68,17 @@ func TestAddReaction_WriteThroughHumanCallsGitLab(t *testing.T) {
 	}
 
 	var count int
+	var cachedEmoji string
 	if err := testPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM comment_reaction WHERE comment_id = $1 AND gitlab_award_id = 9950`,
-		commentID).Scan(&count); err != nil {
+		`SELECT COUNT(*), COALESCE(MAX(emoji), '') FROM comment_reaction WHERE comment_id = $1 AND gitlab_award_id = 9950`,
+		commentID).Scan(&count, &cachedEmoji); err != nil {
 		t.Fatalf("query cache row: %v", err)
 	}
 	if count != 1 {
 		t.Errorf("cache row missing with gitlab_award_id=9950, count=%d", count)
+	}
+	if cachedEmoji != "❤️" {
+		t.Errorf("cache emoji = %q, want ❤️ (unicode, not shortcode)", cachedEmoji)
 	}
 }
 
@@ -175,7 +181,7 @@ func TestAddReaction_WriteThroughGitLabErrorReturns502(t *testing.T) {
 		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"thumbsup"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/comments/"+commentID+"/reactions", strings.NewReader(`{"emoji":"👍"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)

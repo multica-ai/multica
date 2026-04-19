@@ -148,13 +148,21 @@ func main() {
 		// TaskEnqueuer lets the issue-hook spawn agent tasks when a human
 		// assigns ~agent::<slug> from gitlab.com (Phase 4), closing the gap
 		// between the REST write-through path and webhook-initiated updates.
+		// IssueDeleter lets the issue-hook tear down the local cache row
+		// when GitLab reports action="delete" — mirrors the handler's
+		// write-through delete path so GitLab-originated deletions don't
+		// leave orphaned cache rows.
 		webhookWorker := gitlabsync.NewWebhookWorker(glQueries, pool, 5, 250*time.Millisecond).
 			WithDecrypter(decrypter).
-			WithTaskEnqueuer(taskSvc)
+			WithTaskEnqueuer(taskSvc).
+			WithIssueDeleter(h)
 		go webhookWorker.Run(serverCtx)
 
-		// Reconciler — 5-minute drift catcher.
-		reconciler := gitlabsync.NewReconciler(glQueries, gitlabClient, decrypter)
+		// Reconciler — 5-minute drift catcher. IssueDeleter lets the tick
+		// also detect issues destroyed on GitLab (project webhooks don't
+		// fire on destroy) and tear down their cache rows.
+		reconciler := gitlabsync.NewReconciler(glQueries, gitlabClient, decrypter).
+			WithIssueDeleter(h)
 		go reconciler.Run(serverCtx)
 	}
 

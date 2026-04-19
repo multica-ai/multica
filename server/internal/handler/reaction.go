@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -71,26 +72,33 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	// then the returned award is upserted into the cache. Agent reactions skip
 	// GitLab entirely and fall through to the legacy Multica-only path —
 	// GitLab's award_emoji endpoint can't attribute awards to Multica agents.
+	//
+	// Unicode emojis outside our translation map also fall through to the
+	// legacy Multica-only path — GitLab's award_emoji requires a named
+	// shortcode, and we don't have one for arbitrary picks.
 	if h.GitlabEnabled && h.GitlabResolver != nil && actorType != "agent" {
-		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), comment.WorkspaceID)
-		if wsErr == nil {
-			issue, issueErr := h.Queries.GetIssue(r.Context(), comment.IssueID)
-			if issueErr != nil {
-				slog.Error("load parent issue for gitlab reaction write-through",
-					"error", issueErr, "comment_id", commentId)
-				writeError(w, http.StatusInternalServerError, "failed to load issue")
+		if shortcode, ok := gitlabsync.EmojiUnicodeToShortcode(req.Emoji); ok {
+			_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), comment.WorkspaceID)
+			if wsErr == nil {
+				issue, issueErr := h.Queries.GetIssue(r.Context(), comment.IssueID)
+				if issueErr != nil {
+					slog.Error("load parent issue for gitlab reaction write-through",
+						"error", issueErr, "comment_id", commentId)
+					writeError(w, http.StatusInternalServerError, "failed to load issue")
+					return
+				}
+				if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid || !comment.GitlabNoteID.Valid {
+					slog.Error("gitlab connected workspace but comment/issue missing gitlab refs",
+						"comment_id", commentId, "workspace_id", workspaceID)
+					writeError(w, http.StatusBadGateway, "comment or issue not linked to gitlab")
+					return
+				}
+				h.addCommentReactionWriteThrough(w, r, comment, issue, req.Emoji, shortcode, actorType, actorID, workspaceID, commentId)
 				return
 			}
-			if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid || !comment.GitlabNoteID.Valid {
-				slog.Error("gitlab connected workspace but comment/issue missing gitlab refs",
-					"comment_id", commentId, "workspace_id", workspaceID)
-				writeError(w, http.StatusBadGateway, "comment or issue not linked to gitlab")
-				return
-			}
-			h.addCommentReactionWriteThrough(w, r, comment, issue, req.Emoji, actorType, actorID, workspaceID, commentId)
-			return
+			// wsErr != nil → fall through to legacy path (non-connected workspace).
 		}
-		// wsErr != nil → fall through to legacy path (non-connected workspace).
+		// Unsupported emoji → fall through to Multica-only path.
 	}
 
 	reaction, err := h.Queries.AddReaction(r.Context(), db.AddReactionParams{
@@ -141,7 +149,7 @@ func (h *Handler) addCommentReactionWriteThrough(
 	r *http.Request,
 	comment db.Comment,
 	issue db.Issue,
-	emoji string,
+	unicodeEmoji, gitlabShortcode string,
 	actorType, actorID, workspaceID, commentID string,
 ) {
 	ctx := r.Context()
@@ -158,7 +166,7 @@ func (h *Handler) addCommentReactionWriteThrough(
 		issue.GitlabProjectID.Int64,
 		int(issue.GitlabIid.Int32),
 		comment.GitlabNoteID.Int64,
-		emoji,
+		gitlabShortcode,
 	)
 	if err != nil {
 		slog.Error("gitlab create note award_emoji", "error", err, "comment_id", commentID)
@@ -172,13 +180,16 @@ func (h *Handler) addCommentReactionWriteThrough(
 	}
 	externalUpdatedAt := parseGitlabTS(award.UpdatedAt)
 
+	// Cache stores unicode (Multica convention) so the frontend renders the
+	// emoji natively. award.Name is the GitLab shortcode — write the user's
+	// original unicode instead.
 	row, upErr := h.Queries.UpsertCommentReactionFromGitlab(ctx, db.UpsertCommentReactionFromGitlabParams{
 		WorkspaceID:       comment.WorkspaceID,
 		CommentID:         comment.ID,
 		ActorType:         pgtype.Text{String: actorType, Valid: actorType != ""},
 		ActorID:           parseUUID(actorID),
 		GitlabActorUserID: glActor,
-		Emoji:             award.Name,
+		Emoji:             unicodeEmoji,
 		GitlabAwardID:     pgtype.Int8{Int64: award.ID, Valid: true},
 		ExternalUpdatedAt: externalUpdatedAt,
 	})

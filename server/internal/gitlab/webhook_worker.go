@@ -36,6 +36,11 @@ type WebhookWorker struct {
 	// gitlab.com spawns a task on the same path as the POST/PATCH route
 	// in handler/issue.go. Wired by cmd/server/main.go.
 	taskEnqueuer TaskEnqueuer
+	// issueDeleter is optional. When non-nil, ApplyIssueHookEvent tears down
+	// the local cache row on action="delete" events (cancels agent tasks,
+	// fails autopilot runs, clears attachments) — matching the handler's
+	// write-through delete path. Wired by cmd/server/main.go.
+	issueDeleter IssueDeleter
 }
 
 // NewWebhookWorker returns a worker that runs `numWorkers` goroutines and
@@ -81,6 +86,17 @@ func (w *WebhookWorker) WithDecrypter(d TokenDecrypter) *WebhookWorker {
 func (w *WebhookWorker) WithTaskEnqueuer(te TaskEnqueuer) *WebhookWorker {
 	if te != nil {
 		w.taskEnqueuer = te
+	}
+	return w
+}
+
+// WithIssueDeleter installs an IssueDeleter on the worker so the issue-hook
+// handler can tear down the local cache row on GitLab issue deletion.
+// Optional; when omitted, delete events are acknowledged but the cache row
+// is left in place — preserving pre-wiring behavior.
+func (w *WebhookWorker) WithIssueDeleter(d IssueDeleter) *WebhookWorker {
+	if d != nil {
+		w.issueDeleter = d
 	}
 	return w
 }
@@ -163,6 +179,7 @@ func (w *WebhookWorker) processOne(ctx context.Context) (bool, error) {
 		ProjectID:    conn.GitlabProjectID,
 		Resolver:     resolver,
 		TaskEnqueuer: w.taskEnqueuer,
+		IssueDeleter: w.issueDeleter,
 	}
 
 	if err := dispatchWebhookEvent(ctx, deps, row.EventType, row.Payload); err != nil {

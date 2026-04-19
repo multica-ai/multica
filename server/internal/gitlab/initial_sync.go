@@ -330,13 +330,20 @@ func syncOneIssue(
 		if av.GitlabUserID != 0 {
 			glUser = pgtype.Int8{Int64: av.GitlabUserID, Valid: true}
 		}
+		// Translate GitLab's shortcode to unicode for the cache — matches
+		// the webhook inbound path's convention. Unmapped shortcodes
+		// persist as-is (renders as text until the map is extended).
+		cacheEmoji := av.Emoji
+		if unicode, ok := EmojiShortcodeToUnicode(av.Emoji); ok {
+			cacheEmoji = unicode
+		}
 		if _, err := deps.Queries.UpsertIssueReactionFromGitlab(ctx, db.UpsertIssueReactionFromGitlabParams{
 			WorkspaceID:       wsUUID,
 			IssueID:           row.ID,
 			ActorType:         actorType,
 			ActorID:           actorID,
 			GitlabActorUserID: glUser,
-			Emoji:             av.Emoji,
+			Emoji:             cacheEmoji,
 			GitlabAwardID:     pgtype.Int8{Int64: a.ID, Valid: true},
 			ExternalUpdatedAt: parseTS(av.UpdatedAt),
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {

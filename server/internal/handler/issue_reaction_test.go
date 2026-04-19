@@ -36,7 +36,9 @@ func TestAddIssueReaction_WriteThroughHumanCallsGitLab(t *testing.T) {
 	defer testPool.Exec(ctx, `DELETE FROM issue_reaction WHERE issue_id = $1`, issueID)
 	defer testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/"+issueID+"/reactions", strings.NewReader(`{"emoji":"thumbsup"}`))
+	// Frontend sends the unicode emoji; backend translates to GitLab's
+	// "thumbsup" shortcode before the API call. Cache stores the unicode.
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/"+issueID+"/reactions", strings.NewReader(`{"emoji":"👍"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
@@ -55,17 +57,21 @@ func TestAddIssueReaction_WriteThroughHumanCallsGitLab(t *testing.T) {
 		t.Errorf("path = %s", capturedPath)
 	}
 	if capturedBody["name"] != "thumbsup" {
-		t.Errorf("body name = %v, want thumbsup", capturedBody["name"])
+		t.Errorf("body name = %v, want thumbsup (translated from 👍)", capturedBody["name"])
 	}
 
 	var count int
+	var cachedEmoji string
 	if err := testPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM issue_reaction WHERE issue_id = $1 AND gitlab_award_id = 9901`,
-		issueID).Scan(&count); err != nil {
+		`SELECT COUNT(*), COALESCE(MAX(emoji), '') FROM issue_reaction WHERE issue_id = $1 AND gitlab_award_id = 9901`,
+		issueID).Scan(&count, &cachedEmoji); err != nil {
 		t.Fatalf("query cache row: %v", err)
 	}
 	if count != 1 {
 		t.Errorf("cache row missing with gitlab_award_id=9901, count=%d", count)
+	}
+	if cachedEmoji != "👍" {
+		t.Errorf("cache emoji = %q, want 👍 (unicode, not shortcode)", cachedEmoji)
 	}
 }
 
@@ -149,7 +155,7 @@ func TestAddIssueReaction_WriteThroughGitLabErrorReturns502(t *testing.T) {
 	defer testPool.Exec(ctx, `DELETE FROM issue_reaction WHERE issue_id = $1`, issueID)
 	defer testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/"+issueID+"/reactions", strings.NewReader(`{"emoji":"thumbsup"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/"+issueID+"/reactions", strings.NewReader(`{"emoji":"👍"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)

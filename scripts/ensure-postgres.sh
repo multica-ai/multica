@@ -67,6 +67,16 @@ is_local() {
 }
 
 if is_local; then
+  # If something is already listening on the target port, assume it's a
+  # developer-managed Postgres (native install, alternate container, etc.)
+  # and skip the docker-compose bring-up — otherwise we'll get an
+  # "address already in use" binding conflict.
+  if command -v pg_isready > /dev/null 2>&1 && pg_isready -h 127.0.0.1 -p "$db_port" > /dev/null 2>&1; then
+    echo "==> PostgreSQL already responding on localhost:$db_port — skipping Docker."
+    echo "✓ PostgreSQL ready (pre-existing). Database: $POSTGRES_DB"
+    exit 0
+  fi
+
   # ---------- Local: use Docker ----------
   echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
   docker compose up -d postgres

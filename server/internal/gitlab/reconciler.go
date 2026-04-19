@@ -25,6 +25,12 @@ type Reconciler struct {
 	queries *db.Queries
 	client  *gitlabapi.Client
 	decrypt TokenDecrypter
+	// issueDeleter is optional. When non-nil, each tick also runs a deletion
+	// sweep: full ListIssues(state=all) → diff against ListCachedGitlabIssues
+	// → tear down cache rows with no GitLab counterpart. Project webhooks
+	// don't fire on issue destruction (admin-scope system-hook only), so
+	// without this sweep deleted issues linger in the cache indefinitely.
+	issueDeleter IssueDeleter
 
 	tickInterval       time.Duration
 	overlapWindow      time.Duration
@@ -40,6 +46,16 @@ func NewReconciler(queries *db.Queries, client *gitlabapi.Client, decrypt TokenD
 		overlapWindow:      10 * time.Minute,
 		staleWebhookWindow: 15 * time.Minute,
 	}
+}
+
+// WithIssueDeleter installs an IssueDeleter so the reconciler can tear down
+// cache rows for issues destroyed on GitLab. Optional; when omitted, the
+// reconciler only does incremental upserts (pre-sweep behavior).
+func (r *Reconciler) WithIssueDeleter(d IssueDeleter) *Reconciler {
+	if d != nil {
+		r.issueDeleter = d
+	}
+	return r
 }
 
 // Run blocks until ctx is cancelled, ticking every tickInterval.
@@ -170,6 +186,92 @@ func (r *Reconciler) reconcileOne(ctx context.Context, conn db.WorkspaceGitlabCo
 		}); err != nil {
 			slog.Error("clear error status after webhook recovery", "error", err)
 		}
+	}
+
+	// Deletion sweep: catch issues destroyed on GitLab (project webhooks
+	// don't fire on destroy). Sweep failures are logged and swallowed — the
+	// incremental upsert side of the tick has already succeeded, and we'd
+	// rather skip this pass than fail a whole workspace's reconciliation.
+	if r.issueDeleter != nil {
+		if err := r.sweepDeletions(ctx, conn, token); err != nil {
+			slog.Error("reconciler delete sweep",
+				"workspace_id", conn.WorkspaceID, "error", err)
+		}
+	}
+	return nil
+}
+
+// sweepDeletions diffs GitLab's current issue set against our cache and
+// tears down rows with no counterpart upstream. Runs once per reconciler
+// tick, gated by issueDeleter != nil.
+//
+// Safety model: we can't trust "list returned empty" as authoritative —
+// a genuinely-empty project looks identical to a transient permissions
+// glitch or scope mismatch. Instead, before deleting any cached row that's
+// missing from the list, we do a targeted GET /projects/:id/issues/:iid.
+// Only a confirmed 404 triggers the delete. Any other response (the issue
+// still exists, or a transient error) skips this row for the current tick
+// and leaves it for the next pass.
+//
+// Individual deletion failures are logged per-issue and don't abort the
+// sweep — one tombstoned row shouldn't block others from being cleaned up.
+func (r *Reconciler) sweepDeletions(ctx context.Context, conn db.WorkspaceGitlabConnection, token string) error {
+	// Full project scan, no updated_after filter: we need the entire live set
+	// to compute the diff. client.ListIssues paginates via per_page=100.
+	live, err := r.client.ListIssues(ctx, token, conn.GitlabProjectID, gitlabapi.ListIssuesParams{State: "all"})
+	if err != nil {
+		return fmt.Errorf("list live issues: %w", err)
+	}
+	cached, err := r.queries.ListCachedGitlabIssues(ctx, conn.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("list cached issues: %w", err)
+	}
+
+	liveIIDs := make(map[int32]struct{}, len(live))
+	for _, iss := range live {
+		liveIIDs[int32(iss.IID)] = struct{}{}
+	}
+
+	for _, row := range cached {
+		if !row.GitlabIid.Valid {
+			continue
+		}
+		if _, exists := liveIIDs[row.GitlabIid.Int32]; exists {
+			continue
+		}
+
+		// Row appears orphaned. Before deleting, do a per-issue check:
+		// GitLab returns 404 for destroyed issues. Anything else (200 → the
+		// list lied; 403 → token scope flake; 5xx → outage) means we skip
+		// this pass and try again on the next tick.
+		if _, err := r.client.GetIssue(ctx, token, conn.GitlabProjectID, int(row.GitlabIid.Int32)); err != nil {
+			if !errors.Is(err, gitlabapi.ErrNotFound) {
+				slog.Warn("reconciler delete sweep: per-issue check failed; skipping",
+					"workspace_id", conn.WorkspaceID,
+					"gitlab_iid", row.GitlabIid.Int32,
+					"error", err)
+				continue
+			}
+			// 404 confirmed — fall through to the delete below.
+		} else {
+			slog.Warn("reconciler delete sweep: list missed an issue that still exists; skipping",
+				"workspace_id", conn.WorkspaceID,
+				"gitlab_iid", row.GitlabIid.Int32)
+			continue
+		}
+
+		if err := r.issueDeleter.CleanupAndDeleteIssue(ctx, row); err != nil {
+			slog.Error("reconciler delete sweep: cleanup failed",
+				"workspace_id", conn.WorkspaceID,
+				"issue_id", uuidString(row.ID),
+				"gitlab_iid", row.GitlabIid.Int32,
+				"error", err)
+			continue
+		}
+		slog.Info("reconciler delete sweep: cache row removed (no GitLab counterpart)",
+			"workspace_id", conn.WorkspaceID,
+			"issue_id", uuidString(row.ID),
+			"gitlab_iid", row.GitlabIid.Int32)
 	}
 	return nil
 }

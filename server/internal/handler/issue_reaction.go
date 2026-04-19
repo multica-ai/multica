@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	gitlabsync "github.com/multica-ai/multica/server/internal/gitlab"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -66,19 +67,27 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 	// the cache. Agent reactions skip GitLab entirely and fall through to the
 	// legacy Multica-only path — GitLab's award_emoji endpoint can't attribute
 	// awards to Multica agents, so agent reactions stay local.
+	//
+	// Unicode emojis outside our translation map also fall through to the
+	// legacy Multica-only path — GitLab's award_emoji requires a named
+	// shortcode (e.g. "thumbsup"), and we don't have one for arbitrary picks.
+	// See EmojiUnicodeToShortcode for the supported set.
 	if h.GitlabEnabled && h.GitlabResolver != nil && actorType != "agent" {
-		_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
-		if wsErr == nil {
-			if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
-				slog.Error("gitlab connected workspace but issue has no gitlab refs",
-					"issue_id", issueID, "workspace_id", workspaceID)
-				writeError(w, http.StatusBadGateway, "issue not linked to gitlab")
+		if shortcode, ok := gitlabsync.EmojiUnicodeToShortcode(req.Emoji); ok {
+			_, wsErr := h.Queries.GetWorkspaceGitlabConnection(r.Context(), issue.WorkspaceID)
+			if wsErr == nil {
+				if !issue.GitlabIid.Valid || !issue.GitlabProjectID.Valid {
+					slog.Error("gitlab connected workspace but issue has no gitlab refs",
+						"issue_id", issueID, "workspace_id", workspaceID)
+					writeError(w, http.StatusBadGateway, "issue not linked to gitlab")
+					return
+				}
+				h.addIssueReactionWriteThrough(w, r, issue, req.Emoji, shortcode, actorType, actorID, workspaceID, issueID)
 				return
 			}
-			h.addIssueReactionWriteThrough(w, r, issue, req.Emoji, actorType, actorID, workspaceID, issueID)
-			return
+			// wsErr != nil → fall through to legacy path (non-connected workspace).
 		}
-		// wsErr != nil → fall through to legacy path (non-connected workspace).
+		// Unsupported emoji (unicode not in the translation map) → fall through.
 	}
 
 	reaction, err := h.Queries.AddIssueReaction(r.Context(), db.AddIssueReactionParams{
@@ -117,7 +126,7 @@ func (h *Handler) addIssueReactionWriteThrough(
 	w http.ResponseWriter,
 	r *http.Request,
 	issue db.Issue,
-	emoji string,
+	unicodeEmoji, gitlabShortcode string,
 	actorType, actorID, workspaceID, issueID string,
 ) {
 	ctx := r.Context()
@@ -133,7 +142,7 @@ func (h *Handler) addIssueReactionWriteThrough(
 		token,
 		issue.GitlabProjectID.Int64,
 		int(issue.GitlabIid.Int32),
-		emoji,
+		gitlabShortcode,
 	)
 	if err != nil {
 		slog.Error("gitlab create issue award_emoji", "error", err, "issue_id", issueID)
@@ -147,13 +156,16 @@ func (h *Handler) addIssueReactionWriteThrough(
 	}
 	externalUpdatedAt := parseGitlabTS(award.UpdatedAt)
 
+	// Cache stores unicode (Multica convention) so the frontend renders
+	// the emoji natively. award.Name would be the GitLab shortcode
+	// ("thumbsup") — write the user's original unicode instead.
 	row, upErr := h.Queries.UpsertIssueReactionFromGitlab(ctx, db.UpsertIssueReactionFromGitlabParams{
 		WorkspaceID:       issue.WorkspaceID,
 		IssueID:           issue.ID,
 		ActorType:         pgtype.Text{String: actorType, Valid: true},
 		ActorID:           parseUUID(actorID),
 		GitlabActorUserID: glActor,
-		Emoji:             award.Name,
+		Emoji:             unicodeEmoji,
 		GitlabAwardID:     pgtype.Int8{Int64: award.ID, Valid: true},
 		ExternalUpdatedAt: externalUpdatedAt,
 	})
