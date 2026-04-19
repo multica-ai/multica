@@ -63,6 +63,10 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  RuntimeGroup,
+  CreateRuntimeGroupRequest,
+  UpdateRuntimeGroupRequest,
+  SetRuntimeGroupOverrideRequest,
 } from "../types";
 import type { GitlabConnection, ConnectGitlabInput } from "../gitlab/types";
 import type { UserGitlabConnection, ConnectUserGitlabInput } from "../gitlab/user-types";
@@ -923,5 +927,46 @@ export class ApiClient {
       method: "DELETE",
       headers: { "X-Workspace-ID": wsId },
     });
+  }
+
+  // Runtime Groups
+  async listRuntimeGroups(wsId: string): Promise<RuntimeGroup[]> {
+    return this.fetch(`/api/runtime-groups?workspace_id=${wsId}`);
+  }
+
+  async getRuntimeGroup(id: string): Promise<RuntimeGroup> {
+    return this.fetch(`/api/runtime-groups/${id}`);
+  }
+
+  async createRuntimeGroup(data: CreateRuntimeGroupRequest): Promise<RuntimeGroup> {
+    return this.fetch("/api/runtime-groups", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRuntimeGroup(id: string, data: UpdateRuntimeGroupRequest): Promise<RuntimeGroup> {
+    return this.fetch(`/api/runtime-groups/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRuntimeGroup(id: string): Promise<void> {
+    await this.fetch(`/api/runtime-groups/${id}`, { method: "DELETE" });
+  }
+
+  async setRuntimeGroupOverride(
+    groupId: string,
+    data: SetRuntimeGroupOverrideRequest,
+  ): Promise<RuntimeGroup> {
+    return this.fetch(`/api/runtime-groups/${groupId}/override`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async clearRuntimeGroupOverride(groupId: string): Promise<void> {
+    await this.fetch(`/api/runtime-groups/${groupId}/override`, { method: "DELETE" });
   }
 }

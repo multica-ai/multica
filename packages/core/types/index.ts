@@ -6,6 +6,7 @@ export type {
   AgentVisibility,
   AgentTask,
   AgentRuntime,
+  AgentRuntimeRef,
   RuntimeDevice,
   CreateAgentRequest,
   UpdateAgentRequest,
@@ -21,6 +22,12 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
   IssueUsageSummary,
+  RuntimeGroup,
+  RuntimeGroupOverride,
+  AgentRuntimeGroupRef,
+  CreateRuntimeGroupRequest,
+  UpdateRuntimeGroupRequest,
+  SetRuntimeGroupOverrideRequest,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";

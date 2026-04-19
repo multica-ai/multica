@@ -28,6 +28,8 @@ function workspaceScoped(slug: string) {
     inbox: () => `${ws}/inbox`,
     myIssues: () => `${ws}/my-issues`,
     runtimes: () => `${ws}/runtimes`,
+    runtimeGroups: () => `${ws}/runtime-groups`,
+    runtimeGroupDetail: (id: string) => `${ws}/runtime-groups/${encode(id)}`,
     skills: () => `${ws}/skills`,
     settings: () => `${ws}/settings`,
   };
