@@ -257,3 +257,24 @@ WHERE agent_id = $1
 
 -- name: CountAgentRuntimeAssignments :one
 SELECT count(*) FROM agent_runtime_assignment WHERE agent_id = $1;
+
+-- name: ListAgentRuntimeAssignmentsByWorkspace :many
+-- Batched version of ListAgentRuntimeAssignments for ListAgents. Returns one
+-- row per (agent, runtime) pair for every agent in the workspace; callers
+-- group by agent_id to build the Runtimes array. Avoids the N+1 that would
+-- result from calling ListAgentRuntimeAssignments per agent.
+SELECT
+    ara.agent_id     AS agent_id,
+    ar.id            AS runtime_id,
+    ar.name          AS runtime_name,
+    ar.status        AS runtime_status,
+    ar.runtime_mode  AS runtime_mode,
+    ar.provider      AS runtime_provider,
+    ar.owner_id      AS runtime_owner_id,
+    ar.device_info   AS runtime_device_info,
+    (SELECT MAX(atq.created_at)::timestamptz FROM agent_task_queue atq WHERE atq.runtime_id = ara.runtime_id) AS last_used_at
+FROM agent_runtime_assignment ara
+JOIN agent_runtime ar ON ar.id = ara.runtime_id
+JOIN agent a ON a.id = ara.agent_id
+WHERE a.workspace_id = $1
+ORDER BY ara.agent_id, ara.created_at ASC;

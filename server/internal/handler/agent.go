@@ -230,15 +230,54 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-fetch skills and runtime assignments once, then assemble per-agent
+	// responses inline. Avoids the N+1 that buildAgentResponse would produce
+	// for the list endpoint.
+	skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+	skillsByAgent := map[string][]SkillResponse{}
+	for _, row := range skillRows {
+		aid := uuidToString(row.AgentID)
+		skillsByAgent[aid] = append(skillsByAgent[aid], SkillResponse{
+			ID:          uuidToString(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+		})
+	}
+
+	assignmentRows, err := h.Queries.ListAgentRuntimeAssignmentsByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent runtime assignments")
+		return
+	}
+	runtimesByAgent := map[string][]AgentRuntimeRef{}
+	for _, row := range assignmentRows {
+		aid := uuidToString(row.AgentID)
+		runtimesByAgent[aid] = append(runtimesByAgent[aid], AgentRuntimeRef{
+			ID:          uuidToString(row.RuntimeID),
+			Name:        row.RuntimeName,
+			Status:      row.RuntimeStatus,
+			RuntimeMode: row.RuntimeMode,
+			Provider:    row.RuntimeProvider,
+			DeviceInfo:  row.RuntimeDeviceInfo,
+			OwnerID:     uuidToPtr(row.RuntimeOwnerID),
+			LastUsedAt:  timestampToPtr(row.LastUsedAt),
+		})
+	}
+
 	// All agents (including private) are visible to workspace members.
-	// NOTE: buildAgentResponse does N+1 queries (skills + assignments per agent).
-	// Acceptable for current team sizes; optimize with batch queries later if needed.
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
-		resp, err := h.buildAgentResponse(r.Context(), a)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to build agent response")
-			return
+		resp := agentToResponse(a)
+		aid := uuidToString(a.ID)
+		if skills := skillsByAgent[aid]; skills != nil {
+			resp.Skills = skills
+		}
+		if rts := runtimesByAgent[aid]; rts != nil {
+			resp.Runtimes = rts
 		}
 		// Redact custom_env for users who are not the agent owner or workspace owner/admin.
 		if !canViewAgentEnv(a, userID, member.Role) {
@@ -316,7 +355,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate all runtimes belong to this workspace; capture the first for the
-	// legacy runtime_mode column.
+	// legacy agent.runtime_mode column. That column is a denormalised snapshot
+	// left over from the single-runtime design; when runtimes have mixed modes
+	// (e.g. local + cloud) we record only the first, and downstream UI should
+	// read the real mode off the individual runtime. Replace this field with a
+	// computed "mixed" value or drop it entirely once every consumer has moved
+	// off it.
 	runtimeUUIDs := make([]pgtype.UUID, 0, len(req.RuntimeIDs))
 	var primaryMode string
 	for i, rid := range req.RuntimeIDs {
@@ -389,6 +433,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			AgentID:   agent.ID,
 			RuntimeID: rtID,
 		}); err != nil {
+			// FK violation means the runtime was deleted between validation
+			// and insert — treat as a clean 400 rather than 500.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				writeError(w, http.StatusBadRequest, "invalid runtime_id")
+				return
+			}
 			slog.Warn("add agent runtime assignment failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
 			writeError(w, http.StatusInternalServerError, "failed to assign runtime")
 			return
@@ -578,6 +629,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				AgentID:   agent.ID,
 				RuntimeID: rtID,
 			}); err != nil {
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+					writeError(w, http.StatusBadRequest, "invalid runtime_id")
+					return
+				}
 				slog.Warn("add agent runtime assignment failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 				writeError(w, http.StatusInternalServerError, "failed to assign runtime")
 				return

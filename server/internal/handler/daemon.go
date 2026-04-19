@@ -344,34 +344,54 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 			}
 			merged[oldID] = struct{}{}
 
-			agents, err := h.Queries.CopyAgentAssignmentsForRuntimeMerge(r.Context(), db.CopyAgentAssignmentsForRuntimeMergeParams{
+			// Wrap the five-step merge in a transaction so a partial failure
+			// can't leave the runtime half-merged (e.g. assignments copied but
+			// tasks not reassigned). Each legacy runtime is its own tx.
+			tx, err := h.TxStarter.Begin(r.Context())
+			if err != nil {
+				slog.Warn("legacy runtime merge: begin tx failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "error", err)
+				continue
+			}
+			qtx := h.Queries.WithTx(tx)
+
+			agents, err := qtx.CopyAgentAssignmentsForRuntimeMerge(r.Context(), db.CopyAgentAssignmentsForRuntimeMergeParams{
 				NewRuntimeID: registered.ID,
 				OldRuntimeID: old.ID,
 			})
 			if err != nil {
 				slog.Warn("legacy runtime merge: copy agent assignments failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				tx.Rollback(r.Context())
 				continue
 			}
-			if err := h.Queries.DeleteAgentAssignmentsForRuntime(r.Context(), old.ID); err != nil {
+			if err := qtx.DeleteAgentAssignmentsForRuntime(r.Context(), old.ID); err != nil {
 				slog.Warn("legacy runtime merge: delete old agent assignments failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				tx.Rollback(r.Context())
 				continue
 			}
-			tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
+			tasks, err := qtx.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
 				NewRuntimeID: registered.ID,
 				OldRuntimeID: old.ID,
 			})
 			if err != nil {
 				slog.Warn("legacy runtime merge: reassign tasks failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				tx.Rollback(r.Context())
 				continue
 			}
-			if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
+			if err := qtx.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
 				ID:             registered.ID,
 				LegacyDaemonID: strToText(legacyID),
 			}); err != nil {
 				slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
+				tx.Rollback(r.Context())
+				continue
 			}
-			if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
+			if err := qtx.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
 				slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
+				tx.Rollback(r.Context())
+				continue
+			}
+			if err := tx.Commit(r.Context()); err != nil {
+				slog.Warn("legacy runtime merge: commit failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "error", err)
 				continue
 			}
 

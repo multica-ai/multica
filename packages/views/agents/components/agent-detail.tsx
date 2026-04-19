@@ -39,8 +39,9 @@ import { SettingsTab } from "./tabs/settings-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 
-function getRuntimeDevice(agent: Agent, runtimes: RuntimeDevice[]): RuntimeDevice | undefined {
-  return runtimes.find((runtime) => agent.runtime_ids.includes(runtime.id));
+function getAssignedRuntimes(agent: Agent, runtimes: RuntimeDevice[]): RuntimeDevice[] {
+  const assigned = new Set(agent.runtime_ids);
+  return runtimes.filter((runtime) => assigned.has(runtime.id));
 }
 
 type DetailTab = "instructions" | "skills" | "tasks" | "env" | "custom_args" | "settings";
@@ -72,7 +73,14 @@ export function AgentDetail({
   onRestore: (id: string) => Promise<void>;
 }) {
   const st = statusConfig[agent.status];
-  const runtimeDevice = getRuntimeDevice(agent, runtimes);
+  const assignedRuntimes = getAssignedRuntimes(agent, runtimes);
+  const hasCloudRuntime = assignedRuntimes.some((r) => r.runtime_mode === "cloud");
+  const runtimeBadge =
+    assignedRuntimes.length === 1
+      ? assignedRuntimes[0]!.name
+      : assignedRuntimes.length > 1
+        ? `${assignedRuntimes.length} runtimes`
+        : agent.runtime_mode === "cloud" ? "Cloud" : "Local";
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
   const isArchived = !!agent.archived_at;
@@ -106,13 +114,16 @@ export function AgentDetail({
                 {st.label}
               </span>
             )}
-            <span className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-              {agent.runtime_mode === "cloud" ? (
+            <span
+              className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
+              title={assignedRuntimes.length > 1 ? assignedRuntimes.map((r) => r.name).join(", ") : undefined}
+            >
+              {hasCloudRuntime ? (
                 <Cloud className="h-3 w-3" />
               ) : (
                 <Monitor className="h-3 w-3" />
               )}
-              {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
+              {runtimeBadge}
             </span>
           </div>
         </div>

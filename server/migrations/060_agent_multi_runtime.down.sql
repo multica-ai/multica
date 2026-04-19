@@ -1,3 +1,9 @@
+-- WARNING: this rollback is data-lossy. An agent can be assigned to many
+-- runtimes after the up migration; we can only restore one per agent. We
+-- pick the earliest-created assignment and drop the rest. If you need the
+-- other assignments back, recover them from the agent_runtime_assignment
+-- table before running this.
+
 -- Re-add as nullable first so the UPDATE below can populate it before we
 -- apply the NOT NULL constraint.
 ALTER TABLE agent ADD COLUMN runtime_id UUID;

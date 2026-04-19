@@ -708,6 +708,70 @@ func (q *Queries) ListAgentRuntimeAssignments(ctx context.Context, agentID pgtyp
 	return items, nil
 }
 
+const listAgentRuntimeAssignmentsByWorkspace = `-- name: ListAgentRuntimeAssignmentsByWorkspace :many
+SELECT
+    ara.agent_id     AS agent_id,
+    ar.id            AS runtime_id,
+    ar.name          AS runtime_name,
+    ar.status        AS runtime_status,
+    ar.runtime_mode  AS runtime_mode,
+    ar.provider      AS runtime_provider,
+    ar.owner_id      AS runtime_owner_id,
+    ar.device_info   AS runtime_device_info,
+    (SELECT MAX(atq.created_at)::timestamptz FROM agent_task_queue atq WHERE atq.runtime_id = ara.runtime_id) AS last_used_at
+FROM agent_runtime_assignment ara
+JOIN agent_runtime ar ON ar.id = ara.runtime_id
+JOIN agent a ON a.id = ara.agent_id
+WHERE a.workspace_id = $1
+ORDER BY ara.agent_id, ara.created_at ASC
+`
+
+type ListAgentRuntimeAssignmentsByWorkspaceRow struct {
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	RuntimeID         pgtype.UUID        `json:"runtime_id"`
+	RuntimeName       string             `json:"runtime_name"`
+	RuntimeStatus     string             `json:"runtime_status"`
+	RuntimeMode       string             `json:"runtime_mode"`
+	RuntimeProvider   string             `json:"runtime_provider"`
+	RuntimeOwnerID    pgtype.UUID        `json:"runtime_owner_id"`
+	RuntimeDeviceInfo string             `json:"runtime_device_info"`
+	LastUsedAt        pgtype.Timestamptz `json:"last_used_at"`
+}
+
+// Batched version of ListAgentRuntimeAssignments for ListAgents. Returns one
+// row per (agent, runtime) pair for every agent in the workspace; callers
+// group by agent_id to build the Runtimes array. Avoids the N+1 that would
+// result from calling ListAgentRuntimeAssignments per agent.
+func (q *Queries) ListAgentRuntimeAssignmentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentRuntimeAssignmentsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAgentRuntimeAssignmentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentRuntimeAssignmentsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListAgentRuntimeAssignmentsByWorkspaceRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.RuntimeID,
+			&i.RuntimeName,
+			&i.RuntimeStatus,
+			&i.RuntimeMode,
+			&i.RuntimeProvider,
+			&i.RuntimeOwnerID,
+			&i.RuntimeDeviceInfo,
+			&i.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentTasks = `-- name: ListAgentTasks :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
 WHERE agent_id = $1
