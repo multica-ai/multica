@@ -158,6 +158,36 @@ func TestUpdateAgent_RejectsEmptyRuntimeIDs(t *testing.T) {
 	}
 }
 
+func TestEnqueueTaskForIssue_DistributesAcrossRuntimes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	rt2 := createSecondRuntimeInTestWorkspace(t)
+	rt3 := createThirdRuntimeInTestWorkspace(t)
+	agentID := createAgentWithRuntimes(t, []string{testRuntimeID, rt2, rt3})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id IN ($1, $2)`, rt2, rt3)
+	})
+
+	counts := map[string]int{}
+	for i := 0; i < 9; i++ {
+		issueID := createIssueAssignedTo(t, agentID)
+		issue := loadIssue(t, issueID)
+		task, err := testHandler.TaskService.EnqueueTaskForIssue(context.Background(), issue)
+		if err != nil {
+			t.Fatalf("enqueue %d: %v", i, err)
+		}
+		counts[uuidToString(task.RuntimeID)]++
+	}
+
+	for _, rt := range []string{testRuntimeID, rt2, rt3} {
+		if counts[rt] < 2 || counts[rt] > 4 {
+			t.Fatalf("expected 2-4 tasks on runtime %s, got %d (all counts: %+v)", rt, counts[rt], counts)
+		}
+	}
+}
+
 func TestUpdateAgent_PreservesCreatedAtOfSurvivingAssignments(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

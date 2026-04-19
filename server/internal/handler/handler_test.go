@@ -1176,6 +1176,64 @@ func createAgentWithRuntimes(t *testing.T, runtimeIDs []string) string {
 	return agentID
 }
 
+// createThirdRuntimeInTestWorkspace inserts a third agent_runtime in the test
+// workspace and returns its UUID string. The caller must clean it up.
+func createThirdRuntimeInTestWorkspace(t *testing.T) string {
+	t.Helper()
+	var id string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime3', 'online', 'Handler test runtime 3', '{}'::jsonb, now())
+		RETURNING id
+	`, testWorkspaceID, "Handler Test Runtime 3").Scan(&id)
+	if err != nil {
+		t.Fatalf("createThirdRuntimeInTestWorkspace: %v", err)
+	}
+	return id
+}
+
+// createIssueAssignedTo inserts a minimal issue assigned to the given agentID
+// and returns the issue UUID string. The caller must clean it up.
+func createIssueAssignedTo(t *testing.T, agentID string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	// Increment the workspace counter to get a unique issue number.
+	var issueNumber int32
+	if err := testPool.QueryRow(ctx,
+		`UPDATE workspace SET issue_counter = issue_counter + 1 WHERE id = $1 RETURNING issue_counter`,
+		testWorkspaceID,
+	).Scan(&issueNumber); err != nil {
+		t.Fatalf("createIssueAssignedTo: increment counter: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number, position)
+		VALUES ($1, 'lb-test issue', 'todo', 'none', 'member', $2, 'agent', $3, $4, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID, issueNumber).Scan(&issueID); err != nil {
+		t.Fatalf("createIssueAssignedTo: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID
+}
+
+// loadIssue fetches a db.Issue row by UUID string.
+func loadIssue(t *testing.T, issueID string) db.Issue {
+	t.Helper()
+	issue, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("loadIssue %s: %v", issueID, err)
+	}
+	return issue
+}
+
 // newAuthedRequestWithPath creates a request with the standard auth headers and
 // a chi URL parameter named "id" set to agentID.
 func newAuthedRequestWithPath(method, path string, body any, agentID string) *http.Request {
