@@ -123,6 +123,46 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 	}
 }
 
+func TestActivityIssueUpdated_StatusChanged_MapPayload(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupActivities(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"issue": map[string]any{
+				"id":           issueID,
+				"workspace_id": testWorkspaceID,
+				"title":        "activity test issue",
+				"status":       "in_review",
+				"priority":     "medium",
+				"creator_type": "member",
+				"creator_id":   testUserID,
+			},
+			"status_changed": true,
+			"prev_status":    "in_progress",
+		},
+	})
+
+	activities := listActivitiesForIssue(t, queries, issueID)
+	if len(activities) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(activities))
+	}
+	if activities[0].Action != "status_changed" {
+		t.Fatalf("expected action 'status_changed', got %q", activities[0].Action)
+	}
+}
+
 func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
@@ -156,7 +196,7 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":  true,
+			"assignee_changed":   true,
 			"prev_assignee_type": (*string)(nil),
 			"prev_assignee_id":   (*string)(nil),
 		},

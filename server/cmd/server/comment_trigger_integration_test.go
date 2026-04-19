@@ -46,26 +46,37 @@ func authRequestWithAgentTask(t *testing.T, method, path string, body any, agent
 	return r
 }
 
-// insertRunningTask inserts a dispatched agent_task_queue row for the given
-// (agent, issue) pair and returns its ID. Used to simulate an agent acting
-// from within an executing task context.
-func insertRunningTask(t *testing.T, agentID, issueID string) string {
+// insertTaskWithStatus inserts an agent_task_queue row for the given
+// (agent, issue, status) tuple and returns its ID.
+func insertTaskWithStatus(t *testing.T, agentID, issueID, status string) string {
 	t.Helper()
 	var id string
 	err := testPool.QueryRow(context.Background(),
-		`INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
-		 VALUES ($1, $2, 'dispatched',
-			 (SELECT runtime_id FROM agent WHERE id = $1))
+		`INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id, started_at, completed_at)
+		 VALUES ($1, $2, $3,
+			 (SELECT runtime_id FROM agent WHERE id = $1),
+			 CASE WHEN $3 = 'running' THEN now() ELSE NULL END,
+			 CASE WHEN $3 = 'completed' THEN now() ELSE NULL END)
 		 RETURNING id`,
-		agentID, issueID).Scan(&id)
+		agentID, issueID, status).Scan(&id)
 	if err != nil {
-		t.Fatalf("failed to insert running task: %v", err)
+		t.Fatalf("failed to insert %s task: %v", status, err)
 	}
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(),
 			`DELETE FROM agent_task_queue WHERE id = $1`, id)
 	})
 	return id
+}
+
+func insertRunningTask(t *testing.T, agentID, issueID string) string {
+	t.Helper()
+	return insertTaskWithStatus(t, agentID, issueID, "running")
+}
+
+func insertCompletedTask(t *testing.T, agentID, issueID string) string {
+	t.Helper()
+	return insertTaskWithStatus(t, agentID, issueID, "completed")
 }
 
 // countPendingTasks returns the number of queued/dispatched tasks for an issue.
@@ -422,10 +433,31 @@ func TestCommentTriggerOnComment(t *testing.T) {
 			t.Fatalf("self-task comment: expected 201, got %d: %s", resp.StatusCode, b)
 		}
 		resp.Body.Close()
-		if n := countPendingTasks(t, issueID); n != 1 {
-			// The dispatched task inserted above counts toward the pending set
-			// (status='dispatched'); we assert no NEW task was enqueued.
-			t.Errorf("expected 1 pending task (only the original dispatched task), got %d", n)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (self-loop suppressed), got %d", n)
+		}
+	})
+
+	t.Run("completed task context does not bypass assignee self-comment guard", func(t *testing.T) {
+		clearTasks(t, issueID)
+		otherIssueID := createIssueAssignedToAgent(t, "Completed task issue", agentID)
+		t.Cleanup(func() {
+			clearTasks(t, otherIssueID)
+			resp := authRequest(t, "DELETE", "/api/issues/"+otherIssueID, nil)
+			resp.Body.Close()
+		})
+		clearTasks(t, otherIssueID)
+		completedTaskID := insertCompletedTask(t, agentID, otherIssueID)
+		body := map[string]any{"content": "Manual follow-up", "type": "comment"}
+		resp := authRequestWithAgentTask(t, "POST", "/api/issues/"+issueID+"/comments", body, agentID, completedTaskID)
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("completed-task comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		resp.Body.Close()
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (completed task must not bypass guard), got %d", n)
 		}
 	})
 }
