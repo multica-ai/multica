@@ -40,7 +40,7 @@ import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 
 function getRuntimeDevice(agent: Agent, runtimes: RuntimeDevice[]): RuntimeDevice | undefined {
-  return runtimes.find((runtime) => runtime.id === agent.runtime_id);
+  return runtimes.find((runtime) => agent.runtime_ids.includes(runtime.id));
 }
 
 type DetailTab = "instructions" | "skills" | "tasks" | "env" | "custom_args" | "settings";

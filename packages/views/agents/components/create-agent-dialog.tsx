@@ -87,7 +87,7 @@ export function CreateAgentDialog({
       await onCreate({
         name: name.trim(),
         description: description.trim(),
-        runtime_id: selectedRuntime.id,
+        runtime_ids: [selectedRuntime.id],
         visibility,
       });
       onClose();

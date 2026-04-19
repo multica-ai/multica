@@ -42,7 +42,19 @@ import { TasksTab } from "./tasks-tab";
 const agent: Agent = {
   id: "agent-1",
   workspace_id: "ws-1",
-  runtime_id: "runtime-1",
+  runtime_ids: ["runtime-1"],
+  runtimes: [
+    {
+      id: "runtime-1",
+      name: "Runtime 1",
+      status: "online",
+      runtime_mode: "local",
+      provider: "claude",
+      device_info: "macOS",
+      owner_id: null,
+      last_used_at: null,
+    },
+  ],
   name: "Agent",
   description: "",
   instructions: "",
