@@ -304,6 +304,53 @@ func (tc *testContext) seedUsage(t *testing.T, runtimeID pgtype.UUID, tokens int
 	}
 }
 
+// createGroup inserts a runtime_group with the given member runtimes and returns the group UUID.
+func (tc *testContext) createGroup(t *testing.T, runtimes []pgtype.UUID) pgtype.UUID {
+	t.Helper()
+	groupID := newUUID()
+	_, err := testPool.Exec(tc.ctx,
+		`INSERT INTO runtime_group (id, workspace_id, name) VALUES ($1, $2, $3)`,
+		groupID, testWorkspaceID, "test-grp-"+uuid.NewString(),
+	)
+	if err != nil {
+		t.Fatalf("createGroup: %v", err)
+	}
+	for _, rid := range runtimes {
+		_, err := testPool.Exec(tc.ctx,
+			`INSERT INTO runtime_group_member (group_id, runtime_id) VALUES ($1, $2)`,
+			groupID, rid,
+		)
+		if err != nil {
+			t.Fatalf("createGroup insert member: %v", err)
+		}
+	}
+	return groupID
+}
+
+// linkAgentToGroup inserts an agent_runtime_group row associating the agent with the group.
+func (tc *testContext) linkAgentToGroup(t *testing.T, agentID, groupID pgtype.UUID) {
+	t.Helper()
+	_, err := testPool.Exec(tc.ctx,
+		`INSERT INTO agent_runtime_group (agent_id, group_id) VALUES ($1, $2)`,
+		agentID, groupID,
+	)
+	if err != nil {
+		t.Fatalf("linkAgentToGroup: %v", err)
+	}
+}
+
+// setOverride inserts an active runtime_group_override (starts_at=now, ends_at=endsAt).
+func (tc *testContext) setOverride(t *testing.T, groupID, runtimeID pgtype.UUID, endsAt time.Time) {
+	t.Helper()
+	_, err := testPool.Exec(tc.ctx,
+		`INSERT INTO runtime_group_override (group_id, runtime_id, starts_at, ends_at) VALUES ($1, $2, now(), $3)`,
+		groupID, runtimeID, endsAt,
+	)
+	if err != nil {
+		t.Fatalf("setOverride: %v", err)
+	}
+}
+
 // createRuntimeInOtherWorkspace creates a separate workspace + runtime and
 // returns the runtime UUID. Used to test cross-workspace rejection.
 func (tc *testContext) createRuntimeInOtherWorkspace(t *testing.T) pgtype.UUID {
