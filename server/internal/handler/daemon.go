@@ -314,6 +314,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// the stale row so there's only ever one runtime per machine.
 		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 
+		// Adopt agents and pending tasks that are still bound to an offline
+		// runtime of the same provider. This covers daemon restarts where
+		// the runtime UUID changed (e.g. pre-persistent-identity daemons,
+		// daemon_id file loss, or cross-machine migration).
+		h.adoptOrphanedAgents(r, registered, provider)
+
 		resp = append(resp, runtimeToResponse(registered))
 	}
 
@@ -410,6 +416,53 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 				"tasks_reassigned", tasks,
 			)
 		}
+	}
+}
+
+// adoptOrphanedAgents reassigns agents (and their pending tasks) that are
+// still bound to an offline runtime of the same provider in this workspace.
+// This is a server-side safety net: even when daemon identity is persistent
+// (#1220), edge cases (daemon_id file loss, cross-machine migration, pre-
+// persistent-identity upgrades) can leave agents stranded on a stale runtime
+// UUID. Rather than requiring manual `agent update --runtime-id` for each
+// affected agent, the server auto-adopts them at registration time.
+func (h *Handler) adoptOrphanedAgents(r *http.Request, registered db.AgentRuntime, provider string) {
+	newID := uuidToString(registered.ID)
+
+	agents, err := h.Queries.AdoptAgentsFromOfflineRuntimes(r.Context(), db.AdoptAgentsFromOfflineRuntimesParams{
+		NewRuntimeID: registered.ID,
+		WorkspaceID:  registered.WorkspaceID,
+		Provider:     provider,
+	})
+	if err != nil {
+		slog.Warn("adopt orphaned agents: reassign failed",
+			"runtime_id", newID,
+			"provider", provider,
+			"error", err,
+		)
+		return
+	}
+
+	tasks, err := h.Queries.AdoptTasksFromOfflineRuntimes(r.Context(), db.AdoptTasksFromOfflineRuntimesParams{
+		NewRuntimeID: registered.ID,
+		WorkspaceID:  registered.WorkspaceID,
+		Provider:     provider,
+	})
+	if err != nil {
+		slog.Warn("adopt orphaned agents: reassign tasks failed",
+			"runtime_id", newID,
+			"provider", provider,
+			"error", err,
+		)
+	}
+
+	if agents > 0 || tasks > 0 {
+		slog.Info("adopted orphaned agents from offline runtimes",
+			"runtime_id", newID,
+			"provider", provider,
+			"agents_adopted", agents,
+			"tasks_adopted", tasks,
+		)
 	}
 }
 
