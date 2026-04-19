@@ -11,6 +11,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adoptAgentsFromOfflineRuntimes = `-- name: AdoptAgentsFromOfflineRuntimes :execrows
+UPDATE agent
+SET runtime_id = $1, updated_at = now()
+WHERE runtime_id != $1
+  AND runtime_id IN (
+    SELECT id FROM agent_runtime
+    WHERE workspace_id = $2
+      AND provider = $3
+      AND status = 'offline'
+  )
+`
+
+type AdoptAgentsFromOfflineRuntimesParams struct {
+	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Provider     string      `json:"provider"`
+}
+
+// Re-points agents from offline runtimes of the same (workspace, provider) to
+// the newly-registered online runtime. This is a server-side safety net that
+// prevents agents from being silently stranded on stale runtime_ids after a
+// daemon restart (e.g. when daemon_id changes or the CLI is upgraded across
+// identity format changes).
+func (q *Queries) AdoptAgentsFromOfflineRuntimes(ctx context.Context, arg AdoptAgentsFromOfflineRuntimesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, adoptAgentsFromOfflineRuntimes, arg.NewRuntimeID, arg.WorkspaceID, arg.Provider)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const adoptTasksFromOfflineRuntimes = `-- name: AdoptTasksFromOfflineRuntimes :execrows
+UPDATE agent_task_queue
+SET runtime_id = $1
+WHERE status IN ('queued', 'dispatched')
+  AND runtime_id != $1
+  AND runtime_id IN (
+    SELECT id FROM agent_runtime
+    WHERE workspace_id = $2
+      AND provider = $3
+      AND status = 'offline'
+  )
+`
+
+type AdoptTasksFromOfflineRuntimesParams struct {
+	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Provider     string      `json:"provider"`
+}
+
+// Re-points pending tasks from offline runtimes of the same (workspace,
+// provider) to the newly-registered online runtime. Companion to
+// AdoptAgentsFromOfflineRuntimes.
+func (q *Queries) AdoptTasksFromOfflineRuntimes(ctx context.Context, arg AdoptTasksFromOfflineRuntimesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, adoptTasksFromOfflineRuntimes, arg.NewRuntimeID, arg.WorkspaceID, arg.Provider)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveAgentsByRuntime = `-- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL
 `
