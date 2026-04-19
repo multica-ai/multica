@@ -316,6 +316,51 @@ func TestNotification_StatusChanged(t *testing.T) {
 	}
 }
 
+func TestNotification_StatusChanged_MapPayload(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	subEmail := "notif-map-status@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", subID, "commenter")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"issue": map[string]any{
+				"id":           issueID,
+				"workspace_id": testWorkspaceID,
+				"title":        "status test issue",
+				"status":       "in_review",
+				"priority":     "medium",
+				"creator_type": "member",
+				"creator_id":   testUserID,
+			},
+			"status_changed": true,
+			"prev_status":    "in_progress",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, subID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for subscriber, got %d", len(items))
+	}
+	if items[0].Type != "status_changed" {
+		t.Fatalf("expected type 'status_changed', got %q", items[0].Type)
+	}
+}
+
 // TestNotification_CommentCreated verifies that all subscribers except the
 // commenter receive a "new_comment" notification.
 func TestNotification_CommentCreated(t *testing.T) {
@@ -439,8 +484,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},

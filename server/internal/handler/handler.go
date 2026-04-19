@@ -334,6 +334,9 @@ func (h *Handler) actorCurrentIssueID(r *http.Request) string {
 	if err != nil {
 		return ""
 	}
+	if task.Status != "running" {
+		return ""
+	}
 	return uuidToString(task.IssueID)
 }
 
