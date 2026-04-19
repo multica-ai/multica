@@ -490,13 +490,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Validate runtime_ids if provided.
 	var runtimeUUIDs []pgtype.UUID
+	var primaryMode string
 	if req.RuntimeIDs != nil {
 		if len(*req.RuntimeIDs) == 0 {
 			writeError(w, http.StatusBadRequest, "runtime_ids must contain at least one runtime")
 			return
 		}
 		runtimeUUIDs = make([]pgtype.UUID, 0, len(*req.RuntimeIDs))
-		for _, rid := range *req.RuntimeIDs {
+		for i, rid := range *req.RuntimeIDs {
 			rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 				ID:          parseUUID(rid),
 				WorkspaceID: agent.WorkspaceID,
@@ -504,6 +505,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid runtime_id: %s", rid))
 				return
+			}
+			if i == 0 {
+				primaryMode = rt.RuntimeMode
 			}
 			runtimeUUIDs = append(runtimeUUIDs, rt.ID)
 		}
@@ -536,15 +540,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		ca, _ := json.Marshal(*req.CustomArgs)
 		params.CustomArgs = ca
 	}
-	if req.RuntimeIDs != nil && len(runtimeUUIDs) > 0 {
-		// Update the legacy runtime_mode column from the first runtime.
-		rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-			ID:          runtimeUUIDs[0],
-			WorkspaceID: agent.WorkspaceID,
-		})
-		if err == nil {
-			params.RuntimeMode = pgtype.Text{String: rt.RuntimeMode, Valid: true}
-		}
+	if req.RuntimeIDs != nil && len(runtimeUUIDs) > 0 && primaryMode != "" {
+		params.RuntimeMode = pgtype.Text{String: primaryMode, Valid: true}
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}

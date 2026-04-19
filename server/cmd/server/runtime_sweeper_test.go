@@ -19,7 +19,9 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	// Find the integration test agent
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
 		JOIN member m ON m.workspace_id = a.workspace_id
 		JOIN "user" u ON u.id = m.user_id
 		WHERE u.email = $1
@@ -316,7 +318,9 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	// Use the same agent/runtime as the other sweeper tests.
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
 		JOIN member m ON m.workspace_id = a.workspace_id
 		JOIN "user" u ON u.id = m.user_id
 		WHERE u.email = $1
@@ -402,7 +406,9 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
 		JOIN member m ON m.workspace_id = a.workspace_id
 		JOIN "user" u ON u.id = m.user_id
 		WHERE u.email = $1

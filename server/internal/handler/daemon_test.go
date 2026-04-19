@@ -158,7 +158,11 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	// Get an agent and runtime from the test workspace.
 	var agentID, runtimeID string
 	err = testPool.QueryRow(context.Background(), `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
+		WHERE a.workspace_id = $1
+		LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 	if err != nil {
 		t.Fatalf("setup: get agent: %v", err)
@@ -307,12 +311,17 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks
+			visibility, max_concurrent_tasks
 		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, 'workspace', 1)
 		RETURNING id
-	`, foreignWorkspaceID, "Foreign Agent", runtimeID).Scan(&agentID); err != nil {
+	`, foreignWorkspaceID, "Foreign Agent").Scan(&agentID); err != nil {
 		t.Fatalf("setup: create foreign agent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id) VALUES ($1, $2)
+	`, agentID, runtimeID); err != nil {
+		t.Fatalf("setup: assign foreign agent runtime: %v", err)
 	}
 
 	var issueID string
@@ -399,10 +408,13 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
+		WHERE a.workspace_id = $1
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
@@ -467,10 +479,13 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
+		WHERE a.workspace_id = $1
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
@@ -683,11 +698,16 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	// An agent bound to the legacy runtime.
 	var legacyAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
-		VALUES ($1, 'legacy-agent', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks)
+		VALUES ($1, 'legacy-agent', 'local', '{}'::jsonb, 'workspace', 1)
 		RETURNING id
-	`, testWorkspaceID, legacyRuntimeID).Scan(&legacyAgentID); err != nil {
+	`, testWorkspaceID).Scan(&legacyAgentID); err != nil {
 		t.Fatalf("seed legacy agent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id) VALUES ($1, $2)
+	`, legacyAgentID, legacyRuntimeID); err != nil {
+		t.Fatalf("seed legacy agent runtime assignment: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, legacyAgentID)
@@ -748,7 +768,9 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 
 	// Agent should now point at the new runtime.
 	var agentRuntimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, legacyAgentID).Scan(&agentRuntimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `
+		SELECT runtime_id FROM agent_runtime_assignment WHERE agent_id = $1 LIMIT 1
+	`, legacyAgentID).Scan(&agentRuntimeID); err != nil {
 		t.Fatalf("read agent runtime_id: %v", err)
 	}
 	if agentRuntimeID != newRuntimeID {
@@ -949,21 +971,31 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	// Bind one agent to each legacy row to verify both sides get reassigned.
 	var upperAgentID, lowerAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
-		VALUES ($1, 'dup-agent-upper', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks)
+		VALUES ($1, 'dup-agent-upper', 'local', '{}'::jsonb, 'workspace', 1)
 		RETURNING id
-	`, testWorkspaceID, legacyUpperID).Scan(&upperAgentID); err != nil {
+	`, testWorkspaceID).Scan(&upperAgentID); err != nil {
 		t.Fatalf("seed upper agent: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, upperAgentID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id) VALUES ($1, $2)
+	`, upperAgentID, legacyUpperID); err != nil {
+		t.Fatalf("seed upper agent runtime assignment: %v", err)
+	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
-		VALUES ($1, 'dup-agent-lower', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks)
+		VALUES ($1, 'dup-agent-lower', 'local', '{}'::jsonb, 'workspace', 1)
 		RETURNING id
-	`, testWorkspaceID, legacyLowerID).Scan(&lowerAgentID); err != nil {
+	`, testWorkspaceID).Scan(&lowerAgentID); err != nil {
 		t.Fatalf("seed lower agent: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, lowerAgentID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id) VALUES ($1, $2)
+	`, lowerAgentID, legacyLowerID); err != nil {
+		t.Fatalf("seed lower agent runtime assignment: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
@@ -1001,7 +1033,9 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	// Both agents must point at the new runtime.
 	for _, agentID := range []string{upperAgentID, lowerAgentID} {
 		var runtimeID string
-		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		if err := testPool.QueryRow(ctx, `
+			SELECT runtime_id FROM agent_runtime_assignment WHERE agent_id = $1 LIMIT 1
+		`, agentID).Scan(&runtimeID); err != nil {
 			t.Fatalf("read agent runtime_id: %v", err)
 		}
 		if runtimeID != newRuntimeID {
@@ -1065,7 +1099,11 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, ara.runtime_id
+		FROM agent a
+		JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
+		WHERE a.workspace_id = $1
+		LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}

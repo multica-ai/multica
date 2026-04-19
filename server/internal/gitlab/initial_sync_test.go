@@ -183,11 +183,16 @@ func TestInitialSync_IssuesNotesAwards(t *testing.T) {
 	}
 	var agentID string
 	if err := pool.QueryRow(context.Background(), `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks, owner_id, runtime_id)
-		VALUES ($1, 'builder', 'cloud', '{}'::jsonb, 'workspace', 1, NULL, $2)
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks, owner_id)
+		VALUES ($1, 'builder', 'cloud', '{}'::jsonb, 'workspace', 1, NULL)
 		RETURNING id
-	`, wsID, runtimeID).Scan(&agentID); err != nil {
+	`, wsID).Scan(&agentID); err != nil {
 		t.Fatalf("insert agent: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id) VALUES ($1, $2)
+	`, agentID, runtimeID); err != nil {
+		t.Fatalf("insert agent runtime assignment: %v", err)
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

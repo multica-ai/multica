@@ -53,11 +53,16 @@ func seedAgentNamed(t *testing.T, pool *pgxpool.Pool, workspaceID, name string) 
 	}
 	var agentID string
 	if err := pool.QueryRow(context.Background(), `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks, owner_id, runtime_id)
-		VALUES ($1, $2, 'cloud', '{}'::jsonb, 'workspace', 1, NULL, $3)
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, visibility, max_concurrent_tasks, owner_id)
+		VALUES ($1, $2, 'cloud', '{}'::jsonb, 'workspace', 1, NULL)
 		RETURNING id
-	`, workspaceID, name, runtimeID).Scan(&agentID); err != nil {
+	`, workspaceID, name).Scan(&agentID); err != nil {
 		t.Fatalf("insert agent: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO agent_runtime_assignment (agent_id, runtime_id) VALUES ($1, $2)
+	`, agentID, runtimeID); err != nil {
+		t.Fatalf("insert agent runtime assignment: %v", err)
 	}
 	return agentID
 }
