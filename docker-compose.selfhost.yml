@@ -5,6 +5,12 @@
 #   # Edit .env — change JWT_SECRET at minimum
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
+# Update to latest release:
+#   docker compose -f docker-compose.selfhost.yml pull
+#   docker compose -f docker-compose.selfhost.yml up -d
+#
+# Pin to a specific version: set MULTICA_VERSION=0.1.13 in .env
+#
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:8080 (also used by CLI/daemon)
 
@@ -29,6 +35,7 @@ services:
       retries: 5
 
   backend:
+    image: ghcr.io/multica-ai/multica/backend:${MULTICA_VERSION:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -61,6 +68,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: ghcr.io/multica-ai/multica/web:${MULTICA_VERSION:-latest}
     build:
       context: .
       dockerfile: Dockerfile.web

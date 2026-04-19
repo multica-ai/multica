@@ -26,6 +26,7 @@ function runtimeNeedsUpdate(
   userId: string,
 ): boolean {
   if (rt.runtime_mode !== "local") return false;
+  if (rt.status !== "online") return false;
   // Only show to the user who owns this runtime.
   if (rt.owner_id !== userId) return false;
   // Desktop-managed runtimes are updated by the Desktop app's own auto-updater;
