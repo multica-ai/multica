@@ -208,6 +208,7 @@ runtime_load AS (
     WHERE atq.runtime_id IN (
         SELECT runtime_id FROM agent_runtime_assignment WHERE agent_id = $1
     )
+      AND atq.created_at >= (SELECT ts FROM window_since)
     GROUP BY atq.runtime_id
 )
 SELECT ara.runtime_id
@@ -234,14 +235,9 @@ SELECT
     ar.provider      AS runtime_provider,
     ar.owner_id      AS runtime_owner_id,
     ar.device_info   AS runtime_device_info,
-    last_seen.last_used_at AS last_used_at
+    (SELECT MAX(atq.created_at) FROM agent_task_queue atq WHERE atq.runtime_id = ara.runtime_id)::timestamptz AS last_used_at
 FROM agent_runtime_assignment ara
 JOIN agent_runtime ar ON ar.id = ara.runtime_id
-LEFT JOIN LATERAL (
-    SELECT MAX(atq.created_at) AS last_used_at
-    FROM agent_task_queue atq
-    WHERE atq.runtime_id = ara.runtime_id
-) last_seen ON TRUE
 WHERE ara.agent_id = $1
 ORDER BY ara.created_at ASC;
 
