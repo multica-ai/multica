@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // authRequestWithAgent makes an authenticated request with X-Agent-ID header,
@@ -148,8 +149,12 @@ func createSecondAgent(t *testing.T) string {
 	}
 	runtimeID := agents[0]["runtime_id"].(string)
 
+	// Use a unique name so repeated runs (go test -count=N) don't collide with
+	// archived agents left over from prior runs — archive keeps the row, and
+	// (workspace_id, name) is unique.
+	name := fmt.Sprintf("Second Test Agent %d", time.Now().UnixNano())
 	resp = authRequest(t, "POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
-		"name":       "Second Test Agent",
+		"name":       name,
 		"runtime_id": runtimeID,
 		"visibility": "workspace",
 	})
