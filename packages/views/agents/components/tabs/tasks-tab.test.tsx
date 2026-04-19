@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Agent, AgentTask, Issue } from "@multica/core/types";
+import type { Agent, AgentTask, Issue, RuntimeDevice } from "@multica/core/types";
 
 const mockListAgentTasks = vi.hoisted(() => vi.fn());
 const mockListIssues = vi.hoisted(() => vi.fn());
@@ -76,7 +76,7 @@ const agent: Agent = {
   archived_by: null,
 };
 
-function renderTasksTab(tasks: AgentTask[], issues: Issue[]) {
+function renderTasksTab(tasks: AgentTask[], issues: Issue[], runtimes: RuntimeDevice[] = []) {
   mockListAgentTasks.mockResolvedValue(tasks);
   mockListIssues.mockImplementation(
     ({ open_only, status }: { open_only?: boolean; status?: string }) =>
@@ -96,7 +96,7 @@ function renderTasksTab(tasks: AgentTask[], issues: Issue[]) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <TasksTab agent={agent} />
+      <TasksTab agent={agent} runtimes={runtimes} />
     </QueryClientProvider>,
   );
 }
@@ -183,5 +183,54 @@ describe("TasksTab", () => {
     const link = title.closest("a");
 
     expect(link?.getAttribute("href")).toBe("/test/issues/12345678-fallback");
+  });
+
+  it("renders runtime name on task rows when runtime is available", async () => {
+    const runtimes: RuntimeDevice[] = [
+      {
+        id: "runtime-1",
+        workspace_id: "ws-1",
+        daemon_id: null,
+        name: "Laptop Runtime",
+        runtime_mode: "local",
+        provider: "claude",
+        status: "online",
+        device_info: "macOS",
+        metadata: {},
+        owner_id: null,
+        last_seen_at: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    renderTasksTab(
+      [
+        {
+          id: "task-3",
+          agent_id: "agent-1",
+          runtime_id: "runtime-1",
+          issue_id: "issue-3",
+          status: "completed",
+          priority: 1,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: "2026-04-16T01:00:00Z",
+          result: null,
+          error: null,
+          created_at: "2026-04-16T00:00:00Z",
+        },
+      ],
+      [],
+      runtimes,
+    );
+
+    await waitFor(() => {
+      expect(mockListAgentTasks).toHaveBeenCalledWith("agent-1");
+    });
+
+    const badge = await screen.findByTitle("Runtime: Laptop Runtime (local)");
+    expect(badge).toBeTruthy();
+    expect(badge.textContent).toContain("Laptop Runtime");
   });
 });

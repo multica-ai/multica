@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { ListTodo } from "lucide-react";
-import type { Agent, AgentTask } from "@multica/core/types";
+import type { Agent, AgentTask, RuntimeDevice } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -11,8 +11,9 @@ import { issueListOptions } from "@multica/core/issues/queries";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink } from "../../../navigation";
 import { taskStatusConfig } from "../../config";
+import { TaskRuntimeBadge } from "../../../runtimes/components/task-runtime-badge";
 
-export function TasksTab({ agent }: { agent: Agent }) {
+export function TasksTab({ agent, runtimes = [] }: { agent: Agent; runtimes?: RuntimeDevice[] }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
@@ -93,6 +94,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                   : ""
             }`;
 
+            const taskRuntime = runtimes.find((r) => r.id === task.runtime_id) ?? null;
             const content = (
               <>
                 <Icon
@@ -123,6 +125,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                             : `Queued ${new Date(task.created_at).toLocaleString()}`}
                   </div>
                 </div>
+                <TaskRuntimeBadge runtime={taskRuntime} size="xs" />
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>
                   {config.label}
                 </span>

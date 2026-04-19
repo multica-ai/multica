@@ -204,7 +204,7 @@ export function AgentDetail({
         {activeTab === "skills" && (
           <SkillsTab agent={agent} />
         )}
-        {activeTab === "tasks" && <TasksTab agent={agent} />}
+        {activeTab === "tasks" && <TasksTab agent={agent} runtimes={runtimes} />}
         {activeTab === "env" && (
           <EnvTab
             agent={agent}

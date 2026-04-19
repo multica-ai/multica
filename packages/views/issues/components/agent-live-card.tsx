@@ -5,14 +5,18 @@ import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle,
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
-import type { AgentTask } from "@multica/core/types/agent";
+import type { AgentTask, RuntimeDevice } from "@multica/core/types/agent";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { useQuery } from "@tanstack/react-query";
 import { redactSecrets } from "../utils/redact";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
+import { TaskRuntimeBadge } from "../../runtimes/components/task-runtime-badge";
 
 // ─── Shared types & helpers ─────────────────────────────────────────────────
 
@@ -111,6 +115,8 @@ interface AgentLiveCardProps {
 
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { getActorName } = useActorName();
+  const wsId = useWorkspaceId();
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   const seenSeqs = useRef(new Set<string>());
 
@@ -240,6 +246,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
           items={firstEntry.items}
           issueId={issueId}
           agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : "Agent"}
+          runtimes={runtimes}
         />
       </div>
       {/* Additional agents — scroll with the page */}
@@ -252,6 +259,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               items={items}
               issueId={issueId}
               agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+              runtimes={runtimes}
             />
           ))}
         </div>
@@ -267,9 +275,10 @@ interface SingleAgentLiveCardProps {
   items: TimelineItem[];
   issueId: string;
   agentName: string;
+  runtimes: RuntimeDevice[];
 }
 
-function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
+function SingleAgentLiveCard({ task, items, issueId, agentName, runtimes }: SingleAgentLiveCardProps) {
   const [elapsed, setElapsed] = useState("");
   const [open, setOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -315,6 +324,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   }, [task.id, issueId, cancelling]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
+  const runtime = runtimes.find((r) => r.id === task.runtime_id) ?? null;
 
   return (
     <div className="rounded-lg border border-info/20 bg-info/5 backdrop-blur-sm">
@@ -346,6 +356,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           {toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
           )}
+          <TaskRuntimeBadge runtime={runtime} size="xs" />
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
           <button
@@ -434,6 +445,8 @@ interface TaskRunHistoryProps {
 export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [open, setOpen] = useState(false);
+  const wsId = useWorkspaceId();
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
 
   useEffect(() => {
     api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
@@ -481,7 +494,7 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
       <CollapsibleContent>
         <div className="mt-1 space-y-2">
           {completedTasks.map((task) => (
-            <TaskRunEntry key={task.id} task={task} />
+            <TaskRunEntry key={task.id} task={task} runtimes={runtimes} />
           ))}
         </div>
       </CollapsibleContent>
@@ -489,11 +502,12 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
   );
 }
 
-function TaskRunEntry({ task }: { task: AgentTask }) {
+function TaskRunEntry({ task, runtimes }: { task: AgentTask; runtimes: RuntimeDevice[] }) {
   const { getActorName } = useActorName();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TimelineItem[] | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const runtime = runtimes.find((r) => r.id === task.runtime_id) ?? null;
 
   const loadMessages = useCallback(() => {
     if (items !== null) return; // already loaded
@@ -526,6 +540,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           {new Date(task.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
         {duration && <span className="text-muted-foreground">{duration}</span>}
+        <TaskRuntimeBadge runtime={runtime} size="xs" />
         <span className={cn("ml-auto capitalize", task.status === "completed" ? "text-success" : "text-destructive")}>
           {task.status}
         </span>
