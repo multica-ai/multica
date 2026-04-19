@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -54,6 +56,26 @@ func newNotificationBus(t *testing.T, queries *db.Queries) *events.Bus {
 	registerSubscriberListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 	return bus
+}
+
+func setWorkspaceTelegramSettings(t *testing.T, botToken, userID string) {
+	t.Helper()
+	var settings []byte
+	if strings.TrimSpace(botToken) != "" && strings.TrimSpace(userID) != "" {
+		payload, err := json.Marshal(map[string]any{
+			"telegram": map[string]string{
+				"bot_token": botToken,
+				"user_id":   userID,
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal telegram settings: %v", err)
+		}
+		settings = payload
+	}
+	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET settings = $2 WHERE id = $1`, testWorkspaceID, settings); err != nil {
+		t.Fatalf("update workspace settings: %v", err)
+	}
 }
 
 // TestNotification_IssueCreated_AssigneeNotified verifies that when an issue is
@@ -419,8 +441,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
@@ -673,5 +695,96 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	}
 	if sub1Items[0].Severity != "info" {
 		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
+	}
+}
+
+func TestNotification_InboxNew_SendsTelegramWhenConfigured(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	setWorkspaceTelegramSettings(t, "bot-token", "chat-123")
+	t.Cleanup(func() { setWorkspaceTelegramSettings(t, "", "") })
+
+	var calls []string
+	original := telegramSendMessage
+	telegramSendMessage = func(_ context.Context, botToken, userID, text string) error {
+		calls = append(calls, botToken+"|"+userID+"|"+text)
+		return nil
+	}
+	t.Cleanup(func() { telegramSendMessage = original })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"item": map[string]any{
+				"recipient_id": testUserID,
+				"title":        "Inbox title",
+				"body":         "Inbox body",
+				"issue_id":     "issue-123",
+			},
+		},
+	})
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 telegram send, got %d", len(calls))
+	}
+	if !strings.Contains(calls[0], "bot-token|chat-123|") {
+		t.Fatalf("unexpected telegram recipient payload: %q", calls[0])
+	}
+	if !strings.Contains(calls[0], "Inbox title") || !strings.Contains(calls[0], "Inbox body") {
+		t.Fatalf("expected inbox title/body in telegram message, got %q", calls[0])
+	}
+}
+
+func TestNotification_StatusChanged_SendsTelegramWhenConfigured(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	setWorkspaceTelegramSettings(t, "bot-token", "chat-456")
+	t.Cleanup(func() { setWorkspaceTelegramSettings(t, "", "") })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	var texts []string
+	original := telegramSendMessage
+	telegramSendMessage = func(_ context.Context, _, _ string, text string) error {
+		texts = append(texts, text)
+		return nil
+	}
+	t.Cleanup(func() { telegramSendMessage = original })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Identifier:  "INT-42",
+				Title:       "Status transition issue",
+				Status:      "in_progress",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"assignee_changed": false,
+			"status_changed":   true,
+			"prev_status":      "todo",
+		},
+	})
+
+	if len(texts) != 1 {
+		t.Fatalf("expected 1 telegram status message, got %d", len(texts))
+	}
+	if !strings.Contains(texts[0], "INT-42") || !strings.Contains(texts[0], "Todo → In Progress") {
+		t.Fatalf("unexpected telegram status message: %q", texts[0])
 	}
 }
