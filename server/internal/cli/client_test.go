@@ -110,3 +110,81 @@ func TestPostJSON(t *testing.T) {
 		}
 	})
 }
+
+// TestDownloadFile guards the bug from ZAR-27 where a relative `download_url`
+// was passed straight to http.Get and produced "unsupported protocol scheme".
+func TestDownloadFile(t *testing.T) {
+	const payload = "hello-bytes"
+
+	t.Run("relative URL resolves against base URL and sends auth headers", func(t *testing.T) {
+		var seenAuth, seenWS string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/uploads/workspaces/ws-abc/file.png" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			seenAuth = r.Header.Get("Authorization")
+			seenWS = r.Header.Get("X-Workspace-ID")
+			io.WriteString(w, payload)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "ws-abc", "test-token")
+		got, err := client.DownloadFile(context.Background(), "/uploads/workspaces/ws-abc/file.png")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(got) != payload {
+			t.Errorf("expected body %q, got %q", payload, string(got))
+		}
+		if seenAuth != "Bearer test-token" {
+			t.Errorf("expected Authorization 'Bearer test-token', got %q", seenAuth)
+		}
+		if seenWS != "ws-abc" {
+			t.Errorf("expected X-Workspace-ID 'ws-abc', got %q", seenWS)
+		}
+	})
+
+	t.Run("absolute URL passes through and does not send auth headers", func(t *testing.T) {
+		var seenAuth, seenWS string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seenAuth = r.Header.Get("Authorization")
+			seenWS = r.Header.Get("X-Workspace-ID")
+			io.WriteString(w, payload)
+		}))
+		defer srv.Close()
+
+		// Configure the client against a different base URL to prove that
+		// absolute URLs are not rewritten to point at it.
+		client := NewAPIClient("https://api.example.invalid", "ws-abc", "test-token")
+		got, err := client.DownloadFile(context.Background(), srv.URL+"/some/external/object?sig=abc")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(got) != payload {
+			t.Errorf("expected body %q, got %q", payload, string(got))
+		}
+		if seenAuth != "" {
+			t.Errorf("expected no Authorization header on absolute URL, got %q", seenAuth)
+		}
+		if seenWS != "" {
+			t.Errorf("expected no X-Workspace-ID header on absolute URL, got %q", seenWS)
+		}
+	})
+
+	t.Run("error status surfaces server message", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, "nope")
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "")
+		_, err := client.DownloadFile(context.Background(), "/uploads/x.png")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got := err.Error(); got != "download returned 403: nope" {
+			t.Errorf("unexpected error: %s", got)
+		}
+	})
+}

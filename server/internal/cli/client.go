@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -269,11 +270,34 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
+//
+// download_url may be either a workspace-relative path served by this server
+// (e.g. "/uploads/workspaces/.../foo.png" when using LocalStorage) or an
+// absolute URL pointing at external object storage (e.g. an S3 signed URL).
+// Relative paths are resolved against c.BaseURL and carry the API client's
+// auth/context headers; absolute URLs are passed through untouched so we don't
+// leak Bearer tokens to third-party hosts and don't override their own auth
+// (signed query strings, etc.).
+//
 // Downloads are limited to 100 MB to match the upload size limit.
 func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	u, err := url.Parse(downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse download url: %w", err)
+	}
+
+	resolved := downloadURL
+	sameOrigin := !u.IsAbs()
+	if sameOrigin {
+		resolved = c.BaseURL + downloadURL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolved, nil)
 	if err != nil {
 		return nil, err
+	}
+	if sameOrigin {
+		c.setHeaders(req)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
