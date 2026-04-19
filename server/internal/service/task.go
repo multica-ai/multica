@@ -457,15 +457,33 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// the issue is still in an active state (the agent didn't set it manually).
 	if task.IssueID.Valid && !task.ChatSessionID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-			active := issue.Status != "in_review" && issue.Status != "done" && issue.Status != "cancelled"
+			prevStatus := issue.Status
+			active := prevStatus != "in_review" && prevStatus != "done" && prevStatus != "cancelled"
 			if active {
-				if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				if updatedIssue, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 					ID:     task.IssueID,
 					Status: "in_review",
 				}); err != nil {
 					slog.Warn("auto in_review failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
 				} else {
 					slog.Info("issue auto-advanced to in_review", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
+					s.broadcastIssueUpdated(updatedIssue, map[string]any{
+						"assignee_changed":    false,
+						"status_changed":      true,
+						"priority_changed":    false,
+						"due_date_changed":    false,
+						"description_changed": false,
+						"title_changed":       false,
+						"prev_title":          issue.Title,
+						"prev_assignee_type":  util.TextToPtr(issue.AssigneeType),
+						"prev_assignee_id":    util.UUIDToPtr(issue.AssigneeID),
+						"prev_status":         prevStatus,
+						"prev_priority":       issue.Priority,
+						"prev_due_date":       util.TimestampToPtr(issue.DueDate),
+						"prev_description":    util.TextToPtr(issue.Description),
+						"creator_type":        issue.CreatorType,
+						"creator_id":          util.UUIDToString(issue.CreatorID),
+					})
 				}
 			}
 		}
@@ -978,14 +996,20 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 	})
 }
 
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {
+func (s *TaskService) broadcastIssueUpdated(issue db.Issue, extra map[string]any) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	payload := map[string]any{
+		"issue": issueToMap(issue, prefix),
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload:     map[string]any{"issue": issueToMap(issue, prefix)},
+		Payload:     payload,
 	})
 }
 
