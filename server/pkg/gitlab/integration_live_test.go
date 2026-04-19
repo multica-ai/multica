@@ -7,7 +7,7 @@
 // Run with:
 //
 //	GITLAB_TEST_URL=https://gitlab.com \
-//	GITLAB_TEST_PROJECT_PATH=buoyhealth/multicatest \
+//	GITLAB_TEST_PROJECT_PATH=your-group/your-project \
 //	GITLAB_TEST_PAT=<your PAT> \
 //	go test -tags integration_live -v ./pkg/gitlab/
 //
