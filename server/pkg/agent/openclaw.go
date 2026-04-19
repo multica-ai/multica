@@ -14,10 +14,12 @@ import (
 // openclawBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var openclawBlockedArgs = map[string]blockedArgMode{
-	"--local":      blockedStandalone, // local mode for daemon execution
-	"--json":       blockedStandalone, // JSON output for daemon communication
-	"--session-id": blockedWithValue,  // managed by daemon for session resumption
-	"--message":    blockedWithValue,  // prompt is set by daemon
+	"--local":         blockedStandalone, // local mode for daemon execution
+	"--json":          blockedStandalone, // JSON output for daemon communication
+	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
+	"--message":       blockedWithValue,  // prompt is set by daemon
+	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at agent registration
+	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; injected into --message
 }
 
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
@@ -47,16 +49,19 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
 	}
 	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--system-prompt", opts.SystemPrompt)
-	}
+	// Note: openclaw agent does not accept --model or --system-prompt.
+	// Model is bound at agent registration time via `openclaw agents update --model`.
+	// SystemPrompt (AgentInstructions) is prepended to the message below.
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
 	args = append(args, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, b.cfg.Logger)...)
+
+	// OpenClaw loads AGENTS.md from its own workspace directory, not from cwd.
+	// Prepend system prompt to the message so the agent receives it.
+	if opts.SystemPrompt != "" {
+		prompt = opts.SystemPrompt + "\n\n" + prompt
+	}
 	args = append(args, "--message", prompt)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
