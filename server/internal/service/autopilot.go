@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -304,13 +305,18 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	if agent.ArchivedAt.Valid {
 		return fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		return fmt.Errorf("agent has no runtime")
+
+	runtimeID, err := s.Queries.SelectRuntimeForAgent(ctx, agent.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("agent has no runtimes")
+		}
+		return fmt.Errorf("select runtime: %w", err)
 	}
 
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        ap.AssigneeID,
-		RuntimeID:      agent.RuntimeID,
+		RuntimeID:      runtimeID,
 		Priority:       priorityToInt(ap.Priority),
 		AutopilotRunID: run.ID,
 	})
