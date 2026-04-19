@@ -1049,6 +1049,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
+              currentIssueId={id}
             />
 
             <div className="flex items-center gap-1 mt-3">

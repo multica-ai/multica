@@ -291,6 +291,7 @@ function CommentRow({
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
+              currentIssueId={issueId}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -511,6 +512,7 @@ function CommentCard({
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
+                    currentIssueId={issueId}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
