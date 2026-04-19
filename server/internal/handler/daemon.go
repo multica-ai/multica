@@ -344,12 +344,16 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 			}
 			merged[oldID] = struct{}{}
 
-			agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
+			agents, err := h.Queries.CopyAgentAssignmentsForRuntimeMerge(r.Context(), db.CopyAgentAssignmentsForRuntimeMergeParams{
 				NewRuntimeID: registered.ID,
 				OldRuntimeID: old.ID,
 			})
 			if err != nil {
-				slog.Warn("legacy runtime merge: reassign agents failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				slog.Warn("legacy runtime merge: copy agent assignments failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				continue
+			}
+			if err := h.Queries.DeleteAgentAssignmentsForRuntime(r.Context(), old.ID); err != nil {
+				slog.Warn("legacy runtime merge: delete old agent assignments failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
 				continue
 			}
 			tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{

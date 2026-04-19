@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const copyAgentAssignmentsForRuntimeMerge = `-- name: CopyAgentAssignmentsForRuntimeMerge :execrows
+INSERT INTO agent_runtime_assignment (agent_id, runtime_id)
+SELECT ara.agent_id, $1 FROM agent_runtime_assignment ara
+WHERE ara.runtime_id = $2
+ON CONFLICT (agent_id, runtime_id) DO NOTHING
+`
+
+type CopyAgentAssignmentsForRuntimeMergeParams struct {
+	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
+	OldRuntimeID pgtype.UUID `json:"old_runtime_id"`
+}
+
+// Re-points every assignment referencing old_runtime_id at new_runtime_id.
+// ON CONFLICT keeps the existing row when the agent already has an
+// assignment to new_runtime_id. Orphan rows (old_runtime_id rows after the
+// copy) are removed by DeleteAgentAssignmentsForRuntime.
+func (q *Queries) CopyAgentAssignmentsForRuntimeMerge(ctx context.Context, arg CopyAgentAssignmentsForRuntimeMergeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, copyAgentAssignmentsForRuntimeMerge, arg.NewRuntimeID, arg.OldRuntimeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveAgentsByRuntime = `-- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent a
 JOIN agent_runtime_assignment ara ON ara.agent_id = a.id
@@ -22,6 +46,15 @@ func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgty
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteAgentAssignmentsForRuntime = `-- name: DeleteAgentAssignmentsForRuntime :exec
+DELETE FROM agent_runtime_assignment WHERE runtime_id = $1
+`
+
+func (q *Queries) DeleteAgentAssignmentsForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentAssignmentsForRuntime, runtimeID)
+	return err
 }
 
 const deleteAgentRuntime = `-- name: DeleteAgentRuntime :exec
@@ -50,7 +83,7 @@ const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
 DELETE FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => $1::double precision)
-  AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
+  AND id NOT IN (SELECT DISTINCT runtime_id FROM agent_runtime_assignment)
 RETURNING id, workspace_id
 `
 
@@ -60,8 +93,8 @@ type DeleteStaleOfflineRuntimesRow struct {
 }
 
 // Deletes runtimes that have been offline for longer than the TTL and have
-// no agents bound (active or archived). The FK constraint on agent.runtime_id
-// is ON DELETE RESTRICT, so we must exclude all agent references.
+// no agent assignments. The FK constraint on agent_runtime_assignment.runtime_id
+// is ON DELETE RESTRICT, so we must exclude all referenced runtimes.
 func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds float64) ([]DeleteStaleOfflineRuntimesRow, error) {
 	rows, err := q.db.Query(ctx, deleteStaleOfflineRuntimes, staleSeconds)
 	if err != nil {
@@ -360,26 +393,6 @@ func (q *Queries) MarkStaleRuntimesOffline(ctx context.Context, staleSeconds flo
 		return nil, err
 	}
 	return items, nil
-}
-
-const reassignAgentsToRuntime = `-- name: ReassignAgentsToRuntime :execrows
-UPDATE agent_runtime_assignment
-SET runtime_id = $1
-WHERE runtime_id = $2
-`
-
-type ReassignAgentsToRuntimeParams struct {
-	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
-	OldRuntimeID pgtype.UUID `json:"old_runtime_id"`
-}
-
-// Re-points every assignment referencing old_runtime_id to new_runtime_id.
-func (q *Queries) ReassignAgentsToRuntime(ctx context.Context, arg ReassignAgentsToRuntimeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reassignAgentsToRuntime, arg.NewRuntimeID, arg.OldRuntimeID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const reassignTasksToRuntime = `-- name: ReassignTasksToRuntime :execrows
