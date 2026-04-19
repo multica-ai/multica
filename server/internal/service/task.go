@@ -454,11 +454,13 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	}
 
 	// Auto-advance issue to in_review when a non-chat issue task completes and
-	// the issue is still in an active state (the agent didn't set it manually).
+	// the issue is still in an active work state. Parking/terminal states must
+	// be preserved: backlog stays backlog, blocked stays blocked, and terminal
+	// statuses are left untouched if the agent already set them manually.
 	if task.IssueID.Valid && !task.ChatSessionID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
 			prevStatus := issue.Status
-			active := prevStatus != "in_review" && prevStatus != "done" && prevStatus != "cancelled"
+			active := prevStatus == "todo" || prevStatus == "in_progress"
 			if active {
 				if updatedIssue, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 					ID:     task.IssueID,
