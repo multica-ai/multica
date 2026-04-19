@@ -366,6 +366,15 @@ func NewRouterWithHandler(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
 			})
 
+			// Runtime groups
+			r.Get("/api/runtime-groups", h.ListRuntimeGroups)
+			r.Post("/api/runtime-groups", h.CreateRuntimeGroup)
+			r.Get("/api/runtime-groups/{id}", h.GetRuntimeGroup)
+			r.Patch("/api/runtime-groups/{id}", h.UpdateRuntimeGroup)
+			r.Delete("/api/runtime-groups/{id}", h.DeleteRuntimeGroup)
+			r.Put("/api/runtime-groups/{id}/override", h.SetRuntimeGroupOverride)
+			r.Delete("/api/runtime-groups/{id}/override", h.ClearRuntimeGroupOverride)
+
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)

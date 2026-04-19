@@ -41,8 +41,9 @@ type Handler struct {
 	TxStarter        txStarter
 	Hub              *realtime.Hub
 	Bus              *events.Bus
-	TaskService      *service.TaskService
-	AutopilotService *service.AutopilotService
+	TaskService          *service.TaskService
+	AutopilotService     *service.AutopilotService
+	RuntimeGroupService  *service.RuntimeGroupService
 	EmailService     *service.EmailService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
@@ -90,14 +91,15 @@ func New(
 
 	taskSvc := service.NewTaskService(queries, hub, bus)
 	return &Handler{
-		Queries:          queries,
-		DB:               executor,
-		TxStarter:        txStarter,
-		Hub:              hub,
-		Bus:              bus,
-		TaskService:      taskSvc,
-		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		EmailService:     emailService,
+		Queries:             queries,
+		DB:                  executor,
+		TxStarter:           txStarter,
+		Hub:                 hub,
+		Bus:                 bus,
+		TaskService:         taskSvc,
+		AutopilotService:    service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		RuntimeGroupService: service.NewRuntimeGroupService(queries, txStarter),
+		EmailService:        emailService,
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),
 		Storage:          store,

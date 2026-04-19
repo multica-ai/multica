@@ -1241,6 +1241,38 @@ func newAuthedRequestWithPath(method, path string, body any, agentID string) *ht
 	return withURLParam(req, "id", agentID)
 }
 
+// createRuntimeGroupWithMembers creates a runtime group in the test workspace
+// with the given member runtime IDs. Returns the group UUID string.
+// Registers a t.Cleanup to delete the group.
+func createRuntimeGroupWithMembers(t *testing.T, name string, runtimeIDs []string) string {
+	t.Helper()
+	body := map[string]any{
+		"name":        name,
+		"description": "",
+		"runtime_ids": runtimeIDs,
+	}
+	w := httptest.NewRecorder()
+	testHandler.CreateRuntimeGroup(w, newRequest(http.MethodPost, "/api/runtime-groups", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("createRuntimeGroupWithMembers: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	groupID := resp["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM runtime_group WHERE id = $1`, groupID)
+	})
+	return groupID
+}
+
+// newRequestWithParam wraps newRequest and injects a chi URL parameter.
+func newRequestWithParam(method, path string, body any, paramKey, paramValue string) *http.Request {
+	req := newRequest(method, path, body)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(paramKey, paramValue)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
 func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/daemon/register", bytes.NewBufferString(`{
