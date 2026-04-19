@@ -1493,3 +1493,173 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
 	}
 }
+
+func TestDaemonRegister_AdoptsAgentsFromOfflineRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const oldDaemonID = "old-daemon-adopt-test"
+	const newDaemonID = "new-daemon-adopt-test"
+
+	// Seed an offline runtime (simulating a previous daemon that is no longer running).
+	var offlineRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'old-runtime', 'local', 'claude', 'offline', 'old-machine', '{}'::jsonb, $3, now() - interval '1 hour')
+		RETURNING id
+	`, testWorkspaceID, oldDaemonID, testUserID).Scan(&offlineRuntimeID); err != nil {
+		t.Fatalf("seed offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, offlineRuntimeID)
+	})
+
+	// An agent bound to the offline runtime.
+	var orphanedAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1, 'orphaned-agent', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		RETURNING id
+	`, testWorkspaceID, offlineRuntimeID).Scan(&orphanedAgentID); err != nil {
+		t.Fatalf("seed orphaned agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, orphanedAgentID)
+	})
+
+	// A pending task bound to the offline runtime.
+	var orphanedIssueID, orphanedTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'orphaned-task-issue', 'todo', 'medium', $2, 'member', 97601, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&orphanedIssueID); err != nil {
+		t.Fatalf("seed orphaned issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, orphanedIssueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'queued', $3)
+		RETURNING id
+	`, orphanedAgentID, orphanedIssueID, offlineRuntimeID).Scan(&orphanedTaskID); err != nil {
+		t.Fatalf("seed orphaned task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, orphanedTaskID) })
+
+	// Register a NEW daemon (different daemon_id, same provider).
+	// This simulates a fresh install or daemon_id file loss.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    newDaemonID,
+		"device_name":  "NewMachine",
+		"runtimes": []map[string]any{
+			{"name": "new-runtime", "type": "claude", "version": "2.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes := resp["runtimes"].([]any)
+	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	// Agent should have been adopted — now points at the new runtime.
+	var agentRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, orphanedAgentID).Scan(&agentRuntimeID); err != nil {
+		t.Fatalf("read agent runtime_id: %v", err)
+	}
+	if agentRuntimeID != newRuntimeID {
+		t.Fatalf("agent not adopted: got runtime_id=%s, want %s", agentRuntimeID, newRuntimeID)
+	}
+
+	// Pending task should also have been adopted.
+	var taskRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, orphanedTaskID).Scan(&taskRuntimeID); err != nil {
+		t.Fatalf("read task runtime_id: %v", err)
+	}
+	if taskRuntimeID != newRuntimeID {
+		t.Fatalf("task not adopted: got runtime_id=%s, want %s", taskRuntimeID, newRuntimeID)
+	}
+}
+
+func TestDaemonRegister_DoesNotAdoptFromOnlineRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const existingDaemonID = "existing-online-daemon"
+	const newDaemonID = "new-daemon-no-steal"
+
+	// Seed an ONLINE runtime (another machine that is currently active).
+	var onlineRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'online-runtime', 'local', 'claude', 'online', 'active-machine', '{}'::jsonb, $3, now())
+		RETURNING id
+	`, testWorkspaceID, existingDaemonID, testUserID).Scan(&onlineRuntimeID); err != nil {
+		t.Fatalf("seed online runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, onlineRuntimeID)
+	})
+
+	// An agent bound to the online runtime.
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1, 'active-agent', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		RETURNING id
+	`, testWorkspaceID, onlineRuntimeID).Scan(&agentID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	// Register a different daemon — should NOT steal agents from the online runtime.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    newDaemonID,
+		"device_name":  "AnotherMachine",
+		"runtimes": []map[string]any{
+			{"name": "another-runtime", "type": "claude", "version": "2.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes := resp["runtimes"].([]any)
+	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	// Agent should still point at the original online runtime — not stolen.
+	var agentRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&agentRuntimeID); err != nil {
+		t.Fatalf("read agent runtime_id: %v", err)
+	}
+	if agentRuntimeID != onlineRuntimeID {
+		t.Fatalf("agent was stolen from online runtime: got runtime_id=%s, want %s", agentRuntimeID, onlineRuntimeID)
+	}
+}
