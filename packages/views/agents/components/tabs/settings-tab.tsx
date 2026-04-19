@@ -43,7 +43,9 @@ export function SettingsTab({
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
-  const [selectedRuntimeIds, setSelectedRuntimeIds] = useState<string[]>(agent.runtime_ids);
+  const [selectedRuntimeIds, setSelectedRuntimeIds] = useState<string[]>(
+    () => agent.runtime_ids.filter((id) => runtimes.some((r) => r.id === id)),
+  );
   const [addRuntimeOpen, setAddRuntimeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
