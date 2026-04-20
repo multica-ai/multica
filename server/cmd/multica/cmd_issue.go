@@ -187,6 +187,9 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("ac", nil, "Acceptance criteria (can specify multiple)")
+	issueCreateCmd.Flags().StringSlice("scope", nil, "File scope glob patterns (can specify multiple)")
+	issueCreateCmd.Flags().StringSlice("context-ref", nil, "Context references (format: type:ref, e.g. issue:PROJ-38, url:https://...)")
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -198,6 +201,9 @@ func init() {
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+	issueUpdateCmd.Flags().StringSlice("ac", nil, "Acceptance criteria (replaces all, can specify multiple)")
+	issueUpdateCmd.Flags().StringSlice("scope", nil, "File scope glob patterns (replaces all, can specify multiple)")
+	issueUpdateCmd.Flags().StringSlice("context-ref", nil, "Context references (replaces all, format: type:ref)")
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
@@ -426,6 +432,32 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
 	}
+	if acList, _ := cmd.Flags().GetStringSlice("ac"); len(acList) > 0 {
+		criteria := make([]map[string]any, len(acList))
+		for i, desc := range acList {
+			criteria[i] = map[string]any{
+				"id":          fmt.Sprintf("ac-%d", i+1),
+				"description": desc,
+				"completed":   false,
+			}
+		}
+		body["acceptance_criteria"] = criteria
+	}
+	if scopeList, _ := cmd.Flags().GetStringSlice("scope"); len(scopeList) > 0 {
+		body["scope"] = scopeList
+	}
+	if refList, _ := cmd.Flags().GetStringSlice("context-ref"); len(refList) > 0 {
+		refs := make([]map[string]string, 0, len(refList))
+		for _, ref := range refList {
+			parts := strings.SplitN(ref, ":", 2)
+			if len(parts) == 2 {
+				refs = append(refs, map[string]string{"type": parts[0], "ref": parts[1], "title": parts[1]})
+			} else {
+				refs = append(refs, map[string]string{"type": "issue", "ref": ref, "title": ref})
+			}
+		}
+		body["context_refs"] = refs
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
@@ -511,6 +543,35 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		} else {
 			body["parent_issue_id"] = v
 		}
+	}
+	if cmd.Flags().Changed("ac") {
+		acList, _ := cmd.Flags().GetStringSlice("ac")
+		criteria := make([]map[string]any, len(acList))
+		for i, desc := range acList {
+			criteria[i] = map[string]any{
+				"id":          fmt.Sprintf("ac-%d", i+1),
+				"description": desc,
+				"completed":   false,
+			}
+		}
+		body["acceptance_criteria"] = criteria
+	}
+	if cmd.Flags().Changed("scope") {
+		scopeList, _ := cmd.Flags().GetStringSlice("scope")
+		body["scope"] = scopeList
+	}
+	if cmd.Flags().Changed("context-ref") {
+		refList, _ := cmd.Flags().GetStringSlice("context-ref")
+		refs := make([]map[string]string, 0, len(refList))
+		for _, ref := range refList {
+			parts := strings.SplitN(ref, ":", 2)
+			if len(parts) == 2 {
+				refs = append(refs, map[string]string{"type": parts[0], "ref": parts[1], "title": parts[1]})
+			} else {
+				refs = append(refs, map[string]string{"type": "issue", "ref": ref, "title": ref})
+			}
+		}
+		body["context_refs"] = refs
 	}
 
 	if len(body) == 0 {

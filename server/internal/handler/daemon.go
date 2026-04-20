@@ -611,6 +611,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+
+			// Inject issue context if the chat session is bound to an issue.
+			if cs.IssueID.Valid && resp.ChatMessage != "" {
+				if issue, err := h.Queries.GetIssue(r.Context(), cs.IssueID); err == nil {
+					var ctx strings.Builder
+					ctx.WriteString("[Issue Context]\n")
+					ctx.WriteString(fmt.Sprintf("Title: %s\n", issue.Title))
+					if issue.Description.Valid && issue.Description.String != "" {
+						ctx.WriteString(fmt.Sprintf("Description: %s\n", issue.Description.String))
+					}
+					if len(issue.AcceptanceCriteria) > 0 {
+						ctx.WriteString(fmt.Sprintf("Acceptance Criteria: %s\n", string(issue.AcceptanceCriteria)))
+					}
+					if len(issue.Scope) > 0 {
+						ctx.WriteString(fmt.Sprintf("Scope: %s\n", string(issue.Scope)))
+					}
+					if len(issue.ContextRefs) > 0 {
+						ctx.WriteString(fmt.Sprintf("Context References: %s\n", string(issue.ContextRefs)))
+					}
+					ctx.WriteString(fmt.Sprintf("\n[User Message]\n%s", resp.ChatMessage))
+					resp.ChatMessage = ctx.String()
+				}
+			}
 		}
 	}
 

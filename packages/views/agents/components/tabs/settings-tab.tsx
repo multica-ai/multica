@@ -321,10 +321,12 @@ export function SettingsTab({
         </Popover>
       </div>
 
-      <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
-        {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-        Save Changes
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+          {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+          Save Changes
+        </Button>
+      </div>
     </div>
   );
 }

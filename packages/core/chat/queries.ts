@@ -46,6 +46,15 @@ export function chatSessionOptions(wsId: string, id: string) {
   });
 }
 
+export function issueChatSessionsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: ["issue-chat-sessions", issueId] as const,
+    queryFn: () => api.listIssueChatSessions(issueId),
+    enabled: !!issueId,
+    staleTime: Infinity,
+  });
+}
+
 export function chatMessagesOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.messages(sessionId),

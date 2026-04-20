@@ -618,6 +618,157 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// DiscoverAgentCommands detects available slash commands for an agent
+// based on its runtime provider and saves them to runtime_config.
+func (h *Handler) DiscoverAgentCommands(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	// Get the runtime to determine provider
+	if !agent.RuntimeID.Valid {
+		writeError(w, http.StatusBadRequest, "agent has no runtime")
+		return
+	}
+
+	workspaceID := resolveWorkspaceID(r)
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          agent.RuntimeID,
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get runtime")
+		return
+	}
+
+	// Generate commands based on provider
+	commands := defaultCommandsForProvider(runtime.Provider)
+
+	// Merge into existing runtime_config
+	var config map[string]any
+	if len(agent.RuntimeConfig) > 0 {
+		json.Unmarshal(agent.RuntimeConfig, &config)
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	config["slash_commands"] = commands
+
+	configBytes, _ := json.Marshal(config)
+
+	// Update agent
+	_, err = h.Queries.UpdateAgent(r.Context(), db.UpdateAgentParams{
+		ID:            parseUUID(id),
+		RuntimeConfig: configBytes,
+	})
+	if err != nil {
+		slog.Warn("discover commands: update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to save commands")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"commands": commands,
+		"provider": runtime.Provider,
+	})
+}
+
+// SlashCommand represents a preset slash command for an agent.
+type SlashCommand struct {
+	Command string `json:"command"`
+	Label   string `json:"label"`
+	Prompt  string `json:"prompt"`
+}
+
+func defaultCommandsForProvider(provider string) []SlashCommand {
+	switch provider {
+	case "claude":
+		return []SlashCommand{
+			{Command: "/explain", Label: "Explain", Prompt: "Explain how the current implementation works for this issue."},
+			{Command: "/fix", Label: "Fix", Prompt: "Fix the issue described above."},
+			{Command: "/test", Label: "Test", Prompt: "Write tests for the current implementation."},
+			{Command: "/refactor", Label: "Refactor", Prompt: "Refactor the code for better readability and maintainability."},
+			{Command: "/review", Label: "Review", Prompt: "Review the changes and suggest improvements."},
+			{Command: "/plan", Label: "Plan", Prompt: "Create an implementation plan for this issue."},
+		}
+	case "codex":
+		return []SlashCommand{
+			{Command: "/verify", Label: "Verify", Prompt: "Verify the current implementation for correctness and security issues."},
+			{Command: "/fix", Label: "Fix", Prompt: "Fix the issue described above."},
+			{Command: "/test", Label: "Test", Prompt: "Write comprehensive tests for the current implementation."},
+			{Command: "/audit", Label: "Audit", Prompt: "Audit the code for security vulnerabilities and best practice violations."},
+		}
+	case "gemini":
+		return []SlashCommand{
+			{Command: "/explain", Label: "Explain", Prompt: "Explain how the current implementation works for this issue."},
+			{Command: "/fix", Label: "Fix", Prompt: "Fix the issue described above."},
+			{Command: "/test", Label: "Test", Prompt: "Write tests for the current implementation."},
+			{Command: "/review", Label: "Review", Prompt: "Review the changes and suggest improvements."},
+		}
+	default:
+		return []SlashCommand{
+			{Command: "/explain", Label: "Explain", Prompt: "Explain how the current implementation works for this issue."},
+			{Command: "/fix", Label: "Fix", Prompt: "Fix the issue described above."},
+			{Command: "/test", Label: "Test", Prompt: "Write tests for the current implementation."},
+		}
+	}
+}
+
+// DiscoverRuntimeCommands detects available slash commands for a runtime
+// based on its provider and saves them to every agent bound to that runtime.
+//
+// Permission model: requireWorkspaceMember ensures the caller belongs to the
+// workspace that owns the runtime. The bulk UPDATE only touches the
+// `slash_commands` key inside `runtime_config` via jsonb_set, so it is safe
+// for any workspace member to trigger. Fine-grained owner/admin checks can
+// be added later if needed.
+func (h *Handler) DiscoverRuntimeCommands(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	if _, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found"); !ok {
+		return
+	}
+
+	slog.Info("discover runtime commands initiated",
+		append(logger.RequestAttrs(r), "runtime_id", runtimeID, "workspace_id", wsID, "provider", rt.Provider)...)
+
+	// Generate commands based on provider
+	commands := defaultCommandsForProvider(rt.Provider)
+
+	commandsJSON, _ := json.Marshal(commands)
+
+	// Update all agents bound to this runtime: merge slash_commands into their runtime_config.
+	_, err = h.DB.Exec(r.Context(), `
+		UPDATE agent
+		SET runtime_config = jsonb_set(
+			COALESCE(runtime_config, '{}'::jsonb),
+			'{slash_commands}',
+			$1::jsonb
+		),
+		updated_at = now()
+		WHERE runtime_id = $2
+	`, commandsJSON, parseUUID(runtimeID))
+	if err != nil {
+		slog.Warn("discover runtime commands: bulk update failed", append(logger.RequestAttrs(r), "error", err, "runtime_id", runtimeID)...)
+		writeError(w, http.StatusInternalServerError, "failed to save commands")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"commands": commands,
+		"provider": rt.Provider,
+	})
+}
+
 func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if _, ok := h.loadAgentForUser(w, r, id); !ok {

@@ -1,4 +1,4 @@
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, AcceptanceCriterion, ContextRef } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -27,6 +27,9 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  acceptance_criteria?: AcceptanceCriterion[];
+  context_refs?: ContextRef[];
+  scope?: string[];
 }
 
 export interface ListIssuesParams {
