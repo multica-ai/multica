@@ -336,6 +336,7 @@ type hermesPromptResult struct {
 type hermesClient struct {
 	cfg          Config
 	stdin        interface{ Write([]byte) (int, error) }
+	writeMu      sync.Mutex // serialises stdin.Write calls across goroutines
 	mu           sync.Mutex
 	nextID       int
 	pending      map[int]*pendingRPC
@@ -345,6 +346,17 @@ type hermesClient struct {
 
 	usageMu sync.Mutex
 	usage   TokenUsage
+}
+
+// writeLine serialises concurrent JSON-RPC writes so request() (main
+// goroutine) and handleAgentRequest() (reader goroutine) don't
+// interleave frames. The pipe itself is atomic for small writes, but
+// we also want deterministic ordering under contention.
+func (c *hermesClient) writeLine(data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_, err := c.stdin.Write(data)
+	return err
 }
 
 func (c *hermesClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -369,7 +381,7 @@ func (c *hermesClient) request(ctx context.Context, method string, params any) (
 		return nil, err
 	}
 	data = append(data, '\n')
-	if _, err := c.stdin.Write(data); err != nil {
+	if err := c.writeLine(data); err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
@@ -402,7 +414,11 @@ func (c *hermesClient) handleLine(line string) {
 		return
 	}
 
-	// Check if it's a response to our request (has id + result or error).
+	// Agent → client request: has id + method (no result / error yet).
+	// Kimi uses this for session/request_permission; if we don't answer,
+	// the agent blocks for 300s and the task hangs. Hermes doesn't send
+	// these when launched with HERMES_YOLO_MODE=1, but we still handle
+	// the case generically for any future ACP backend we bolt on.
 	if _, hasID := raw["id"]; hasID {
 		if _, hasResult := raw["result"]; hasResult {
 			c.handleResponse(raw)
@@ -412,11 +428,71 @@ func (c *hermesClient) handleLine(line string) {
 			c.handleResponse(raw)
 			return
 		}
+		if _, hasMethod := raw["method"]; hasMethod {
+			c.handleAgentRequest(raw)
+			return
+		}
 	}
 
 	// Notification (no id, has method) — session updates from Hermes.
 	if _, hasMethod := raw["method"]; hasMethod {
 		c.handleNotification(raw)
+	}
+}
+
+// handleAgentRequest replies to JSON-RPC requests the agent sends
+// us (agent → client direction). The only one we care about today is
+// `session/request_permission`: the daemon is headless and cannot
+// actually prompt a user, so we auto-approve every action. Using
+// `approve_for_session` rather than `approve` means subsequent
+// identical actions (every Shell invocation, every file write) don't
+// round-trip through us — the agent remembers them locally.
+func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
+	var method string
+	_ = json.Unmarshal(raw["method"], &method)
+
+	rawID, ok := raw["id"]
+	if !ok {
+		return
+	}
+
+	var resp map[string]any
+	switch method {
+	case "session/request_permission":
+		resp = map[string]any{
+			"jsonrpc": "2.0",
+			"id":      json.RawMessage(rawID),
+			"result": map[string]any{
+				"outcome": map[string]any{
+					"outcome":  "selected",
+					"optionId": "approve_for_session",
+				},
+			},
+		}
+		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
+	default:
+		// Unknown agent→client method — reply with standard "method
+		// not found" so the agent doesn't block waiting for us. Better
+		// than silence: the agent can decide how to proceed.
+		resp = map[string]any{
+			"jsonrpc": "2.0",
+			"id":      json.RawMessage(rawID),
+			"error": map[string]any{
+				"code":    -32601,
+				"message": "method not found: " + method,
+			},
+		}
+		c.cfg.Logger.Debug("unhandled agent→client request", "method", method)
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		c.cfg.Logger.Warn("marshal agent-request response", "method", method, "error", err)
+		return
+	}
+	data = append(data, '\n')
+	if err := c.writeLine(data); err != nil {
+		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
 	}
 }
 

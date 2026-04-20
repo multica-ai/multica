@@ -150,13 +150,15 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 	}
 }
 
-// TestKimiBackendPassesYoloFlag pins that the daemon invokes
-// `kimi --yolo acp ...` rather than `kimi acp ...`. Missing --yolo
-// causes Kimi to block on session/request_permission for any Shell /
-// file-mutating tool call — the headless daemon never answers those
-// permission requests, so the task hangs 5 minutes and then dies. See
-// MUL-1159 discussion on the first stuck run (issue 5732f3d0).
-func TestKimiBackendPassesYoloFlag(t *testing.T) {
+// TestKimiBackendInvokesACPSubcommand pins the argv for `kimi`. An
+// earlier fix tried passing `--yolo` to bypass per-tool approval
+// prompts, but the `acp` subcommand in kimi-cli takes no options
+// (see cli/__init__.py @cli.command def acp()), so `--yolo` was a
+// no-op and the daemon still hung for 5 min on the first Shell call.
+// The actual bypass is in hermesClient.handleAgentRequest, which
+// auto-approves session/request_permission. This test catches
+// accidental re-introduction of the dead flag.
+func TestKimiBackendInvokesACPSubcommand(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -198,13 +200,16 @@ func TestKimiBackendPassesYoloFlag(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 args (--yolo acp), got %d: %q", len(lines), lines)
+	if len(lines) < 1 {
+		t.Fatalf("expected at least 1 arg (acp), got %d: %q", len(lines), lines)
 	}
-	if lines[0] != "--yolo" {
-		t.Errorf("expected first arg to be --yolo, got %q (full: %q)", lines[0], lines)
+	if lines[0] != "acp" {
+		t.Errorf("expected first arg to be acp, got %q (full: %q)", lines[0], lines)
 	}
-	if lines[1] != "acp" {
-		t.Errorf("expected second arg to be acp, got %q (full: %q)", lines[1], lines)
+	for _, l := range lines {
+		switch l {
+		case "--yolo", "--auto-approve", "--yes", "-y":
+			t.Errorf("kimi acp doesn't accept %q; auto-approval is handled in hermesClient.handleAgentRequest", l)
+		}
 	}
 }

@@ -2,7 +2,9 @@ package agent
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -134,6 +136,111 @@ func TestHermesClientHandleLineError(t *testing.T) {
 	}
 	if got := res.err.Error(); got != "initialize: bad request (code=-32600)" {
 		t.Errorf("error: got %q", got)
+	}
+}
+
+// ── agent → client request handling ──
+
+// bufferWriter is a test stand-in for cmd.StdinPipe that captures
+// writes in-memory so we can assert what handleAgentRequest emitted.
+type bufferWriter struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *bufferWriter) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.WriteString(string(p))
+}
+
+func (b *bufferWriter) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestHermesClientAutoApprovesPermissionRequest asserts that when an
+// ACP agent sends us `session/request_permission` (kimi does this on
+// every Shell / file-mutating tool call), the client replies with
+// `approve_for_session` — without this the agent blocks 300s and the
+// task hangs. The id in the reply must match the agent's request id
+// so its in-flight future resolves.
+func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"approve","name":"Approve once","kind":"allow_once"},{"optionId":"approve_for_session","name":"Approve for this session","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_1","title":"Shell","content":[]}}}`)
+
+	got := w.String()
+	var resp struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  struct {
+			Outcome struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+	}
+	if resp.JSONRPC != "2.0" {
+		t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
+	}
+	if resp.ID != 42 {
+		t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
+	}
+	if resp.Result.Outcome.Outcome != "selected" {
+		t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
+	}
+	if resp.Result.Outcome.OptionID != "approve_for_session" {
+		t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, "approve_for_session")
+	}
+}
+
+// TestHermesClientReplesMethodNotFoundForUnknownAgentRequest ensures
+// that any agent → client request we don't explicitly handle gets a
+// proper JSON-RPC error back, not silence. Silence would block the
+// agent for however long its internal timeout is, same as the
+// session/request_permission hang this change fixes.
+func TestHermesClientReplesMethodNotFoundForUnknownAgentRequest(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+	c.handleLine(`{"jsonrpc":"2.0","id":7,"method":"fs/read_text_file","params":{"path":"/tmp/x"}}`)
+
+	got := w.String()
+	var resp struct {
+		ID    int `json:"id"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+		t.Fatalf("reply not valid JSON: %q err=%v", got, err)
+	}
+	if resp.ID != 7 {
+		t.Errorf("id echo: got %d, want 7", resp.ID)
+	}
+	if resp.Error.Code != -32601 {
+		t.Errorf("error code: got %d, want -32601 (method not found)", resp.Error.Code)
+	}
+	if !strings.Contains(resp.Error.Message, "fs/read_text_file") {
+		t.Errorf("error message should name the unhandled method, got %q", resp.Error.Message)
 	}
 }
 

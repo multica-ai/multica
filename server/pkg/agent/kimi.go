@@ -15,13 +15,8 @@ import (
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport for Kimi Code CLI;
 // overriding it would break the daemon↔Kimi communication contract.
-// `--yolo` bypasses Kimi's per-tool approval prompts — the daemon is
-// headless and has no way to ack a `session/request_permission` call,
-// so without it the agent hangs for 300s on the first Shell tool use
-// then aborts (see kimi_cli/approval_runtime/runtime.py wait_for_response).
 var kimiBlockedArgs = map[string]blockedArgMode{
-	"acp":    blockedStandalone,
-	"--yolo": blockedStandalone,
+	"acp": blockedStandalone,
 }
 
 // kimiBackend implements Backend by spawning `kimi acp` and communicating
@@ -50,11 +45,11 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	// `--yolo` must come before the `acp` subcommand: it's a top-level
-	// flag on the `kimi` CLI, not a flag on `kimi acp`. Kept in lock-step
-	// with hermes' HERMES_YOLO_MODE=1 — both skip per-tool approval prompts
-	// the headless daemon can't answer.
-	kimiArgs := append([]string{"--yolo", "acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
+	// `kimi acp` ignores --yolo / --auto-approve (they're flags on the
+	// root `kimi` command, not on the `acp` subcommand). Instead, the
+	// daemon auto-approves in hermesClient.handleAgentRequest by replying
+	// "approve_for_session" to every session/request_permission request.
+	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", kimiArgs)
 	if opts.Cwd != "" {
