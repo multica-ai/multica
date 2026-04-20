@@ -258,7 +258,7 @@ func TestParseHermesSessionNewModels(t *testing.T) {
         "currentModelId": "nous:anthropic/claude-opus-4.7"
       }
     }`)
-	models := parseHermesSessionNewModels(raw)
+	models := parseACPSessionNewModels(raw)
 	if len(models) != 2 {
 		t.Fatalf("expected 2 models (duplicate deduped), got %d: %+v", len(models), models)
 	}
@@ -281,13 +281,13 @@ func TestParseHermesSessionNewModelsMissingField(t *testing.T) {
 	// failed _build_model_state — should yield nil so the caller
 	// can distinguish "no catalog" from "empty catalog".
 	raw := []byte(`{"sessionId": "ses_123"}`)
-	if got := parseHermesSessionNewModels(raw); got != nil && len(got) != 0 {
+	if got := parseACPSessionNewModels(raw); got != nil && len(got) != 0 {
 		t.Errorf("expected nil/empty, got %+v", got)
 	}
 }
 
 func TestParseHermesSessionNewModelsGarbage(t *testing.T) {
-	if got := parseHermesSessionNewModels([]byte("not json")); got != nil {
+	if got := parseACPSessionNewModels([]byte("not json")); got != nil {
 		t.Errorf("expected nil for non-JSON, got %+v", got)
 	}
 }

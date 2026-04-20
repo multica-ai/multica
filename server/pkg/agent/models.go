@@ -71,6 +71,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverHermesModels(ctx, executablePath)
 		})
+	case "kimi":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverKimiModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -317,8 +321,52 @@ func parsePiModels(output string) []Model {
 // error) all return an empty list so the UI falls back to the
 // creatable manual-entry input instead of blocking the form.
 func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:      "hermes",
+		clientName:      "multica-model-discovery",
+		extraEnv:        []string{"HERMES_YOLO_MODE=1"},
+		tmpdirPrefix:    "multica-hermes-discovery-",
+	})
+}
+
+// discoverKimiModels spins up a throwaway `kimi acp` process and
+// drives the same minimal ACP handshake as Hermes to surface the
+// model catalog advertised by Kimi's `session/new` response. Kimi's
+// ACPServer.new_session returns a `models` block of the same shape
+// (`availableModels`/`currentModelId`) so the parsing path is shared.
+//
+// Failure modes (kimi missing, not logged in, config error) all
+// return an empty list so the UI falls back to manual entry.
+func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "kimi",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-kimi-discovery-",
+	})
+}
+
+// acpDiscoveryProvider configures how discoverACPModels launches an
+// ACP-speaking agent CLI. The shared helper drives every CLI in
+// the same way (initialize → session/new → parse models block) — the
+// per-provider differences are which binary to spawn, which env
+// vars suppress interactive prompts during init, and what to label
+// temporary work directories so they're easy to identify in logs.
+type acpDiscoveryProvider struct {
+	defaultBin   string
+	clientName   string
+	extraEnv     []string
+	tmpdirPrefix string
+}
+
+// discoverACPModels runs the ACP handshake for any agent CLI that
+// implements the standard `initialize` + `session/new` flow and
+// advertises its model catalog in the response under
+// `models.availableModels` / `models.currentModelId`. This covers
+// Hermes and Kimi today; future ACP backends can plug in by adding
+// an acpDiscoveryProvider entry instead of duplicating the loop.
+func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
-		executablePath = "hermes"
+		executablePath = p.defaultBin
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
@@ -327,8 +375,9 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, executablePath, "acp")
-	// Mirror the real backend's auto-approve so init doesn't prompt.
-	cmd.Env = append(os.Environ(), "HERMES_YOLO_MODE=1")
+	if len(p.extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), p.extraEnv...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return []Model{}, nil
@@ -370,16 +419,16 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	// Send initialize + session/new.
 	if err := writeACP(1, "initialize", map[string]any{
 		"protocolVersion":    1,
-		"clientInfo":         map[string]any{"name": "multica-model-discovery", "version": "0.1.0"},
+		"clientInfo":         map[string]any{"name": p.clientName, "version": "0.1.0"},
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
 		return []Model{}, nil
 	}
 
-	// Hermes requires a valid cwd for session/new — use a temp
-	// directory we clean up afterwards, not the daemon's workdir
-	// (which might be in the middle of another task's worktree).
-	tmp, err := os.MkdirTemp("", "multica-hermes-discovery-")
+	// session/new requires a valid cwd — use a temp directory we
+	// clean up afterwards, not the daemon's workdir (which might
+	// be in the middle of another task's worktree).
+	tmp, err := os.MkdirTemp("", p.tmpdirPrefix)
 	if err != nil {
 		return []Model{}, nil
 	}
@@ -414,7 +463,7 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 			if env.ID.String() != "2" || len(env.Result) == 0 {
 				continue
 			}
-			done <- parseHermesSessionNewModels(env.Result)
+			done <- parseACPSessionNewModels(env.Result)
 			return
 		}
 	}()
@@ -432,14 +481,15 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 	}
 }
 
-// parseHermesSessionNewModels extracts the model catalog from a
-// hermes `session/new` response. Hermes' ACP schema emits:
+// parseACPSessionNewModels extracts the model catalog from an ACP
+// `session/new` response. Both Hermes and Kimi (and any other ACP
+// agent that follows the standard schema) emit:
 //
 //	{
 //	  "sessionId": "...",
 //	  "models": {
 //	    "availableModels": [
-//	      {"modelId": "...", "name": "...", "description": "... current"}
+//	      {"modelId": "...", "name": "...", "description": "..."}
 //	    ],
 //	    "currentModelId": "..."
 //	  }
@@ -448,7 +498,7 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 // Returns nil (not an empty slice) when the payload is missing so
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
-func parseHermesSessionNewModels(raw json.RawMessage) []Model {
+func parseACPSessionNewModels(raw json.RawMessage) []Model {
 	var resp struct {
 		Models struct {
 			AvailableModels []struct {

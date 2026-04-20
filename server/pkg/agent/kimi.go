@@ -194,13 +194,42 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("kimi session created", "session_id", sessionID)
 
-		// 3. Build the prompt content. If we have a system prompt, prepend it.
+		// 3. If the caller picked a model (via agent.model from the
+		// UI dropdown), ask kimi to switch the session to it before
+		// we send any prompt. Kimi's ACP server exposes
+		// `session/set_model` and advertises available models via
+		// the `models.availableModels` block returned by
+		// `session/new` — we pass the chosen modelId through
+		// verbatim. This MUST fail the task on error: silently
+		// falling back to kimi's default model would let the user
+		// believe their pick was honoured while the task actually
+		// ran on something else.
+		if opts.Model != "" {
+			if _, err := c.request(runCtx, "session/set_model", map[string]any{
+				"sessionId": sessionID,
+				"modelId":   opts.Model,
+			}); err != nil {
+				b.cfg.Logger.Warn("kimi set_session_model failed", "error", err, "requested_model", opts.Model)
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("kimi could not switch to model %q: %v", opts.Model, err)
+				resCh <- Result{
+					Status:     finalStatus,
+					Error:      finalError,
+					DurationMs: time.Since(startTime).Milliseconds(),
+					SessionID:  sessionID,
+				}
+				return
+			}
+			b.cfg.Logger.Info("kimi session model set", "model", opts.Model)
+		}
+
+		// 4. Build the prompt content. If we have a system prompt, prepend it.
 		userText := prompt
 		if opts.SystemPrompt != "" {
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		// 4. Send the prompt and wait for PromptResponse.
+		// 5. Send the prompt and wait for PromptResponse.
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
