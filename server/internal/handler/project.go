@@ -22,6 +22,7 @@ type ProjectResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
+	Color       *string `json:"color"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -39,6 +40,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Title:       p.Title,
 		Description: textToPtr(p.Description),
 		Icon:        textToPtr(p.Icon),
+		Color:       textToPtr(p.Color),
 		Status:      p.Status,
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
@@ -60,6 +62,7 @@ type CreateProjectRequest struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
+	Color       *string `json:"color"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -70,6 +73,7 @@ type UpdateProjectRequest struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
+	Color       *string `json:"color"`
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -177,6 +181,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
+		Color:       ptrToText(req.Color),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create project")
@@ -218,6 +223,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		ID:          prevProject.ID,
 		Description: prevProject.Description,
 		Icon:        prevProject.Icon,
+		Color:       prevProject.Color,
 		LeadType:    prevProject.LeadType,
 		LeadID:      prevProject.LeadID,
 	}
@@ -242,6 +248,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.Icon = pgtype.Text{String: *req.Icon, Valid: true}
 		} else {
 			params.Icon = pgtype.Text{Valid: false}
+		}
+	}
+	if _, ok := rawFields["color"]; ok {
+		if req.Color != nil {
+			params.Color = pgtype.Text{String: *req.Color, Valid: true}
+		} else {
+			params.Color = pgtype.Text{Valid: false}
 		}
 	}
 	if _, ok := rawFields["lead_type"]; ok {

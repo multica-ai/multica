@@ -9,6 +9,7 @@ import {
   PROJECT_STATUS_ORDER,
   PROJECT_PRIORITY_CONFIG,
   PROJECT_PRIORITY_ORDER,
+  PROJECT_COLORS,
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -71,6 +72,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [leadId, setLeadId] = useState<string | undefined>();
   const [icon, setIcon] = useState<string | undefined>();
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [color, setColor] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -95,6 +97,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         title: title.trim(),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         icon,
+        color,
         status,
         priority,
         lead_type: leadType,
@@ -236,6 +239,25 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <DropdownMenuItem key={pr} onClick={() => setPriority(pr)}>
                   <PriorityIcon priority={pr} />
                   <span>{PROJECT_PRIORITY_CONFIG[pr].label}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton>
+                  <span className={cn("size-2.5 rounded-full", color ? PROJECT_COLORS.find((c) => c.value === color)?.dot ?? "bg-zinc-500" : "bg-zinc-500")} />
+                  <span>{color ? PROJECT_COLORS.find((c) => c.value === color)?.label ?? "Color" : "Color"}</span>
+                </PillButton>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-36">
+              {PROJECT_COLORS.map((c) => (
+                <DropdownMenuItem key={c.value} onClick={() => setColor(c.value)}>
+                  <span className={cn("size-2.5 rounded-full", c.dot)} />
+                  <span>{c.label}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
