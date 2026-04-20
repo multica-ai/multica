@@ -1,6 +1,6 @@
 import { Server, ArrowUpCircle, ChevronDown, Check } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
+import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
@@ -21,12 +21,14 @@ function RuntimeListItem({
   isSelected,
   ownerMember,
   hasUpdate,
+  boundAgents,
   onClick,
 }: {
   runtime: AgentRuntime;
   isSelected: boolean;
   ownerMember: MemberWithUser | null;
   hasUpdate: boolean;
+  boundAgents: Agent[];
   onClick: () => void;
 }) {
   return (
@@ -55,6 +57,11 @@ function RuntimeListItem({
             <span className="truncate">{runtime.runtime_mode}</span>
           )}
         </div>
+        {boundAgents.length > 0 ? (
+          <div className="mt-1 truncate text-xs text-muted-foreground">
+            Agents: {boundAgents.map((agent) => agent.name).join(", ")}
+          </div>
+        ) : null}
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         {hasUpdate && (
@@ -81,6 +88,7 @@ export function RuntimeList({
   ownerFilter,
   onOwnerFilterChange,
   updatableIds,
+  agentsByRuntimeId,
 }: {
   runtimes: AgentRuntime[];
   selectedId: string;
@@ -90,6 +98,7 @@ export function RuntimeList({
   ownerFilter: string | null;
   onOwnerFilterChange: (ownerId: string | null) => void;
   updatableIds?: Set<string>;
+  agentsByRuntimeId: Map<string, Agent[]>;
 }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -224,6 +233,7 @@ export function RuntimeList({
               isSelected={runtime.id === selectedId}
               ownerMember={getOwnerMember(runtime.owner_id)}
               hasUpdate={updatableIds?.has(runtime.id) ?? false}
+              boundAgents={agentsByRuntimeId.get(runtime.id) ?? []}
               onClick={() => onSelect(runtime.id)}
             />
           ))}

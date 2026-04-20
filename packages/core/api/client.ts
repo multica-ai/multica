@@ -63,6 +63,14 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  ClarifyStructuredTaskRequest,
+  StructuredTaskSpec,
+  StructuredTaskClarityCheckRequest,
+  StructuredTaskClarityCheckResponse,
+  StructuredTaskTemplate,
+  CreateStructuredTaskTemplateRequest,
+  StructuredTaskHistoryItem,
+  CreateStructuredTaskHistoryRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -263,6 +271,48 @@ export class ApiClient {
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async clarifyStructuredTask(data: ClarifyStructuredTaskRequest): Promise<StructuredTaskSpec> {
+    return this.fetch("/api/structured-tasks/clarify", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async checkStructuredTaskClarity(
+    data: StructuredTaskClarityCheckRequest,
+  ): Promise<StructuredTaskClarityCheckResponse> {
+    return this.fetch("/api/structured-tasks/check", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listStructuredTaskTemplates(): Promise<StructuredTaskTemplate[]> {
+    return this.fetch("/api/structured-task-templates");
+  }
+
+  async createStructuredTaskTemplate(
+    data: CreateStructuredTaskTemplateRequest,
+  ): Promise<StructuredTaskTemplate> {
+    return this.fetch("/api/structured-task-templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listStructuredTaskHistory(): Promise<StructuredTaskHistoryItem[]> {
+    return this.fetch("/api/structured-task-history");
+  }
+
+  async createStructuredTaskHistory(
+    data: CreateStructuredTaskHistoryRequest,
+  ): Promise<StructuredTaskHistoryItem> {
+    return this.fetch("/api/structured-task-history", {
       method: "POST",
       body: JSON.stringify(data),
     });

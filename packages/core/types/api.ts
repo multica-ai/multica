@@ -73,6 +73,83 @@ export interface UpdateMeRequest {
   avatar_url?: string;
 }
 
+export interface StructuredTaskSpec {
+  goal: string;
+  audience: string[];
+  output: string;
+  constraints: string[];
+  style: string[];
+  open_questions: string[];
+}
+
+export interface ClarifyStructuredTaskRequest {
+  original_input: string;
+}
+
+export interface StructuredTaskClarityCheckRequest extends StructuredTaskSpec {}
+
+export interface StructuredTaskClarityCheckResponse {
+  clarity_status: "clear" | "risky" | "blocked";
+  reason: string[];
+  suggestions: string[];
+}
+
+export interface StructuredTaskTemplate {
+  id: string;
+  workspace_id: string;
+  template_name: string;
+  description: string;
+  goal: string;
+  audience: string[];
+  output: string;
+  constraints: string[];
+  style: string[];
+  parameters: StructuredTaskTemplateParameter[];
+  scope: "personal" | "team" | "org";
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StructuredTaskTemplateParameter {
+  key: string;
+  description: string;
+  required: boolean;
+  default_value: string;
+}
+
+export interface CreateStructuredTaskTemplateRequest {
+  template_name: string;
+  description?: string;
+  goal: string;
+  audience: string[];
+  output: string;
+  constraints: string[];
+  style: string[];
+  parameters?: StructuredTaskTemplateParameter[];
+  scope?: "personal" | "team" | "org";
+}
+
+export interface StructuredTaskHistoryItem {
+  id: string;
+  workspace_id: string;
+  issue_id?: string | null;
+  goal: string;
+  used_template_id?: string | null;
+  clarity_status: "clear" | "risky" | "blocked";
+  spec: StructuredTaskSpec;
+  created_by?: string | null;
+  executed_at: string;
+}
+
+export interface CreateStructuredTaskHistoryRequest {
+  issue_id?: string;
+  goal: string;
+  used_template_id?: string;
+  clarity_status: "clear" | "risky" | "blocked";
+  spec: StructuredTaskSpec;
+}
+
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
