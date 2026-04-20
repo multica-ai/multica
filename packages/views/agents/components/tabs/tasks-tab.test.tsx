@@ -55,6 +55,7 @@ const agent: Agent = {
   visibility: "workspace",
   status: "idle",
   max_concurrent_tasks: 1,
+  model: "",
   owner_id: null,
   skills: [],
   created_at: "2026-04-16T00:00:00Z",

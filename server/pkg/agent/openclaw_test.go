@@ -688,8 +688,8 @@ func TestOpenclawUsageAlternativeFieldNames(t *testing.T) {
 
 	// Test PaperClip-style field names (inputTokens, outputTokens, etc.)
 	data := map[string]any{
-		"inputTokens":      float64(500),
-		"outputTokens":     float64(200),
+		"inputTokens":       float64(500),
+		"outputTokens":      float64(200),
 		"cachedInputTokens": float64(100),
 	}
 	usage := parseOpenclawUsage(data)
@@ -711,8 +711,8 @@ func TestOpenclawUsageSnakeCaseFieldNames(t *testing.T) {
 	// Test snake_case field names (Anthropic API style)
 	data := map[string]any{
 		"input_tokens":                float64(300),
-		"output_tokens":              float64(150),
-		"cache_read_input_tokens":    float64(80),
+		"output_tokens":               float64(150),
+		"cache_read_input_tokens":     float64(80),
 		"cache_creation_input_tokens": float64(40),
 	}
 	usage := parseOpenclawUsage(data)
@@ -796,8 +796,8 @@ func TestOpenclawUsageFinalResultAlternativeFields(t *testing.T) {
 			DurationMs: 1000,
 			AgentMeta: map[string]any{
 				"usage": map[string]any{
-					"inputTokens":      float64(400),
-					"outputTokens":     float64(180),
+					"inputTokens":       float64(400),
+					"outputTokens":      float64(180),
 					"cachedInputTokens": float64(90),
 				},
 			},
@@ -943,13 +943,15 @@ func TestBuildOpenclawArgsMinimal(t *testing.T) {
 	}
 }
 
-func TestBuildOpenclawArgsDoesNotForwardModelOrSystemPrompt(t *testing.T) {
+func TestBuildOpenclawArgsMapsModelToAgent(t *testing.T) {
 	t.Parallel()
 
-	// openclaw agent rejects --model and --system-prompt; verify they are
-	// never emitted as flags even when Model and SystemPrompt are set.
+	// For openclaw, agent.model stores the pre-registered agent name;
+	// the daemon must translate that to `--agent <name>` because the
+	// CLI rejects `--model` entirely. `--system-prompt` is also
+	// rejected and must not be emitted as a flag.
 	args := buildOpenclawArgs("task", "ses-2", ExecOptions{
-		Model:        "gpt-4o",
+		Model:        "deepseek-v4-agent",
 		SystemPrompt: "You are a helpful agent.",
 	}, slog.Default())
 
@@ -958,6 +960,40 @@ func TestBuildOpenclawArgsDoesNotForwardModelOrSystemPrompt(t *testing.T) {
 	}
 	if idx := indexOf(args, "--system-prompt"); idx != -1 {
 		t.Fatalf("unexpected --system-prompt flag at %d: %v", idx, args)
+	}
+
+	agentIdx := indexOf(args, "--agent")
+	if agentIdx == -1 || agentIdx+1 >= len(args) {
+		t.Fatalf("expected --agent <value> in args: %v", args)
+	}
+	if got := args[agentIdx+1]; got != "deepseek-v4-agent" {
+		t.Errorf("--agent value = %q, want %q", got, "deepseek-v4-agent")
+	}
+}
+
+func TestBuildOpenclawArgsCustomAgentWinsOverModel(t *testing.T) {
+	t.Parallel()
+
+	// If the user already configured --agent via custom_args, their
+	// value wins — we don't double-inject. This keeps existing configs
+	// working when they later set agent.model.
+	args := buildOpenclawArgs("task", "ses-2b", ExecOptions{
+		Model:      "from-dropdown",
+		CustomArgs: []string{"--agent", "from-custom-args"},
+	}, slog.Default())
+
+	count := 0
+	for _, a := range args {
+		if a == "--agent" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --agent flag, got %d: %v", count, args)
+	}
+	agentIdx := indexOf(args, "--agent")
+	if args[agentIdx+1] != "from-custom-args" {
+		t.Errorf("custom --agent should win, got %q", args[agentIdx+1])
 	}
 }
 

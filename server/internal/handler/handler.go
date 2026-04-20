@@ -48,6 +48,7 @@ type Handler struct {
 	EmailService     *service.EmailService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
+	ModelListStore   *ModelListStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
 	cfg              Config
@@ -71,6 +72,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmailService:     emailService,
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),
+		ModelListStore:   NewModelListStore(),
 		Storage:          store,
 		CFSigner:         cfSigner,
 		cfg:              cfg,

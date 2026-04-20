@@ -494,6 +494,11 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check for pending model-list requests for this runtime.
+	if pending := h.ModelListStore.PopPending(req.RuntimeID); pending != nil {
+		resp["pending_model_list"] = map[string]string{"id": pending.ID}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -589,6 +594,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			CustomEnv:    customEnv,
 			CustomArgs:   customArgs,
 			McpConfig:    mcpConfig,
+			Model:        agent.Model.String,
 		}
 	}
 

@@ -146,13 +146,35 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
-	args = append(args, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)...)
+	// OpenClaw binds models to pre-registered agents at `openclaw agents
+	// add/update --model` time; the daemon selects one at runtime by
+	// passing --agent <name>. The model dropdown populates its list from
+	// `openclaw agents list`, so opts.Model here is an agent name. Only
+	// inject when the user hasn't already set --agent via custom_args —
+	// custom_args wins for backward compatibility with existing configs.
+	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
+	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
+		args = append(args, "--agent", opts.Model)
+	}
+	args = append(args, customArgs...)
 
 	if opts.SystemPrompt != "" {
 		prompt = opts.SystemPrompt + "\n\n" + prompt
 	}
 	args = append(args, "--message", prompt)
 	return args
+}
+
+// customArgsContains reports whether args contains the given flag
+// (either as a standalone token "--flag" or in "--flag=value" form).
+func customArgsContains(args []string, flag string) bool {
+	prefix := flag + "="
+	for _, a := range args {
+		if a == flag || strings.HasPrefix(a, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Event handlers ──
@@ -439,9 +461,9 @@ type openclawEvent struct {
 	CallID    string          `json:"callId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	Usage     map[string]any  `json:"usage,omitempty"`
-	Phase     string          `json:"phase,omitempty"`     // lifecycle event phase
-	Error     *openclawError  `json:"error,omitempty"`     // structured error object
-	Message   string          `json:"message,omitempty"`   // alternative error message field
+	Phase     string          `json:"phase,omitempty"`   // lifecycle event phase
+	Error     *openclawError  `json:"error,omitempty"`   // structured error object
+	Message   string          `json:"message,omitempty"` // alternative error message field
 }
 
 // errorMessage extracts a human-readable error message from the event,
