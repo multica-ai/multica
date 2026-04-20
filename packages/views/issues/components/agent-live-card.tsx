@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2 } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Terminal, Play, GitFork } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
@@ -705,5 +705,154 @@ function ErrorRow({ item }: { item: TimelineItem }) {
       <AlertCircle className="h-3 w-3 shrink-0 text-destructive mt-0.5" />
       <span className="text-destructive">{item.content}</span>
     </div>
+  );
+}
+
+// ─── Work Session History (Claude Code MCP sessions) ────────────────────────
+
+interface WorkSessionHistoryProps {
+  issueId: string;
+}
+
+export function WorkSessionHistory({ issueId }: WorkSessionHistoryProps) {
+  const [sessions, setSessions] = useState<WorkSessionData[]>([]);
+
+  const refresh = useCallback(() => {
+    api.listWorkSessions(issueId).then(setSessions).catch(console.error);
+  }, [issueId]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  if (sessions.length === 0) {
+    return <p className="text-xs text-muted-foreground py-4">No Claude Code sessions yet.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {sessions.map((ws) => (
+        <WorkSessionEntry key={ws.id} session={ws} onUpdate={refresh} />
+      ))}
+    </div>
+  );
+}
+
+interface WorkSessionData {
+  id: string;
+  issue_id: string;
+  user_id: string;
+  session_type: string;
+  work_dir: string | null;
+  status: "active" | "completed" | "failed";
+  summary: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+function WorkSessionEntry({ session, onUpdate }: { session: WorkSessionData; onUpdate: () => void }) {
+  const { getActorName } = useActorName();
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<TimelineItem[] | null>(null);
+
+  const loadMessages = useCallback(() => {
+    if (items !== null) return;
+    api.getWorkSessionMessages(session.id).then((msgs) => {
+      setItems(buildTimeline(msgs));
+    }).catch((e) => {
+      console.error(e);
+      setItems([]);
+    });
+  }, [session.id, items]);
+
+  useEffect(() => {
+    if (open) loadMessages();
+  }, [open, loadMessages]);
+
+  const handleResume = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    api.resumeWorkSession(session.id).then(() => {
+      toast.success("Session resumed — next Claude Code session will auto-attach");
+      onUpdate();
+    }).catch(() => toast.error("Failed to resume session"));
+  };
+
+  const handleFork = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    api.forkWorkSession(session.id).then(() => {
+      toast.success("Session forked — next Claude Code session will auto-attach");
+      onUpdate();
+    }).catch(() => toast.error("Failed to fork session"));
+  };
+
+  const statusColor = session.status === "completed" ? "text-success"
+    : session.status === "active" ? "text-blue-500"
+    : "text-destructive";
+
+  const statusIcon = session.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+    : session.status === "active" ? <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center"><span className="absolute size-2 rounded-full bg-blue-500 animate-ping opacity-40" /><span className="size-2 rounded-full bg-blue-500" /></span>
+    : <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />;
+
+  const userName = getActorName("member", session.user_id);
+  const canResume = session.status === "completed" || session.status === "failed";
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent/30 transition-colors border border-transparent hover:border-border">
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        {statusIcon}
+        <Terminal className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground truncate">{userName}</span>
+        <span className="text-muted-foreground">
+          {new Date(session.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+        </span>
+        <span className={cn("ml-auto capitalize", statusColor)}>
+          {session.status}
+        </span>
+        {canResume && (
+          <>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={handleResume}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); handleResume(e as unknown as React.MouseEvent); } }}
+              className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+              title="Resume session"
+            >
+              <Play className="h-3 w-3" />
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={handleFork}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); handleFork(e as unknown as React.MouseEvent); } }}
+              className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
+              title="Fork session"
+            >
+              <GitFork className="h-3 w-3" />
+            </span>
+          </>
+        )}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {session.summary && (
+          <p className="ml-5 mt-1 text-xs text-muted-foreground italic">{session.summary}</p>
+        )}
+        <div className="ml-5 mt-1 max-h-64 overflow-y-auto rounded border bg-muted/30 px-3 py-2 space-y-0.5">
+          {items === null ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading...
+            </div>
+          ) : items.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-2">No execution data recorded.</p>
+          ) : (
+            items.map((item, idx) => (
+              <TimelineRow key={`${item.seq}-${idx}`} item={item} />
+            ))
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

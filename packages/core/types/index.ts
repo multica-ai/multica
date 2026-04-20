@@ -21,6 +21,7 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
   IssueUsageSummary,
+  WorkSession,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";

@@ -38,6 +38,18 @@ export interface AgentTask {
   created_at: string;
 }
 
+export interface WorkSession {
+  id: string;
+  issue_id: string;
+  user_id: string;
+  session_type: string;
+  work_dir: string | null;
+  status: "active" | "completed" | "failed";
+  summary: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;

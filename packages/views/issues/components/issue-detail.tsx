@@ -66,7 +66,8 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, 
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
-import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
+import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -1276,11 +1277,26 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 stays pinned while scrolling through TaskRunHistory + comments. */}
             <AgentLiveCard issueId={id} />
 
-            {/* Agent execution history */}
-            <div className="mt-3">
-              <TaskRunHistory issueId={id} />
-            </div>
+            <Tabs defaultValue="comments" className="mt-3">
+              <TabsList variant="line">
+                <TabsTrigger value="comments">Comments</TabsTrigger>
+                <TabsTrigger value="agent-runs">Agent Runs</TabsTrigger>
+                <TabsTrigger value="sessions">Sessions</TabsTrigger>
+              </TabsList>
 
+              <TabsContent value="agent-runs">
+                <div className="mt-2">
+                  <TaskRunHistory issueId={id} />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="sessions">
+                <div className="mt-2">
+                  <WorkSessionHistory issueId={id} />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="comments">
             {/* Timeline entries */}
             <div className="mt-4 flex flex-col gap-3">
               {(() => {
@@ -1403,6 +1419,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <div className="mt-4">
               <CommentInput issueId={id} onSubmit={submitComment} />
             </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
         </div>

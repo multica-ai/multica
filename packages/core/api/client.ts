@@ -63,6 +63,7 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WorkSession,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -484,6 +485,22 @@ export class ApiClient {
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
+  }
+
+  async listWorkSessions(issueId: string): Promise<WorkSession[]> {
+    return this.fetch(`/api/issues/${issueId}/work-sessions`);
+  }
+
+  async getWorkSessionMessages(sessionId: string): Promise<TaskMessagePayload[]> {
+    return this.fetch(`/api/work-sessions/${sessionId}/messages`);
+  }
+
+  async resumeWorkSession(sessionId: string): Promise<{ id: string; issue_id: string; status: string }> {
+    return this.fetch(`/api/work-sessions/${sessionId}/resume`, { method: "POST" });
+  }
+
+  async forkWorkSession(sessionId: string): Promise<{ id: string; issue_id: string; forked_from: string; status: string }> {
+    return this.fetch(`/api/work-sessions/${sessionId}/fork`, { method: "POST" });
   }
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
