@@ -79,7 +79,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "list_issues",
-		Description: "List issues in the workspace. Supports filtering by status, priority, project, and assignee.",
+		Description: "List issues in the current workspace. Returns issues with identifier (e.g. JEH-43), title, status, priority, project, and assignee. Use this to find existing work before creating new issues.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -124,7 +124,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "get_issue",
-		Description: "Get full issue details including comments and sub-issues.",
+		Description: "Get full issue details: title, description, status, comments, and sub-issues. Use this to understand the full context of an issue before working on it or commenting.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id"},
@@ -162,7 +162,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "search_issues",
-		Description: "Search issues by text query.",
+		Description: "Search issues by text query across titles and descriptions. Use this to find related or duplicate issues before creating new ones.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"query"},
@@ -194,13 +194,18 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "create_issue",
-		Description: "Create a new issue. If a repo-project binding exists, project_id defaults to the bound project.",
+		Description: `Create a new issue. If a repo-project binding exists, project_id defaults to the bound project.
+
+WRITING GUIDELINES — issues are read by both humans and AI agents:
+- Title: clear, specific, action-oriented. GOOD: "Add rate limiting to /api/auth endpoints". BAD: "fix auth thing".
+- Description: explain WHAT needs to happen and WHY. Include acceptance criteria when possible. A teammate who has never seen the code should understand the issue from the title and description alone.
+- Use sub-issues (parent_issue_id) to break large tasks into verifiable steps.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"title"},
 			"properties": map[string]any{
-				"title":           map[string]any{"type": "string", "description": "Issue title"},
-				"description":     map[string]any{"type": "string", "description": "Issue description (markdown)"},
+				"title":           map[string]any{"type": "string", "description": "Clear, specific title. Describe the outcome, not the task. Example: 'Add WebSocket reconnection with exponential backoff' not 'fix websocket'"},
+				"description":     map[string]any{"type": "string", "description": "Markdown description. Include: what, why, and acceptance criteria. Written for humans — a teammate should understand this without reading the code."},
 				"status":          map[string]any{"type": "string", "description": "Status (backlog, todo, in_progress, done, cancelled). Default: todo"},
 				"priority":        map[string]any{"type": "string", "description": "Priority (urgent, high, medium, low, none). Default: none"},
 				"project_id":      map[string]any{"type": "string", "description": "Project ID to link the issue to"},
@@ -257,7 +262,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "update_issue",
-		Description: "Update an existing issue. Only provided fields are changed.",
+		Description: "Update an existing issue. Only provided fields are changed. Update status to 'in_progress' when starting work, 'done' when complete.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id"},
@@ -298,13 +303,20 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "add_comment",
-		Description: "Add a comment to an issue.",
+		Description: `Add a comment to an issue. Comments are visible to the entire team.
+
+WRITING GUIDELINES:
+- Write for humans first. Explain decisions, not just actions.
+- GOOD: "Chose to use middleware-based rate limiting instead of reverse proxy because it gives per-endpoint control and we already have the auth middleware in place."
+- BAD: "Added rate limiting."
+- Reference specific files, functions, or commits when relevant.
+- Use comments to document blockers, questions, or handoff context.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id", "content"},
 			"properties": map[string]any{
 				"issue_id": map[string]any{"type": "string", "description": "Issue ID"},
-				"content":  map[string]any{"type": "string", "description": "Comment content (markdown)"},
+				"content":  map[string]any{"type": "string", "description": "Comment in markdown. Write for humans — explain decisions, context, and reasoning. Reference files and commits when relevant."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -326,11 +338,37 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	})
 
 	// -----------------------------------------------------------------------
+	// list_comments
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name:        "list_comments",
+		Description: "List comments on an issue. Returns all comments with author, timestamp, and content. Use this to read the discussion history before commenting or to find context from previous sessions.",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"issue_id"},
+			"properties": map[string]any{
+				"issue_id": map[string]any{"type": "string", "description": "Issue ID"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "issue_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+
+		var comments any
+		if err := client.GetJSON(ctx, "/api/issues/"+id+"/comments", &comments); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(comments)
+	})
+
+	// -----------------------------------------------------------------------
 	// list_projects
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "list_projects",
-		Description: "List projects in the workspace.",
+		Description: "List all projects in the workspace with their status, issue count, and progress. Projects group related issues into a coherent deliverable.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -359,13 +397,13 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "create_project",
-		Description: "Create a new project.",
+		Description: "Create a new project. Projects are high-level deliverables that group related issues. Title should describe the outcome, e.g. 'Authentication system overhaul' not 'auth work'.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"title"},
 			"properties": map[string]any{
-				"title":       map[string]any{"type": "string", "description": "Project title"},
-				"description": map[string]any{"type": "string", "description": "Project description"},
+				"title":       map[string]any{"type": "string", "description": "Clear project title describing the deliverable. Written for a non-technical stakeholder to understand."},
+				"description": map[string]any{"type": "string", "description": "Project description: goals, scope, and success criteria. What does 'done' look like?"},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -391,7 +429,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "get_me",
-		Description: "Get current user info and workspace context.",
+		Description: "Get current user, workspace, bound project, and active work session. Call this at the start of a session to understand your context — which project and issue you are working on.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -485,7 +523,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "attach_session",
-		Description: "Attach this Claude Code session to an issue. Creates a work session for tracking progress.",
+		Description: "Attach this Claude Code session to an issue. Creates a work session that tracks your activity, decisions, and file changes. Auto-captures git context at start. The session persists across restarts.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id"},
@@ -539,12 +577,12 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "complete_work",
-		Description: "Mark the attached work session as complete with a summary.",
+		Description: "Mark the attached work session as complete. Auto-captures git diff. Call this when you finish working on an issue — do not leave sessions dangling.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"summary"},
 			"properties": map[string]any{
-				"summary": map[string]any{"type": "string", "description": "Summary of work completed"},
+				"summary": map[string]any{"type": "string", "description": "Human-readable summary: what was done, what was decided, what remains. A colleague should understand the state of the issue from this summary alone."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -658,7 +696,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "resume_session",
-		Description: "Resume a previously completed work session. Re-opens it and continues where you left off.",
+		Description: "Resume a previously completed work session. Re-opens it, restores the message sequence counter, and continues where you left off. Use this when returning to unfinished work.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"work_session_id"},
@@ -698,7 +736,7 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "fork_session",
-		Description: "Fork an existing work session — creates a new session on the same issue with fresh tracking.",
+		Description: "Fork an existing work session — creates a new session on the same issue with fresh tracking. Use when you want to try a different approach without overwriting the original session's history.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"work_session_id"},
