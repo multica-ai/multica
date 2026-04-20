@@ -343,6 +343,135 @@ func TestHermesClientHandleToolCallComplete(t *testing.T) {
 	}
 }
 
+// TestHermesClientHandleToolCallStartKimiContent covers the kimi-cli
+// emission shape: tool_call carries an ACP `content` array with a
+// nested text block instead of a `rawInput` map. Without the fallback
+// extractor the daemon records empty Input and the UI renders a blank
+// tool bubble ("terminal's input is empty").
+func TestHermesClientHandleToolCallStartKimiContent(t *testing.T) {
+	t.Parallel()
+
+	var got Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = msg
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-kimi-1","title":"Shell","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"{\"command\":\"echo hello\"}"}}]}}}`
+	c.handleLine(line)
+
+	if got.Type != MessageToolUse {
+		t.Fatalf("type: got %v, want MessageToolUse", got.Type)
+	}
+	if got.CallID != "tc-kimi-1" {
+		t.Errorf("callID: got %q", got.CallID)
+	}
+	text, ok := got.Input["text"].(string)
+	if !ok {
+		t.Fatalf("Input.text missing or not a string: %v", got.Input)
+	}
+	if !strings.Contains(text, "echo hello") {
+		t.Errorf("Input.text should contain the command args, got %q", text)
+	}
+}
+
+// TestHermesClientHandleToolCallCompleteKimiContent covers kimi's
+// completion shape: the Shell tool's stdout comes back via `content`
+// blocks rather than `rawOutput`.
+func TestHermesClientHandleToolCallCompleteKimiContent(t *testing.T) {
+	t.Parallel()
+
+	var got Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = msg
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-kimi-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hello\n"}},{"type":"content","content":{"type":"text","text":"exit 0"}}]}}}`
+	c.handleLine(line)
+
+	if got.Type != MessageToolResult {
+		t.Fatalf("type: got %v, want MessageToolResult", got.Type)
+	}
+	// Multiple content blocks must be concatenated; newline separator
+	// keeps streamed chunks visually distinct in the UI.
+	if got.Output != "hello\n\nexit 0" {
+		t.Errorf("output: got %q, want %q", got.Output, "hello\n\nexit 0")
+	}
+}
+
+// TestHermesClientHandleToolCallRawOutputTakesPrecedence keeps hermes
+// behaviour unchanged: when the update has both `rawOutput` (hermes
+// convention) and `content` (would be ambiguous), honour rawOutput.
+func TestHermesClientHandleToolCallRawOutputTakesPrecedence(t *testing.T) {
+	t.Parallel()
+
+	var got Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = msg
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc","status":"completed","rawOutput":"raw wins","content":[{"type":"content","content":{"type":"text","text":"ignored"}}]}}}`
+	c.handleLine(line)
+
+	if got.Output != "raw wins" {
+		t.Errorf("output: got %q, want %q", got.Output, "raw wins")
+	}
+}
+
+func TestExtractACPToolCallText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		json string
+		want string
+	}{
+		{
+			name: "single text block",
+			json: `[{"type":"content","content":{"type":"text","text":"hello"}}]`,
+			want: "hello",
+		},
+		{
+			name: "multiple text blocks join with newline",
+			json: `[{"type":"content","content":{"type":"text","text":"a"}},{"type":"content","content":{"type":"text","text":"b"}}]`,
+			want: "a\nb",
+		},
+		{
+			name: "terminal blocks skipped",
+			json: `[{"type":"terminal","terminalId":"t1"},{"type":"content","content":{"type":"text","text":"shell out"}}]`,
+			want: "shell out",
+		},
+		{
+			name: "empty array returns empty",
+			json: `[]`,
+			want: "",
+		},
+		{
+			name: "no text content",
+			json: `[{"type":"terminal","terminalId":"t1"}]`,
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var blocks []json.RawMessage
+			if err := json.Unmarshal([]byte(tt.json), &blocks); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got := extractACPToolCallText(blocks); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHermesClientHandleToolCallInProgressIgnored(t *testing.T) {
 	t.Parallel()
 

@@ -636,32 +636,43 @@ func (c *hermesClient) handleAgentThought(data json.RawMessage) {
 
 func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	var msg struct {
-		ToolCallID string         `json:"toolCallId"`
-		Title      string         `json:"title"`
-		Kind       string         `json:"kind"`
-		RawInput   map[string]any `json:"rawInput"`
+		ToolCallID string            `json:"toolCallId"`
+		Title      string            `json:"title"`
+		Kind       string            `json:"kind"`
+		RawInput   map[string]any    `json:"rawInput"`
+		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
 
 	toolName := hermesToolNameFromTitle(msg.Title, msg.Kind)
+	input := msg.RawInput
+	// kimi-cli emits the tool input as ACP `content` blocks (text type),
+	// not `rawInput`. Fall back so the UI shows "echo hello" instead of
+	// a blank input bubble. See kimi_cli/acp/session.py::_send_tool_call.
+	if input == nil {
+		if text := extractACPToolCallText(msg.Content); text != "" {
+			input = map[string]any{"text": text}
+		}
+	}
 	if c.onMessage != nil {
 		c.onMessage(Message{
 			Type:   MessageToolUse,
 			Tool:   toolName,
 			CallID: msg.ToolCallID,
-			Input:  msg.RawInput,
+			Input:  input,
 		})
 	}
 }
 
 func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	var msg struct {
-		ToolCallID string `json:"toolCallId"`
-		Status     string `json:"status"`
-		Kind       string `json:"kind"`
-		RawOutput  string `json:"rawOutput"`
+		ToolCallID string            `json:"toolCallId"`
+		Status     string            `json:"status"`
+		Kind       string            `json:"kind"`
+		RawOutput  string            `json:"rawOutput"`
+		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
@@ -672,13 +683,59 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 		return
 	}
 
+	output := msg.RawOutput
+	// kimi-cli returns Shell / file-tool output via `content` blocks on
+	// the completion update, not `rawOutput`. Fall back so the UI shows
+	// the command's stdout instead of an empty terminal panel. See
+	// kimi_cli/acp/session.py::_send_tool_result.
+	if output == "" {
+		output = extractACPToolCallText(msg.Content)
+	}
 	if c.onMessage != nil {
 		c.onMessage(Message{
 			Type:   MessageToolResult,
 			CallID: msg.ToolCallID,
-			Output: msg.RawOutput,
+			Output: output,
 		})
 	}
+}
+
+// extractACPToolCallText concatenates the text of every ACP
+// `ContentToolCallContent` block (shape: {"type":"content",
+// "content":{"type":"text","text":"..."}}) from a tool_call /
+// tool_call_update's `content` array. Non-text blocks (terminal,
+// diff, image) are skipped — the client UI doesn't have a way to
+// render raw terminal_id references, so a text concatenation is the
+// most useful thing we can surface.
+func extractACPToolCallText(blocks []json.RawMessage) string {
+	var b strings.Builder
+	for _, raw := range blocks {
+		var outer struct {
+			Type    string          `json:"type"`
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(raw, &outer); err != nil {
+			continue
+		}
+		if outer.Type != "content" || len(outer.Content) == 0 {
+			continue
+		}
+		var inner struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(outer.Content, &inner); err != nil {
+			continue
+		}
+		if inner.Type != "text" || inner.Text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(inner.Text)
+	}
+	return b.String()
 }
 
 func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
