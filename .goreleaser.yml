@@ -30,7 +30,7 @@ archives:
       - goos: windows
         formats:
           - zip
-    name_template: "{{ .ProjectName }}-cli-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"

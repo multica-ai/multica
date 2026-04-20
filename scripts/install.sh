@@ -90,8 +90,7 @@ install_cli_binary() {
     fail "Could not determine latest release. Check your network connection."
   fi
 
-  local version="${latest#v}"
-  local url="https://github.com/multica-ai/multica/releases/download/${latest}/multica-cli-${version}-${OS}-${ARCH}.tar.gz"
+  local url="https://github.com/multica-ai/multica/releases/download/${latest}/multica_${OS}_${ARCH}.tar.gz"
   local tmp_dir
   tmp_dir=$(mktemp -d)
 

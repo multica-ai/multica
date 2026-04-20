@@ -55,8 +55,7 @@ function Install-CliBinary {
         Write-Fail "Could not determine latest release. Check your network connection."
     }
 
-    $version = $latest.TrimStart('v')
-    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica-cli-$version-windows-$arch.zip"
+    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica_windows_$arch.zip"
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install"
 
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
@@ -76,7 +75,7 @@ function Install-CliBinary {
         $checksums = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -ErrorAction Stop
         $zipFile = Join-Path $tmpDir "multica.zip"
         $actualHash = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
-        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica-cli-$version-windows-$arch\.zip" } | Select-Object -First 1
+        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica_windows_$arch\.zip" } | Select-Object -First 1
         if ($expectedLine) {
             $expectedHash = ($expectedLine -split "\s+")[0].ToLower()
             if ($actualHash -ne $expectedHash) {
