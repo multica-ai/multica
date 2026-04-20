@@ -107,6 +107,7 @@ export function BoardView({
   doneTotal: doneTotalOverride,
   myIssuesScope,
   myIssuesFilter,
+  createIssueData,
 }: {
   issues: Issue[];
   allIssues: Issue[];
@@ -123,6 +124,8 @@ export function BoardView({
   /** When set, use the My Issues load-more hook instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  /** Extra data merged into the create-issue modal (e.g. project_id). */
+  createIssueData?: Record<string, unknown>;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -299,6 +302,7 @@ export function BoardView({
                 <InfiniteScrollSentinel onVisible={loadMore} loading={loadingMore} />
               ) : undefined
             }
+            createIssueData={createIssueData}
           />
         ))}
 

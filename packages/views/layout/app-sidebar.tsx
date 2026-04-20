@@ -27,9 +27,9 @@ import {
   BookOpenText,
   SquarePen,
   CircleUser,
-  FolderKanban,
   X,
   Zap,
+  FolderKanban,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -74,6 +74,9 @@ import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { getProjectColor } from "@multica/core/projects/config";
+import type { Project } from "@multica/core/types";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
@@ -87,6 +90,7 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_PROJECTS: Project[] = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -109,7 +113,6 @@ const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
 
 const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "issues", label: "Issues", icon: ListTodo },
-  { key: "projects", label: "Projects", icon: FolderKanban },
   { key: "autopilots", label: "Autopilot", icon: Zap },
   { key: "agents", label: "Agents", icon: Bot },
 ];
@@ -226,6 +229,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     [inboxItems],
   );
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
+  const { data: projects = EMPTY_PROJECTS } = useQuery({
+    ...projectListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const activeProjects = React.useMemo(
+    () => projects.filter((p: Project) => p.status !== "completed" && p.status !== "cancelled"),
+    [projects],
+  );
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -294,6 +305,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     },
   });
 
+  // Auto-fill project when on a project detail page
+  const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  const createIssueData = projectMatch ? { project_id: projectMatch[1] } : undefined;
+
   // Global "C" shortcut to open create-issue modal (like Linear)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -307,10 +322,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         if (isEditable) return;
         if (useModalStore.getState().modal) return;
         e.preventDefault();
-        // Auto-fill project when on a project detail page
-        const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-        const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-        useModalStore.getState().open("create-issue", data);
+        useModalStore.getState().open("create-issue", createIssueData);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -433,7 +445,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("create-issue")}
+                onClick={() => useModalStore.getState().open("create-issue", createIssueData)}
               >
                 <span className="relative">
                   <SquarePen />
@@ -530,6 +542,62 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </SidebarMenuItem>
                   );
                 })}
+                {/* Projects — collapsible nav item with sub-items */}
+                <Collapsible defaultOpen>
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors cursor-pointer",
+                        "text-muted-foreground hover:bg-sidebar-accent/70",
+                        pathname.includes("/projects") && "bg-sidebar-accent text-sidebar-accent-foreground",
+                      )}
+                    >
+                      <FolderKanban className="size-4 shrink-0" />
+                      <AppLink href={p.projects()} onClick={(e: React.MouseEvent) => e.stopPropagation()} className="flex-1 text-left hover:underline">
+                        Projects
+                      </AppLink>
+                      <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[panel-open]:rotate-90" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenu className="gap-0 mt-0.5">
+                        <SidebarMenuItem>
+                          <SidebarMenuButton
+                            className="text-muted-foreground hover:bg-sidebar-accent/70 pl-8 h-7"
+                            onClick={() => useModalStore.getState().open("create-project")}
+                          >
+                            <Plus className="size-3.5" />
+                            <span>New Project</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                        {activeProjects.map((project: Project) => {
+                          const href = p.projectDetail(project.id);
+                          const isActive = pathname === href;
+                          return (
+                            <SidebarMenuItem key={project.id}>
+                              <SidebarMenuButton
+                                isActive={isActive}
+                                render={<AppLink href={href} />}
+                                className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground pl-8 h-7"
+                              >
+                                {project.icon ? (
+                                  <span className="text-sm shrink-0">{project.icon}</span>
+                                ) : (
+                                  <span className={cn("size-2 rounded-full shrink-0", getProjectColor(project.color).dot)} />
+                                )}
+                                <span className="truncate">{project.title}</span>
+                                {project.issue_count > 0 && (
+                                  <span className="ml-auto text-[10px] text-muted-foreground">
+                                    {project.done_count}/{project.issue_count}
+                                  </span>
+                                )}
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

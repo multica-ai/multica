@@ -18,7 +18,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_PRIORITY_CONFIG } from "@multica/core/projects/config";
+import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_PRIORITY_CONFIG, PROJECT_COLORS, getProjectColor } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -94,7 +94,7 @@ function PropRow({
 
 const projectViewStore = createIssueViewStore("project_issues_view");
 
-function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
+function ProjectIssuesContent({ projectIssues, projectId }: { projectIssues: Issue[]; projectId: string }) {
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
@@ -164,6 +164,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
           doneTotal={doneColumnCount}
+          createIssueData={{ project_id: projectId }}
         />
       ) : (
         <ListView
@@ -171,6 +172,7 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
           visibleStatuses={visibleStatuses}
           childProgressMap={childProgressMap}
           doneTotal={doneColumnCount}
+          createIssueData={{ project_id: projectId }}
         />
       )}
     </div>
@@ -298,6 +300,28 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             />
           </PopoverContent>
         </Popover>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 cursor-pointer rounded-lg px-2 py-1 -ml-0.5 hover:bg-accent/60 transition-colors text-xs text-muted-foreground"
+                title="Change color"
+              >
+                <span className={cn("size-3 rounded-full", getProjectColor(project.color).dot)} />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-36">
+            {PROJECT_COLORS.map((c) => (
+              <DropdownMenuItem key={c.value} onClick={() => handleUpdateField({ color: c.value })}>
+                <span className={cn("size-2.5 rounded-full", c.dot)} />
+                <span>{c.label}</span>
+                {project.color === c.value && <Check className="ml-auto h-3.5 w-3.5" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <TitleEditor
           key={`title-${projectId}`}
           defaultValue={project.title}
@@ -573,7 +597,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           <ViewStoreProvider store={projectViewStore}>
               <IssuesHeader scopedIssues={projectIssues} />
-              <ProjectIssuesContent projectIssues={projectIssues} />
+              <ProjectIssuesContent projectIssues={projectIssues} projectId={projectId} />
               <BatchActionToolbar />
             </ViewStoreProvider>
           </div>
