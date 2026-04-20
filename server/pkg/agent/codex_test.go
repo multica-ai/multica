@@ -501,6 +501,63 @@ func TestCodexRawThreadStatusIdle(t *testing.T) {
 	}
 }
 
+// Regression for #1181: subagent threads (e.g. memory consolidation)
+// are multiplexed on the same stdio pipe. Their turn/completed must not
+// terminate the main turn.
+func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub","status":"completed"}}}`)
+
+	if doneCount != 0 {
+		t.Fatalf("subagent turn/completed must not trigger onTurnDone, got %d calls", doneCount)
+	}
+
+	// Sanity check: a matching threadId still drives completion.
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+	if doneCount != 1 {
+		t.Fatalf("matching threadId should trigger onTurnDone exactly once, got %d", doneCount)
+	}
+}
+
+// Regression for #1181: subagent agentMessage/final_answer must not
+// trigger turn completion or leak text into the main output stream.
+func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.turnStarted = true
+
+	var messages []Message
+	var doneCount int
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_subagent","item":{"type":"agentMessage","id":"sub-1","text":"subagent leakage","phase":"final_answer"}}}`)
+
+	if len(messages) != 0 {
+		t.Fatalf("subagent text must not leak into output builder, got %+v", messages)
+	}
+	if doneCount != 0 {
+		t.Fatalf("subagent final_answer must not trigger onTurnDone, got %d calls", doneCount)
+	}
+}
+
 func TestCodexCloseAllPending(t *testing.T) {
 	t.Parallel()
 

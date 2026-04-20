@@ -52,9 +52,9 @@ function formatDate(date: string): string {
   });
 }
 
-const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
+const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { label: "Issue Created", color: "text-blue-500", icon: Clock },
-  running: { label: "Running", color: "text-blue-500", icon: Loader2 },
+  running: { label: "Running", color: "text-blue-500", icon: Loader2, spin: true },
   completed: { label: "Completed", color: "text-emerald-500", icon: CheckCircle2 },
   failed: { label: "Failed", color: "text-destructive", icon: XCircle },
 };
@@ -66,7 +66,7 @@ function RunRow({ run }: { run: AutopilotRun }) {
 
   const content = (
     <>
-      <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color)} />
+      <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color, cfg.spin && "animate-spin")} />
       <span className={cn("w-24 shrink-0 text-xs font-medium", cfg.color)}>{cfg.label}</span>
       <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">

@@ -615,6 +615,19 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 }
 
 func (c *codexClient) handleRawNotification(method string, params map[string]any) {
+	// Ignore notifications from threads other than the one we are tracking.
+	// Codex multiplexes subagent threads (e.g. memory consolidation) on the
+	// same stdio pipe; only our thread should drive turn lifecycle and output.
+	//
+	// The v2 app-server-protocol schema guarantees a top-level threadId on
+	// every notification, so this dispatch-level guard transparently covers
+	// every handler below. If a future codex revision introduces notifications
+	// without threadId, they fall through (ok=false) — re-audit this guard
+	// when bumping codex.
+	if threadID, ok := params["threadId"].(string); ok && c.threadID != "" && threadID != c.threadID {
+		return
+	}
+
 	switch method {
 	case "turn/started":
 		c.turnStarted = true

@@ -479,6 +479,56 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "copilot-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "copilot", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Copilot CLI natively discovers project-level skills from .github/skills/.
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".github", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .github/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	// Supporting files should also be under .github/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".github", "skills", "go-conventions", "templates", "example.go"))
+	if err != nil {
+		t.Fatalf("failed to read supporting file: %v", err)
+	}
+	if string(supportFile) != "package main" {
+		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	// .agent_context/skills/ should NOT exist for Copilot.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Copilot provider")
+	}
+
+	// issue_context.md should still be in .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
+		t.Error("expected .agent_context/issue_context.md to exist")
+	}
+}
+
 func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

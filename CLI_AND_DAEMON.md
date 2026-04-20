@@ -332,6 +332,27 @@ multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 multica issue comment delete <comment-id>
 ```
 
+### Subscribers
+
+```bash
+# List subscribers of an issue
+multica issue subscriber list <issue-id>
+
+# Subscribe yourself to an issue
+multica issue subscriber add <issue-id>
+
+# Subscribe another member or agent by name
+multica issue subscriber add <issue-id> --user "Lambda"
+
+# Unsubscribe yourself
+multica issue subscriber remove <issue-id>
+
+# Unsubscribe another member or agent
+multica issue subscriber remove <issue-id> --user "Lambda"
+```
+
+Subscribers receive notifications about issue activity (new comments, status changes, etc.). Without `--user`, the command acts on the caller.
+
 ### Execution History
 
 ```bash
@@ -448,6 +469,63 @@ multica config set server_url https://api.example.com
 multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
 ```
+
+## Autopilot Commands
+
+Autopilots are scheduled/triggered automations that dispatch agent tasks (either by creating an issue or by running an agent directly).
+
+### List Autopilots
+
+```bash
+multica autopilot list
+multica autopilot list --status active --output json
+```
+
+### Get Autopilot Details
+
+```bash
+multica autopilot get <id>
+multica autopilot get <id> --output json   # includes triggers
+```
+
+### Create / Update / Delete
+
+```bash
+multica autopilot create \
+  --title "Nightly bug triage" \
+  --description "Scan todo issues and prioritize." \
+  --agent "Lambda" \
+  --mode create_issue
+
+multica autopilot update <id> --status paused
+multica autopilot update <id> --description "New prompt"
+multica autopilot delete <id>
+```
+
+`--mode` currently only accepts `create_issue` (creates a new issue on each run and assigns it to the agent). The server data model also defines `run_only`, but the daemon task path doesn't yet resolve a workspace for runs without an issue, so it's not exposed by the CLI. `--agent` accepts either a name or UUID.
+
+### Manual Trigger
+
+```bash
+multica autopilot trigger <id>            # Fires the autopilot once, returns the run
+```
+
+### Run History
+
+```bash
+multica autopilot runs <id>
+multica autopilot runs <id> --limit 50 --output json
+```
+
+### Schedule Triggers
+
+```bash
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
+multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
+multica autopilot trigger-delete <autopilot-id> <trigger-id>
+```
+
+Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
 
 ## Other Commands
 
