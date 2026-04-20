@@ -700,6 +700,15 @@ func hermesToolNameFromTitle(title string, kind string) string {
 	case "think":
 		return "thinking"
 	default:
+		// Preserve a non-empty title when we can't classify it: kimi
+		// emits bare titles like "Shell" or "Read file" without any
+		// `kind`, so returning an empty string here drops the tool
+		// name entirely before kimiToolNameFromTitle can map it.
+		// Hermes titles always carry a colon, so hermes never reaches
+		// this branch with a non-empty title.
+		if title != "" {
+			return title
+		}
 		return kind
 	}
 }

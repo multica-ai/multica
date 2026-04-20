@@ -65,14 +65,24 @@ func TestHermesToolNameFromTitle(t *testing.T) {
 		{"delegate: fix the bug", "execute", "delegate_task"},
 		{"analyze image: what is this?", "read", "vision_analyze"},
 		{"execute code", "execute", "execute_code"},
-		// Fallback to kind when no colon in title.
+		// Fallback to kind when no colon in title but kind is known.
 		{"unknownTool", "read", "read_file"},
 		{"unknownTool", "edit", "write_file"},
 		{"unknownTool", "execute", "terminal"},
 		{"unknownTool", "search", "search_files"},
 		{"unknownTool", "fetch", "web_search"},
 		{"unknownTool", "think", "thinking"},
-		{"unknownTool", "other", "other"},
+		// Bare title (no colon, no known kind) — preserve the title
+		// itself rather than falling back to an unclassified kind.
+		// Matters for kimi: its ACP `tool_call` updates emit a bare
+		// `title: "Shell"` with no `kind`, and we need downstream
+		// normalisation (kimiToolNameFromTitle) to see "Shell" rather
+		// than an empty string.
+		{"Shell", "", "Shell"},
+		{"Read file", "", "Read file"},
+		{"unknownTool", "other", "unknownTool"},
+		// Empty title falls back to kind, even when kind isn't known.
+		{"", "other", "other"},
 		// Tool with colon but not in known map.
 		{"custom_tool: args", "other", "custom_tool"},
 	}

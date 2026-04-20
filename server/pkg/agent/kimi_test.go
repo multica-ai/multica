@@ -60,10 +60,21 @@ func TestKimiToolNameFromTitle(t *testing.T) {
 // task rather than silently falling back to the default model.
 func fakeKimiACPScript() string {
 	return `#!/bin/sh
-# Fake ` + "`kimi acp`" + ` — used by TestKimiBackendSetModelFailureFailsTask.
-# Reads one JSON-RPC request per line from stdin, matches on method name,
-# and writes back a canned response. Exits after set_model so the
-# kimiBackend cleanup path can run.
+# Fake ` + "`kimi`" + ` binary — used by TestKimiBackendSetModelFailureFailsTask
+# and TestKimiBackendPassesYoloFlag.
+#
+# Writes the full argv (one arg per line) to $KIMI_ARGS_FILE if that env
+# var is set, so tests can assert that the daemon invokes us with the
+# right flags (`+"`--yolo acp`"+`, not bare `+"`acp`"+`).
+#
+# Then reads one JSON-RPC request per line from stdin, matches on the
+# method name, and writes back a canned response. Exits after set_model
+# so the kimiBackend cleanup path can run.
+if [ -n "$KIMI_ARGS_FILE" ]; then
+  for arg in "$@"; do
+    printf '%s\n' "$arg" >> "$KIMI_ARGS_FILE"
+  done
+fi
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
@@ -136,5 +147,64 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestKimiBackendPassesYoloFlag pins that the daemon invokes
+// `kimi --yolo acp ...` rather than `kimi acp ...`. Missing --yolo
+// causes Kimi to block on session/request_permission for any Shell /
+// file-mutating tool call — the headless daemon never answers those
+// permission requests, so the task hangs 5 minutes and then dies. See
+// MUL-1159 discussion on the first stuck run (issue 5732f3d0).
+func TestKimiBackendPassesYoloFlag(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "kimi")
+	if err := os.WriteFile(fakePath, []byte(fakeKimiACPScript()), 0o755); err != nil {
+		t.Fatalf("write fake kimi: %v", err)
+	}
+
+	backend, err := New("kimi", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIMI_ARGS_FILE": argsFile},
+	})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Set Model so the fake binary exits on set_model and we don't
+	// have to wait for the prompt branch. We only care about argv here.
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Model:   "bogus-model",
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 args (--yolo acp), got %d: %q", len(lines), lines)
+	}
+	if lines[0] != "--yolo" {
+		t.Errorf("expected first arg to be --yolo, got %q (full: %q)", lines[0], lines)
+	}
+	if lines[1] != "acp" {
+		t.Errorf("expected second arg to be acp, got %q (full: %q)", lines[1], lines)
 	}
 }
