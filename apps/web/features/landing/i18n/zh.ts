@@ -1,6 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
+export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
+
 export const zh: LandingDict = {
   header: {
     github: "GitHub",
@@ -120,9 +122,10 @@ export const zh: LandingDict = {
     headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
     steps: [
       {
-        title: "\u6ce8\u518c\u5e76\u521b\u5efa\u5de5\u4f5c\u533a",
-        description:
-          "\u8f93\u5165\u90ae\u7bb1\uff0c\u9a8c\u8bc1\u7801\u786e\u8ba4\uff0c\u5373\u53ef\u8fdb\u5165\u3002\u5de5\u4f5c\u533a\u81ea\u52a8\u521b\u5efa\u2014\u2014\u65e0\u9700\u8bbe\u7f6e\u5411\u5bfc\uff0c\u65e0\u9700\u914d\u7f6e\u8868\u5355\u3002",
+        title: ALLOW_SIGNUP ? "注册并创建您的工作空间" : "登录到您的工作空间",
+        description: ALLOW_SIGNUP
+          ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
+          : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
       },
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",

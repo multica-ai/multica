@@ -53,6 +53,10 @@ interface UpdaterAPI {
   onUpdateDownloaded: (callback: () => void) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
+  checkForUpdates: () => Promise<
+    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
+    | { ok: false; error: string }
+  >;
 }
 
 declare global {

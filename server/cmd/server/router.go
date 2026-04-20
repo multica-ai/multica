@@ -70,7 +70,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner)
+	
+	signupConfig := handler.Config{
+		AllowSignup:         os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+	}
+	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, signupConfig)
 
 	r := chi.NewRouter()
 
@@ -413,4 +419,19 @@ func parseUUID(s string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return u
+}
+
+func splitAndTrim(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	res := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			res = append(res, trimmed)
+		}
+	}
+	return res
 }

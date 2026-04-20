@@ -40,6 +40,7 @@ import { createMentionSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createSubmitExtension } from "./submit-shortcut";
+import { createBlurShortcutExtension } from "./blur-shortcut";
 import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
@@ -137,6 +138,7 @@ export function createEditorExtensions(
         },
         { submitOnEnter: options.submitOnEnter ?? false },
       ),
+      createBlurShortcutExtension(),
       createFileUploadExtension(options.onUploadFileRef!),
     );
   }

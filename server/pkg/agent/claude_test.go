@@ -466,6 +466,73 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	}
 }
 
+func TestResolveSessionID(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		requested string
+		emitted   string
+		failed    bool
+		want      string
+	}{
+		{
+			name:      "no resume requested propagates emitted",
+			requested: "",
+			emitted:   "fresh-abc",
+			failed:    false,
+			want:      "fresh-abc",
+		},
+		{
+			name:      "resume succeeded keeps matching id",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    false,
+			want:      "sess-old",
+		},
+		{
+			name:      "resume succeeded but run failed mid-turn keeps id for later retry",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			want:      "sess-old",
+		},
+		{
+			name:      "resume did not land and run failed clears id so daemon fallback fires",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    true,
+			want:      "",
+		},
+		{
+			name:      "resume did not land but run succeeded keeps fresh id (defensive)",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    false,
+			want:      "fresh-new",
+		},
+		{
+			name:      "no emitted id leaves result empty",
+			requested: "sess-old",
+			emitted:   "",
+			failed:    true,
+			want:      "",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveSessionID(tc.requested, tc.emitted, tc.failed)
+			if got != tc.want {
+				t.Fatalf("resolveSessionID(%q, %q, %v) = %q, want %q",
+					tc.requested, tc.emitted, tc.failed, got, tc.want)
+			}
+		})
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)

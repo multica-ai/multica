@@ -1,6 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
+export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
+
 export const en: LandingDict = {
   header: {
     github: "GitHub",
@@ -120,9 +122,10 @@ export const en: LandingDict = {
     headlineFaded: "in the next hour.",
     steps: [
       {
-        title: "Sign up & create your workspace",
-        description:
-          "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms.",
+        title: ALLOW_SIGNUP ? "Sign up & create your workspace" : "Login to your workspace",
+        description: ALLOW_SIGNUP
+          ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
+          : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
       },
       {
         title: "Install the CLI & connect your machine",

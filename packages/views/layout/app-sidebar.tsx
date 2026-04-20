@@ -78,6 +78,16 @@ import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 
+// Stable empty arrays for query defaults. Using an inline `= []` default on
+// `useQuery` creates a new array reference on every render when `data` is
+// undefined (e.g. query disabled or loading) — which in turn breaks any
+// `useEffect`/`useMemo` that depends on the value, and can trigger infinite
+// re-render loops when the effect itself calls `setState`.
+const EMPTY_PINS: PinnedItem[] = [];
+const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
+const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
+const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
 // Only parameterless paths are valid nav destinations.
@@ -202,11 +212,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const logout = useLogout();
   const workspace = useCurrentWorkspace();
   const p = useWorkspacePaths();
-  const { data: workspaces = [] } = useQuery(workspaceListOptions());
-  const { data: myInvitations = [] } = useQuery(myInvitationListOptions());
+  const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
+  const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
 
   const wsId = workspace?.id;
-  const { data: inboxItems = [] } = useQuery({
+  const { data: inboxItems = EMPTY_INBOX } = useQuery({
     queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
     queryFn: () => api.listInbox(),
     enabled: !!wsId,
@@ -216,7 +226,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     [inboxItems],
   );
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
-  const { data: pinnedItems = [] } = useQuery({
+  const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });

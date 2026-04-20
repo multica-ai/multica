@@ -263,14 +263,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
-		// Resolve thread root: if the comment is a reply, agent should reply
-		// to the thread root (matching frontend behavior where all replies
-		// in a thread share the same top-level parent).
-		replyTo := comment.ID
-		if comment.ParentID.Valid {
-			replyTo = comment.ParentID
-		}
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, replyTo); err != nil {
+		// Always use the current comment as the trigger so the agent reads
+		// the actual new reply, not the thread root. Reply placement (flat
+		// thread grouping) is handled downstream by createAgentComment,
+		// which resolves parent_id to the thread root before posting. This
+		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
+		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}

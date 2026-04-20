@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 	bus := events.New()
 	emailSvc := service.NewEmailService()
-	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil)
+	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, Config{AllowSignup: true})
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)
@@ -819,6 +819,39 @@ func TestSendCode(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM verification_code WHERE email = $1`, "sendcode-test@multica.ai")
 	})
+}
+
+func TestSendCodeDbError(t *testing.T) {
+	// We can't easily mock the DB here without changing architecture,
+	// but we can simulate a DB error by closing the pool temporarily or
+	// using a cancelled context if the query respects it.
+	
+	// Create a handler with a "broken" queries object is hard because it's a struct.
+	// Instead, let's use a context that is already cancelled.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	w := httptest.NewRecorder()
+	body := map[string]string{"email": "dberror-test@multica.ai"}
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(body)
+	req := httptest.NewRequest("POST", "/auth/send-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
+
+	testHandler.SendCode(w, req)
+	
+	// If the DB query respects the cancelled context, it should return an error.
+	// pgx usually returns context.Canceled which is not what isNotFound checks for.
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("SendCode (db error): expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "failed to lookup user" {
+		t.Fatalf("SendCode (db error): expected error message 'failed to lookup user', got '%s'", resp["error"])
+	}
 }
 
 func TestSendCodeRateLimit(t *testing.T) {

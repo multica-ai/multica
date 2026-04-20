@@ -21,13 +21,14 @@ import (
 )
 
 type TaskService struct {
-	Queries *db.Queries
-	Hub     *realtime.Hub
-	Bus     *events.Bus
+	Queries   *db.Queries
+	TxStarter TxStarter
+	Hub       *realtime.Hub
+	Bus       *events.Bus
 }
 
-func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskService {
-	return &TaskService{Queries: q, Hub: hub, Bus: bus}
+func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -248,21 +249,48 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 
 // CompleteTask marks a task as completed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
+//
+// For chat tasks, CompleteAgentTask and the chat_session resume-pointer
+// update run in a single transaction. This closes a race where the next
+// queued chat message could be claimed in the window between the task
+// flipping to 'completed' and chat_session.session_id being refreshed,
+// causing the new task to resume against a stale (or NULL) session.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
-		ID:        taskID,
-		Result:    result,
-		SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-		WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
-	})
-	if err != nil {
+	var task db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
+			ID:        taskID,
+			Result:    result,
+			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+		})
+		if err != nil {
+			return err
+		}
+		task = t
+
+		if t.ChatSessionID.Valid {
+			// COALESCE in SQL guarantees empty inputs don't wipe the
+			// existing resume pointer; we still surface DB errors.
+			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
+				ID:        t.ChatSessionID,
+				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+			}); err != nil {
+				return fmt.Errorf("update chat session resume pointer: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
 		// Log the current task state to help debug why the update matched no rows.
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
-			slog.Warn("complete task failed: task not in running state",
+			slog.Warn("complete task failed",
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
 				"issue_id", util.UUIDToString(existing.IssueID),
+				"chat_session_id", util.UUIDToString(existing.ChatSessionID),
 				"agent_id", util.UUIDToString(existing.AgentID),
+				"error", err,
 			)
 		} else {
 			slog.Warn("complete task failed: task not found",
@@ -296,7 +324,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 	}
 
-	// For chat tasks, save assistant reply, update session, and broadcast chat:done.
+	// For chat tasks, save assistant reply and broadcast chat:done. The
+	// resume pointer was already persisted inside the transaction above.
 	if task.ChatSessionID.Valid {
 		var payload protocol.TaskCompletedPayload
 		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
@@ -317,11 +346,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				}
 			}
 		}
-		s.Queries.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
-			ID:        task.ChatSessionID,
-			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
-		})
 		s.broadcastChatDone(ctx, task)
 	}
 
@@ -336,18 +360,45 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 // FailTask marks a task as failed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg string) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.FailAgentTask(ctx, db.FailAgentTaskParams{
-		ID:    taskID,
-		Error: pgtype.Text{String: errMsg, Valid: true},
-	})
-	if err != nil {
+//
+// sessionID/workDir are optional: when the agent established a real session
+// before failing (e.g. crashed mid-conversation, was cancelled, or hit a
+// tool error), the daemon should pass them so we can preserve the resume
+// pointer on both the task row and the chat_session — otherwise the next
+// chat turn would silently start a brand-new session and lose memory.
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir string) (*db.AgentTaskQueue, error) {
+	var task db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
+			ID:        taskID,
+			Error:     pgtype.Text{String: errMsg, Valid: true},
+			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+		})
+		if err != nil {
+			return err
+		}
+		task = t
+
+		if t.ChatSessionID.Valid {
+			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
+				ID:        t.ChatSessionID,
+				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+			}); err != nil {
+				return fmt.Errorf("update chat session resume pointer: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
-			slog.Warn("fail task failed: task not in dispatched/running state",
+			slog.Warn("fail task failed",
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
 				"issue_id", util.UUIDToString(existing.IssueID),
+				"chat_session_id", util.UUIDToString(existing.ChatSessionID),
 				"agent_id", util.UUIDToString(existing.AgentID),
+				"error", err,
 			)
 		} else {
 			slog.Warn("fail task failed: task not found",
@@ -370,6 +421,24 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
 
 	return &task, nil
+}
+
+// runInTx executes fn inside a single DB transaction. If TxStarter is nil
+// (e.g. some tests construct TaskService directly), fn runs against the
+// regular Queries handle without transactional guarantees.
+func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
+	if s.TxStarter == nil {
+		return fn(s.Queries)
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := fn(s.Queries.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ReportProgress broadcasts a progress update via the event bus.

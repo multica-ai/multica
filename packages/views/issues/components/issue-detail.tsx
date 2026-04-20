@@ -697,8 +697,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0">
+            <span className="shrink-0 text-muted-foreground">
               {issue.identifier}
+            </span>
+            <span className="truncate font-medium text-foreground">
+              {issue.title}
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -1046,6 +1049,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
+              currentIssueId={id}
             />
 
             <div className="flex items-center gap-1 mt-3">
