@@ -1020,6 +1020,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:      customArgs,
 		McpConfig:       mcpConfig,
 	}
+	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
+	// workspace dir rather than the task workdir, so the AGENTS.md written by
+	// execenv.InjectRuntimeConfig is never read. Pass agent instructions inline
+	// via SystemPrompt so the backend can prepend them to the --message payload.
+	// Other providers already surface instructions through their runtime config
+	// file and don't need this.
+	if provider == "openclaw" {
+		execOpts.SystemPrompt = instructions
+	}
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {

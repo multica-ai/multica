@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsOpenclawBackend(t *testing.T) {
@@ -912,4 +913,142 @@ func TestOpenclawInt64Nil(t *testing.T) {
 	if got := openclawInt64(data, "count"); got != 0 {
 		t.Errorf("got %d, want 0", got)
 	}
+}
+
+// ── buildOpenclawArgs tests ──
+
+// indexOf returns the first index of s in args, or -1 if absent.
+func indexOf(args []string, s string) int {
+	for i, a := range args {
+		if a == s {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestBuildOpenclawArgsMinimal(t *testing.T) {
+	t.Parallel()
+
+	args := buildOpenclawArgs("do work", "ses-1", ExecOptions{}, slog.Default())
+	expected := []string{"agent", "--local", "--json", "--session-id", "ses-1", "--message", "do work"}
+
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildOpenclawArgsDoesNotForwardModelOrSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	// openclaw agent rejects --model and --system-prompt; verify they are
+	// never emitted as flags even when Model and SystemPrompt are set.
+	args := buildOpenclawArgs("task", "ses-2", ExecOptions{
+		Model:        "gpt-4o",
+		SystemPrompt: "You are a helpful agent.",
+	}, slog.Default())
+
+	if idx := indexOf(args, "--model"); idx != -1 {
+		t.Fatalf("unexpected --model flag at %d: %v", idx, args)
+	}
+	if idx := indexOf(args, "--system-prompt"); idx != -1 {
+		t.Fatalf("unexpected --system-prompt flag at %d: %v", idx, args)
+	}
+}
+
+func TestBuildOpenclawArgsPrependsSystemPromptToMessage(t *testing.T) {
+	t.Parallel()
+
+	args := buildOpenclawArgs("do the thing", "ses-3", ExecOptions{
+		SystemPrompt: "You are a read-only agent.",
+	}, slog.Default())
+
+	msgIdx := indexOf(args, "--message")
+	if msgIdx == -1 || msgIdx+1 >= len(args) {
+		t.Fatalf("expected --message <value> in args: %v", args)
+	}
+	got := args[msgIdx+1]
+	want := "You are a read-only agent.\n\ndo the thing"
+	if got != want {
+		t.Errorf("--message payload mismatch:\n got:  %q\n want: %q", got, want)
+	}
+}
+
+func TestBuildOpenclawArgsEmptySystemPromptLeavesMessageUnchanged(t *testing.T) {
+	t.Parallel()
+
+	args := buildOpenclawArgs("just do it", "ses-4", ExecOptions{}, slog.Default())
+
+	msgIdx := indexOf(args, "--message")
+	if msgIdx == -1 || msgIdx+1 >= len(args) {
+		t.Fatalf("expected --message <value> in args: %v", args)
+	}
+	if got := args[msgIdx+1]; got != "just do it" {
+		t.Errorf("--message payload: got %q, want %q", got, "just do it")
+	}
+}
+
+func TestBuildOpenclawArgsTimeout(t *testing.T) {
+	t.Parallel()
+
+	args := buildOpenclawArgs("task", "ses-5", ExecOptions{
+		Timeout: 90 * time.Second,
+	}, slog.Default())
+
+	idx := indexOf(args, "--timeout")
+	if idx == -1 || idx+1 >= len(args) {
+		t.Fatalf("expected --timeout <value> in args: %v", args)
+	}
+	if got := args[idx+1]; got != "90" {
+		t.Errorf("--timeout value: got %q, want %q", got, "90")
+	}
+}
+
+func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	// Users must not be able to re-introduce the banned flags via custom_args —
+	// they would crash `openclaw agent` just like the direct forward did.
+	args := buildOpenclawArgs("task", "ses-6", ExecOptions{
+		CustomArgs: []string{
+			"--agent", "research-bot",
+			"--model", "gpt-4o",
+			"--system-prompt", "You are helpful",
+			"--session-id", "hijacked",
+			"--message", "hijacked",
+		},
+	}, slog.Default())
+
+	if idx := indexOf(args, "--model"); idx != -1 {
+		t.Errorf("--model should be filtered from custom_args: %v", args)
+	}
+	if idx := indexOf(args, "--system-prompt"); idx != -1 {
+		t.Errorf("--system-prompt should be filtered from custom_args: %v", args)
+	}
+	// Whitelisted pass-through flag must survive filtering.
+	if idx := indexOf(args, "--agent"); idx == -1 || idx+1 >= len(args) || args[idx+1] != "research-bot" {
+		t.Errorf("expected --agent research-bot to survive filtering: %v", args)
+	}
+	// --session-id and --message appear exactly once — the daemon-managed ones.
+	if count := countOccurrences(args, "--session-id"); count != 1 {
+		t.Errorf("expected 1 --session-id (daemon-managed), got %d: %v", count, args)
+	}
+	if count := countOccurrences(args, "--message"); count != 1 {
+		t.Errorf("expected 1 --message (daemon-managed), got %d: %v", count, args)
+	}
+}
+
+func countOccurrences(args []string, s string) int {
+	n := 0
+	for _, a := range args {
+		if a == s {
+			n++
+		}
+	}
+	return n
 }
