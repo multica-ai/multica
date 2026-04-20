@@ -26,7 +26,7 @@ export
 
 MULTICA_ARGS ?= $(ARGS)
 
-COMPOSE := docker compose
+COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
