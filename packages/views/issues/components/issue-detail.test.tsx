@@ -236,6 +236,27 @@ vi.mock("@multica/core/issues/stores", () => ({
     };
     return selector ? selector(state) : state;
   },
+  useCommentDraftStore: Object.assign(
+    (selector?: any) => {
+      const state = {
+        drafts: {},
+        getDraft: () => "",
+        setDraft: () => {},
+        clearDraft: () => {},
+      };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({
+        drafts: {},
+        getDraft: () => "",
+        setDraft: () => {},
+        clearDraft: () => {},
+      }),
+    },
+  ),
+  commentDraftKey: (issueId: string) => `comment:${issueId}`,
+  replyDraftKey: (issueId: string, commentId: string) => `reply:${issueId}:${commentId}`,
 }));
 
 // Mock modals

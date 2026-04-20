@@ -7,6 +7,7 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay 
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { useCommentDraftStore, commentDraftKey } from "@multica/core/issues/stores";
 
 interface CommentInputProps {
   issueId: string;
@@ -14,8 +15,12 @@ interface CommentInputProps {
 }
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+  const draftKey = commentDraftKey(issueId);
+  // Read the persisted draft once on mount so we can seed the editor. Later
+  // updates go through setDraft / clearDraft without re-rendering from the store.
+  const initialDraftRef = useRef<string>(useCommentDraftStore.getState().getDraft(draftKey));
   const editorRef = useRef<ContentEditorRef>(null);
-  const [isEmpty, setIsEmpty] = useState(true);
+  const [isEmpty, setIsEmpty] = useState(!initialDraftRef.current.trim());
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
@@ -31,6 +36,11 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     return result;
   }, [uploadWithToast, issueId]);
 
+  const handleUpdate = useCallback((md: string) => {
+    setIsEmpty(!md.trim());
+    useCommentDraftStore.getState().setDraft(draftKey, md);
+  }, [draftKey]);
+
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
@@ -45,6 +55,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       editorRef.current?.clearContent();
       setIsEmpty(true);
       uploadMapRef.current.clear();
+      useCommentDraftStore.getState().clearDraft(draftKey);
     } finally {
       setSubmitting(false);
     }
@@ -59,7 +70,8 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         <ContentEditor
           ref={editorRef}
           placeholder="Leave a comment..."
-          onUpdate={(md) => setIsEmpty(!md.trim())}
+          defaultValue={initialDraftRef.current}
+          onUpdate={handleUpdate}
           onSubmit={handleSubmit}
           onUploadFile={handleUpload}
           debounceMs={100}

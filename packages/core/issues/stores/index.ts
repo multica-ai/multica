@@ -9,6 +9,11 @@ export {
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
 export {
+  useCommentDraftStore,
+  commentDraftKey,
+  replyDraftKey,
+} from "./comment-draft-store";
+export {
   myIssuesViewStore,
   type MyIssuesViewState,
   type MyIssuesScope,

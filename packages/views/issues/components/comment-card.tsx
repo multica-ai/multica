@@ -36,7 +36,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, replyDraftKey } from "@multica/core/issues/stores";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -569,6 +569,7 @@ function CommentCard({
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
+              draftKey={replyDraftKey(issueId, entry.id)}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
             />
           </div>

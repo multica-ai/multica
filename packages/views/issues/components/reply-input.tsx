@@ -7,6 +7,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -20,6 +21,12 @@ interface ReplyInputProps {
   avatarId: string;
   onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
   size?: "sm" | "default";
+  /**
+   * Stable identifier used to persist the unsent draft across unmount
+   * (e.g. switching issues or collapsing the parent comment). When omitted,
+   * drafts are ephemeral.
+   */
+  draftKey?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -33,10 +40,17 @@ function ReplyInput({
   avatarId,
   onSubmit,
   size = "default",
+  draftKey,
 }: ReplyInputProps) {
+  // Seed editor with any persisted draft once on mount. Omitted draftKey →
+  // no persistence, preserving the old ephemeral behavior for callers that
+  // don't want it.
+  const initialDraftRef = useRef<string>(
+    draftKey ? useCommentDraftStore.getState().getDraft(draftKey) : "",
+  );
   const editorRef = useRef<ContentEditorRef>(null);
   const measureRef = useRef<HTMLDivElement>(null);
-  const [isEmpty, setIsEmpty] = useState(true);
+  const [isEmpty, setIsEmpty] = useState(!initialDraftRef.current.trim());
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
@@ -64,6 +78,11 @@ function ReplyInput({
     return result;
   }, [uploadWithToast, issueId]);
 
+  const handleUpdate = useCallback((md: string) => {
+    setIsEmpty(!md.trim());
+    if (draftKey) useCommentDraftStore.getState().setDraft(draftKey, md);
+  }, [draftKey]);
+
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
@@ -78,6 +97,7 @@ function ReplyInput({
       editorRef.current?.clearContent();
       setIsEmpty(true);
       uploadMapRef.current.clear();
+      if (draftKey) useCommentDraftStore.getState().clearDraft(draftKey);
     } finally {
       setSubmitting(false);
     }
@@ -106,7 +126,8 @@ function ReplyInput({
             <ContentEditor
               ref={editorRef}
               placeholder={placeholder}
-              onUpdate={(md) => setIsEmpty(!md.trim())}
+              defaultValue={initialDraftRef.current}
+              onUpdate={handleUpdate}
               onSubmit={handleSubmit}
               onUploadFile={handleUpload}
               debounceMs={100}
