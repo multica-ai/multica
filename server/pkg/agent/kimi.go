@@ -94,9 +94,10 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	// Reuse the hermesClient ACP transport — Kimi speaks the same protocol.
 	c := &hermesClient{
-		cfg:     b.cfg,
-		stdin:   stdin,
-		pending: make(map[int]*pendingRPC),
+		cfg:          b.cfg,
+		stdin:        stdin,
+		pending:      make(map[int]*pendingRPC),
+		pendingTools: make(map[string]*pendingToolCall),
 		onMessage: func(msg Message) {
 			// hermesClient.handleToolCallStart has already mapped
 			// the raw ACP title via hermesToolNameFromTitle — which

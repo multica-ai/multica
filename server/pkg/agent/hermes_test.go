@@ -343,64 +343,130 @@ func TestHermesClientHandleToolCallComplete(t *testing.T) {
 	}
 }
 
-// TestHermesClientHandleToolCallStartKimiContent covers the kimi-cli
-// emission shape: tool_call carries an ACP `content` array with a
-// nested text block instead of a `rawInput` map. Without the fallback
-// extractor the daemon records empty Input and the UI renders a blank
-// tool bubble ("terminal's input is empty").
-func TestHermesClientHandleToolCallStartKimiContent(t *testing.T) {
+// TestHermesClientKimiStreamingToolCall walks the real kimi frame
+// sequence for a single Shell call:
+//  1. tool_call with empty content (LLM hasn't started emitting args yet)
+//  2. tool_call_update status=in_progress carrying the cumulative args
+//     JSON character-by-character ("{", "{\"command", …)
+//  3. tool_call_update status=completed carrying the command's stdout
+//
+// The client must defer MessageToolUse until we have the full args so
+// the UI doesn't show a command like `{"comma` — and the MessageToolUse
+// must carry the parsed args as the Input map (`{"command": "echo hi"}`
+// → Input["command"] = "echo hi") rather than a raw string.
+func TestHermesClientKimiStreamingToolCall(t *testing.T) {
 	t.Parallel()
 
-	var got Message
+	var got []Message
 	c := &hermesClient{
 		pending: make(map[int]*pendingRPC),
 		onMessage: func(msg Message) {
-			got = msg
+			got = append(got, msg)
 		},
 	}
 
-	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-kimi-1","title":"Shell","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"{\"command\":\"echo hello\"}"}}]}}}`
-	c.handleLine(line)
+	// 1. tool_call: empty content (classic kimi start frame).
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-kimi-1","title":"Shell","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":""}}]}}}`)
+	if len(got) != 0 {
+		t.Fatalf("expected nothing emitted yet (args empty), got %+v", got)
+	}
 
-	if got.Type != MessageToolUse {
-		t.Fatalf("type: got %v, want MessageToolUse", got.Type)
+	// 2. Streaming updates — cumulative args JSON.
+	partials := []string{
+		`{"`,
+		`{"command`,
+		`{"command":`,
+		`{"command":"echo `,
+		`{"command":"echo hi"}`,
 	}
-	if got.CallID != "tc-kimi-1" {
-		t.Errorf("callID: got %q", got.CallID)
+	for _, args := range partials {
+		// JSON-encode args so embedded quotes are escaped properly.
+		argsJSON, _ := json.Marshal(args)
+		line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-kimi-1","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":` + string(argsJSON) + `}}]}}}`
+		c.handleLine(line)
 	}
-	text, ok := got.Input["text"].(string)
-	if !ok {
-		t.Fatalf("Input.text missing or not a string: %v", got.Input)
+	if len(got) != 0 {
+		t.Fatalf("expected nothing emitted mid-stream, got %+v", got)
 	}
-	if !strings.Contains(text, "echo hello") {
-		t.Errorf("Input.text should contain the command args, got %q", text)
+
+	// 3. Completed — stdout.
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-kimi-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hi\n"}}]}}}`)
+
+	if len(got) != 2 {
+		t.Fatalf("expected [MessageToolUse, MessageToolResult], got %d: %+v", len(got), got)
+	}
+	if got[0].Type != MessageToolUse {
+		t.Errorf("first message: got %v, want MessageToolUse", got[0].Type)
+	}
+	if got[0].CallID != "tc-kimi-1" {
+		t.Errorf("first.callID: got %q", got[0].CallID)
+	}
+	if cmd, _ := got[0].Input["command"].(string); cmd != "echo hi" {
+		t.Errorf("first.Input.command: got %v, want %q", got[0].Input["command"], "echo hi")
+	}
+	if got[1].Type != MessageToolResult {
+		t.Errorf("second message: got %v, want MessageToolResult", got[1].Type)
+	}
+	if got[1].Output != "hi\n" {
+		t.Errorf("second.output: got %q, want %q", got[1].Output, "hi\n")
 	}
 }
 
-// TestHermesClientHandleToolCallCompleteKimiContent covers kimi's
-// completion shape: the Shell tool's stdout comes back via `content`
-// blocks rather than `rawOutput`.
-func TestHermesClientHandleToolCallCompleteKimiContent(t *testing.T) {
+// TestHermesClientKimiMalformedArgsFallback: if the accumulated args
+// aren't valid JSON (streaming glitch, tool with non-JSON args), we
+// still surface the text under Input.text rather than silently
+// dropping it.
+func TestHermesClientKimiMalformedArgsFallback(t *testing.T) {
 	t.Parallel()
 
-	var got Message
+	var got []Message
 	c := &hermesClient{
 		pending: make(map[int]*pendingRPC),
 		onMessage: func(msg Message) {
-			got = msg
+			got = append(got, msg)
 		},
 	}
 
-	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-kimi-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hello\n"}},{"type":"content","content":{"type":"text","text":"exit 0"}}]}}}`
-	c.handleLine(line)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc","title":"Shell","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"not-json"}}]}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc","status":"completed","content":[{"type":"content","content":{"type":"text","text":"output"}}]}}}`)
 
-	if got.Type != MessageToolResult {
-		t.Fatalf("type: got %v, want MessageToolResult", got.Type)
+	if len(got) < 1 {
+		t.Fatalf("expected ToolUse+ToolResult, got %+v", got)
 	}
-	// Multiple content blocks must be concatenated; newline separator
-	// keeps streamed chunks visually distinct in the UI.
-	if got.Output != "hello\n\nexit 0" {
-		t.Errorf("output: got %q, want %q", got.Output, "hello\n\nexit 0")
+	if text, _ := got[0].Input["text"].(string); text != "not-json" {
+		t.Errorf("fallback Input.text: got %v", got[0].Input["text"])
+	}
+}
+
+// TestHermesClientHandleToolCallCompleteOrphan: if a completion frame
+// arrives without a preceding tool_call (out-of-order / missed frame),
+// still emit ToolUse synthesised from the update's own title/rawInput
+// before ToolResult. Keeps the UI from showing a bare result with no
+// header.
+func TestHermesClientHandleToolCallCompleteOrphan(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc","status":"completed","title":"terminal: ls","kind":"execute","rawInput":{"command":"ls"},"content":[{"type":"content","content":{"type":"text","text":"file.go\n"}}]}}}`)
+
+	if len(got) != 2 || got[0].Type != MessageToolUse || got[1].Type != MessageToolResult {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if got[0].Tool != "terminal" {
+		t.Errorf("orphan ToolUse tool: got %q", got[0].Tool)
+	}
+	if cmd, _ := got[0].Input["command"].(string); cmd != "ls" {
+		t.Errorf("orphan ToolUse input.command: got %v", got[0].Input["command"])
+	}
+	if got[1].Output != "file.go\n" {
+		t.Errorf("ToolResult output: got %q", got[1].Output)
 	}
 }
 
@@ -447,6 +513,16 @@ func TestExtractACPToolCallText(t *testing.T) {
 			name: "terminal blocks skipped",
 			json: `[{"type":"terminal","terminalId":"t1"},{"type":"content","content":{"type":"text","text":"shell out"}}]`,
 			want: "shell out",
+		},
+		{
+			name: "diff block renders as mini header",
+			json: `[{"type":"diff","path":"foo.go","oldText":"abc","newText":"abcdef"}]`,
+			want: "--- foo.go\n+++ foo.go\n(edited: 3 → 6 bytes)",
+		},
+		{
+			name: "new-file diff (no oldText)",
+			json: `[{"type":"diff","path":"new.go","oldText":"","newText":"hi"}]`,
+			want: "--- new.go\n+++ new.go\n(new file, 2 bytes)",
 		},
 		{
 			name: "empty array returns empty",

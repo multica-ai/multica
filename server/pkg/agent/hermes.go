@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -92,9 +93,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	promptDone := make(chan hermesPromptResult, 1)
 
 	c := &hermesClient{
-		cfg:     b.cfg,
-		stdin:   stdin,
-		pending: make(map[int]*pendingRPC),
+		cfg:          b.cfg,
+		stdin:        stdin,
+		pending:      make(map[int]*pendingRPC),
+		pendingTools: make(map[string]*pendingToolCall),
 		onMessage: func(msg Message) {
 			if msg.Type == MessageText {
 				outputMu.Lock()
@@ -344,8 +346,26 @@ type hermesClient struct {
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
 
+	// pendingTools buffers the args for tool calls whose input streams in
+	// across multiple ACP tool_call_update messages (kimi does this —
+	// tokens from the LLM arrive one at a time, and each update carries
+	// the cumulative args JSON so far). We defer emitting MessageToolUse
+	// until we either see status=completed/failed or have a full arg set,
+	// so the UI never sees a half-written command like `{"comma`.
+	toolMu       sync.Mutex
+	pendingTools map[string]*pendingToolCall
+
 	usageMu sync.Mutex
 	usage   TokenUsage
+}
+
+// pendingToolCall buffers state for a tool call while its arguments
+// are streaming in. One entry per ACP toolCallId.
+type pendingToolCall struct {
+	toolName string         // already mapped via hermesToolNameFromTitle
+	input    map[string]any // from rawInput when the agent sends it up front (hermes)
+	argsText string         // accumulated `content[].text` args (kimi, cumulative)
+	emitted  bool           // whether we've already sent MessageToolUse
 }
 
 // writeLine serialises concurrent JSON-RPC writes so request() (main
@@ -647,30 +667,46 @@ func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	}
 
 	toolName := hermesToolNameFromTitle(msg.Title, msg.Kind)
-	input := msg.RawInput
-	// kimi-cli emits the tool input as ACP `content` blocks (text type),
-	// not `rawInput`. Fall back so the UI shows "echo hello" instead of
-	// a blank input bubble. See kimi_cli/acp/session.py::_send_tool_call.
-	if input == nil {
-		if text := extractACPToolCallText(msg.Content); text != "" {
-			input = map[string]any{"text": text}
-		}
-	}
-	if c.onMessage != nil {
-		c.onMessage(Message{
-			Type:   MessageToolUse,
-			Tool:   toolName,
-			CallID: msg.ToolCallID,
-			Input:  input,
+
+	// Hermes pre-populates rawInput on the initial tool_call — emit
+	// MessageToolUse immediately so the UI can show the tool invocation
+	// live. Record the emission so handleToolCallUpdate doesn't re-emit
+	// on completion.
+	if msg.RawInput != nil {
+		c.trackTool(msg.ToolCallID, &pendingToolCall{
+			toolName: toolName,
+			input:    msg.RawInput,
+			emitted:  true,
 		})
+		if c.onMessage != nil {
+			c.onMessage(Message{
+				Type:   MessageToolUse,
+				Tool:   toolName,
+				CallID: msg.ToolCallID,
+				Input:  msg.RawInput,
+			})
+		}
+		return
 	}
+
+	// Kimi streams args token-by-token across tool_call_update messages;
+	// the initial tool_call often carries an empty content block. Buffer
+	// the tool and defer MessageToolUse emission to avoid the UI seeing
+	// a command with `{""` as its input.
+	c.trackTool(msg.ToolCallID, &pendingToolCall{
+		toolName: toolName,
+		argsText: extractACPToolCallText(msg.Content),
+		emitted:  false,
+	})
 }
 
 func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	var msg struct {
 		ToolCallID string            `json:"toolCallId"`
 		Status     string            `json:"status"`
+		Title      string            `json:"title"`
 		Kind       string            `json:"kind"`
+		RawInput   map[string]any    `json:"rawInput"`
 		RawOutput  string            `json:"rawOutput"`
 		Content    []json.RawMessage `json:"content"`
 	}
@@ -678,16 +714,24 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 		return
 	}
 
-	// Only emit tool result when the call is completed.
+	// Mid-stream: only buffer updates. Kimi emits many of these per
+	// tool call, each carrying the cumulative args JSON so far.
 	if msg.Status != "completed" && msg.Status != "failed" {
+		if pending := c.getPendingTool(msg.ToolCallID); pending != nil && !pending.emitted {
+			if text := extractACPToolCallText(msg.Content); text != "" {
+				// kimi streams the full cumulative args on every frame;
+				// overwrite rather than concatenate.
+				pending.argsText = text
+			}
+		}
 		return
 	}
 
+	// Completion: emit any deferred MessageToolUse first, then the result.
+	pending := c.takePendingTool(msg.ToolCallID)
+	c.emitDeferredToolUse(pending, msg.ToolCallID, msg.Title, msg.Kind, msg.RawInput)
+
 	output := msg.RawOutput
-	// kimi-cli returns Shell / file-tool output via `content` blocks on
-	// the completion update, not `rawOutput`. Fall back so the UI shows
-	// the command's stdout instead of an empty terminal panel. See
-	// kimi_cli/acp/session.py::_send_tool_result.
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
 	}
@@ -700,40 +744,191 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	}
 }
 
-// extractACPToolCallText concatenates the text of every ACP
-// `ContentToolCallContent` block (shape: {"type":"content",
-// "content":{"type":"text","text":"..."}}) from a tool_call /
-// tool_call_update's `content` array. Non-text blocks (terminal,
-// diff, image) are skipped — the client UI doesn't have a way to
-// render raw terminal_id references, so a text concatenation is the
-// most useful thing we can surface.
+// trackTool stores pending-tool state for a given callID. Lazy-inits
+// the map so zero-value hermesClient values (common in tests) don't
+// panic on the first tool call.
+func (c *hermesClient) trackTool(callID string, p *pendingToolCall) {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	if c.pendingTools == nil {
+		c.pendingTools = make(map[string]*pendingToolCall)
+	}
+	c.pendingTools[callID] = p
+}
+
+// getPendingTool returns the pending entry (may be nil) without
+// removing it. Safe to call on a zero-value hermesClient.
+func (c *hermesClient) getPendingTool(callID string) *pendingToolCall {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	if c.pendingTools == nil {
+		return nil
+	}
+	return c.pendingTools[callID]
+}
+
+// takePendingTool removes and returns the pending entry, or nil if
+// none was tracked (e.g. the tool completed before we saw its start,
+// or we missed the start frame).
+func (c *hermesClient) takePendingTool(callID string) *pendingToolCall {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	if c.pendingTools == nil {
+		return nil
+	}
+	p := c.pendingTools[callID]
+	delete(c.pendingTools, callID)
+	return p
+}
+
+// emitDeferredToolUse emits a buffered MessageToolUse right before the
+// matching MessageToolResult. Handles three cases:
+//   - hermes tool: already emitted on tool_call → skip
+//   - kimi tool with streamed args → parse accumulated JSON as Input
+//   - unknown tool (completed arrived without a start frame) →
+//     synthesize minimal info from the update's own fields
+func (c *hermesClient) emitDeferredToolUse(
+	p *pendingToolCall,
+	callID, updateTitle, updateKind string,
+	updateRawInput map[string]any,
+) {
+	if p != nil && p.emitted {
+		return
+	}
+
+	var toolName string
+	var input map[string]any
+
+	switch {
+	case p != nil && p.input != nil:
+		// Pre-buffered rawInput path — shouldn't happen because we set
+		// emitted=true in that case, but handle defensively.
+		toolName = p.toolName
+		input = p.input
+	case p != nil:
+		toolName = p.toolName
+		input = parseToolArgsJSON(p.argsText)
+	default:
+		// No record of the start frame — fall back to the update's own
+		// title/kind/rawInput so the UI at least sees the tool name.
+		toolName = hermesToolNameFromTitle(updateTitle, updateKind)
+		input = updateRawInput
+	}
+
+	if c.onMessage == nil {
+		return
+	}
+	c.onMessage(Message{
+		Type:   MessageToolUse,
+		Tool:   toolName,
+		CallID: callID,
+		Input:  input,
+	})
+}
+
+// parseToolArgsJSON turns kimi's accumulated args string into the
+// structured map the UI expects under Message.Input. Kimi sends args
+// as a JSON-encoded object (`{"command":"echo hi"}`), so a full JSON
+// parse recovers the original tool-arg shape. On malformed input
+// (streaming glitch, non-JSON tool) we preserve the raw text under a
+// `text` key so the UI still has something to render.
+func parseToolArgsJSON(argsText string) map[string]any {
+	argsText = strings.TrimSpace(argsText)
+	if argsText == "" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(argsText), &m); err == nil {
+		return m
+	}
+	return map[string]any{"text": argsText}
+}
+
+// extractACPToolCallText concatenates the rendered text of every ACP
+// block in a tool_call / tool_call_update's `content` array.
+//
+// Handles the two block types kimi emits:
+//   - {type:"content", content:{type:"text", text:"..."}} — plain text
+//     (shell output, tool args). Text is concatenated verbatim.
+//   - {type:"diff", path, oldText, newText} — FileEdit output. Rendered
+//     as a minimal unified-diff header so the UI distinguishes writes
+//     from reads without needing a diff viewer.
+//
+// Terminal blocks ({type:"terminal", terminalId}) reference a remote
+// terminal the client would normally subscribe to via terminal/output;
+// we don't advertise terminal capability so we never receive those in
+// practice, but if one slips through we skip it (nothing useful to
+// surface from a bare ID).
 func extractACPToolCallText(blocks []json.RawMessage) string {
 	var b strings.Builder
-	for _, raw := range blocks {
-		var outer struct {
-			Type    string          `json:"type"`
-			Content json.RawMessage `json:"content"`
-		}
-		if err := json.Unmarshal(raw, &outer); err != nil {
-			continue
-		}
-		if outer.Type != "content" || len(outer.Content) == 0 {
-			continue
-		}
-		var inner struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(outer.Content, &inner); err != nil {
-			continue
-		}
-		if inner.Type != "text" || inner.Text == "" {
-			continue
+	appendPiece := func(piece string) {
+		if piece == "" {
+			return
 		}
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(inner.Text)
+		b.WriteString(piece)
+	}
+	for _, raw := range blocks {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &kind); err != nil {
+			continue
+		}
+		switch kind.Type {
+		case "content":
+			var outer struct {
+				Content json.RawMessage `json:"content"`
+			}
+			if err := json.Unmarshal(raw, &outer); err != nil || len(outer.Content) == 0 {
+				continue
+			}
+			var inner struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(outer.Content, &inner); err != nil {
+				continue
+			}
+			if inner.Type != "text" {
+				continue
+			}
+			appendPiece(inner.Text)
+		case "diff":
+			var diff struct {
+				Path    string `json:"path"`
+				OldText string `json:"oldText"`
+				NewText string `json:"newText"`
+			}
+			if err := json.Unmarshal(raw, &diff); err != nil || diff.Path == "" {
+				continue
+			}
+			// Keep it tiny — a full unified diff can be huge and we're
+			// really just recording "this tool wrote to this file".
+			// The UI can re-read the file if it needs the actual content.
+			var piece strings.Builder
+			piece.WriteString("--- ")
+			piece.WriteString(diff.Path)
+			piece.WriteString("\n+++ ")
+			piece.WriteString(diff.Path)
+			if diff.OldText == "" {
+				piece.WriteString("\n(new file, ")
+				piece.WriteString(strconv.Itoa(len(diff.NewText)))
+				piece.WriteString(" bytes)")
+			} else {
+				piece.WriteString("\n(edited: ")
+				piece.WriteString(strconv.Itoa(len(diff.OldText)))
+				piece.WriteString(" → ")
+				piece.WriteString(strconv.Itoa(len(diff.NewText)))
+				piece.WriteString(" bytes)")
+			}
+			appendPiece(piece.String())
+		default:
+			// terminal blocks, image blocks, unknown future types —
+			// ignore. We have no way to inline-render them.
+		}
 	}
 	return b.String()
 }
