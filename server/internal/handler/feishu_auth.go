@@ -3,10 +3,12 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,17 +19,19 @@ import (
 
 const feishuProvider = "feishu"
 
+var feishuEmailLocalPartSanitizer = regexp.MustCompile(`[^a-z0-9._+-]+`)
+
 type FeishuLoginRequest struct {
 	Code        string `json:"code"`
 	RedirectURI string `json:"redirect_uri"`
 }
 
 type feishuTokenRequest struct {
-	GrantType    string `json:"grant_type"`
-	Code         string `json:"code"`
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	RedirectURI  string `json:"redirect_uri,omitempty"`
+	GrantType   string `json:"grant_type"`
+	Code        string `json:"code"`
+	AppID       string `json:"app_id"`
+	AppSecret   string `json:"app_secret"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 type feishuTokenResponse struct {
@@ -58,6 +62,16 @@ func feishuRedirectURI(reqRedirectURI string) string {
 		return strings.TrimSpace(reqRedirectURI)
 	}
 	return strings.TrimSpace(os.Getenv("FEISHU_REDIRECT_URI"))
+}
+
+func feishuPlaceholderEmail(openID string) string {
+	sanitized := strings.ToLower(strings.TrimSpace(openID))
+	sanitized = feishuEmailLocalPartSanitizer.ReplaceAllString(sanitized, "-")
+	sanitized = strings.Trim(sanitized, ".-+")
+	if sanitized == "" {
+		sanitized = "user"
+	}
+	return fmt.Sprintf("feishu+%s@users.multica.local", sanitized)
 }
 
 func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
@@ -139,11 +153,11 @@ func (h *Handler) FeishuLogin(w http.ResponseWriter, r *http.Request) {
 
 func exchangeFeishuCode(r *http.Request, code, redirectURI, appID, appSecret string) (string, error) {
 	payload, err := json.Marshal(feishuTokenRequest{
-		GrantType:    "authorization_code",
-		Code:         code,
-		ClientID:     appID,
-		ClientSecret: appSecret,
-		RedirectURI:  redirectURI,
+		GrantType:   "authorization_code",
+		Code:        code,
+		AppID:       appID,
+		AppSecret:   appSecret,
+		RedirectURI: redirectURI,
 	})
 	if err != nil {
 		return "", err
@@ -166,15 +180,18 @@ func exchangeFeishuCode(r *http.Request, code, redirectURI, appID, appSecret str
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", io.ErrUnexpectedEOF
+		return "", fmt.Errorf("feishu token exchange status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var parsed feishuTokenResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", err
 	}
-	if parsed.Code != 0 || strings.TrimSpace(parsed.Data.AccessToken) == "" {
-		return "", io.ErrUnexpectedEOF
+	if parsed.Code != 0 {
+		return "", fmt.Errorf("feishu token exchange failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
+	}
+	if strings.TrimSpace(parsed.Data.AccessToken) == "" {
+		return "", fmt.Errorf("feishu token exchange returned empty access token")
 	}
 
 	return parsed.Data.AccessToken, nil
@@ -200,13 +217,13 @@ func fetchFeishuUserInfo(r *http.Request, accessToken string) (feishuUserInfoRes
 		return parsed, nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return parsed, nil, io.ErrUnexpectedEOF
+		return parsed, nil, fmt.Errorf("feishu userinfo status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return parsed, nil, err
 	}
 	if parsed.Code != 0 {
-		return parsed, nil, io.ErrUnexpectedEOF
+		return parsed, nil, fmt.Errorf("feishu userinfo failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
 
 	return parsed, body, nil
@@ -240,7 +257,7 @@ func (h *Handler) resolveFeishuUser(r *http.Request, profile feishuUserInfoRespo
 
 	email := strings.ToLower(strings.TrimSpace(profile.Data.Email))
 	if email == "" {
-		return db.User{}, missingEmailError("Feishu account has no email")
+		email = feishuPlaceholderEmail(profile.Data.OpenID)
 	}
 
 	if existing, existingErr := h.Queries.GetUserByEmail(r.Context(), email); existingErr == nil {
