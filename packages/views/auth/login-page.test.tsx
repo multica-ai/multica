@@ -368,6 +368,25 @@ describe("LoginPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders Feishu OAuth button when feishu prop provided", () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        feishu={{ clientId: "cli-feishu", redirectUri: "http://localhost/cb" }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides Feishu OAuth button when feishu prop omitted", () => {
+    render(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.queryByRole("button", { name: /continue with feishu/i }),
+    ).not.toBeInTheDocument();
+  });
+
   // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------

@@ -27,10 +27,10 @@ import type { User } from "@multica/core/types";
 // Types
 // ---------------------------------------------------------------------------
 
-interface GoogleAuthConfig {
+interface OAuthConfig {
   clientId: string;
   redirectUri: string;
-  /** Opaque state passed through Google OAuth (e.g. "platform:desktop"). */
+  /** Opaque state passed through OAuth (e.g. "platform:desktop"). */
   state?: string;
 }
 
@@ -48,13 +48,19 @@ interface LoginPageProps {
    *  Query before this fires, so the caller can compute a destination URL. */
   onSuccess: () => void;
   /** Google OAuth config. Omit to disable Google login. */
-  google?: GoogleAuthConfig;
+  google?: OAuthConfig;
+  /** Feishu OAuth config. Omit to disable Feishu login. */
+  feishu?: OAuthConfig;
   /** CLI callback config for authorizing CLI tools. */
   cliCallback?: CliCallbackConfig;
   /** Called after a token is obtained (e.g. to set cookies). */
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Override Feishu login handler (e.g. desktop opens browser externally). When provided, renders the Feishu button even if `feishu` config is omitted. */
+  onFeishuLogin?: () => void;
+  /** When set, automatically starts the selected OAuth login once the page is ready. */
+  autoStartProvider?: "google" | "feishu";
 }
 
 // ---------------------------------------------------------------------------
@@ -95,9 +101,12 @@ export function LoginPage({
   logo,
   onSuccess,
   google,
+  feishu,
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  onFeishuLogin,
+  autoStartProvider,
 }: LoginPageProps) {
   const qc = useQueryClient();
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
@@ -110,6 +119,7 @@ export function LoginPage({
   // Tracks how the existing session was detected so handleCliAuthorize
   // uses the matching token source (cookie → issueCliToken, localStorage → direct).
   const authSourceRef = useRef<"cookie" | "localStorage">("cookie");
+  const autoStartRef = useRef(false);
 
   // Check for existing session when CLI callback is present.
   // Prioritises cookie auth (= current browser session) to avoid authorising
@@ -258,7 +268,7 @@ export function LoginPage({
     }
   };
 
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = useCallback(() => {
     if (onGoogleLogin) {
       onGoogleLogin();
       return;
@@ -274,7 +284,48 @@ export function LoginPage({
     });
     if (google.state) params.set("state", google.state);
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-  };
+  }, [google, onGoogleLogin]);
+
+  const handleFeishuLogin = useCallback(() => {
+    if (onFeishuLogin) {
+      onFeishuLogin();
+      return;
+    }
+    if (!feishu) return;
+    const params = new URLSearchParams({
+      client_id: feishu.clientId,
+      redirect_uri: feishu.redirectUri,
+      response_type: "code",
+      scope: "contact:user.base:readonly contact:user.email:readonly",
+    });
+    if (feishu.state) params.set("state", feishu.state);
+    window.location.href = `https://accounts.feishu.cn/open-apis/authen/v1/authorize?${params}`;
+  }, [feishu, onFeishuLogin]);
+
+  useEffect(() => {
+    if (autoStartRef.current || !autoStartProvider || step !== "email") return;
+    if (existingUser) return;
+
+    if (autoStartProvider === "google" && (google || onGoogleLogin)) {
+      autoStartRef.current = true;
+      handleGoogleLogin();
+      return;
+    }
+    if (autoStartProvider === "feishu" && (feishu || onFeishuLogin)) {
+      autoStartRef.current = true;
+      handleFeishuLogin();
+    }
+  }, [
+    autoStartProvider,
+    existingUser,
+    feishu,
+    google,
+    handleFeishuLogin,
+    handleGoogleLogin,
+    onFeishuLogin,
+    onGoogleLogin,
+    step,
+  ]);
 
   // -------------------------------------------------------------------------
   // CLI confirm step
@@ -431,7 +482,7 @@ export function LoginPage({
           >
             {loading ? "Sending code..." : "Continue"}
           </Button>
-          {(google || onGoogleLogin) && (
+          {(google || onGoogleLogin || feishu || onFeishuLogin) && (
             <>
               <div className="relative w-full">
                 <div className="absolute inset-0 flex items-center">
@@ -441,34 +492,52 @@ export function LoginPage({
                   <span className="bg-card px-2 text-muted-foreground">or</span>
                 </div>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                size="lg"
-                onClick={handleGoogleLogin}
-                disabled={loading}
-              >
-                <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-                  <path
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
-                    fill="#4285F4"
-                  />
-                  <path
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    fill="#34A853"
-                  />
-                  <path
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                    fill="#FBBC05"
-                  />
-                  <path
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                    fill="#EA4335"
-                  />
-                </svg>
-                Continue with Google
-              </Button>
+              {(feishu || onFeishuLogin) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                  onClick={handleFeishuLogin}
+                  disabled={loading}
+                >
+                  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="16" rx="4" fill="#00C45A" />
+                    <path d="M8 9.5h8M8 13h5" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  Continue with Feishu
+                </Button>
+              )}
+              {(google || onGoogleLogin) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                  onClick={handleGoogleLogin}
+                  disabled={loading}
+                >
+                  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+                    <path
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+                      fill="#4285F4"
+                    />
+                    <path
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      fill="#34A853"
+                    />
+                    <path
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      fill="#FBBC05"
+                    />
+                    <path
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      fill="#EA4335"
+                    />
+                  </svg>
+                  Continue with Google
+                </Button>
+              )}
             </>
           )}
         </CardFooter>
