@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, AlertTriangle } from "lucide-react";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import type { RuntimeUsage } from "@multica/core/types";
 import { api } from "@multica/core/api";
@@ -23,7 +23,13 @@ const TIME_RANGES = [
 
 type TimeRange = (typeof TIME_RANGES)[number]["days"];
 
-export function UsageSection({ runtimeId }: { runtimeId: string }) {
+export function UsageSection({
+  runtimeId,
+  dailyCostLimit,
+}: {
+  runtimeId: string;
+  dailyCostLimit?: number;
+}) {
   const [usage, setUsage] = useState<RuntimeUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState<TimeRange>(30);
@@ -66,6 +72,14 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
       </div>
     );
   }
+
+  // Compute today's cost for limit check
+  const today = new Date().toISOString().slice(0, 10);
+  const todayCost = usage
+    .filter((u) => u.date === today)
+    .reduce((sum, u) => sum + estimateCost(u), 0);
+  const limitReached =
+    dailyCostLimit != null && dailyCostLimit > 0 && todayCost >= dailyCostLimit;
 
   // Filter by selected time range
   const cutoffDate = new Date();
@@ -113,6 +127,18 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
           </button>
         ))}
       </div>
+
+      {/* Daily cost limit warning */}
+      {limitReached && (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            Daily cost limit of{" "}
+            <strong>${dailyCostLimit!.toFixed(2)}</strong> reached. Today&apos;s
+            cost: <strong>${todayCost.toFixed(2)}</strong>.
+          </span>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-3">
