@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -20,9 +21,15 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--message":    blockedWithValue,  // prompt is set by daemon
 }
 
-// openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
-// --output-format stream-json --yes` and reading streaming NDJSON events from
-// stdout — similar to the opencode backend.
+// openclawBackend implements Backend by spawning `openclaw agent --local --json
+// --session-id <id> --message <prompt>` and reading streaming NDJSON events
+// from stderr — similar to the opencode backend.
+//
+// Gateway mode (MULTICA_OPENCLAW_GATEWAY=1) omits --local so the task routes
+// through the OpenClaw Gateway, giving agents access to workspace context
+// (memory, skills, tools, identity). Each task gets a stable per-task session
+// ID derived from its workdir path to prevent context bleed between issues.
+// Comment-triggered follow-ups reuse PriorSessionID for continuity.
 type openclawBackend struct {
 	cfg Config
 }
@@ -44,9 +51,32 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	sessionID := opts.ResumeSessionID
 	if sessionID == "" {
-		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
+		if b.cfg.GatewayMode {
+			// Derive a stable per-task session ID from the task workdir so each
+			// Multica task gets its own isolated Gateway session.
+			// Expected path shape: <workspacesRoot>/<task-id>/workdir
+			// filepath.Dir gives <workspacesRoot>/<task-id>, Base gives the task ID.
+			prefix := b.cfg.SessionPrefix
+			if prefix == "" {
+				prefix = "multica"
+			}
+			if opts.Cwd != "" {
+				sessionID = prefix + "-" + filepath.Base(filepath.Dir(opts.Cwd))
+			} else {
+				sessionID = fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+			}
+		} else {
+			sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
+		}
 	}
-	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
+
+	var args []string
+	if b.cfg.GatewayMode {
+		// Gateway mode: omit --local to route through the OpenClaw Gateway.
+		args = []string{"agent", "--json", "--session-id", sessionID}
+	} else {
+		args = []string{"agent", "--local", "--json", "--session-id", sessionID}
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -80,7 +110,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("start openclaw: %w", err)
 	}
 
-	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model, "gateway", b.cfg.GatewayMode, "session", sessionID)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)

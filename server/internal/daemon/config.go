@@ -102,9 +102,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	openclawPath := envOrDefault("MULTICA_OPENCLAW_PATH", "openclaw")
 	if _, err := exec.LookPath(openclawPath); err == nil {
+		v := strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_GATEWAY"))
+		openclawGateway := v == "1" || strings.EqualFold(v, "true")
 		agents["openclaw"] = AgentEntry{
-			Path:  openclawPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+			Path:          openclawPath,
+			Model:         strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+			GatewayMode:   openclawGateway,
+			SessionPrefix: envOrDefault("MULTICA_OPENCLAW_SESSION_PREFIX", "multica"),
 		}
 	}
 	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")

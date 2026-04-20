@@ -4,8 +4,10 @@ import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path          string // path to CLI binary
+	Model         string // model override (optional)
+	GatewayMode   bool   // omit --local to route through OpenClaw Gateway
+	SessionPrefix string // prefix for derived Gateway session IDs (default "multica")
 }
 
 // Runtime represents a registered daemon runtime.
