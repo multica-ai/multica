@@ -73,7 +73,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// without this we'd report a misleading "empty output" and hide
 	// the real cause (wrong model for the current provider, bad
 	// credentials, rate limit, …) in the daemon log.
-	providerErr := newHermesProviderErrorSniffer()
+	providerErr := newACPProviderErrorSniffer("hermes")
 	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr)
 
 	if err := cmd.Start(); err != nil {
@@ -188,7 +188,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = extractHermesSessionID(result)
+			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
 				finalError = "hermes session/new returned no session ID"
@@ -634,7 +634,10 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 
 // ── Helpers ──
 
-func extractHermesSessionID(result json.RawMessage) string {
+// extractACPSessionID pulls `sessionId` out of a session/new or
+// session/resume response. Shared by all ACP backends (hermes, kimi,
+// and anything else that follows the standard ACP schema).
+func extractACPSessionID(result json.RawMessage) string {
 	var r struct {
 		SessionID string `json:"sessionId"`
 	}
@@ -703,40 +706,49 @@ func hermesToolNameFromTitle(title string, kind string) string {
 
 // ── Provider-error sniffing ──
 //
-// hermes' session/prompt RPC reports stopReason=end_turn even when
-// the underlying HTTP call to the configured LLM endpoint returned
-// an error — the actionable detail only appears on stderr (e.g.
+// ACP agents (hermes, kimi, …) all have the same failure mode:
+// session/prompt reports stopReason=end_turn even when the underlying
+// HTTP call to the configured LLM endpoint returned an error — the
+// actionable detail only appears on stderr (e.g.
 // `⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]` and
 // `Error: HTTP 400: Error code: 400 - {'detail': "The '...' model
 // is not supported when using Codex with a ChatGPT account."}`).
-// We scan for those patterns so the daemon can surface a real
-// failure instead of a generic "empty output".
-type hermesProviderErrorSniffer struct {
-	mu      sync.Mutex
-	remains []byte   // buffer for a partial trailing line across writes
-	lines   []string // captured error lines, bounded
-	seen    map[string]bool
+// The sniffer scans for those patterns so the daemon can surface a
+// real failure instead of a generic "empty output".
+//
+// Parameterised by provider name so both hermes and kimi can share
+// the transport: the regexes match format-level signals (HTTP status,
+// error-kind tags, "API call failed" banner) that both runtimes emit.
+type acpProviderErrorSniffer struct {
+	provider string
+	mu       sync.Mutex
+	remains  []byte   // buffer for a partial trailing line across writes
+	lines    []string // captured error lines, bounded
+	seen     map[string]bool
 }
 
-// hermesErrorHeaderRe matches the first line of an API-error block.
-// Hermes prefixes these with ⚠️ / ❌ and includes an HTTP status
-// code or a non-retryable-error tag.
-var hermesErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)`)
+// acpErrorHeaderRe matches the first line of an API-error block.
+// ACP agents typically prefix these with ⚠️ / ❌ and include an HTTP
+// status code or a non-retryable-error tag.
+var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)`)
 
-// hermesErrorDetailRe pulls the most useful single-line messages
-// out of the subsequent lines of the error block (the one whose
-// "Error:" or "Details:" tag actually spells out what happened).
-var hermesErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
+// acpErrorDetailRe pulls the most useful single-line messages out of
+// the subsequent lines of the error block (the one whose "Error:" or
+// "Details:" tag actually spells out what happened).
+var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
 
-const hermesMaxErrorLines = 8
+const acpMaxErrorLines = 8
 
-func newHermesProviderErrorSniffer() *hermesProviderErrorSniffer {
-	return &hermesProviderErrorSniffer{seen: map[string]bool{}}
+// newACPProviderErrorSniffer returns a sniffer that tags its messages
+// with the given provider name (e.g. "hermes", "kimi") so failure
+// strings make it obvious which runtime produced the error.
+func newACPProviderErrorSniffer(provider string) *acpProviderErrorSniffer {
+	return &acpProviderErrorSniffer{provider: provider, seen: map[string]bool{}}
 }
 
 // Write implements io.Writer so the sniffer can sit behind an
 // io.MultiWriter next to the normal stderr log forwarder.
-func (s *hermesProviderErrorSniffer) Write(p []byte) (int, error) {
+func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -757,7 +769,7 @@ func (s *hermesProviderErrorSniffer) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		if !(hermesErrorHeaderRe.MatchString(line) || hermesErrorDetailRe.MatchString(line)) {
+		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
 			continue
 		}
 		if s.seen[line] {
@@ -765,8 +777,8 @@ func (s *hermesProviderErrorSniffer) Write(p []byte) (int, error) {
 		}
 		s.seen[line] = true
 		s.lines = append(s.lines, line)
-		if len(s.lines) > hermesMaxErrorLines {
-			s.lines = s.lines[len(s.lines)-hermesMaxErrorLines:]
+		if len(s.lines) > acpMaxErrorLines {
+			s.lines = s.lines[len(s.lines)-acpMaxErrorLines:]
 		}
 	}
 	return len(p), nil
@@ -776,21 +788,22 @@ func (s *hermesProviderErrorSniffer) Write(p []byte) (int, error) {
 // error field. Prefers the most specific "Error:" / "detail:"
 // fragment; falls back to the first captured header line; empty
 // when nothing useful was seen.
-func (s *hermesProviderErrorSniffer) message() string {
+func (s *acpProviderErrorSniffer) message() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	prefix := s.provider + " provider error: "
 	for _, line := range s.lines {
-		if m := hermesErrorDetailRe.FindStringSubmatch(line); m != nil {
+		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
 			if detail != "" {
-				return "hermes provider error: " + detail
+				return prefix + detail
 			}
 		}
 	}
 	for _, line := range s.lines {
-		if hermesErrorHeaderRe.MatchString(line) {
-			return "hermes provider error: " + line
+		if acpErrorHeaderRe.MatchString(line) {
+			return prefix + line
 		}
 	}
 	return ""

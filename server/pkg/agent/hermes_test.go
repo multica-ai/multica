@@ -17,30 +17,30 @@ func TestNewReturnsHermesBackend(t *testing.T) {
 	}
 }
 
-// ── extractHermesSessionID ──
+// ── extractACPSessionID ──
 
-func TestExtractHermesSessionID(t *testing.T) {
+func TestExtractACPSessionID(t *testing.T) {
 	t.Parallel()
 	raw := json.RawMessage(`{"sessionId":"20260410_141145_47260c"}`)
-	got := extractHermesSessionID(raw)
+	got := extractACPSessionID(raw)
 	if got != "20260410_141145_47260c" {
 		t.Errorf("got %q, want %q", got, "20260410_141145_47260c")
 	}
 }
 
-func TestExtractHermesSessionIDEmpty(t *testing.T) {
+func TestExtractACPSessionIDEmpty(t *testing.T) {
 	t.Parallel()
 	raw := json.RawMessage(`{}`)
-	got := extractHermesSessionID(raw)
+	got := extractACPSessionID(raw)
 	if got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }
 
-func TestExtractHermesSessionIDInvalidJSON(t *testing.T) {
+func TestExtractACPSessionIDInvalidJSON(t *testing.T) {
 	t.Parallel()
 	raw := json.RawMessage(`not json`)
-	got := extractHermesSessionID(raw)
+	got := extractACPSessionID(raw)
 	if got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
@@ -101,7 +101,7 @@ func TestHermesClientHandleLineResponse(t *testing.T) {
 	if res.err != nil {
 		t.Fatalf("unexpected error: %v", res.err)
 	}
-	sid := extractHermesSessionID(res.result)
+	sid := extractACPSessionID(res.result)
 	if sid != "ses_abc" {
 		t.Errorf("sessionId: got %q, want %q", sid, "ses_abc")
 	}
@@ -384,7 +384,7 @@ func TestHermesProviderErrorSniffer(t *testing.T) {
 	// LLM endpoint rejects the requested model. We verify the
 	// sniffer extracts the `Error: ...` line so the task error
 	// tells the user *why* it failed.
-	s := newHermesProviderErrorSniffer()
+	s := newACPProviderErrorSniffer("hermes")
 	lines := []string{
 		"2026-04-20 23:41:47 [INFO] acp_adapter.server: Prompt on session abc",
 		`⚠️  API call failed (attempt 1/3): BadRequestError [HTTP 400]`,
@@ -409,7 +409,7 @@ func TestHermesProviderErrorSniffer(t *testing.T) {
 func TestHermesProviderErrorSnifferIgnoresInfoLines(t *testing.T) {
 	t.Parallel()
 
-	s := newHermesProviderErrorSniffer()
+	s := newACPProviderErrorSniffer("hermes")
 	s.Write([]byte("2026-04-20 23:41:45 [INFO] acp_adapter.entry: Loaded env\n"))
 	s.Write([]byte("2026-04-20 23:41:47 [INFO] agent.auxiliary_client: Vision auto-detect...\n"))
 	if msg := s.message(); msg != "" {
@@ -422,7 +422,7 @@ func TestHermesProviderErrorSnifferHandlesPartialLines(t *testing.T) {
 
 	// Writer may be called mid-line; the sniffer must buffer until
 	// it sees a newline so the regex doesn't miss the header.
-	s := newHermesProviderErrorSniffer()
+	s := newACPProviderErrorSniffer("hermes")
 	s.Write([]byte(`⚠️  API call failed (attempt 1/3):`))
 	s.Write([]byte(` BadRequestError [HTTP 400]` + "\n"))
 	s.Write([]byte(`   📝 Error: something went wrong` + "\n"))
@@ -435,12 +435,12 @@ func TestHermesProviderErrorSnifferHandlesPartialLines(t *testing.T) {
 func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	t.Parallel()
 
-	s := newHermesProviderErrorSniffer()
+	s := newACPProviderErrorSniffer("hermes")
 	for i := 0; i < 20; i++ {
 		// Each line differs so dedup doesn't merge them.
 		s.Write([]byte(`⚠️  API call failed (HTTP 400) attempt ` + string(rune('a'+i%26)) + `: Non-retryable error` + "\n"))
 	}
-	if len(s.lines) > hermesMaxErrorLines {
-		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), hermesMaxErrorLines)
+	if len(s.lines) > acpMaxErrorLines {
+		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
 	}
 }

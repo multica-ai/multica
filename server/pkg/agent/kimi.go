@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"sync"
@@ -47,7 +48,6 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", kimiArgs)
-	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -63,7 +63,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("kimi stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[kimi:stderr] ")
+	// Forward stderr to the daemon log *and* sniff provider-level
+	// errors out of it so we can surface them in the task result.
+	// Kimi's session/prompt still reports stopReason=end_turn when
+	// the underlying HTTP call to api.kimi.com returns 4xx/5xx, so
+	// without this the daemon reports a misleading "empty output"
+	// and the actionable error (expired token, rate limit, upstream
+	// 5xx, …) stays buried in the daemon log.
+	providerErr := newACPProviderErrorSniffer("kimi")
+	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[kimi:stderr] "), providerErr)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -86,9 +94,16 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		stdin:   stdin,
 		pending: make(map[int]*pendingRPC),
 		onMessage: func(msg Message) {
-			// Replace tool names with Kimi-friendly extraction when applicable.
+			// hermesClient.handleToolCallStart has already mapped
+			// the raw ACP title via hermesToolNameFromTitle — which
+			// covers lowercase hermes-style titles ("read:", "patch
+			// (replace)", …) but not capitalised kimi-style ones
+			// ("Read file: …", "Run command: …"). Re-normalise so
+			// the UI sees consistent snake_case identifiers across
+			// both backends. No-op when the name is already normal
+			// form (e.g. already mapped to "read_file").
 			if msg.Type == MessageToolUse {
-				msg.Tool = kimiToolNameFromTitle(msg.Tool, msg.Tool)
+				msg.Tool = kimiToolNameFromTitle(msg.Tool)
 			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
@@ -182,7 +197,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = extractHermesSessionID(result)
+			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
 				finalError = "kimi session/new returned no session ID"
@@ -274,6 +289,20 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		finalOutput := output.String()
 		outputMu.Unlock()
 
+		// If kimi produced no visible output but we sniffed a
+		// provider-level error on stderr (typically HTTP 4xx from
+		// api.kimi.com — token expired, rate-limited, upstream
+		// 5xx, …), promote the status to failed and surface the
+		// real reason. Without this the daemon reports a cryptic
+		// "completed + empty output" and the actionable error
+		// stays buried in daemon logs.
+		if finalStatus == "completed" && finalOutput == "" {
+			if msg := providerErr.message(); msg != "" {
+				finalStatus = "failed"
+				finalError = msg
+			}
+		}
+
 		c.usageMu.Lock()
 		u := c.usage
 		c.usageMu.Unlock()
@@ -300,15 +329,19 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-// kimiToolNameFromTitle normalises tool names emitted by Kimi's ACP server.
-// Kimi follows the ACP spec where `title` is a short human-readable label
-// such as "Read file: /path/to/foo.go". This helper strips common prefixes
-// and collapses titles into stable snake_case tool identifiers used by the
-// Multica UI. Unknown titles are returned unchanged.
-func kimiToolNameFromTitle(title string, kind string) string {
+// kimiToolNameFromTitle normalises tool names emitted by Kimi's ACP
+// server into the snake_case identifiers the Multica UI expects.
+//
+// Kimi follows the ACP spec where `title` is a short human-readable
+// label such as "Read file: /path/to/foo.go" or "Run command: ls".
+// hermesToolNameFromTitle upstream handles hermes' lowercase
+// convention ("read:", "patch (replace)") but not kimi's capitalised
+// format — so we get called on the already-mapped name from hermes
+// and fix up anything that slipped through. Empty input returns "".
+func kimiToolNameFromTitle(title string) string {
 	t := strings.TrimSpace(title)
 	if t == "" {
-		return kind
+		return ""
 	}
 
 	// Strip everything after the first colon — ACP titles often look like
@@ -340,5 +373,5 @@ func kimiToolNameFromTitle(title string, kind string) string {
 	}
 
 	// Fallback: snake_case the title so the UI gets a stable identifier.
-	return strings.ToLower(strings.ReplaceAll(lower, " ", "_"))
+	return strings.ReplaceAll(lower, " ", "_")
 }
