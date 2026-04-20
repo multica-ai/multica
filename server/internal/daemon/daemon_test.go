@@ -190,6 +190,73 @@ func TestMergeUsage(t *testing.T) {
 	}
 }
 
+func TestBuildProviderEnvGlm(t *testing.T) {
+	t.Setenv("MULTICA_GLM_AUTH_TOKEN", "glm-token")
+	t.Setenv("MULTICA_GLM_BASE_URL", "https://api.z.ai/api/anthropic")
+	t.Setenv("MULTICA_GLM_API_TIMEOUT_MS", "3000000")
+
+	env, err := buildProviderEnv("glm")
+	if err != nil {
+		t.Fatalf("buildProviderEnv(glm) error: %v", err)
+	}
+
+	if got := env["ANTHROPIC_AUTH_TOKEN"]; got != "glm-token" {
+		t.Fatalf("ANTHROPIC_AUTH_TOKEN = %q, want %q", got, "glm-token")
+	}
+	if got := env["ANTHROPIC_BASE_URL"]; got != "https://api.z.ai/api/anthropic" {
+		t.Fatalf("ANTHROPIC_BASE_URL = %q", got)
+	}
+	if got := env["API_TIMEOUT_MS"]; got != "3000000" {
+		t.Fatalf("API_TIMEOUT_MS = %q", got)
+	}
+}
+
+func TestBuildProviderEnvGlmRejectsInvalidTimeout(t *testing.T) {
+	t.Setenv("MULTICA_GLM_API_TIMEOUT_MS", "abc")
+
+	_, err := buildProviderEnv("glm")
+	if err == nil {
+		t.Fatal("expected error for invalid MULTICA_GLM_API_TIMEOUT_MS")
+	}
+}
+
+func TestLoadConfigWarnsOnPartialGlm(t *testing.T) {
+	t.Setenv("MULTICA_GLM_BASE_URL", "https://api.z.ai/api/anthropic")
+	t.Setenv("MULTICA_GLM_AUTH_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://localhost:8080")
+
+	cfg, err := LoadConfig(Overrides{})
+	if err != nil {
+		// LoadConfig returns an error when no agents are found at all.
+		// In CI no agent CLIs are on PATH, so we accept either outcome but
+		// only assert when we got a Config back.
+		return
+	}
+	if _, ok := cfg.Agents["glm"]; ok {
+		t.Fatal("glm should not be registered when only base_url is set")
+	}
+	found := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "GLM partially configured") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected partial-GLM warning, got warnings=%v", cfg.Warnings)
+	}
+}
+
+func TestBuildProviderEnvNonGlmEmpty(t *testing.T) {
+	env, err := buildProviderEnv("claude")
+	if err != nil {
+		t.Fatalf("buildProviderEnv(claude) error: %v", err)
+	}
+	if env != nil {
+		t.Fatalf("expected nil env for non-glm provider, got %+v", env)
+	}
+}
+
 // fakeBackend is a test double for agent.Backend that returns preconfigured
 // results. Each call to Execute pops the next entry from the results slice.
 type fakeBackend struct {

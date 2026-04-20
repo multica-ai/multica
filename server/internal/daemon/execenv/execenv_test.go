@@ -179,6 +179,38 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigGlmUsesClaudePaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "glm-issue-id",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/glm-repo", Description: "GLM runtime repo"},
+		},
+		AgentSkills: []SkillContextForEnv{
+			{Name: "GLM Skill", Content: "Use the GLM runtime."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "glm", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+	if err := InjectRuntimeConfig(dir, "glm", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Fatalf("expected CLAUDE.md for glm: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills")); err != nil {
+		t.Fatalf("expected .claude/skills for glm: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("glm should not create AGENTS.md, got err=%v", err)
+	}
+}
+
 func TestWriteContextFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

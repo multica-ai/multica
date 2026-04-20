@@ -34,7 +34,7 @@ type Config struct {
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini, pi
+	Agents             map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, glm, pi, cursor
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -46,6 +46,7 @@ type Config struct {
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
+	Warnings           []string // non-fatal config issues to surface at startup
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -142,8 +143,27 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_COPILOT_MODEL")),
 		}
 	}
+	// GLM reuses the Claude Code binary with a different API endpoint.
+	// Both MULTICA_GLM_BASE_URL and MULTICA_GLM_AUTH_TOKEN must be set,
+	// and the claude binary must be available.
+	var warnings []string
+	glmBase := os.Getenv("MULTICA_GLM_BASE_URL")
+	glmToken := os.Getenv("MULTICA_GLM_AUTH_TOKEN")
+	switch {
+	case glmBase != "" && glmToken != "":
+		if claudeResolved, err := exec.LookPath(claudePath); err == nil {
+			agents["glm"] = AgentEntry{
+				Path:  claudeResolved,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_GLM_MODEL")),
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("GLM env configured but claude binary %q not found on PATH — GLM runtime skipped", claudePath))
+		}
+	case glmBase != "" || glmToken != "":
+		warnings = append(warnings, fmt.Sprintf("GLM partially configured — both MULTICA_GLM_BASE_URL and MULTICA_GLM_AUTH_TOKEN are required (base_url_set=%t, auth_token_set=%t)", glmBase != "", glmToken != ""))
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, or cursor-agent and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, glm, pi, or cursor-agent and ensure it is on PATH")
 	}
 
 	// Host info
@@ -300,6 +320,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,
+		Warnings:           warnings,
 	}, nil
 }
 

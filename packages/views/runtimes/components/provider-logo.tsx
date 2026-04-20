@@ -111,6 +111,28 @@ function CursorLogo({ className }: { className: string }) {
   );
 }
 
+// GLM (Z.AI) — vectorized from the official z.ai mark geometry
+function GlmLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 56 46" fill="none" className={className}>
+      <path
+        d="M29.4256 0.436371L24.2163 7.04244H3.52728L8.73286 0.436371H29.4256Z"
+        fill="currentColor"
+        fillOpacity="0.85"
+      />
+      <path
+        d="M52.2648 38.5712L47.0592 45.1739H26.4422L31.644 38.5712H52.2648Z"
+        fill="currentColor"
+        fillOpacity="0.85"
+      />
+      <path
+        d="M55.9614 0.436371L20.7049 45.1742H0.0390625L5.24089 38.5715L16.7845 24.1041L30.0903 7.04244L35.2955 0.436371H55.9614Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -129,6 +151,8 @@ export function ProviderLogo({
       return <OpenClawLogo className={className} />;
     case "hermes":
       return <HermesLogo className={className} />;
+    case "glm":
+      return <GlmLogo className={className} />;
     case "pi":
       return <PiLogo className={className} />;
     case "copilot":

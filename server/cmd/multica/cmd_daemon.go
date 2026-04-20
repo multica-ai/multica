@@ -299,6 +299,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
+	for _, w := range cfg.Warnings {
+		logger.Warn(w)
+	}
 	d := daemon.New(cfg, logger)
 
 	// Write PID file so "daemon stop" can find us.

@@ -134,6 +134,28 @@ func (d *Daemon) Run(ctx context.Context) error {
 	return d.pollLoop(ctx)
 }
 
+func buildProviderEnv(provider string) (map[string]string, error) {
+	switch provider {
+	case "glm":
+		env := map[string]string{}
+		if token := strings.TrimSpace(os.Getenv("MULTICA_GLM_AUTH_TOKEN")); token != "" {
+			env["ANTHROPIC_AUTH_TOKEN"] = token
+		}
+		if baseURL := strings.TrimSpace(os.Getenv("MULTICA_GLM_BASE_URL")); baseURL != "" {
+			env["ANTHROPIC_BASE_URL"] = baseURL
+		}
+		if timeout := strings.TrimSpace(os.Getenv("MULTICA_GLM_API_TIMEOUT_MS")); timeout != "" {
+			if _, err := intFromEnv("MULTICA_GLM_API_TIMEOUT_MS", 0); err != nil {
+				return nil, err
+			}
+			env["API_TIMEOUT_MS"] = timeout
+		}
+		return env, nil
+	default:
+		return nil, nil
+	}
+}
+
 // RestartBinary returns the path to the new binary if the daemon needs to restart
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
@@ -516,8 +538,19 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 		return
 	}
 
+	providerEnv, err := buildProviderEnv(rt.Provider)
+	if err != nil {
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "failed",
+			"error":       err.Error(),
+			"duration_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
 	backend, err := agent.New(rt.Provider, agent.Config{
 		ExecutablePath: entry.Path,
+		Env:            providerEnv,
 		Logger:         d.logger,
 	})
 	if err != nil {
@@ -962,6 +995,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+	}
+	providerEnv, err := buildProviderEnv(provider)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("build provider env: %w", err)
+	}
+	for k, v := range providerEnv {
+		agentEnv[k] = v
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not

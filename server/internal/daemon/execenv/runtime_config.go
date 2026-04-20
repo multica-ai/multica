@@ -11,6 +11,7 @@ import (
 // config file so the agent discovers its environment through its native mechanism.
 //
 // For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
+// For GLM:      writes {workDir}/CLAUDE.md  (GLM reuses Claude Code's config/skill paths)
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
@@ -22,7 +23,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	content := buildMetaSkillContent(provider, ctx)
 
 	switch provider {
-	case "claude":
+	case "claude", "glm":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
 	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
@@ -147,7 +148,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Skills\n\n")
 		switch provider {
-		case "claude":
+		case "claude", "glm":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor":

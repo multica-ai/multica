@@ -89,6 +89,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | Google's coding agent |
+| [GLM](https://z.ai/) | `glm` | Z.AI runtime using the Claude-compatible interface |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | Google's coding agent |
 | OpenCode | `opencode` | Open-source coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
@@ -126,6 +128,10 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_GLM_BASE_URL` | Base URL for the GLM Claude-compatible endpoint (required to enable GLM) |
+| `MULTICA_GLM_AUTH_TOKEN` | API token for GLM (required to enable GLM) |
+| `MULTICA_GLM_MODEL` | Override the GLM model used |
+| `MULTICA_GLM_API_TIMEOUT_MS` | Request timeout in milliseconds for GLM requests |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |

@@ -12,6 +12,7 @@ import (
 // skills into the appropriate provider-native location.
 //
 // Claude:   skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
+// GLM:      skills → {workDir}/.claude/skills/{name}/SKILL.md  (reuses Claude Code layout)
 // Codex:    skills → handled separately in Prepare via codex-home
 // Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode: skills → {workDir}/.config/opencode/skills/{name}/SKILL.md  (native discovery)
@@ -51,7 +52,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 func resolveSkillsDir(workDir, provider string) (string, error) {
 	var skillsDir string
 	switch provider {
-	case "claude":
+	case "claude", "glm":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".claude", "skills")
 	case "copilot":
