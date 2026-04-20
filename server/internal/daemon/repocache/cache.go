@@ -5,6 +5,7 @@ package repocache
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,23 +128,34 @@ func (c *Cache) Fetch(barePath string) error {
 
 // bareDirName derives a directory name from a repo URL.
 // e.g. "https://github.com/org/my-repo.git" → "my-repo.git"
-func bareDirName(url string) string {
-	url = strings.TrimRight(url, "/")
-	name := url
-	if i := strings.LastIndex(url, "/"); i >= 0 {
-		name = url[i+1:]
-	}
-	// Handle SSH-style "host:org/repo".
-	if i := strings.LastIndex(name, ":"); i >= 0 {
-		name = name[i+1:]
-		if j := strings.LastIndex(name, "/"); j >= 0 {
-			name = name[j+1:]
+// bareDirName returns a filesystem-safe dir name for the bare clone of
+// rawURL. Uses path-with-namespace so org-a/app and org-b/app don't
+// collide on the same path.
+func bareDirName(rawURL string) string {
+	rawURL = strings.TrimRight(rawURL, "/")
+
+	var path string
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme != "" {
+		// URL form: ssh://[user@]host[:port]/path or https://host/path
+		path = strings.TrimPrefix(u.Path, "/")
+	} else {
+		// scp-style: [user@]host:path
+		s := rawURL
+		if i := strings.Index(s, "@"); i >= 0 {
+			s = s[i+1:]
+		}
+		if i := strings.Index(s, ":"); i >= 0 {
+			path = s[i+1:]
+		} else {
+			path = s
 		}
 	}
+
+	name := strings.ReplaceAll(path, "/", "-")
 	if !strings.HasSuffix(name, ".git") {
 		name += ".git"
 	}
-	if name == ".git" {
+	if name == "" || name == ".git" {
 		name = "repo.git"
 	}
 	return name

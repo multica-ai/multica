@@ -51,11 +51,16 @@ func TestBareDirName(t *testing.T) {
 	tests := []struct {
 		input, want string
 	}{
-		{"https://github.com/org/my-repo.git", "my-repo.git"},
-		{"https://github.com/org/my-repo", "my-repo.git"},
-		{"git@github.com:org/my-repo.git", "my-repo.git"},
-		{"git@github.com:org/my-repo", "my-repo.git"},
-		{"https://github.com/org/repo/", "repo.git"},
+		{"https://github.com/org/my-repo.git", "org-my-repo.git"},
+		{"https://github.com/org/my-repo", "org-my-repo.git"},
+		{"git@github.com:org/my-repo.git", "org-my-repo.git"},
+		{"git@github.com:org/my-repo", "org-my-repo.git"},
+		{"https://github.com/org/repo/", "org-repo.git"},
+		{"ssh://git@gitlab.example.com:22/group/sub/repo.git", "group-sub-repo.git"},
+		// Collision case: two repos sharing the basename must produce
+		// distinct dirs.
+		{"ssh://git@gitlab.example.com:22/relisty/app.git", "relisty-app.git"},
+		{"ssh://git@gitlab.example.com:22/listbridge/app.git", "listbridge-app.git"},
 		{"my-repo", "my-repo.git"},
 		{"", "repo.git"},
 	}
