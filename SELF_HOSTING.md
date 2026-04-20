@@ -205,6 +205,129 @@ multica login
 multica daemon start
 ```
 
+
+Migrations run automatically on each backend startup.
+
+## Configuration
+
+All configuration is done via environment variables. Copy `.env.example` as a starting point.
+
+### Required Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
+| `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
+| `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
+
+### Email (Required for Authentication)
+
+Multica uses email-based magic link authentication via [Resend](https://resend.com).
+
+| Variable | Description |
+|----------|-------------|
+| `RESEND_API_KEY` | Your Resend API key |
+| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
+
+### Google OAuth (Optional)
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
+
+### File Storage (Optional)
+
+For file uploads and attachments, configure S3 or an S3-compatible storage service.
+
+#### AWS S3 + CloudFront
+
+| Variable | Description |
+|----------|-------------|
+| `S3_BUCKET` | S3 bucket name |
+| `S3_REGION` | AWS region (default: `us-west-2`) |
+| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain (optional; if set, returned URLs use this domain) |
+| `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
+| `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
+| `COOKIE_DOMAIN` | Domain for CloudFront auth cookies |
+
+#### S3-Compatible Storage (Aliyun OSS, MinIO, etc.)
+
+In addition to the standard AWS S3 configuration, set these variables to connect to an S3-compatible service:
+
+| Variable | Description |
+|----------|-------------|
+| `S3_ENDPOINT` | Custom endpoint URL (e.g. `https://oss-cn-hongkong.aliyuncs.com` for Aliyun OSS) |
+| `S3_FORCE_PATH_STYLE` | Set to `true` for services that require path-style URLs (e.g. MinIO). Defaults to `false`. |
+| `AWS_ACCESS_KEY_ID` | Access key (falls back to default AWS credential chain if unset) |
+| `AWS_SECRET_ACCESS_KEY` | Secret key |
+
+**Aliyun OSS example** (`.env` or `docker-compose.yml`):
+
+```bash
+S3_BUCKET=your-bucket-name
+S3_REGION=cn-hongkong
+S3_ENDPOINT=https://oss-cn-hongkong.aliyuncs.com
+S3_FORCE_PATH_STYLE=false
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+CLOUDFRONT_DOMAIN=your-cdn-domain.com   # optional: custom domain for returned URLs
+```
+
+**MinIO example:**
+
+```bash
+S3_BUCKET=multica
+S3_REGION=us-east-1
+S3_ENDPOINT=http://minio:9000
+S3_FORCE_PATH_STYLE=true
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+### Server
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | Backend server port |
+| `FRONTEND_PORT` | `3000` | Frontend port |
+| `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
+| `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+
+### CLI / Daemon
+
+These are configured on each user's machine, not on the server:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | WebSocket URL for daemon → server connection |
+| `MULTICA_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
+
+## Database Setup
+
+Multica requires PostgreSQL 17 with the pgvector extension.
+
+### Using Docker Compose (Recommended)
+
+The `docker-compose.selfhost.yml` includes PostgreSQL. No separate setup needed.
+
+### Using Your Own PostgreSQL
+
+If you prefer to use an existing PostgreSQL instance, ensure the pgvector extension is available:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Set `DATABASE_URL` in your `.env` and remove the `postgres` service from the compose file.
+
+### Running Migrations Manually
+
+The Docker Compose setup runs migrations automatically. If you need to run them manually:
+
 For production deployments with TLS:
 
 ```bash
