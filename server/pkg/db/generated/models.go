@@ -336,6 +336,7 @@ type Project struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
+	Color       pgtype.Text        `json:"color"`
 }
 
 type Skill struct {
@@ -360,15 +361,16 @@ type SkillFile struct {
 }
 
 type TaskMessage struct {
-	ID        pgtype.UUID        `json:"id"`
-	TaskID    pgtype.UUID        `json:"task_id"`
-	Seq       int32              `json:"seq"`
-	Type      string             `json:"type"`
-	Tool      pgtype.Text        `json:"tool"`
-	Content   pgtype.Text        `json:"content"`
-	Input     []byte             `json:"input"`
-	Output    pgtype.Text        `json:"output"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	Seq           int32              `json:"seq"`
+	Type          string             `json:"type"`
+	Tool          pgtype.Text        `json:"tool"`
+	Content       pgtype.Text        `json:"content"`
+	Input         []byte             `json:"input"`
+	Output        pgtype.Text        `json:"output"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	WorkSessionID pgtype.UUID        `json:"work_session_id"`
 }
 
 type TaskUsage struct {
@@ -400,6 +402,20 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type WorkSession struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	SessionType string             `json:"session_type"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	Summary     pgtype.Text        `json:"summary"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
 }
 
 type Workspace struct {

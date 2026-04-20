@@ -244,11 +244,25 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
+					r.Get("/work-sessions", h.ListWorkSessions)
 				})
 			})
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+
+			// Work sessions (Claude Code MCP integration)
+			r.Route("/api/work-sessions", func(r chi.Router) {
+				r.Post("/", h.CreateWorkSession)
+				r.Get("/active", h.GetActiveWorkSession)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/messages", h.GetWorkSessionMessages)
+					r.Put("/complete", h.CompleteWorkSession)
+					r.Post("/messages", h.ReportWorkSessionMessages)
+					r.Post("/resume", h.ResumeWorkSession)
+					r.Post("/fork", h.ForkWorkSession)
+				})
+			})
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {

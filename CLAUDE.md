@@ -371,3 +371,24 @@ All queries filter by `workspace_id`. Membership checks gate access. `X-Workspac
 ## Agent Assignees
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
+
+## Multica MCP Integration
+
+When the `multica` MCP server is connected and `get_me` shows an `active_session`, report activity at natural milestones using `report_activity`. This costs minimal tokens and gives visibility in the Multica UI.
+
+**When to call `report_activity`:**
+- `decision` — after choosing between two or more approaches
+- `verification` — after running tests, typecheck, or build (include pass/fail)
+- `blocker` — when stuck or needing user input
+- `dependency` — after adding a package, creating a migration, or changing infra
+- `error` — after encountering and fixing an error (what failed + what fixed it)
+
+**When NOT to call it:**
+- After every file edit (captured automatically at `complete_work`)
+- For routine tool calls (reading files, searching)
+- For formatting or minor changes
+
+**Session lifecycle:**
+- `attach_session` at the start of work on an issue (auto-reports git context)
+- `complete_work` when done (auto-captures git diff and file changes)
+- If interrupted without `complete_work`, the next session auto-resumes

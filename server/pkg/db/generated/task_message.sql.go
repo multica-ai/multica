@@ -14,7 +14,7 @@ import (
 const createTaskMessage = `-- name: CreateTaskMessage :one
 INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, task_id, seq, type, tool, content, input, output, created_at
+RETURNING id, task_id, seq, type, tool, content, input, output, created_at, work_session_id
 `
 
 type CreateTaskMessageParams struct {
@@ -48,6 +48,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		&i.Input,
 		&i.Output,
 		&i.CreatedAt,
+		&i.WorkSessionID,
 	)
 	return i, err
 }
@@ -63,7 +64,7 @@ func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) er
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, work_session_id FROM task_message
 WHERE task_id = $1
 ORDER BY seq ASC
 `
@@ -87,6 +88,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.WorkSessionID,
 		); err != nil {
 			return nil, err
 		}
@@ -99,7 +101,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 }
 
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, work_session_id FROM task_message
 WHERE task_id = $1 AND seq > $2
 ORDER BY seq ASC
 `
@@ -128,6 +130,7 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.WorkSessionID,
 		); err != nil {
 			return nil, err
 		}
