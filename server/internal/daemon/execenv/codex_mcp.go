@@ -263,33 +263,67 @@ func quoteTomlString(s string) string {
 	return b.String()
 }
 
-// userMcpServerSectionRe matches a top-level section header of the form
-// `[mcp_servers.<name>]`, capturing <name> either as a bare key (group 1) or
-// a double-quoted key (group 2). Whitespace is allowed inside the brackets
-// per TOML. Single-quoted (literal-string) keys are not matched — they're
-// permitted by TOML but vanishingly rare in practice.
-var userMcpServerSectionRe = regexp.MustCompile(
-	`^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")[ \t]*\][ \t]*$`,
+// mcpServersParentSectionRe matches a `[mcp_servers]` parent section header
+// exactly — no sub-path segment. Lines inside this section can define MCP
+// servers via dotted keys (e.g. `fs.command = "..."`), which TOML folds into
+// `mcp_servers.fs.command` at parse time and so collide with a daemon-rendered
+// `[mcp_servers.fs]` table the same way an explicit user `[mcp_servers.fs]`
+// would.
+var mcpServersParentSectionRe = regexp.MustCompile(
+	`^[ \t]*\[[ \t]*mcp_servers[ \t]*\][ \t]*$`,
 )
 
-// userMcpServerDottedKeyRe matches a top-level dotted-key assignment of the
-// form `mcp_servers.<name>.<anything> = ...`, capturing <name> the same way
-// as userMcpServerSectionRe.
-var userMcpServerDottedKeyRe = regexp.MustCompile(
-	`^[ \t]*mcp_servers[ \t]*\.[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")[ \t]*\.[^=\s]+[ \t]*=`,
-)
-
-// stripUserMcpServerEntries removes top-level `[mcp_servers.<name>]` sections
-// and standalone `mcp_servers.<name>.*` dotted-key lines from src for any
-// <name> in blocked. Needed because the copied user config.toml can define
-// entries whose names collide with those rendered by the managed block, and
-// TOML 1.0 rejects duplicate table / key definitions — without this strip,
-// the merged file fails to load and Codex refuses to start the task.
+// mcpServersFamilySectionRe matches any section header whose path starts with
+// `mcp_servers.<name>` — including deeper sub-tables like
+// `[mcp_servers.<name>.env]` and `[mcp_servers.<name>.env.nested]`. Captures
+// <name> either as a bare key (group 1) or a double-quoted key (group 2).
+// Single-quoted (literal-string) keys are not matched — legal TOML but
+// vanishingly rare in practice.
 //
-// Name matching uses the TOML-key semantics both writers share: bare keys
-// and double-quoted basic strings. For the double-quoted form, `\"` and
-// `\\` escapes are unquoted before comparison; other escapes are left as-is
-// (Codex/toml crate canonicalizes identically).
+// Matching the whole family is necessary to prevent silent merges: if the
+// user's config has `[mcp_servers.fs.env]\nFOO = "x"` and the daemon renders
+// a `[mcp_servers.fs]` that doesn't emit an inline `env = { ... }`, TOML's
+// implicit sub-table rule folds the user's env into the daemon-authorized
+// server with no parse error. Stripping the whole family closes that hole.
+var mcpServersFamilySectionRe = regexp.MustCompile(
+	`^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")(?:[ \t]*\.[^]]*)?[ \t]*\][ \t]*$`,
+)
+
+// topLevelDottedKeyRe matches a top-level dotted-key assignment of the form
+// `mcp_servers.<name>(.<anything>)? = ...`, capturing <name> the same way as
+// mcpServersFamilySectionRe. Used for lines outside any explicit section.
+var topLevelDottedKeyRe = regexp.MustCompile(
+	`^[ \t]*mcp_servers[ \t]*\.[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")(?:[ \t]*\.[^=]+)?[ \t]*=`,
+)
+
+// parentSectionBodyKeyRe matches a line inside a `[mcp_servers]` section that
+// assigns a key whose first segment is a single name (bare or quoted),
+// optionally followed by a `.<rest>` dotted path. Used to detect
+// `fs.command = "..."` / `fs = { command = "..." }` inside `[mcp_servers]`
+// where <name> might collide with a daemon-rendered server.
+var parentSectionBodyKeyRe = regexp.MustCompile(
+	`^[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)")[ \t]*(?:\.[^=]*)?[ \t]*=`,
+)
+
+// stripUserMcpServerEntries removes user-config entries that would collide
+// with the multica-managed block the daemon is about to append. Handles:
+//
+//  1. `[mcp_servers.<blocked>]` — direct section header collision.
+//  2. `[mcp_servers.<blocked>.<anything>]` — ANY sub-table under a blocked
+//     name (`.env`, `.headers`, nested, etc.) because a sub-table silently
+//     folds into an implicitly-defined parent when TOML parses it, producing
+//     user-controlled values on a daemon-authorized MCP server.
+//  3. `[mcp_servers]` parent section body — dotted keys / inline-table
+//     assignments whose first segment is a blocked name (e.g.
+//     `fs.command = "..."` inside `[mcp_servers]`).
+//  4. Top-level `mcp_servers.<blocked>(.<more>)? = ...` dotted keys.
+//
+// Non-colliding user entries (different server names, unrelated sections,
+// top-level keys like `model`) are preserved untouched.
+//
+// Name matching accepts bare keys and double-quoted basic strings.
+// `\"` and `\\` escape sequences inside quoted keys are unquoted before
+// comparison.
 func stripUserMcpServerEntries(src string, blocked []string, logger *slog.Logger) string {
 	if len(blocked) == 0 || src == "" {
 		return src
@@ -299,41 +333,76 @@ func stripUserMcpServerEntries(src string, blocked []string, logger *slog.Logger
 		blockedSet[n] = true
 	}
 
+	type sectionKind int
+	const (
+		sectionOther sectionKind = iota
+		sectionBlocked               // inside [mcp_servers.<blocked>(.*)] family — drop all lines
+		sectionMcpServersParent      // inside [mcp_servers] — filter blocked first-segment keys
+	)
+
 	lines := strings.Split(src, "\n")
 	out := make([]string, 0, len(lines))
-	inBlockedSection := false
+	current := sectionOther
 	strippedSections := 0
 	strippedDotted := 0
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") {
-			// Entering a new section — reset blocked-section state.
-			if m := userMcpServerSectionRe.FindStringSubmatch(line); m != nil {
+			// Entering a new section — recompute mode from the header.
+			switch {
+			case mcpServersParentSectionRe.MatchString(line):
+				current = sectionMcpServersParent
+				out = append(out, line)
+			case func() bool {
+				m := mcpServersFamilySectionRe.FindStringSubmatch(line)
+				if m == nil {
+					return false
+				}
 				name := m[1]
 				if name == "" {
 					name = unescapeTomlBasic(m[2])
 				}
 				if blockedSet[name] {
-					inBlockedSection = true
+					current = sectionBlocked
 					strippedSections++
+					return true
+				}
+				// Family member of a non-blocked name — keep as-is.
+				current = sectionOther
+				out = append(out, line)
+				return true
+			}():
+				// handled inside the anonymous func
+			default:
+				current = sectionOther
+				out = append(out, line)
+			}
+			continue
+		}
+		switch current {
+		case sectionBlocked:
+			continue
+		case sectionMcpServersParent:
+			if m := parentSectionBodyKeyRe.FindStringSubmatch(line); m != nil {
+				name := m[1]
+				if name == "" {
+					name = unescapeTomlBasic(m[2])
+				}
+				if blockedSet[name] {
+					strippedDotted++
 					continue
 				}
 			}
-			inBlockedSection = false
-			out = append(out, line)
-			continue
-		}
-		if inBlockedSection {
-			continue
-		}
-		if m := userMcpServerDottedKeyRe.FindStringSubmatch(line); m != nil {
-			name := m[1]
-			if name == "" {
-				name = unescapeTomlBasic(m[2])
-			}
-			if blockedSet[name] {
-				strippedDotted++
-				continue
+		case sectionOther:
+			if m := topLevelDottedKeyRe.FindStringSubmatch(line); m != nil {
+				name := m[1]
+				if name == "" {
+					name = unescapeTomlBasic(m[2])
+				}
+				if blockedSet[name] {
+					strippedDotted++
+					continue
+				}
 			}
 		}
 		out = append(out, line)

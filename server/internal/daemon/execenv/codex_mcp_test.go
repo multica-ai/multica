@@ -419,6 +419,150 @@ command = "user-mcp-fs"
 	}
 }
 
+func TestSyncMcpServersTomlStripsSilentMergeSubtable(t *testing.T) {
+	t.Parallel()
+
+	// Silent-merge regression: user has `[mcp_servers.fs.env]` sub-table for
+	// env vars, agent's mcp_config sets only `command` (no inline `env`).
+	// Without the family-aware strip, TOML's implicit sub-table rule folds
+	// `env.FOO` into the daemon-authorized fs server with no parse error —
+	// agent MCP process ends up running with env vars the daemon never
+	// authorized. Merged output must NOT contain the user's FOO anywhere.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `[mcp_servers.fs.env]
+USER_INJECTED = "leaked-from-user-global"
+
+[mcp_servers.fs]
+command = "user-fs"
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if strings.Contains(s, "USER_INJECTED") {
+		t.Errorf("user-injected env var leaked through: %s", s)
+	}
+	if strings.Contains(s, "leaked-from-user-global") {
+		t.Errorf("user-injected env value leaked through: %s", s)
+	}
+	if strings.Contains(s, `command = "user-fs"`) {
+		t.Errorf("user's colliding fs.command survived: %s", s)
+	}
+	if !strings.Contains(s, `command = "daemon-fs"`) {
+		t.Errorf("managed fs.command missing: %s", s)
+	}
+}
+
+func TestSyncMcpServersTomlStripsArbitrarySubtable(t *testing.T) {
+	t.Parallel()
+
+	// Any sub-table under a blocked name must be stripped, not just `.env` —
+	// this keeps the fix future-proof against new sub-keys Codex may accept.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `[mcp_servers.fs.headers]
+Authorization = "Bearer user-token"
+
+[mcp_servers.fs.auth.oauth]
+client_id = "user-client"
+
+[other_section]
+preserved = true
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if strings.Contains(s, "Bearer user-token") {
+		t.Errorf("user .headers sub-table survived: %s", s)
+	}
+	if strings.Contains(s, "user-client") {
+		t.Errorf("user .auth.oauth nested sub-table survived: %s", s)
+	}
+	if !strings.Contains(s, "[other_section]") || !strings.Contains(s, "preserved = true") {
+		t.Errorf("unrelated [other_section] was stripped: %s", s)
+	}
+}
+
+func TestSyncMcpServersTomlStripsParentSectionBody(t *testing.T) {
+	t.Parallel()
+
+	// User's global config uses `[mcp_servers]` parent section with dotted
+	// keys inside: `fs.command = "..."` folds into `mcp_servers.fs.command`
+	// at parse time and collides the same way an explicit section would.
+	// Inline-table form `fs = { command = "..." }` is the same pattern.
+	// Non-blocked first-segment keys (e.g. `gh.command`) must survive.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `[mcp_servers]
+fs.command = "user-fs"
+fs.args = ["/home/me"]
+gh.command = "gh-mcp"
+other = { command = "other-mcp" }
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if strings.Contains(s, "user-fs") {
+		t.Errorf(`colliding fs.command in [mcp_servers] body survived: %s`, s)
+	}
+	if strings.Contains(s, "/home/me") {
+		t.Errorf(`colliding fs.args in [mcp_servers] body survived: %s`, s)
+	}
+	if !strings.Contains(s, `gh.command = "gh-mcp"`) {
+		t.Errorf(`non-colliding gh.command was stripped: %s`, s)
+	}
+	if !strings.Contains(s, `other = { command = "other-mcp" }`) {
+		t.Errorf(`non-colliding inline-table other was stripped: %s`, s)
+	}
+	if !strings.Contains(s, `command = "daemon-fs"`) {
+		t.Errorf(`managed fs.command missing: %s`, s)
+	}
+}
+
+func TestSyncMcpServersTomlStripsInlineTableInParentSection(t *testing.T) {
+	t.Parallel()
+
+	// `[mcp_servers] fs = { command = "..." }` — inline-table form of the
+	// parent-section-body case. Must also be stripped.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	userConfig := `[mcp_servers]
+fs = { command = "user-fs", args = ["/u"] }
+`
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{"mcpServers": {"fs": {"command": "daemon-fs"}}}`)
+	if err := syncMcpServersToml(path, raw, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "user-fs") {
+		t.Errorf(`colliding inline-table fs = { ... } survived: %s`, data)
+	}
+}
+
 func TestRenderMcpServersSkipsNonStdioTransport(t *testing.T) {
 	t.Parallel()
 
