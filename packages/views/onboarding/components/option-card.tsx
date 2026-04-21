@@ -1,70 +1,55 @@
 "use client";
 
-import { Card } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
 
 const OTHER_INPUT_MAX_LENGTH = 80;
 
 /**
- * Clickable radio-style option used in the Step 1 questionnaire.
+ * Editorial radio-style option row used in the Step 1 questionnaire.
  *
- * Rendered as an ARIA radio so screen readers announce the question's
- * option set correctly — keep this consistent with the containing
- * `<fieldset role="radiogroup">` in `StepQuestionnaire`. Enter / Space
- * select, matching the existing clickable-card pattern used in
- * step-agent / step-runtime.
+ * Design reference: onboarding(3) `.opt` — thin border resting, and on
+ * select: filled inset ring + radio marker turns into a filled dot.
+ * Enter/Space select; full row is the hit target. ARIA radio inside a
+ * containing `<fieldset role="radiogroup">` in StepQuestionnaire.
  */
 export function OptionCard({
   selected,
   onSelect,
   label,
-  description,
 }: {
   selected: boolean;
   onSelect: () => void;
   label: string;
-  description?: string;
 }) {
   return (
-    <Card
+    <button
+      type="button"
       role="radio"
       aria-checked={selected}
-      tabIndex={0}
       onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
       className={cn(
-        "flex cursor-pointer flex-col gap-0.5 p-3 transition-colors",
+        "group flex w-full items-center gap-3.5 rounded-lg border bg-card px-4 py-2.5 text-left transition-all",
         selected
-          ? "border-primary ring-1 ring-primary"
-          : "hover:border-foreground/20",
+          ? "border-foreground shadow-[inset_0_0_0_1px_var(--color-foreground)]"
+          : "hover:border-foreground/20 hover:bg-accent/30",
       )}
     >
-      <div className="text-sm font-medium">{label}</div>
-      {description && (
-        <div className="text-xs text-muted-foreground">{description}</div>
-      )}
-    </Card>
+      <RadioMark selected={selected} />
+      <span className="text-[14.5px] font-normal leading-tight text-foreground">
+        {label}
+      </span>
+    </button>
   );
 }
 
 /**
- * "Other" variant of OptionCard. When selected, reveals an 80-char
- * text input as an escape hatch for answers that don't fit the
- * predefined options.
+ * "Other" variant — reveals an 80-char text input below the row once
+ * selected. Auto-focus on first open saves the user a click.
  *
- * Auto-focus: the input is conditionally rendered, so going from
- * unselected → selected mounts a fresh <Input>. `autoFocus` fires on
- * that mount — saving the user an extra click when they pick Other.
- *
- * Clearing `otherValue` when the user picks a different option in the
- * same group is the parent questionnaire's job, not this component's.
- * That keeps the input focus-stable while typing.
+ * Clearing `otherValue` when the user picks a sibling option is the
+ * parent questionnaire's job; this component stays focus-stable while
+ * the user is mid-typing.
  */
 export function OtherOptionCard({
   selected,
@@ -80,45 +65,57 @@ export function OtherOptionCard({
   placeholder: string;
 }) {
   return (
-    <Card
-      role="radio"
-      aria-checked={selected}
-      tabIndex={0}
-      onClick={(e) => {
-        // Don't re-fire onSelect when the click lands inside the input —
-        // that would trigger a re-render that could feel jumpy during
-        // mid-typing.
-        if (e.target instanceof HTMLInputElement) return;
-        onSelect();
-      }}
-      onKeyDown={(e) => {
-        if (e.target instanceof HTMLInputElement) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
+    <div
       className={cn(
-        "flex cursor-pointer flex-col gap-2 p-3 transition-colors",
+        "flex w-full flex-col rounded-lg border bg-card transition-all",
         selected
-          ? "border-primary ring-1 ring-primary"
+          ? "border-foreground shadow-[inset_0_0_0_1px_var(--color-foreground)]"
           : "hover:border-foreground/20",
       )}
     >
-      <div className="text-sm font-medium">Other</div>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        onClick={onSelect}
+        className="flex w-full items-center gap-3.5 px-4 py-2.5 text-left"
+      >
+        <RadioMark selected={selected} />
+        <span className="text-[14.5px] font-normal leading-tight text-foreground">
+          Other
+        </span>
+      </button>
       {selected && (
-        <Input
-          autoFocus
-          type="text"
-          value={otherValue}
-          onChange={(e) => onOtherChange(e.target.value)}
-          placeholder={placeholder}
-          maxLength={OTHER_INPUT_MAX_LENGTH}
-          className="h-8 text-sm"
-          aria-label={placeholder}
-        />
+        <div className="px-4 pb-3 pl-[44px]">
+          <Input
+            autoFocus
+            type="text"
+            value={otherValue}
+            onChange={(e) => onOtherChange(e.target.value)}
+            placeholder={placeholder}
+            maxLength={OTHER_INPUT_MAX_LENGTH}
+            className="h-8 rounded-none border-x-0 border-t-0 border-b px-0 text-sm shadow-none focus-visible:border-foreground focus-visible:ring-0"
+            aria-label={placeholder}
+          />
+        </div>
       )}
-    </Card>
+    </div>
+  );
+}
+
+function RadioMark({ selected }: { selected: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "relative inline-block h-4 w-4 shrink-0 rounded-full border-[1.5px] transition-colors",
+        selected ? "border-foreground" : "border-border",
+      )}
+    >
+      {selected && (
+        <span className="absolute inset-[3px] rounded-full bg-foreground" />
+      )}
+    </span>
   );
 }
 

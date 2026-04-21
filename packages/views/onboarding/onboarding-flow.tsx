@@ -157,19 +157,40 @@ export function OnboardingFlow({
     onComplete(workspace ?? undefined);
   }, [workspace, onComplete]);
 
+  // Welcome and Questionnaire own full-bleed two-column layouts (hero
+  // / side panel). Every other step renders in a narrow max-w-xl
+  // column top-aligned under the stable StepHeader anchor. The outer
+  // platform shell provides only overflow/scroll; width is the flow's
+  // responsibility so each step picks what fits it.
   if (step === "welcome") {
     return <StepWelcome onNext={handleWelcomeNext} />;
   }
 
+  if (step === "questionnaire") {
+    return (
+      <StepQuestionnaire
+        initial={storedQuestionnaire}
+        onSubmit={handleQuestionnaireSubmit}
+      />
+    );
+  }
+
   return (
-    <div className="flex w-full flex-col gap-8">
+    <div className="flex min-h-full flex-col">
+      {/* Drag strip — 48px at top. On desktop macOS this sits under
+          the native traffic lights and lets users grab the window by
+          its top edge; on web it's top breathing room (same 48px the
+          removed pt-12 was giving). Flex child, not absolute overlay,
+          per CLAUDE.md drag region rule — `-webkit-app-region`
+          hit-testing isn't reliable across z-index stacking. */}
+      <div
+        aria-hidden
+        className="h-12 shrink-0"
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      />
+      <div className="flex flex-1 flex-col items-center px-6 pb-12">
+        <div className="flex w-full max-w-xl flex-col gap-8">
       <StepHeader currentStep={step} />
-      {step === "questionnaire" && (
-        <StepQuestionnaire
-          initial={storedQuestionnaire}
-          onSubmit={handleQuestionnaireSubmit}
-        />
-      )}
       {step === "workspace" && (
         <StepWorkspace
           existing={existingWorkspace}
@@ -212,6 +233,8 @@ export function OnboardingFlow({
           onSkip={handleBootstrapSkip}
         />
       )}
+        </div>
+      </div>
     </div>
   );
 }

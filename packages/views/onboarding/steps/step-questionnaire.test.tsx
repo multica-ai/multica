@@ -98,7 +98,7 @@ describe("StepQuestionnaire", () => {
     renderStep({ team_size: "solo", role: "developer" });
     const q3Other = screen.getAllByRole("radio", { name: /^other$/i })[2]!;
     await user.click(q3Other);
-    const input = screen.getByPlaceholderText(/tell us what you'd like to do/i);
+    const input = screen.getByPlaceholderText(/automate my weekly reports/i);
     await user.type(input, "Teach me the system");
     expect(
       screen.getByRole("button", { name: /continue/i }),
@@ -117,7 +117,7 @@ describe("StepQuestionnaire", () => {
     const q1Other = screen.getAllByRole("radio", { name: /^other$/i })[0]!;
     await user.click(q1Other);
     await user.type(
-      screen.getByPlaceholderText(/tell us about your team/i),
+      screen.getByPlaceholderText(/small community i help run/i),
       "large enterprise",
     );
     await user.click(screen.getByRole("radio", { name: /just me/i }));
