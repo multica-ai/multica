@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import type { DaemonPrefs } from "../../../shared/daemon-types";
+import {
+  CLI_AND_DAEMON_GUIDE_URL,
+  CLI_INSTALLATION_GUIDE_URL,
+  DESKTOP_SANDBOX_TROUBLESHOOTING_URL,
+} from "../support-links";
 
 function SettingRow({
   label,
@@ -89,13 +94,39 @@ export function DaemonSettingsTab() {
               className="mt-2"
               onClick={() =>
                 window.desktopAPI.openExternal(
-                  "https://github.com/multica-ai/multica#cli-installation",
+                  CLI_INSTALLATION_GUIDE_URL,
                 )
               }
             >
               Installation Guide
             </Button>
           )}
+        </div>
+
+        <div className="py-4">
+          <p className="text-sm font-medium">Troubleshooting</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Need help with daemon startup, CLI discovery, or Codex sandbox
+            networking? Open the desktop troubleshooting guides.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.desktopAPI.openExternal(CLI_AND_DAEMON_GUIDE_URL)}
+            >
+              CLI &amp; Daemon Guide
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                window.desktopAPI.openExternal(DESKTOP_SANDBOX_TROUBLESHOOTING_URL)
+              }
+            >
+              Codex Sandbox Help
+            </Button>
+          </div>
         </div>
       </div>
     </div>
