@@ -57,3 +57,5 @@ _features/
 server/server
 data/
 .kilo
+.omx/
+.idea/

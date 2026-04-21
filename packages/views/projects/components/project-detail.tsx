@@ -8,7 +8,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectDetailOptions, projectUsageOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -70,6 +70,12 @@ import {
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
 // ---------------------------------------------------------------------------
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 function PropRow({
   label,
@@ -189,6 +195,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const { data: usage } = useQuery(projectUsageOptions(wsId, projectId));
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -209,6 +216,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -486,6 +494,59 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           />
         </div>}
       </div>
+
+      {/* Token usage — aggregated across all issues in this project */}
+      {usage && usage.total.task_count > 0 && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
+          >
+            Token usage
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
+          </button>
+          {tokenUsageOpen && <div className="space-y-0.5 pl-2">
+            <PropRow label="Input">
+              <span className="text-muted-foreground">{formatTokenCount(usage.total.total_input_tokens)}</span>
+            </PropRow>
+            <PropRow label="Output">
+              <span className="text-muted-foreground">{formatTokenCount(usage.total.total_output_tokens)}</span>
+            </PropRow>
+            {(usage.total.total_cache_read_tokens > 0 || usage.total.total_cache_write_tokens > 0) && (
+              <PropRow label="Cache">
+                <span className="text-muted-foreground">
+                  {formatTokenCount(usage.total.total_cache_read_tokens)} read / {formatTokenCount(usage.total.total_cache_write_tokens)} write
+                </span>
+              </PropRow>
+            )}
+            <PropRow label="Runs">
+              <span className="text-muted-foreground">{usage.total.task_count}</span>
+            </PropRow>
+            {usage.summary.length > 0 && (
+              <div className="pt-2 mt-1 border-t border-border/50">
+                <div className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Last 30 days by model
+                </div>
+                <div className="space-y-0.5">
+                  {usage.summary.slice(0, 5).map((row) => (
+                    <div
+                      key={row.model}
+                      className="flex min-h-7 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-xs" title={row.model}>
+                        {row.model}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                        {formatTokenCount(row.total_input_tokens + row.total_output_tokens)} · {row.task_count} runs
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>}
+        </div>
+      )}
     </div>
   );
 

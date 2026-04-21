@@ -157,6 +157,31 @@ export interface IssueUsageSummary {
   task_count: number;
 }
 
+export interface ProjectUsageModelRow {
+  model: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  task_count: number;
+}
+
+export interface ProjectUsageDailyRow extends ProjectUsageModelRow {
+  date: string;
+}
+
+export interface ProjectUsage {
+  summary: ProjectUsageModelRow[];
+  by_day: ProjectUsageDailyRow[];
+  total: {
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cache_read_tokens: number;
+    total_cache_write_tokens: number;
+    task_count: number;
+  };
+}
+
 export interface RuntimeUsage {
   runtime_id: string;
   date: string;

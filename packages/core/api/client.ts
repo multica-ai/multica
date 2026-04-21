@@ -32,6 +32,7 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  ProjectUsage,
   RuntimeHourlyActivity,
   RuntimePing,
   RuntimeUpdate,
@@ -810,6 +811,10 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async getProjectUsage(id: string, days = 30): Promise<ProjectUsage> {
+    return this.fetch(`/api/projects/${id}/usage?days=${days}`);
   }
 
   // Pins

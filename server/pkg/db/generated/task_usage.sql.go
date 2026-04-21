@@ -44,6 +44,164 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 	return i, err
 }
 
+const getProjectUsageByDay = `-- name: GetProjectUsageByDay :many
+SELECT
+    DATE(tu.created_at) AS date,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS total_input_tokens,
+    SUM(tu.output_tokens)::bigint AS total_output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS total_cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.project_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY DATE(tu.created_at), tu.model
+ORDER BY DATE(tu.created_at) DESC, tu.model
+`
+
+type GetProjectUsageByDayParams struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type GetProjectUsageByDayRow struct {
+	Date                  pgtype.Date `json:"date"`
+	Model                 string      `json:"model"`
+	TotalInputTokens      int64       `json:"total_input_tokens"`
+	TotalOutputTokens     int64       `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64       `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64       `json:"total_cache_write_tokens"`
+	TaskCount             int32       `json:"task_count"`
+}
+
+// Daily buckets of token usage for a project. Bucket by tu.created_at.
+func (q *Queries) GetProjectUsageByDay(ctx context.Context, arg GetProjectUsageByDayParams) ([]GetProjectUsageByDayRow, error) {
+	rows, err := q.db.Query(ctx, getProjectUsageByDay, arg.ProjectID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetProjectUsageByDayRow{}
+	for rows.Next() {
+		var i GetProjectUsageByDayRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.Model,
+			&i.TotalInputTokens,
+			&i.TotalOutputTokens,
+			&i.TotalCacheReadTokens,
+			&i.TotalCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getProjectUsageSummary = `-- name: GetProjectUsageSummary :many
+SELECT
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS total_input_tokens,
+    SUM(tu.output_tokens)::bigint AS total_output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS total_cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.project_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY tu.model
+ORDER BY (SUM(tu.input_tokens) + SUM(tu.output_tokens)) DESC
+`
+
+type GetProjectUsageSummaryParams struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type GetProjectUsageSummaryRow struct {
+	Model                 string `json:"model"`
+	TotalInputTokens      int64  `json:"total_input_tokens"`
+	TotalOutputTokens     int64  `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TaskCount             int32  `json:"task_count"`
+}
+
+// Aggregate token usage by model for all issues in a project.
+// Filter by tu.created_at (usage report time), aligned to start-of-day, so
+// `days=N` is interpreted as N full calendar days like the other usage queries.
+func (q *Queries) GetProjectUsageSummary(ctx context.Context, arg GetProjectUsageSummaryParams) ([]GetProjectUsageSummaryRow, error) {
+	rows, err := q.db.Query(ctx, getProjectUsageSummary, arg.ProjectID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetProjectUsageSummaryRow{}
+	for rows.Next() {
+		var i GetProjectUsageSummaryRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalInputTokens,
+			&i.TotalOutputTokens,
+			&i.TotalCacheReadTokens,
+			&i.TotalCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getProjectUsageTotal = `-- name: GetProjectUsageTotal :one
+SELECT
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.project_id = $1
+`
+
+type GetProjectUsageTotalRow struct {
+	TotalInputTokens      int64 `json:"total_input_tokens"`
+	TotalOutputTokens     int64 `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64 `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64 `json:"total_cache_write_tokens"`
+	TaskCount             int32 `json:"task_count"`
+}
+
+// Total token usage rolled up across all models for a project (no date filter).
+func (q *Queries) GetProjectUsageTotal(ctx context.Context, projectID pgtype.UUID) (GetProjectUsageTotalRow, error) {
+	row := q.db.QueryRow(ctx, getProjectUsageTotal, projectID)
+	var i GetProjectUsageTotalRow
+	err := row.Scan(
+		&i.TotalInputTokens,
+		&i.TotalOutputTokens,
+		&i.TotalCacheReadTokens,
+		&i.TotalCacheWriteTokens,
+		&i.TaskCount,
+	)
+	return i, err
+}
+
 const getTaskUsage = `-- name: GetTaskUsage :many
 SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at FROM task_usage
 WHERE task_id = $1

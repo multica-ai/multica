@@ -289,6 +289,101 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetProjectUsage returns aggregated token usage for a project across two views:
+// - summary: per-model totals over the last `days` window (default 30)
+// - by_day: per-model daily buckets over the same window
+// - total: all-time rollup across all models
+func (h *Handler) GetProjectUsage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	since := parseSinceParam(r, 30)
+
+	summaryRows, err := h.Queries.GetProjectUsageSummary(r.Context(), db.GetProjectUsageSummaryParams{
+		ProjectID: project.ID,
+		Since:     since,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get project usage")
+		return
+	}
+	dailyRows, err := h.Queries.GetProjectUsageByDay(r.Context(), db.GetProjectUsageByDayParams{
+		ProjectID: project.ID,
+		Since:     since,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get project usage")
+		return
+	}
+	total, err := h.Queries.GetProjectUsageTotal(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get project usage")
+		return
+	}
+
+	type summaryRow struct {
+		Model                 string `json:"model"`
+		TotalInputTokens      int64  `json:"total_input_tokens"`
+		TotalOutputTokens     int64  `json:"total_output_tokens"`
+		TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+		TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+		TaskCount             int32  `json:"task_count"`
+	}
+	type dailyRow struct {
+		Date                  string `json:"date"`
+		Model                 string `json:"model"`
+		TotalInputTokens      int64  `json:"total_input_tokens"`
+		TotalOutputTokens     int64  `json:"total_output_tokens"`
+		TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+		TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+		TaskCount             int32  `json:"task_count"`
+	}
+
+	summary := make([]summaryRow, len(summaryRows))
+	for i, row := range summaryRows {
+		summary[i] = summaryRow{
+			Model:                 row.Model,
+			TotalInputTokens:      row.TotalInputTokens,
+			TotalOutputTokens:     row.TotalOutputTokens,
+			TotalCacheReadTokens:  row.TotalCacheReadTokens,
+			TotalCacheWriteTokens: row.TotalCacheWriteTokens,
+			TaskCount:             row.TaskCount,
+		}
+	}
+	daily := make([]dailyRow, len(dailyRows))
+	for i, row := range dailyRows {
+		daily[i] = dailyRow{
+			Date:                  row.Date.Time.Format("2006-01-02"),
+			Model:                 row.Model,
+			TotalInputTokens:      row.TotalInputTokens,
+			TotalOutputTokens:     row.TotalOutputTokens,
+			TotalCacheReadTokens:  row.TotalCacheReadTokens,
+			TotalCacheWriteTokens: row.TotalCacheWriteTokens,
+			TaskCount:             row.TaskCount,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"summary": summary,
+		"by_day":  daily,
+		"total": map[string]any{
+			"total_input_tokens":       total.TotalInputTokens,
+			"total_output_tokens":      total.TotalOutputTokens,
+			"total_cache_read_tokens":  total.TotalCacheReadTokens,
+			"total_cache_write_tokens": total.TotalCacheWriteTokens,
+			"task_count":               total.TaskCount,
+		},
+	})
+}
+
 // SearchProjectResponse extends ProjectResponse with search metadata.
 type SearchProjectResponse struct {
 	ProjectResponse
