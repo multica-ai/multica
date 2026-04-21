@@ -229,6 +229,68 @@ func TestBootstrapTokenReturnsBearerWithoutSettingBrowserCookies(t *testing.T) {
 	}
 }
 
+func TestBootstrapTokenFailsClosedForMultiUserDatabase(t *testing.T) {
+	h, ctx := newBootstrapTestHandler(t, Config{AllowSignup: true})
+	resetBootstrapState(t, ctx, h)
+
+	insertBootstrapUser(t, ctx, h, "First User", "first@example.com")
+	insertBootstrapUser(t, ctx, h, "Second User", "second@example.com")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/bootstrap/token", nil)
+	rec := httptest.NewRecorder()
+
+	h.BootstrapToken(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("BootstrapToken: expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp BootstrapConflictResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Mode != trustedBootstrapMode {
+		t.Fatalf("expected mode %q, got %q", trustedBootstrapMode, resp.Mode)
+	}
+	if resp.BootstrapState != trustedBootstrapStateMultiUserDB {
+		t.Fatalf("expected bootstrap_state %q, got %q", trustedBootstrapStateMultiUserDB, resp.BootstrapState)
+	}
+}
+
+func TestLogoutClearsBootstrapSessionCookies(t *testing.T) {
+	h, _ := newBootstrapTestHandler(t, Config{AllowSignup: true})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	rec := httptest.NewRecorder()
+
+	h.Logout(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Logout: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	cookies := rec.Result().Cookies()
+	seenAuth := false
+	seenCSRF := false
+	for _, cookie := range cookies {
+		switch cookie.Name {
+		case auth.AuthCookieName:
+			seenAuth = true
+			if cookie.Value != "" || cookie.MaxAge != -1 {
+				t.Fatalf("expected cleared auth cookie, got %+v", cookie)
+			}
+		case auth.CSRFCookieName:
+			seenCSRF = true
+			if cookie.Value != "" || cookie.MaxAge != -1 {
+				t.Fatalf("expected cleared csrf cookie, got %+v", cookie)
+			}
+		}
+	}
+	if !seenAuth || !seenCSRF {
+		t.Fatalf("expected logout to clear auth+csrf cookies, got %+v", cookies)
+	}
+}
+
 func TestVerifyCodeDoesNotCreateAdditionalUsersInTrustedBootstrapMode(t *testing.T) {
 	h, ctx := newBootstrapTestHandler(t, Config{AllowSignup: true})
 	resetBootstrapState(t, ctx, h)
