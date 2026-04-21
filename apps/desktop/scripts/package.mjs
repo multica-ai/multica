@@ -282,6 +282,18 @@ export function builderArgsForTarget(
       `-c.directories.output=dist/${target.platform}-${target.arch}`,
     );
   }
+  // electron-builder's update metadata file is `latest.yml` for Windows
+  // regardless of arch (only Linux gets an arch suffix automatically — see
+  // app-builder-lib's getArchPrefixForUpdateFile). Without an explicit
+  // channel override, building Windows x64 and arm64 in two invocations
+  // makes both publish `latest.yml` to the same GitHub Release, so the
+  // second upload overwrites the first and one of the two architectures
+  // ends up with no auto-update metadata. Route Windows arm64 to its own
+  // channel so x64 keeps `latest.yml` and arm64 ships `latest-arm64.yml`;
+  // the renderer-side updater pins the matching channel per arch.
+  if (target.platform === "win" && target.arch === "arm64") {
+    builderArgs.push("-c.publish.channel=latest-arm64");
+  }
   return builderArgs;
 }
 

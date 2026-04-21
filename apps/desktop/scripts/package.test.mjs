@@ -184,6 +184,32 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "never",
       "-c.directories.output=dist/win-arm64",
+      "-c.publish.channel=latest-arm64",
+    ]);
+  });
+
+  it("does not override the publish channel for Windows x64 (default latest.yml)", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "win", arch: "x64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "always"],
+          platformTargets: { mac: [], win: ["nsis"], linux: [] },
+          requestedPlatforms: ["win"],
+          requestedArchs: ["x64"],
+        },
+        "1.2.3",
+        { hostPlatform: "win32", useScopedOutputDir: true },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=1.2.3",
+      "--win",
+      "nsis",
+      "--x64",
+      "--publish",
+      "always",
+      "-c.directories.output=dist/win-x64",
     ]);
   });
 
