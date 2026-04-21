@@ -74,6 +74,15 @@ UPDATE agent_task_queue
 SET status = 'cancelled'
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
 
+-- CancelAgentTasksByIssueReturning cancels all active tasks for an issue and
+-- returns the affected (id, agent_id) pairs. Used by CancelTasksForIssue so
+-- it can call ReconcileAgentStatus for each unique agent after cancellation.
+-- name: CancelAgentTasksByIssueReturning :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING id, agent_id;
+
 -- name: CancelAgentTasksByAgent :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'

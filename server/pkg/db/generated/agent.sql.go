@@ -106,6 +106,38 @@ func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UU
 	return err
 }
 
+const cancelAgentTasksByIssueReturning = `-- name: CancelAgentTasksByIssueReturning :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING id, agent_id
+`
+
+type CancelAgentTasksByIssueReturningRow struct {
+	ID      pgtype.UUID `json:"id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+func (q *Queries) CancelAgentTasksByIssueReturning(ctx context.Context, issueID pgtype.UUID) ([]CancelAgentTasksByIssueReturningRow, error) {
+	rows, err := q.db.Query(ctx, cancelAgentTasksByIssueReturning, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CancelAgentTasksByIssueReturningRow{}
+	for rows.Next() {
+		var i CancelAgentTasksByIssueReturningRow
+		if err := rows.Scan(&i.ID, &i.AgentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimAgentTask = `-- name: ClaimAgentTask :one
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
