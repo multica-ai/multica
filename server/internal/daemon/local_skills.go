@@ -33,6 +33,18 @@ type runtimeLocalSkillBundle struct {
 	Files       []SkillFileData `json:"files,omitempty"`
 }
 
+// localSkillRootForProvider tracks the user-level skill locations exposed by
+// each runtime/provider. Keep these in sync with upstream docs / conventions:
+//   - GitHub Copilot: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills
+//   - OpenCode: https://opencode.ai/docs/skills
+//   - OpenClaw: https://github.com/openclaw/openclaw/blob/main/docs/tools/skills.md
+//   - Pi: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md
+//   - Cursor: official forum guidance referencing the built-in /create-skill flow
+//     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
+//
+// Longer-term this mapping would be better colocated with the provider
+// definitions under server/pkg/agent so adding a new runtime can't silently
+// miss the local-skills surface.
 func localSkillRootForProvider(provider string) (string, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
