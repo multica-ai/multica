@@ -1,0 +1,64 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pgvector-init
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: pgvector-init
+spec:
+  # Only needs to run once successfully
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: pgvector-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: pgvector-init
+        image: postgres:17
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Connecting to PostgreSQL to initialize pgvector extension..."
+          psql -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          echo "pgvector extension initialized successfully"
+        env:
+        # Database connection details from ExternalSecret
+        - name: PGHOST
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: host
+        - name: PGPORT
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: port
+        - name: PGDATABASE
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: database
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: password
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
