@@ -64,6 +64,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WorkspaceColumnConfig,
+  UpdateWorkspaceColumnConfigRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -557,6 +559,21 @@ export class ApiClient {
 
   async getWorkspace(id: string): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`);
+  }
+
+  async listWorkspaceColumnConfigs(workspaceId: string): Promise<WorkspaceColumnConfig[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/column-configs`);
+  }
+
+  async updateWorkspaceColumnConfig(
+    workspaceId: string,
+    status: string,
+    data: UpdateWorkspaceColumnConfigRequest,
+  ): Promise<WorkspaceColumnConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/column-configs/${status}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
