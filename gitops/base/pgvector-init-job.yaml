@@ -17,16 +17,32 @@ spec:
         component: pgvector-init
     spec:
       restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999  # postgres user in postgres:17 image
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: pgvector-init
-        image: postgres:17
+        image: postgres:17.2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         command:
         - /bin/bash
         - -c
         - |
           set -e
-          echo "Connecting to PostgreSQL to initialize pgvector extension..."
+          echo "Testing database connection..."
+          psql -c "SELECT version();" || { echo "Connection failed"; exit 1; }
+          echo "Initializing pgvector extension..."
           psql -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          echo "Verifying extension installation..."
+          psql -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
           echo "pgvector extension initialized successfully"
         env:
         # Database connection details from ExternalSecret
@@ -55,6 +71,9 @@ spec:
             secretKeyRef:
               name: agentfarm-rds-credentials
               key: password
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         resources:
           requests:
             memory: "64Mi"
@@ -62,3 +81,8 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "200m"
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Mi
