@@ -1,0 +1,88 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pgvector-init
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: pgvector-init
+spec:
+  # Only needs to run once successfully
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: pgvector-init
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999  # postgres user in postgres:17 image
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: pgvector-init
+        image: postgres:17.2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Testing database connection..."
+          psql -c "SELECT version();" || { echo "Connection failed"; exit 1; }
+          echo "Initializing pgvector extension..."
+          psql -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          echo "Verifying extension installation..."
+          psql -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
+          echo "pgvector extension initialized successfully"
+        env:
+        # Database connection details from ExternalSecret
+        - name: PGHOST
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: host
+        - name: PGPORT
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: port
+        - name: PGDATABASE
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: database
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agentfarm-rds-credentials
+              key: password
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Mi
