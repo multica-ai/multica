@@ -10,7 +10,7 @@ INSERT INTO workspace_column_config (
     instructions,
     allowed_transitions
 ) VALUES ($1, $2, $3, sqlc.arg(allowed_transitions)::text[])
-ON CONFLICT (workspace_id, status)
+ON CONFLICT ON CONSTRAINT workspace_column_config_unique
 DO UPDATE SET
     instructions = EXCLUDED.instructions,
     allowed_transitions = EXCLUDED.allowed_transitions,
