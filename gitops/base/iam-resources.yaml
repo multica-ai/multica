@@ -1,0 +1,101 @@
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-role
+spec:
+  forProvider:
+    tags:
+    - key: Owner
+      value: DevOps
+    - key: Production
+      value: "false"
+    - key: Application
+      value: agentfarm
+    assumeRolePolicyDocument: |
+      {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Effect": "Allow",
+                  "Principal": {
+                      "Federated": "arn:aws:iam::637423279283:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                      "StringEquals": {
+                          "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:sub": "system:serviceaccount:agentfarm:agentfarm",
+                          "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:aud": "sts.amazonaws.com"
+                      }
+                  }
+              }
+          ]
+      }
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-policy
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    tags:
+    - key: Owner
+      value: DevOps
+    - key: Production
+      value: "false"
+    - key: Application
+      value: agentfarm
+    description: Allow agentfarm to read SSM parameters and access S3 bucket
+    document: |-
+      {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Sid": "AllowSSMParamReadScoped",
+                  "Effect": "Allow",
+                  "Action": [
+                      "ssm:GetParameter",
+                      "ssm:GetParameters",
+                      "ssm:GetParametersByPath",
+                      "ssm:DescribeParameters"
+                  ],
+                  "Resource": [
+                      "arn:aws:ssm:us-east-1:637423279283:parameter/agentfarm/tools",
+                      "arn:aws:ssm:us-east-1:637423279283:parameter/agentfarm/tools/*"
+                  ]
+              },
+              {
+                  "Sid": "AllowS3AccessScoped",
+                  "Effect": "Allow",
+                  "Action": [
+                      "s3:GetObject",
+                      "s3:PutObject",
+                      "s3:DeleteObject",
+                      "s3:ListBucket",
+                      "s3:GetBucketLocation"
+                  ],
+                  "Resource": [
+                      "arn:aws:s3:::agentfarm-tools-*",
+                      "arn:aws:s3:::agentfarm-tools-*/*"
+                  ]
+              }
+          ]
+      }
+    name: agentfarm-policy-document
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: RolePolicyAttachment
+metadata:
+  name: agentfarm-policy-attachment
+spec:
+  forProvider:
+    policyArnRef:
+      name: agentfarm-policy
+    roleNameRef:
+      name: agentfarm-role
+  providerConfigRef:
+    name: provider-aws-config
