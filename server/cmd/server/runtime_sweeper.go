@@ -51,7 +51,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 }
 
 // sweepStaleRuntimes marks runtimes offline if they haven't heartbeated,
-// then fails any tasks belonging to those offline runtimes.
+// then cancels any tasks belonging to those offline runtimes.
 func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, staleThresholdSeconds)
 	if err != nil {
@@ -71,12 +71,12 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
 
-	// Fail orphaned tasks (dispatched/running) whose runtimes just went offline.
+	// Cancel orphaned tasks (dispatched/running) whose runtimes just went offline.
 	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx)
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
 	} else if len(failedTasks) > 0 {
-		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
+		slog.Info("runtime sweeper: cancelled orphaned tasks", "count", len(failedTasks))
 		broadcastFailedTasks(ctx, queries, bus, failedTasks)
 	}
 
@@ -125,7 +125,7 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	}
 }
 
-// sweepStaleTasks fails tasks stuck in dispatched/running for too long,
+// sweepStaleTasks cancels tasks stuck in dispatched/running for too long,
 // even when the runtime is still online. This handles cases where:
 // - The agent process hangs and the daemon is still heartbeating
 // - The daemon failed to report task completion/failure
@@ -143,7 +143,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) 
 		return
 	}
 
-	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+	slog.Info("task sweeper: cancelled stale tasks", "count", len(failedTasks))
 	broadcastFailedTasks(ctx, queries, bus, failedTasks)
 }
 
@@ -154,7 +154,7 @@ type failedTask struct {
 	IssueID pgtype.UUID
 }
 
-// broadcastFailedTasks publishes task:failed events with the correct WorkspaceID
+// broadcastFailedTasks publishes task:cancelled events with the correct WorkspaceID
 // and reconciles agent status for all affected agents.
 func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.Bus, tasks any) {
 	var items []failedTask
@@ -203,14 +203,14 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.
 		}
 
 		bus.Publish(events.Event{
-			Type:        protocol.EventTaskFailed,
+			Type:        protocol.EventTaskCancelled,
 			WorkspaceID: workspaceID,
 			ActorType:   "system",
 			Payload: map[string]any{
 				"task_id":  util.UUIDToString(ft.ID),
 				"agent_id": util.UUIDToString(ft.AgentID),
 				"issue_id": util.UUIDToString(ft.IssueID),
-				"status":   "failed",
+				"status":   "cancelled",
 			},
 		})
 
