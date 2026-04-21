@@ -30,6 +30,7 @@ import {
   X,
   Zap,
   FolderKanban,
+  MessageSquare,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -168,6 +169,8 @@ function SortablePinItem({ pin, href, pathname, onUnpin }: { pin: PinnedItem; hr
         {pin.item_type === "issue" && pin.status ? (
           /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
           <StatusIcon status={pin.status as IssueStatus} className="!size-3.5 shrink-0" />
+        ) : pin.item_type === "chat_session" ? (
+          <MessageSquare className="!size-3.5 shrink-0" />
         ) : (
           <span className="flex size-3.5 shrink-0 items-center justify-center text-xs leading-none">{pin.icon || "📁"}</span>
         )}
@@ -508,7 +511,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <SortablePinItem
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)}
+                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : pin.item_type === "chat_session" ? `${p.inbox()}?chat=${pin.item_id}` : p.projectDetail(pin.item_id)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                             />
