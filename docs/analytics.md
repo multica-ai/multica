@@ -5,6 +5,8 @@ to PostHog. Events feed the acquisition → activation → expansion funnel that
 drives our weekly Active Workspaces (WAW) north-star metric.
 
 See [MUL-1122](https://github.com/multica-ai/multica) for the design context.
+For how these events roll up into the weekly funnel dashboard, see
+[`analytics-dashboards.md`](./analytics-dashboards.md).
 
 ## Configuration
 
