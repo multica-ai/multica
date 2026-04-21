@@ -14,7 +14,8 @@ import { StepHeader } from "./components/step-header";
 import { StepWelcome } from "./steps/step-welcome";
 import { StepQuestionnaire } from "./steps/step-questionnaire";
 import { StepWorkspace } from "./steps/step-workspace";
-import { StepRuntime } from "./steps/step-runtime";
+import { StepRuntimeConnect } from "./steps/step-runtime-connect";
+import { StepPlatformFork } from "./steps/step-platform-fork";
 import { StepAgent } from "./steps/step-agent";
 import { StepComplete } from "./steps/step-complete";
 
@@ -112,6 +113,7 @@ export function OnboardingFlow({
     (s) => s.state.questionnaire,
   );
   const advance = useOnboardingStore((s) => s.advance);
+  const complete = useOnboardingStore((s) => s.complete);
 
   // Fallback when the user skipped workspace creation (already had one).
   // We use the first workspace in the list as the runtime-step context.
@@ -185,6 +187,15 @@ export function OnboardingFlow({
     onComplete(workspace ?? undefined);
   }, [workspace, onComplete]);
 
+  const handleWaitlist = useCallback(
+    async (email: string) => {
+      await advance({ cloud_waitlist_email: email });
+      await complete({});
+      onComplete(workspace ?? undefined);
+    },
+    [advance, complete, workspace, onComplete],
+  );
+
   // Welcome renders standalone (no progress header, its own vertical
   // centering). All other steps render under a shared wrapper whose
   // job is to provide a stable visual anchor — StepHeader at the top,
@@ -214,11 +225,19 @@ export function OnboardingFlow({
         />
       )}
       {step === "runtime" && runtimeWorkspace && (
-        <StepRuntime
-          wsId={runtimeWorkspace.id}
-          onNext={handleRuntimeNext}
-          instructions={runtimeInstructions}
-        />
+        runtimeInstructions ? (
+          <StepPlatformFork
+            wsId={runtimeWorkspace.id}
+            onNext={handleRuntimeNext}
+            onWaitlist={handleWaitlist}
+            cliInstructions={runtimeInstructions}
+          />
+        ) : (
+          <StepRuntimeConnect
+            wsId={runtimeWorkspace.id}
+            onNext={handleRuntimeNext}
+          />
+        )
       )}
       {step === "agent" && runtime && (
         <StepAgent

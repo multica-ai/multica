@@ -32,7 +32,7 @@ import { ProviderLogo } from "../../runtimes/components/provider-logo";
  *  instant — desktop's auto-started daemon flips it in ~3s, web flips
  *  when the user finishes the `multica setup` command in their terminal.
  */
-export function StepRuntime({
+export function StepRuntimeConnect({
   wsId,
   onNext,
   instructions,
