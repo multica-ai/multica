@@ -418,6 +418,16 @@ type Workspace struct {
 	IssueCounter int32              `json:"issue_counter"`
 }
 
+type WorkspaceColumnConfig struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Status             string             `json:"status"`
+	Instructions       string             `json:"instructions"`
+	AllowedTransitions []string           `json:"allowed_transitions"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type WorkspaceInvitation struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
