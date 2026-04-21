@@ -26,11 +26,11 @@ spec:
               value: "0.0.0.0"
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: "2"
+              memory: 2G
             limits:
-              cpu: "1"
-              memory: 512Mi
+              cpu: "2"
+              memory: 2G
           readinessProbe:
             httpGet:
               path: /
