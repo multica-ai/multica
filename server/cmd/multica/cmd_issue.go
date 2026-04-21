@@ -1072,7 +1072,8 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 	}
 
 	nameLower := strings.ToLower(name)
-	var matches []assigneeMatch
+	var exactMatches []assigneeMatch
+	var substringMatches []assigneeMatch
 	var errs []error
 
 	// Search members.
@@ -1082,12 +1083,11 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 	} else {
 		for _, m := range members {
 			mName := strVal(m, "name")
-			if strings.Contains(strings.ToLower(mName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "member",
-					ID:   strVal(m, "user_id"),
-					Name: mName,
-				})
+			match := assigneeMatch{Type: "member", ID: strVal(m, "user_id"), Name: mName}
+			if strings.ToLower(mName) == nameLower {
+				exactMatches = append(exactMatches, match)
+			} else if strings.Contains(strings.ToLower(mName), nameLower) {
+				substringMatches = append(substringMatches, match)
 			}
 		}
 	}
@@ -1100,12 +1100,11 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 	} else {
 		for _, a := range agents {
 			aName := strVal(a, "name")
-			if strings.Contains(strings.ToLower(aName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "agent",
-					ID:   strVal(a, "id"),
-					Name: aName,
-				})
+			match := assigneeMatch{Type: "agent", ID: strVal(a, "id"), Name: aName}
+			if strings.ToLower(aName) == nameLower {
+				exactMatches = append(exactMatches, match)
+			} else if strings.Contains(strings.ToLower(aName), nameLower) {
+				substringMatches = append(substringMatches, match)
 			}
 		}
 	}
@@ -1115,14 +1114,29 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", errs[0], errs[1])
 	}
 
-	switch len(matches) {
+	// Exact matches take priority: if exactly one exact match exists, return it regardless
+	// of how many substring matches exist. This prevents "Developer" from being ambiguous
+	// against "Lead Developer".
+	if len(exactMatches) == 1 {
+		return exactMatches[0].Type, exactMatches[0].ID, nil
+	}
+	if len(exactMatches) > 1 {
+		var parts []string
+		for _, m := range exactMatches {
+			parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+		}
+		return "", "", fmt.Errorf("ambiguous assignee %q; matches:\n%s", name, strings.Join(parts, "\n"))
+	}
+
+	// No exact match — fall back to substring matching.
+	switch len(substringMatches) {
 	case 0:
 		return "", "", fmt.Errorf("no member or agent found matching %q", name)
 	case 1:
-		return matches[0].Type, matches[0].ID, nil
+		return substringMatches[0].Type, substringMatches[0].ID, nil
 	default:
 		var parts []string
-		for _, m := range matches {
+		for _, m := range substringMatches {
 			parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
 		}
 		return "", "", fmt.Errorf("ambiguous assignee %q; matches:\n%s", name, strings.Join(parts, "\n"))

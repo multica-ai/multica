@@ -128,6 +128,42 @@ func TestResolveAssignee(t *testing.T) {
 		}
 	})
 
+	t.Run("exact match wins over substring collision", func(t *testing.T) {
+		// "Developer" is a substring of "Lead Developer"; exact match must win.
+		collisionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/workspaces/ws-1/members":
+				json.NewEncoder(w).Encode([]map[string]any{})
+			case "/api/agents":
+				json.NewEncoder(w).Encode([]map[string]any{
+					{"id": "agent-dev", "name": "Developer"},
+					{"id": "agent-lead", "name": "Lead Developer"},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer collisionSrv.Close()
+
+		collisionClient := cli.NewAPIClient(collisionSrv.URL, "ws-1", "test-token")
+		aType, aID, err := resolveAssignee(ctx, collisionClient, "Developer")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "agent-dev" {
+			t.Errorf("got (%q, %q), want (agent, agent-dev)", aType, aID)
+		}
+
+		// Verify the longer name still resolves unambiguously.
+		aType, aID, err = resolveAssignee(ctx, collisionClient, "Lead Developer")
+		if err != nil {
+			t.Fatalf("unexpected error for Lead Developer: %v", err)
+		}
+		if aType != "agent" || aID != "agent-lead" {
+			t.Errorf("got (%q, %q), want (agent, agent-lead)", aType, aID)
+		}
+	})
+
 	t.Run("missing workspace ID", func(t *testing.T) {
 		noWSClient := cli.NewAPIClient(srv.URL, "", "test-token")
 		_, _, err := resolveAssignee(ctx, noWSClient, "alice")
