@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { Plus, FolderKanban, ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus, Check } from "lucide-react";
+import { useState, useRef, useCallback, useMemo } from "react";
+import { Plus, FolderKanban, ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus, Check, ArrowDown, ArrowUp, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useCreateProject, useUpdateProject } from "@multica/core/projects/mutations";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER, PROJECT_PRIORITY_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
+import {
+  PROJECT_SORT_DEFAULT_DIRECTION,
+  PROJECT_SORT_OPTIONS,
+  useProjectViewStore,
+} from "@multica/core/projects/stores";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -39,6 +44,7 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import type { Project, ProjectStatus, ProjectPriority, UpdateProjectRequest } from "@multica/core/types";
 import { PageHeader } from "../../layout/page-header";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { sortProjects } from "./sort-projects";
 
 function formatRelativeDate(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
@@ -539,6 +545,17 @@ export function ProjectsPage() {
   const wsId = useWorkspaceId();
   const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
   const [createOpen, setCreateOpen] = useState(false);
+  const sortBy = useProjectViewStore((s) => s.sortBy);
+  const sortDirection = useProjectViewStore((s) => s.sortDirection);
+  const setSortBy = useProjectViewStore((s) => s.setSortBy);
+  const setSortDirection = useProjectViewStore((s) => s.setSortDirection);
+
+  const sortedProjects = useMemo(
+    () => sortProjects(projects, sortBy, sortDirection),
+    [projects, sortBy, sortDirection],
+  );
+  const sortLabel =
+    PROJECT_SORT_OPTIONS.find((option) => option.value === sortBy)?.label ?? "Created date";
 
   return (
     <div className="flex h-full flex-col">
@@ -551,10 +568,79 @@ export function ProjectsPage() {
             <span className="text-xs text-muted-foreground tabular-nums">{projects.length}</span>
           )}
         </div>
-        <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          New project
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Popover>
+            <Tooltip>
+              <PopoverTrigger
+                render={
+                  <TooltipTrigger
+                    render={
+                      <Button variant="outline" size="icon-sm" className="text-muted-foreground">
+                        <SlidersHorizontal className="size-4" />
+                      </Button>
+                    }
+                  />
+                }
+              />
+              <TooltipContent side="bottom">Display settings</TooltipContent>
+            </Tooltip>
+            <PopoverContent align="end" className="w-64 p-0">
+              <div className="px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Ordering
+                </span>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 justify-between text-xs"
+                        >
+                          {sortLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto">
+                      {PROJECT_SORT_OPTIONS.map((option) => (
+                        <DropdownMenuItem
+                          key={option.value}
+                          onClick={() => {
+                            setSortBy(option.value);
+                            setSortDirection(PROJECT_SORT_DEFAULT_DIRECTION[option.value]);
+                          }}
+                        >
+                          {option.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() =>
+                      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+                    }
+                    title={sortDirection === "asc" ? "Ascending" : "Descending"}
+                  >
+                    {sortDirection === "asc" ? (
+                      <ArrowUp className="size-3.5" />
+                    ) : (
+                      <ArrowDown className="size-3.5" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            New project
+          </Button>
+        </div>
       </PageHeader>
 
       {/* Table */}
@@ -565,7 +651,7 @@ export function ProjectsPage() {
               <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
-        ) : projects.length === 0 ? (
+        ) : sortedProjects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <FolderKanban className="h-10 w-10 mb-3 opacity-30" />
             <p className="text-sm">No projects yet</p>
@@ -587,7 +673,7 @@ export function ProjectsPage() {
               <span className="w-20 text-right shrink-0">Created</span>
             </div>
             {/* Rows */}
-            {projects.map((project) => (
+            {sortedProjects.map((project) => (
               <ProjectRow key={project.id} project={project} />
             ))}
           </>
