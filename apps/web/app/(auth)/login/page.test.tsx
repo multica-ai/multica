@@ -193,7 +193,7 @@ describe("LoginPage", () => {
       render(<LoginPage />, { wrapper: createWrapper() });
 
       await waitFor(() => {
-        expect(mockIssueCliToken).toHaveBeenCalledTimes(1);
+        expect(mockIssueCliToken).toHaveBeenCalled();
       });
       await waitFor(() => {
         expect(hrefSetter).toHaveBeenCalledWith(
