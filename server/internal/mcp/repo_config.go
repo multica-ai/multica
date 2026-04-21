@@ -107,3 +107,26 @@ func DetectGitRoot() string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// DetectGitRemote returns the normalized remote URL (e.g. "github.com/org/repo") for the origin remote.
+func DetectGitRemote(gitRoot string) string {
+	out, err := exec.Command("git", "-C", gitRoot, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return NormalizeRepoURL(strings.TrimSpace(string(out)))
+}
+
+// NormalizeRepoURL converts various git remote formats to a canonical form: "github.com/org/repo".
+func NormalizeRepoURL(raw string) string {
+	// SSH: git@github.com:org/repo.git → github.com/org/repo
+	if strings.HasPrefix(raw, "git@") {
+		raw = strings.TrimPrefix(raw, "git@")
+		raw = strings.Replace(raw, ":", "/", 1)
+	}
+	// HTTPS: https://github.com/org/repo.git → github.com/org/repo
+	raw = strings.TrimPrefix(raw, "https://")
+	raw = strings.TrimPrefix(raw, "http://")
+	raw = strings.TrimSuffix(raw, ".git")
+	return raw
+}

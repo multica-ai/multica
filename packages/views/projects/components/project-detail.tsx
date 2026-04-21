@@ -20,6 +20,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_PRIORITY_CONFIG, PROJECT_COLORS, getProjectColor } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { useModalStore } from "@multica/core/modals";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
@@ -460,6 +461,21 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </PopoverContent>
             </Popover>
           </PropRow>
+          <PropRow label="Repository">
+            <input
+              type="text"
+              defaultValue={project.repo_url ?? ""}
+              placeholder="github.com/org/repo"
+              className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+              onBlur={(e) => {
+                const val = e.target.value.trim();
+                if (val !== (project.repo_url ?? "")) {
+                  handleUpdateField({ repo_url: val || null });
+                }
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            />
+          </PropRow>
         </div>}
       </div>
 
@@ -527,6 +543,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <span className="truncate">{project.title}</span>
             </div>
             <div className="flex items-center gap-1 shrink-0">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => useModalStore.getState().open("create-issue", { project_id: projectId })}
+              >
+                New Issue
+              </Button>
               <Button
                 variant="ghost"
                 size="icon-sm"

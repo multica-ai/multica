@@ -27,6 +27,7 @@ UPDATE project SET
     description = sqlc.narg('description'),
     icon = sqlc.narg('icon'),
     color = sqlc.narg('color'),
+    repo_url = sqlc.narg('repo_url'),
     status = COALESCE(sqlc.narg('status'), status),
     priority = COALESCE(sqlc.narg('priority'), priority),
     lead_type = sqlc.narg('lead_type'),
@@ -34,6 +35,10 @@ UPDATE project SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: GetProjectByRepoURL :one
+SELECT * FROM project
+WHERE workspace_id = $1 AND repo_url = $2;
 
 -- name: DeleteProject :exec
 DELETE FROM project WHERE id = $1;

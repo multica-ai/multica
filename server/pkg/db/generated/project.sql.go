@@ -29,7 +29,7 @@ INSERT INTO project (
     lead_type, lead_id, priority, color
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url
 `
 
 type CreateProjectParams struct {
@@ -70,6 +70,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.Color,
+		&i.RepoUrl,
 	)
 	return i, err
 }
@@ -84,7 +85,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
 WHERE id = $1
 `
 
@@ -104,12 +105,44 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.Color,
+		&i.RepoUrl,
+	)
+	return i, err
+}
+
+const getProjectByRepoURL = `-- name: GetProjectByRepoURL :one
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
+WHERE workspace_id = $1 AND repo_url = $2
+`
+
+type GetProjectByRepoURLParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RepoUrl     pgtype.Text `json:"repo_url"`
+}
+
+func (q *Queries) GetProjectByRepoURL(ctx context.Context, arg GetProjectByRepoURLParams) (Project, error) {
+	row := q.db.QueryRow(ctx, getProjectByRepoURL, arg.WorkspaceID, arg.RepoUrl)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.Color,
+		&i.RepoUrl,
 	)
 	return i, err
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -134,6 +167,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.Color,
+		&i.RepoUrl,
 	)
 	return i, err
 }
@@ -174,7 +208,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -209,6 +243,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.UpdatedAt,
 			&i.Priority,
 			&i.Color,
+			&i.RepoUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -226,13 +261,14 @@ UPDATE project SET
     description = $3,
     icon = $4,
     color = $5,
-    status = COALESCE($6, status),
-    priority = COALESCE($7, priority),
-    lead_type = $8,
-    lead_id = $9,
+    repo_url = $6,
+    status = COALESCE($7, status),
+    priority = COALESCE($8, priority),
+    lead_type = $9,
+    lead_id = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url
 `
 
 type UpdateProjectParams struct {
@@ -241,6 +277,7 @@ type UpdateProjectParams struct {
 	Description pgtype.Text `json:"description"`
 	Icon        pgtype.Text `json:"icon"`
 	Color       pgtype.Text `json:"color"`
+	RepoUrl     pgtype.Text `json:"repo_url"`
 	Status      pgtype.Text `json:"status"`
 	Priority    pgtype.Text `json:"priority"`
 	LeadType    pgtype.Text `json:"lead_type"`
@@ -254,6 +291,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Description,
 		arg.Icon,
 		arg.Color,
+		arg.RepoUrl,
 		arg.Status,
 		arg.Priority,
 		arg.LeadType,
@@ -273,6 +311,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.Color,
+		&i.RepoUrl,
 	)
 	return i, err
 }

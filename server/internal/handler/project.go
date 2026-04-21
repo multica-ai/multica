@@ -23,6 +23,7 @@ type ProjectResponse struct {
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
 	Color       *string `json:"color"`
+	RepoURL     *string `json:"repo_url"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -41,6 +42,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Description: textToPtr(p.Description),
 		Icon:        textToPtr(p.Icon),
 		Color:       textToPtr(p.Color),
+		RepoURL:     textToPtr(p.RepoUrl),
 		Status:      p.Status,
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
@@ -63,6 +65,7 @@ type CreateProjectRequest struct {
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
 	Color       *string `json:"color"`
+	RepoURL     *string `json:"repo_url"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -74,10 +77,34 @@ type UpdateProjectRequest struct {
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
 	Color       *string `json:"color"`
+	RepoURL     *string `json:"repo_url"`
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+}
+
+// GetProjectByRepo looks up a project by its repo_url.
+func (h *Handler) GetProjectByRepo(w http.ResponseWriter, r *http.Request) {
+	repoURL := r.URL.Query().Get("url")
+	if repoURL == "" {
+		writeError(w, http.StatusBadRequest, "url parameter is required")
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	project, err := h.Queries.GetProjectByRepoURL(r.Context(), db.GetProjectByRepoURLParams{
+		WorkspaceID: parseUUID(workspaceID),
+		RepoUrl:     pgtype.Text{String: repoURL, Valid: true},
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"project": nil})
+		return
+	}
+	resp := projectToResponse(project)
+	total, done := h.loadProjectIssueStats(r.Context(), project.ID)
+	resp.IssueCount = total
+	resp.DoneCount = done
+	writeJSON(w, http.StatusOK, map[string]any{"project": resp})
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -224,6 +251,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		Description: prevProject.Description,
 		Icon:        prevProject.Icon,
 		Color:       prevProject.Color,
+		RepoUrl:     prevProject.RepoUrl,
 		LeadType:    prevProject.LeadType,
 		LeadID:      prevProject.LeadID,
 	}
@@ -255,6 +283,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.Color = pgtype.Text{String: *req.Color, Valid: true}
 		} else {
 			params.Color = pgtype.Text{Valid: false}
+		}
+	}
+	if _, ok := rawFields["repo_url"]; ok {
+		if req.RepoURL != nil {
+			params.RepoUrl = pgtype.Text{String: *req.RepoURL, Valid: true}
+		} else {
+			params.RepoUrl = pgtype.Text{Valid: false}
 		}
 	}
 	if _, ok := rawFields["lead_type"]; ok {

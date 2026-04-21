@@ -9,6 +9,7 @@ export interface Project {
   description: string | null;
   icon: string | null;
   color: string | null;
+  repo_url: string | null;
   status: ProjectStatus;
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
@@ -24,6 +25,7 @@ export interface CreateProjectRequest {
   description?: string;
   icon?: string;
   color?: string;
+  repo_url?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
   lead_type?: "member" | "agent";
@@ -35,6 +37,7 @@ export interface UpdateProjectRequest {
   description?: string | null;
   icon?: string | null;
   color?: string | null;
+  repo_url?: string | null;
   status?: ProjectStatus;
   priority?: ProjectPriority;
   lead_type?: "member" | "agent" | null;
