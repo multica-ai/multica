@@ -504,6 +504,22 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 						go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
 					}
 				}
+
+				// Handle pending runtime-local-skill inventory requests.
+				if resp.PendingLocalSkills != nil {
+					rt := d.findRuntime(rid)
+					if rt != nil {
+						go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
+					}
+				}
+
+				// Handle pending runtime-local-skill import requests.
+				if resp.PendingLocalSkillImport != nil {
+					rt := d.findRuntime(rid)
+					if rt != nil {
+						go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
+					}
+				}
 			}
 		}
 	}
@@ -557,6 +573,50 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+	})
+}
+
+func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {
+	d.logger.Info("runtime local skills requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
+
+	skills, supported, err := listRuntimeLocalSkills(rt.Provider)
+	if err != nil {
+		d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, map[string]any{
+		"status":    "completed",
+		"skills":    skills,
+		"supported": supported,
+	})
+}
+
+func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending PendingLocalSkillImport) {
+	d.logger.Info("runtime local skill import requested", "runtime_id", rt.ID, "request_id", pending.ID, "provider", rt.Provider, "skill_key", pending.SkillKey)
+
+	skill, supported, err := loadRuntimeLocalSkillBundle(rt.Provider, pending.SkillKey)
+	if err != nil {
+		d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
+		return
+	}
+	if !supported {
+		d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+			"status": "failed",
+			"error":  fmt.Sprintf("provider %q does not expose runtime local skills", rt.Provider),
+		})
+		return
+	}
+
+	d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+		"status": "completed",
+		"skill":  skill,
 	})
 }
 

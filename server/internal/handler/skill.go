@@ -209,27 +209,14 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	config, _ := json.Marshal(req.Config)
-	if req.Config == nil {
-		config = []byte("{}")
-	}
-
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-
-	qtx := h.Queries.WithTx(tx)
-
-	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+		WorkspaceID: workspaceID,
+		CreatorID:   creatorID,
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Config:      config,
-		CreatedBy:   parseUUID(creatorID),
+		Config:      req.Config,
+		Files:       req.Files,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -238,30 +225,6 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
-	}
-
-	fileResps := make([]SkillFileResponse, 0, len(req.Files))
-	for _, f := range req.Files {
-		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    f.Path,
-			Content: f.Content,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create skill file: "+err.Error())
-			return
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
@@ -868,23 +831,25 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create skill in database
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
+	files := make([]CreateSkillFileRequest, 0, len(imported.files))
+	for _, f := range imported.files {
+		if !validateFilePath(f.path) {
+			continue
+		}
+		files = append(files, CreateSkillFileRequest{
+			Path:    f.path,
+			Content: f.content,
+		})
 	}
-	defer tx.Rollback(r.Context())
 
-	qtx := h.Queries.WithTx(tx)
-
-	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+		WorkspaceID: workspaceID,
+		CreatorID:   creatorID,
 		Name:        imported.name,
 		Description: imported.description,
 		Content:     imported.content,
-		Config:      []byte("{}"),
-		CreatedBy:   parseUUID(creatorID),
+		Config:      map[string]any{},
+		Files:       files,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -893,32 +858,6 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
-	}
-
-	fileResps := make([]SkillFileResponse, 0, len(imported.files))
-	for _, f := range imported.files {
-		if !validateFilePath(f.path) {
-			continue
-		}
-		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    f.path,
-			Content: f.content,
-		})
-		if err != nil {
-			continue
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
