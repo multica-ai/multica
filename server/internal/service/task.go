@@ -372,8 +372,19 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 		return nil
 	}); err != nil {
-		// Log the current task state to help debug why the update matched no rows.
+		// When parallel agents race, a task may already be completed,
+		// cancelled, or failed by the time this call runs. The UPDATE
+		// … WHERE status = 'running' returns no rows in that case.
+		// Treat it as an idempotent success — same pattern as CancelTask.
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Info("complete task: already finalized",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return &existing, nil
+			}
 			slog.Warn("complete task failed",
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
@@ -482,6 +493,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		return nil
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Info("fail task: already finalized",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return &existing, nil
+			}
 			slog.Warn("fail task failed",
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
