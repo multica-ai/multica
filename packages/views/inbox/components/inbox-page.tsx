@@ -28,8 +28,14 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  Plus,
+  MessageSquare,
+  Bot,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
+import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ResizablePanelGroup,
@@ -48,6 +54,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
+import { InboxChatPanel } from "./inbox-chat-panel";
 
 export function InboxPage() {
   const { searchParams, replace } = useNavigation();
@@ -65,7 +72,16 @@ export function InboxPage() {
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  // Chat sessions in inbox
+  const { data: chatSessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+
+  // Track whether the selected key is a chat session
+  const selectedChatSession = chatSessions.find((s) => s.id === selectedKey) ?? null;
+  const selected = selectedChatSession
+    ? null
+    : items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -74,8 +90,10 @@ export function InboxPage() {
     if (loading) return;
     if (!selectedKey) return;
     if (selected) return;
+    // Don't redirect for chat sessions or new-chat state
+    if (selectedChatSession || selectedKey === "new-chat") return;
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, replace, wsPaths]);
+  }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths]);
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
@@ -147,6 +165,10 @@ export function InboxPage() {
 
   // -- Shared sub-components --------------------------------------------------
 
+  const handleNewChat = () => {
+    setSelectedKey("new-chat");
+  };
+
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
@@ -157,6 +179,16 @@ export function InboxPage() {
           </span>
         )}
       </div>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          onClick={handleNewChat}
+          title="New message"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -189,29 +221,81 @@ export function InboxPage() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-      <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">No notifications</p>
-    </div>
-  ) : (
+  const listBody = (
     <div>
-      {items.map((item) => (
-        <InboxListItem
-          key={item.id}
-          item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
-          onClick={() => handleSelect(item)}
-          onArchive={() => handleArchive(item.id)}
-        />
-      ))}
+      {/* Chat sessions */}
+      {chatSessions.length > 0 && (
+        <>
+          {chatSessions.map((session) => {
+            const agent = agentMap.get(session.agent_id);
+            return (
+              <div
+                key={session.id}
+                className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
+                  session.id === selectedKey ? "bg-accent" : ""
+                }`}
+                onClick={() => setSelectedKey(session.id)}
+              >
+                <Avatar className="size-7 shrink-0">
+                  {agent?.avatar_url && <AvatarImage src={agent.avatar_url} />}
+                  <AvatarFallback className="bg-purple-100 text-purple-700 text-xs">
+                    <Bot className="size-3.5" />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium truncate">
+                      {session.title || agent?.name || "Chat"}
+                    </span>
+                    {session.has_unread && (
+                      <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {agent?.name} · {timeAgo(session.updated_at)}
+                  </span>
+                </div>
+                <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+              </div>
+            );
+          })}
+          {items.length > 0 && (
+            <div className="mx-4 my-1 border-b" />
+          )}
+        </>
+      )}
+
+      {/* Notifications */}
+      {items.length === 0 && chatSessions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
+          <p className="text-sm">No notifications</p>
+        </div>
+      ) : (
+        items.map((item) => (
+          <InboxListItem
+            key={item.id}
+            item={item}
+            isSelected={(item.issue_id ?? item.id) === selectedKey}
+            onClick={() => handleSelect(item)}
+            onArchive={() => handleArchive(item.id)}
+          />
+        ))
+      )}
     </div>
   );
 
-  const detailContent = selected?.issue_id ? (
+  const detailContent = selectedChatSession || selectedKey === "new-chat" ? (
+    <InboxChatPanel
+      key={selectedChatSession?.id ?? "new"}
+      sessionId={selectedChatSession?.id ?? null}
+      onSessionCreated={(id) => setSelectedKey(id)}
+    />
+  ) : selected?.issue_id ? (
     <IssueDetail
       key={selected.id}
       issueId={selected.issue_id}
