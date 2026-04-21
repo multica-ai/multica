@@ -37,6 +37,7 @@ export function IssuesPage() {
   const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
+  const subIssueDisplay = useIssueViewStore((s) => s.subIssueDisplay);
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(useIssueViewStore, wsId);
@@ -54,14 +55,37 @@ export function IssuesPage() {
     return allIssues;
   }, [allIssues, scope]);
 
+  // Sub-issue display filter: hide child issues from the list when not "standalone"
+  const displayIssues = useMemo(() => {
+    if (subIssueDisplay === "standalone") return scopedIssues;
+    // "on-parent" and "hidden" both remove child issues from the top-level list
+    return scopedIssues.filter((i) => !i.parent_issue_id);
+  }, [scopedIssues, subIssueDisplay]);
+
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject],
+    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject }),
+    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject],
   );
 
   // Fetch sub-issue progress from the backend so counts are accurate
   // regardless of client-side pagination or filtering of done issues.
-  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  const { data: serverProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  // When sub-issues are hidden entirely, suppress progress indicators too
+  const childProgressMap = subIssueDisplay === "hidden" ? new Map() : serverProgressMap;
+
+  // Build children-by-parent map for inline nesting in "on-parent" mode
+  const childrenMap = useMemo(() => {
+    if (subIssueDisplay !== "on-parent") return new Map<string, typeof scopedIssues>();
+    const map = new Map<string, typeof scopedIssues>();
+    for (const issue of scopedIssues) {
+      if (issue.parent_issue_id) {
+        const children = map.get(issue.parent_issue_id) ?? [];
+        children.push(issue);
+        map.set(issue.parent_issue_id, children);
+      }
+    }
+    return map;
+  }, [scopedIssues, subIssueDisplay]);
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -164,14 +188,14 @@ export function IssuesPage() {
             {viewMode === "board" ? (
               <BoardView
                 issues={issues}
-                allIssues={scopedIssues}
+                allIssues={displayIssues}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
+              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} childrenMap={childrenMap} />
             )}
           </div>
         )}

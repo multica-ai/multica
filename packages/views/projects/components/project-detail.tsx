@@ -103,17 +103,39 @@ function ProjectIssuesContent({ projectIssues, projectId }: { projectIssues: Iss
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const subIssueDisplay = useViewStore((s) => s.subIssueDisplay);
+
+  // Sub-issue display filter: hide child issues when not "standalone"
+  const displayIssues = useMemo(() => {
+    if (subIssueDisplay === "standalone") return projectIssues;
+    return projectIssues.filter((i) => !i.parent_issue_id);
+  }, [projectIssues, subIssueDisplay]);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
+    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
+    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
   );
   const doneColumnCount = useMemo(
-    () => projectIssues.filter((issue) => issue.status === "done").length,
-    [projectIssues],
+    () => displayIssues.filter((issue) => issue.status === "done").length,
+    [displayIssues],
   );
 
-  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  const { data: serverProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  const childProgressMap = subIssueDisplay === "hidden" ? new Map() : serverProgressMap;
+
+  // Build children-by-parent map for inline nesting in "on-parent" mode
+  const childrenMap = useMemo(() => {
+    if (subIssueDisplay !== "on-parent") return new Map<string, Issue[]>();
+    const map = new Map<string, Issue[]>();
+    for (const issue of projectIssues) {
+      if (issue.parent_issue_id) {
+        const children = map.get(issue.parent_issue_id) ?? [];
+        children.push(issue);
+        map.set(issue.parent_issue_id, children);
+      }
+    }
+    return map;
+  }, [projectIssues, subIssueDisplay]);
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -159,7 +181,7 @@ function ProjectIssuesContent({ projectIssues, projectId }: { projectIssues: Iss
       {viewMode === "board" ? (
         <BoardView
           issues={issues}
-          allIssues={projectIssues}
+          allIssues={displayIssues}
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
@@ -172,6 +194,7 @@ function ProjectIssuesContent({ projectIssues, projectId }: { projectIssues: Iss
           issues={issues}
           visibleStatuses={visibleStatuses}
           childProgressMap={childProgressMap}
+          childrenMap={childrenMap}
           doneTotal={doneColumnCount}
           createIssueData={{ project_id: projectId }}
         />

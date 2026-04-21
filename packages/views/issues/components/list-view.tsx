@@ -18,11 +18,13 @@ import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
+const EMPTY_CHILDREN_MAP = new Map<string, Issue[]>();
 
 export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  childrenMap = EMPTY_CHILDREN_MAP,
   doneTotal: doneTotalOverride,
   myIssuesScope,
   myIssuesFilter,
@@ -31,6 +33,8 @@ export function ListView({
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
+  /** Sub-issues grouped by parent ID, used for inline nesting in "on-parent" mode. */
+  childrenMap?: Map<string, Issue[]>;
   /** Override the done-group count (e.g. with a server-filtered total). */
   doneTotal?: number;
   /** When set, use the My Issues load-more hook instead of the workspace one. */
@@ -152,7 +156,12 @@ export function ListView({
                 {statusIssues.length > 0 ? (
                   <>
                     {statusIssues.map((issue) => (
-                      <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
+                      <ListRow
+                        key={issue.id}
+                        issue={issue}
+                        childProgress={childProgressMap.get(issue.id)}
+                        childIssues={childrenMap.get(issue.id)}
+                      />
                     ))}
                     {status === "done" && hasMore && (
                       <InfiniteScrollSentinel onVisible={loadMore} loading={loadingMore} />

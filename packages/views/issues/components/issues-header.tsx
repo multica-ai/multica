@@ -395,6 +395,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const cardProperties = useViewStore((s) => s.cardProperties);
+  const subIssueDisplay = useViewStore((s) => s.subIssueDisplay);
   const act = useViewStoreApi().getState();
 
   const counts = useIssueCounts(scopedIssues);
@@ -673,6 +674,33 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                     <ArrowDown className="size-3.5" />
                   )}
                 </Button>
+              </div>
+            </div>
+
+            <div className="border-b px-3 py-2.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Sub-issues
+              </span>
+              <div className="mt-2 flex gap-1">
+                {([
+                  { value: "standalone" as const, label: "Separate" },
+                  { value: "on-parent" as const, label: "On parent" },
+                  { value: "hidden" as const, label: "Hidden" },
+                ]).map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant="outline"
+                    size="sm"
+                    className={`flex-1 text-xs ${
+                      subIssueDisplay === opt.value
+                        ? "bg-accent text-accent-foreground border-accent"
+                        : ""
+                    }`}
+                    onClick={() => act.setSubIssueDisplay(opt.value)}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
               </div>
             </div>
 

@@ -12,6 +12,7 @@ import { defaultStorage } from "../../platform/storage";
 export type ViewMode = "board" | "list";
 export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
+export type SubIssueDisplay = "standalone" | "on-parent" | "hidden";
 
 export interface CardProperties {
   priority: boolean;
@@ -57,6 +58,7 @@ export interface IssueViewState {
   sortDirection: SortDirection;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
+  subIssueDisplay: SubIssueDisplay;
   setViewMode: (mode: ViewMode) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
@@ -72,6 +74,7 @@ export interface IssueViewState {
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
+  setSubIssueDisplay: (mode: SubIssueDisplay) => void;
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
@@ -94,6 +97,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     childProgress: true,
   },
   listCollapsedStatuses: [],
+  subIssueDisplay: "standalone",
 
   setViewMode: (mode) => set({ viewMode: mode }),
   toggleStatusFilter: (status) =>
@@ -185,6 +189,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.listCollapsedStatuses.filter((s) => s !== status)
         : [...state.listCollapsedStatuses, status],
     })),
+  setSubIssueDisplay: (mode) => set({ subIssueDisplay: mode }),
 });
 
 export const viewStorePersistOptions = (name: string) => ({
@@ -203,6 +208,7 @@ export const viewStorePersistOptions = (name: string) => ({
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
+    subIssueDisplay: state.subIssueDisplay,
   }),
 });
 
