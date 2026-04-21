@@ -37,6 +37,14 @@ jobs:
           git bundle create multica-deploy.bundle HEAD
           ls -lh multica-deploy.bundle
 
+      - name: Package deploy assets
+        run: |
+          mkdir -p deploy-assets/scripts
+          cp multica-deploy.bundle deploy-assets/
+          cp scripts/selfhost-backup.sh deploy-assets/scripts/
+          tar -czf multica-deploy-assets.tgz -C deploy-assets .
+          ls -lh multica-deploy-assets.tgz
+
       - name: Upload bundle to server
         uses: appleboy/scp-action@v1
         with:
@@ -45,7 +53,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ env.DEPLOY_SSH_PORT }}
           fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
-          source: multica-deploy.bundle
+          source: multica-deploy-assets.tgz
           target: /tmp/multica-deploy-${{ github.run_id }}
           overwrite: true
 
@@ -69,13 +77,13 @@ jobs:
           script: |
             set -eu
 
-            bundle_path="/tmp/multica-deploy-${DEPLOY_RUN_ID}/multica-deploy.bundle"
-            backup_root="/home/${DEPLOY_APP_USER}/multica-deploy-backups"
-            timestamp="$(date +%Y%m%d-%H%M%S)"
-            short_sha="$(printf '%s' "$DEPLOY_SHA" | cut -c1-7)"
+            deploy_tmp="/tmp/multica-deploy-${DEPLOY_RUN_ID}"
+            archive_path="${deploy_tmp}/multica-deploy-assets.tgz"
+            bundle_path="${deploy_tmp}/multica-deploy.bundle"
+            backup_script="${deploy_tmp}/scripts/selfhost-backup.sh"
 
-            if [ ! -f "$bundle_path" ]; then
-              echo "bundle not found: $bundle_path" >&2
+            if [ ! -f "$archive_path" ]; then
+              echo "deploy archive not found: $archive_path" >&2
               exit 1
             fi
 
@@ -84,11 +92,11 @@ jobs:
               exit 1
             fi
 
-            sudo mkdir -p "$backup_root"
-            sudo tar -czf "$backup_root/multica-${timestamp}-${short_sha}.tgz" \
-              --exclude='multica/.git' \
-              -C "$(dirname "$DEPLOY_DIR")" \
-              "$(basename "$DEPLOY_DIR")"
+            mkdir -p "${deploy_tmp}/scripts"
+            tar -xzf "$archive_path" -C "$deploy_tmp"
+            chmod +x "$backup_script"
+
+            "$backup_script" "$DEPLOY_DIR" "$DEPLOY_APP_USER" "$DEPLOY_SHA"
 
             sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" fetch "$bundle_path" HEAD
             sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" reset --hard FETCH_HEAD

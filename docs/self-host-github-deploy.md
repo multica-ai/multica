@@ -6,8 +6,8 @@ This fork includes a manual GitHub Actions workflow for deploying to the current
 
 - Triggered manually from GitHub Actions via `Deploy Self-Host`
 - Creates a `git bundle` from the selected ref
-- Uploads that bundle to the server over SSH
-- Backs up the current worktree on the server
+- Uploads the bundle and backup script to the server over SSH
+- Runs a full pre-deploy backup on the server before touching the worktree
 - Resets `/home/ubuntu/services/multica` to the bundled commit
 - Preserves `.env`
 - Rebuilds and restarts the Docker Compose stack
@@ -67,8 +67,24 @@ These defaults already match the current server:
 
 ## Rollback
 
-Each deploy creates a backup tarball on the server:
+Each deploy creates a timestamped backup directory on the server under:
 
-- `/home/ubuntu/multica-deploy-backups/`
+- `/home/ubuntu/multica-release-backups/`
+
+Every backup includes:
+
+- `.env.backup`
+- `postgres.dump`
+- `postgres-globals.sql`
+- `backend_uploads.tgz`
+- `worktree-no-git.tgz`
+- `predeploy-status.txt`
+- `predeploy-working-tree.patch`
+- `predeploy-diffstat.txt`
+- `SHA256SUMS`
+
+The backup logic lives in:
+
+- `scripts/selfhost-backup.sh`
 
 The workflow is designed for the current Ubuntu host and current directory layout. If the server path or SSH user changes later, update the repository variables or the workflow file before the next deployment.
