@@ -18,11 +18,12 @@ const logger = createLogger("chat.ui");
 export function ChatFab() {
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
+  const hideFloatingChat = useChatStore((s) => s.hideFloatingChat);
   const toggle = useChatStore((s) => s.toggle);
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
 
-  if (isOpen) return null;
+  if (isOpen || hideFloatingChat) return null;
 
   const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
   const isRunning = (pending?.tasks ?? []).length > 0;

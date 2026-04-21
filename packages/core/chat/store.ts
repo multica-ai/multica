@@ -69,6 +69,8 @@ export interface ChatState {
   chatWidth: number;
   chatHeight: number;
   isExpanded: boolean;
+  /** When true, ChatFab and ChatWindow are fully hidden (inbox chat is active). */
+  hideFloatingChat: boolean;
   setOpen: (open: boolean) => void;
   toggle: () => void;
   setActiveSession: (id: string | null) => void;
@@ -80,6 +82,7 @@ export interface ChatState {
   /** Persist raw size and auto-exit expanded mode. */
   setChatSize: (width: number, height: number) => void;
   setExpanded: (expanded: boolean) => void;
+  setHideFloatingChat: (hide: boolean) => void;
 }
 
 export interface ChatStoreOptions {
@@ -103,6 +106,7 @@ export function createChatStore(options: ChatStoreOptions) {
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
     chatHeight: Number(storage.getItem(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H,
     isExpanded: storage.getItem(wsKey(CHAT_EXPANDED_KEY)) === "true",
+    hideFloatingChat: false,
     setOpen: (open) => {
       logger.debug("setOpen", { from: get().isOpen, to: open });
       set({ isOpen: open });
@@ -166,6 +170,7 @@ export function createChatStore(options: ChatStoreOptions) {
       }
       set({ isExpanded: expanded });
     },
+    setHideFloatingChat: (hide) => set({ hideFloatingChat: hide }),
   }));
 
   registerForWorkspaceRehydration(() => {

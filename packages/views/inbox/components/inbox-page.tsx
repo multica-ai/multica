@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -29,14 +29,20 @@ import {
   ListChecks,
   ArrowLeft,
   Plus,
-  MessageSquare,
   Bot,
+  Pin,
+  X,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { useCreatePin, useDeletePin, pinListOptions } from "@multica/core/pins";
+import { useAuthStore } from "@multica/core/auth";
+import { api } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -77,11 +83,16 @@ export function InboxPage() {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
-  // Track whether the selected key is a chat session
+  // Chat session management
   const selectedChatSession = chatSessions.find((s) => s.id === selectedKey) ?? null;
   const selected = selectedChatSession
     ? null
     : items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
+  const userId = useAuthStore((s) => s.user?.id ?? "");
+  const { data: pins = [] } = useQuery(pinListOptions(wsId, userId));
+  const qc = useQueryClient();
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -101,6 +112,17 @@ export function InboxPage() {
     const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
     replace(url);
   }, [replace, wsPaths]);
+
+  const handleArchiveChat = useCallback(async (sessionId: string) => {
+    if (sessionId === selectedKey) setSelectedKey("");
+    await api.archiveChatSession(sessionId);
+    qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+  }, [selectedKey, setSelectedKey, wsId, qc]);
+
+  const isChatPinned = useCallback((sessionId: string) => {
+    return pins.some((p) => p.item_type === "chat_session" && p.item_id === sessionId);
+  }, [pins]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
@@ -235,7 +257,7 @@ export function InboxPage() {
             return (
               <div
                 key={session.id}
-                className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
+                className={`group/chat flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
                   session.id === selectedKey ? "bg-accent" : ""
                 }`}
                 onClick={() => setSelectedKey(session.id)}
@@ -259,7 +281,46 @@ export function InboxPage() {
                     {agent?.name} · {timeAgo(session.updated_at)}
                   </span>
                 </div>
-                <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+                <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover/chat:opacity-100 transition-opacity">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isChatPinned(session.id)) {
+                              deletePin.mutate({ itemType: "chat_session", itemId: session.id });
+                            } else {
+                              createPin.mutate({ item_type: "chat_session", item_id: session.id });
+                            }
+                          }}
+                        />
+                      }
+                    >
+                      {isChatPinned(session.id) ? <X className="size-3" /> : <Pin className="size-3" />}
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{isChatPinned(session.id) ? "Unpin" : "Pin"}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleArchiveChat(session.id);
+                          }}
+                        />
+                      }
+                    >
+                      <Archive className="size-3" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Archive</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
             );
           })}

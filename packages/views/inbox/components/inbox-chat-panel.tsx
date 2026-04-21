@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useEffect, useRef } from "react";
+import { useCallback, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
@@ -157,14 +157,12 @@ export function InboxChatPanel({
 
   // Hide the floating chat bubble while this panel is mounted
   const setOpen = useChatStore((s) => s.setOpen);
-  const wasOpenRef = useRef(useChatStore.getState().isOpen);
+  const setHideFloatingChat = useChatStore((s) => s.setHideFloatingChat);
   useEffect(() => {
-    wasOpenRef.current = useChatStore.getState().isOpen;
-    if (wasOpenRef.current) setOpen(false);
-    return () => {
-      // Don't restore — user can reopen manually
-    };
-  }, [setOpen]);
+    setHideFloatingChat(true);
+    if (useChatStore.getState().isOpen) setOpen(false);
+    return () => setHideFloatingChat(false);
+  }, [setOpen, setHideFloatingChat]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -191,7 +189,7 @@ export function InboxChatPanel({
       </div>
 
       {/* Input — fixed at bottom */}
-      <div className="shrink-0 border-t">
+      <div className="shrink-0 border-t pt-2">
       <ChatInput
         onSend={handleSend}
         onStop={handleStop}

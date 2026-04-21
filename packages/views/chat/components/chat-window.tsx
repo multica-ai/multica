@@ -297,7 +297,8 @@ export function ChatWindow() {
   // a real message, or a pending task whose timeline will stream in.
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
-  const isVisible = isOpen && boundsReady;
+  const hideFloatingChat = useChatStore((s) => s.hideFloatingChat);
+  const isVisible = isOpen && boundsReady && !hideFloatingChat;
 
   const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
   const containerStyle: React.CSSProperties = {
