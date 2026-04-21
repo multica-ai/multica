@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -102,6 +103,15 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// Realtime subsystem metrics — connection counts, slow-client evictions,
+	// and per-event-type send QPS counters. Exposed as JSON so it can be
+	// scraped by ops or surfaced in the admin UI without adding a Prometheus
+	// dependency. See MUL-1138 (Phase 0).
+	r.Get("/health/realtime", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(realtime.M.Snapshot())
 	})
 
 	// WebSocket

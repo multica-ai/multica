@@ -147,15 +147,19 @@ func (h *Hub) Run() {
 				total += len(r)
 			}
 			h.mu.Unlock()
+			M.ConnectsTotal.Add(1)
+			M.ActiveConnections.Add(1)
 			slog.Info("ws client connected", "workspace_id", room, "total_clients", total)
 
 		case client := <-h.unregister:
 			h.mu.Lock()
 			room := client.workspaceID
+			removed := false
 			if clients, ok := h.rooms[room]; ok {
 				if _, exists := clients[client]; exists {
 					delete(clients, client)
 					close(client.send)
+					removed = true
 					if len(clients) == 0 {
 						delete(h.rooms, room)
 					}
@@ -166,30 +170,43 @@ func (h *Hub) Run() {
 				total += len(r)
 			}
 			h.mu.Unlock()
+			if removed {
+				M.DisconnectsTotal.Add(1)
+				M.ActiveConnections.Add(-1)
+			}
 			slog.Info("ws client disconnected", "workspace_id", room, "total_clients", total)
 
 		case message := <-h.broadcast:
 			// Global broadcast for daemon events (no workspace filtering)
 			h.mu.RLock()
 			var slow []*Client
+			var sent int64
 			for _, clients := range h.rooms {
 				for client := range clients {
 					select {
 					case client.send <- message:
+						sent++
 					default:
 						slow = append(slow, client)
 					}
 				}
 			}
 			h.mu.RUnlock()
+			if sent > 0 {
+				M.MessagesSentTotal.Add(sent)
+			}
 			if len(slow) > 0 {
+				M.MessagesDroppedTotal.Add(int64(len(slow)))
+				M.SlowEvictionsTotal.Add(int64(len(slow)))
 				h.mu.Lock()
+				evicted := 0
 				for _, client := range slow {
 					room := client.workspaceID
 					if clients, ok := h.rooms[room]; ok {
 						if _, exists := clients[client]; exists {
 							delete(clients, client)
 							close(client.send)
+							evicted++
 							if len(clients) == 0 {
 								delete(h.rooms, room)
 							}
@@ -197,6 +214,10 @@ func (h *Hub) Run() {
 					}
 				}
 				h.mu.Unlock()
+				if evicted > 0 {
+					M.ActiveConnections.Add(int64(-evicted))
+					M.DisconnectsTotal.Add(int64(evicted))
+				}
 			}
 		}
 	}
@@ -207,23 +228,33 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, message []byte) {
 	h.mu.RLock()
 	clients := h.rooms[workspaceID]
 	var slow []*Client
+	var sent int64
 	for client := range clients {
 		select {
 		case client.send <- message:
+			sent++
 		default:
 			slow = append(slow, client)
 		}
 	}
 	h.mu.RUnlock()
 
+	if sent > 0 {
+		M.MessagesSentTotal.Add(sent)
+	}
+
 	// Remove slow clients under write lock
 	if len(slow) > 0 {
+		M.MessagesDroppedTotal.Add(int64(len(slow)))
+		M.SlowEvictionsTotal.Add(int64(len(slow)))
 		h.mu.Lock()
+		evicted := 0
 		for _, client := range slow {
 			if room, ok := h.rooms[workspaceID]; ok {
 				if _, exists := room[client]; exists {
 					delete(room, client)
 					close(client.send)
+					evicted++
 					if len(room) == 0 {
 						delete(h.rooms, workspaceID)
 					}
@@ -231,6 +262,10 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, message []byte) {
 			}
 		}
 		h.mu.Unlock()
+		if evicted > 0 {
+			M.ActiveConnections.Add(int64(-evicted))
+			M.DisconnectsTotal.Add(int64(evicted))
+		}
 	}
 }
 
@@ -262,22 +297,32 @@ func (h *Hub) SendToUser(userID string, message []byte, excludeWorkspace ...stri
 	h.mu.RUnlock()
 
 	var slow []target
+	var sent int64
 	for _, t := range targets {
 		select {
 		case t.client.send <- message:
+			sent++
 		default:
 			slow = append(slow, t)
 		}
 	}
 
+	if sent > 0 {
+		M.MessagesSentTotal.Add(sent)
+	}
+
 	// Remove slow clients under write lock (same pattern as BroadcastToWorkspace)
 	if len(slow) > 0 {
+		M.MessagesDroppedTotal.Add(int64(len(slow)))
+		M.SlowEvictionsTotal.Add(int64(len(slow)))
 		h.mu.Lock()
+		evicted := 0
 		for _, t := range slow {
 			if room, ok := h.rooms[t.workspaceID]; ok {
 				if _, exists := room[t.client]; exists {
 					delete(room, t.client)
 					close(t.client.send)
+					evicted++
 					if len(room) == 0 {
 						delete(h.rooms, t.workspaceID)
 					}
@@ -285,6 +330,10 @@ func (h *Hub) SendToUser(userID string, message []byte, excludeWorkspace ...stri
 			}
 		}
 		h.mu.Unlock()
+		if evicted > 0 {
+			M.ActiveConnections.Add(int64(-evicted))
+			M.DisconnectsTotal.Add(int64(evicted))
+		}
 	}
 }
 
