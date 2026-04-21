@@ -15,12 +15,14 @@ const {
   mockSendCode,
   mockVerifyCode,
   mockIssueCliToken,
+  mockBootstrap,
   searchParamsState,
   authStateRef,
 } = vi.hoisted(() => ({
   mockSendCode: vi.fn(),
   mockVerifyCode: vi.fn(),
   mockIssueCliToken: vi.fn(),
+  mockBootstrap: vi.fn(),
   searchParamsState: { params: new URLSearchParams() },
   authStateRef: {
     state: {
@@ -71,6 +73,7 @@ vi.mock("@multica/core/api", () => ({
     setToken: vi.fn(),
     getMe: vi.fn(),
     issueCliToken: mockIssueCliToken,
+    bootstrap: mockBootstrap,
   },
 }));
 
@@ -82,22 +85,24 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    mockBootstrap.mockRejectedValue({ status: 404 });
   });
 
-  it("renders login form with email input and continue button", () => {
+  it("renders login form with email input and continue button", async () => {
     render(<LoginPage />, { wrapper: createWrapper() });
 
-    expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
+    });
     expect(screen.getByText("Enter your email to get a login code")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Continue" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
   });
 
   it("does not call sendCode when email is empty", async () => {
     const user = userEvent.setup();
     render(<LoginPage />, { wrapper: createWrapper() });
+    await screen.findByRole("button", { name: "Continue" });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(mockSendCode).not.toHaveBeenCalled();
@@ -107,6 +112,7 @@ describe("LoginPage", () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
     render(<LoginPage />, { wrapper: createWrapper() });
+    await screen.findByRole("button", { name: "Continue" });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -120,6 +126,7 @@ describe("LoginPage", () => {
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
     const user = userEvent.setup();
     render(<LoginPage />, { wrapper: createWrapper() });
+    await screen.findByRole("button", { name: "Continue" });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -133,6 +140,7 @@ describe("LoginPage", () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
     render(<LoginPage />, { wrapper: createWrapper() });
+    await screen.findByRole("button", { name: "Continue" });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -146,6 +154,7 @@ describe("LoginPage", () => {
     mockSendCode.mockRejectedValueOnce(new Error("Network error"));
     const user = userEvent.setup();
     render(<LoginPage />, { wrapper: createWrapper() });
+    await screen.findByRole("button", { name: "Continue" });
 
     await user.type(screen.getByLabelText("Email"), "test@multica.ai");
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -162,6 +171,13 @@ describe("LoginPage", () => {
   it("mints a token and deep-links to Desktop when already logged in with platform=desktop", async () => {
     searchParamsState.params = new URLSearchParams({ platform: "desktop" });
     authStateRef.state.user = { id: "u1", email: "test@multica.ai" };
+    mockBootstrap.mockResolvedValue({
+      mode: "trusted_single_user",
+      owner_resolution: "resumed",
+      bootstrap_state: "ready",
+      user: authStateRef.state.user,
+      workspaces: [],
+    });
     mockIssueCliToken.mockImplementation(() =>
       Promise.resolve({ token: "handoff-jwt" }),
     );
@@ -193,5 +209,17 @@ describe("LoginPage", () => {
         value: originalLocation,
       });
     }
+  });
+
+  it("tries trusted bootstrap before falling back to the manual login form", async () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(
+      screen.getByText("Preparing your trusted bootstrap session..."),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockBootstrap).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByText("Sign in to Multica");
   });
 });

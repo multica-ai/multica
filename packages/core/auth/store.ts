@@ -35,21 +35,39 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     initialize: async () => {
       if (cookieAuth) {
-        // In cookie mode, the HttpOnly cookie is sent automatically.
-        // Try to fetch the current user — if the cookie exists the server will accept it.
         try {
-          const user = await api.getMe();
+          const { user } = await api.bootstrap();
           set({ user, isLoading: false });
-        } catch {
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) {
+            try {
+              const user = await api.getMe();
+              set({ user, isLoading: false });
+              return;
+            } catch {
+              set({ user: null, isLoading: false });
+              return;
+            }
+          }
           set({ user: null, isLoading: false });
         }
         return;
       }
 
-      // Token mode: read from localStorage (Electron / legacy).
       const token = storage.getItem("multica_token");
       if (!token) {
-        set({ isLoading: false });
+        try {
+          const { token: bootstrapToken, user } = await api.bootstrapToken();
+          storage.setItem("multica_token", bootstrapToken);
+          api.setToken(bootstrapToken);
+          set({ user, isLoading: false });
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) {
+            set({ isLoading: false });
+            return;
+          }
+          set({ user: null, isLoading: false });
+        }
         return;
       }
 

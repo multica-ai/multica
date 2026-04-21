@@ -7,6 +7,7 @@ import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
+import { ApiError } from "@multica/core/api/client";
 import type { Workspace } from "@multica/core/types";
 import {
   Card,
@@ -42,6 +43,40 @@ function LoginPageContent() {
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
+  const [bootstrapState, setBootstrapState] = useState<
+    "idle" | "pending" | "failed"
+  >("pending");
+
+  useEffect(() => {
+    if (user) {
+      setBootstrapState("idle");
+      return;
+    }
+    if (isLoading) return;
+
+    let cancelled = false;
+    setBootstrapState("pending");
+    api
+      .bootstrap()
+      .then(({ user: bootstrapUser, workspaces }) => {
+        if (cancelled) return;
+        qc.setQueryData(workspaceKeys.list(), workspaces);
+        useAuthStore.setState({ user: bootstrapUser, isLoading: false });
+        setBootstrapState("idle");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setBootstrapState("failed");
+          return;
+        }
+        setBootstrapState("failed");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoading, qc]);
 
   // Already authenticated — honor ?next= or fall back to first workspace
   // (or /workspaces/new if the user has none). Skip this entire path when
@@ -139,6 +174,24 @@ function LoginPageContent() {
             ) : (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!user && !isLoading && bootstrapState === "pending") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Starting Multica</CardTitle>
+            <CardDescription>
+              Preparing your trusted bootstrap session...
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </CardContent>
         </Card>
       </div>

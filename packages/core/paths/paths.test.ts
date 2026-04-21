@@ -35,6 +35,7 @@ describe("paths (global)", () => {
 
 describe("isGlobalPath", () => {
   it("returns true for pre-workspace routes", () => {
+    expect(isGlobalPath("/")).toBe(true);
     expect(isGlobalPath("/login")).toBe(true);
     expect(isGlobalPath("/workspaces/new")).toBe(true);
     expect(isGlobalPath("/invite/abc")).toBe(true);
@@ -43,6 +44,5 @@ describe("isGlobalPath", () => {
 
   it("returns false for workspace-scoped paths", () => {
     expect(isGlobalPath("/acme/issues")).toBe(false);
-    expect(isGlobalPath("/")).toBe(false);
   });
 });

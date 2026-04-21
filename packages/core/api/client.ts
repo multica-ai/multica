@@ -30,6 +30,8 @@ import type {
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
+  TrustedBootstrapResponse,
+  TrustedBootstrapTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
@@ -221,8 +223,12 @@ export class ApiClient {
     await this.fetch("/auth/logout", { method: "POST" });
   }
 
-  async bootstrap(): Promise<BootstrapResponse> {
+  async bootstrap(): Promise<TrustedBootstrapResponse> {
     return this.fetch("/auth/bootstrap", { method: "POST" });
+  }
+
+  async bootstrapToken(): Promise<TrustedBootstrapTokenResponse> {
+    return this.fetch("/auth/bootstrap/token", { method: "POST" });
   }
 
   async issueCliToken(): Promise<{ token: string }> {

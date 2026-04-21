@@ -53,5 +53,6 @@ export type WorkspacePaths = ReturnType<typeof workspaceScoped>;
 const GLOBAL_PREFIXES = ["/login", "/workspaces/", "/invite/", "/auth/", "/logout", "/signup"];
 
 export function isGlobalPath(path: string): boolean {
+  if (path === "/") return true;
   return GLOBAL_PREFIXES.some((p) => path === p || path.startsWith(p));
 }

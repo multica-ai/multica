@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { isGlobalPath } from "../paths";
 import {
   createWorkspaceAwareStorage,
   registerForWorkspaceRehydration,
@@ -9,18 +10,9 @@ import {
 import { defaultStorage } from "../platform/storage";
 
 // Paths that should not be persisted as "last visited":
-//  - Auth flows (/login, /signup, /logout)
-//  - Pre-workspace routes (/workspaces/new, /auth/, /invite/)
+//  - Global / pre-workspace routes (see paths.isGlobalPath)
 //  - Pair flow (/pair/)
-const EXCLUDED_PREFIXES = [
-  "/login",
-  "/signup",
-  "/logout",
-  "/workspaces/",
-  "/auth/",
-  "/invite/",
-  "/pair/",
-];
+const EXCLUDED_PREFIXES = ["/pair/"];
 
 interface NavigationState {
   lastPath: string | null;
@@ -32,7 +24,10 @@ export const useNavigationStore = create<NavigationState>()(
     (set) => ({
       lastPath: null,
       onPathChange: (path: string) => {
-        if (!EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+        if (
+          !isGlobalPath(path) &&
+          !EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))
+        ) {
           set({ lastPath: path });
         }
       },

@@ -13,7 +13,7 @@ import { useNavigation } from "../navigation";
  *
  * Redirect logic:
  *  - Auth still loading → wait
- *  - Not logged in → /login
+ *  - Not logged in → /
  *  - Logged in but workspace list not yet loaded → wait (don't bounce prematurely)
  *  - Logged in but URL slug doesn't resolve to any workspace → /workspaces/new
  *
@@ -38,7 +38,7 @@ export function useDashboardGuard() {
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      replace(`${paths.login()}?next=${encodeURIComponent(nextPath)}`);
+      replace(paths.root());
       return;
     }
     // Wait for workspace list to settle before deciding "no workspace".

@@ -17,6 +17,7 @@ import { defaultStorage } from "./storage";
 import { setCurrentWorkspace } from "./workspace-storage";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
+import { ApiError } from "../api/client";
 
 const logger = createLogger("auth");
 
@@ -67,54 +68,83 @@ export function AuthInitializer({
       useAuthStore.setState({ user: null, isLoading: false });
     };
 
+    const seedWorkspaces = (wsList: unknown) => {
+      qc.setQueryData(workspaceKeys.list(), wsList);
+    };
+
+    const applyBootstrap = (user: User, wsList: unknown, token?: string) => {
+      if (token) {
+        storage.setItem("multica_token", token);
+        api.setToken(token);
+      }
+      onAuthSuccess(user);
+      seedWorkspaces(wsList);
+    };
+
+    const runLegacyInit = () =>
+      Promise.all([api.getMe(), api.listWorkspaces()]).then(([user, wsList]) => {
+        onAuthSuccess(user);
+        seedWorkspaces(wsList);
+      });
+
     if (cookieAuth) {
-      // Cookie mode first tries the trusted single-user bootstrap contract.
-      // If the backend does not support it or bootstrap is otherwise
-      // unavailable, fall back to the legacy "resume existing session via
-      // getMe + listWorkspaces" path so compatibility flows keep working.
       api
         .bootstrap()
         .then(({ user, workspaces }) => {
-          onAuthSuccess(user);
-          qc.setQueryData(workspaceKeys.list(), workspaces);
+          applyBootstrap(user, workspaces);
         })
-        .catch((bootstrapErr) => {
-          logger.warn("bootstrap init failed; falling back to session check", bootstrapErr);
-          Promise.all([api.getMe(), api.listWorkspaces()])
-            .then(([user, wsList]) => {
-              onAuthSuccess(user);
-              qc.setQueryData(workspaceKeys.list(), wsList);
-            })
-            .catch((err) => {
-              logger.error("cookie auth init failed", err);
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 404) {
+            runLegacyInit().catch((legacyErr) => {
+              logger.error("cookie auth init failed", legacyErr);
               onAuthFailure();
             });
+            return;
+          }
+          logger.error("cookie bootstrap init failed", err);
+          onAuthFailure();
         });
       return;
     }
 
-    // Token mode: read from localStorage (Electron / legacy).
     const token = storage.getItem("multica_token");
-    if (!token) {
-      onLogout?.();
-      useAuthStore.setState({ isLoading: false });
-      return;
-    }
-
-    api.setToken(token);
-
-    Promise.all([api.getMe(), api.listWorkspaces()])
-      .then(([user, wsList]) => {
-        onAuthSuccess(user);
-        // Seed React Query cache so the URL-driven layout can resolve the
-        // slug without a second fetch.
-        qc.setQueryData(workspaceKeys.list(), wsList);
-      })
-      .catch((err) => {
+    if (token) {
+      api.setToken(token);
+      runLegacyInit().catch((err) => {
         logger.error("auth init failed", err);
         api.setToken(null);
         setCurrentWorkspace(null, null);
         storage.removeItem("multica_token");
+        api
+          .bootstrapToken()
+          .then(({ user, workspaces, token: bootstrapToken }) => {
+            applyBootstrap(user, workspaces, bootstrapToken);
+          })
+          .catch((bootstrapErr) => {
+            if (bootstrapErr instanceof ApiError && bootstrapErr.status === 404) {
+              onLogout?.();
+              useAuthStore.setState({ isLoading: false });
+              return;
+            }
+            logger.error("bootstrap token init failed", bootstrapErr);
+            onAuthFailure();
+          });
+      });
+      return;
+    }
+
+    api
+      .bootstrapToken()
+      .then(({ user, workspaces, token: bootstrapToken }) => {
+        applyBootstrap(user, workspaces, bootstrapToken);
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) {
+          onLogout?.();
+          useAuthStore.setState({ isLoading: false });
+          return;
+        }
+        logger.error("bootstrap token init failed", err);
         onAuthFailure();
       });
   }, []);

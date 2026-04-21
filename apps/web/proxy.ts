@@ -16,10 +16,14 @@ const LEGACY_ROUTE_SEGMENTS = new Set([
   "settings",
 ]);
 
+const AUTH_COOKIE = "multica_auth";
+
 // Next.js 16 renamed `middleware` → `proxy`. The runtime API is identical.
 export function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-  const hasSession = req.cookies.has("multica_logged_in");
+  const { pathname, search } = req.nextUrl;
+  // Read the server-owned auth cookie directly so proxy redirects work for
+  // trusted bootstrap sessions without waiting for a client-side marker cookie.
+  const hasSession = req.cookies.has(AUTH_COOKIE);
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
   // --- Legacy URL redirect: /issues/... → /{slug}/issues/... ---
@@ -31,8 +35,7 @@ export function proxy(req: NextRequest) {
 
     if (!hasSession) {
       url.pathname = "/login";
-      url.search = "";
-      url.searchParams.set("next", `${pathname}${req.nextUrl.search}`);
+      url.searchParams.set("next", `${pathname}${search}`);
       return NextResponse.redirect(url);
     }
 

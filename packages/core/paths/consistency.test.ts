@@ -72,11 +72,11 @@ describe("global path / reserved slug consistency", () => {
   ];
 
   it("isGlobalPath agrees with the canonical global prefix list", () => {
+    expect(isGlobalPath("/")).toBe(true);
     for (const prefix of globalPrefixes) {
       expect(isGlobalPath(prefix)).toBe(true);
     }
     expect(isGlobalPath("/acme/issues")).toBe(false);
-    expect(isGlobalPath("/")).toBe(false);
   });
 
   it("every global prefix's first path segment is a reserved slug", () => {

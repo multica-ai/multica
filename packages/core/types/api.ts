@@ -116,6 +116,20 @@ export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {
   token: string;
 }
 
+// Trusted bootstrap auth
+export interface TrustedBootstrapResponse {
+  mode: "trusted_single_user";
+  owner_resolution: "created" | "resumed";
+  bootstrap_state: "ready" | string;
+  user: import("./workspace").User;
+  workspaces: import("./workspace").Workspace[];
+}
+
+export interface TrustedBootstrapTokenResponse
+  extends TrustedBootstrapResponse {
+  token: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;
