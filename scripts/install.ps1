@@ -48,7 +48,14 @@ function Install-CliBinary {
     if (-not [Environment]::Is64BitOperatingSystem) {
         Write-Fail "Multica requires a 64-bit Windows installation."
     }
-    $arch = "amd64"
+
+    # Distinguish amd64 vs arm64 — Is64BitOperatingSystem is true for both.
+    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    switch ($osArch) {
+        'X64'   { $arch = "amd64" }
+        'Arm64' { $arch = "arm64" }
+        default { Write-Fail "Unsupported Windows architecture: $osArch (only X64 and Arm64 are supported)." }
+    }
 
     $latest = Get-LatestVersion
     if (-not $latest) {

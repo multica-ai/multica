@@ -44,3 +44,60 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  # Build the Desktop installers for Linux and Windows and upload them to
+  # the GitHub Release that the `release` job above just published. macOS
+  # Desktop continues to ship via the manual `release-desktop` skill so it
+  # can be signed + notarized with Apple Developer credentials that are
+  # not (yet) wired into CI.
+  desktop:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install rpmbuild (Linux)
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Desktop installers (${{ matrix.target }})
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder's GitHub publisher reads this:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable code signing on Linux/Windows for now — the public
+          # release is unsigned for these platforms, the CLI carries the
+          # trust boundary. Set CSC_LINK in repo secrets to enable
+          # Windows signing later.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
