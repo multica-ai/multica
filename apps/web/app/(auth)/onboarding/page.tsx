@@ -37,28 +37,33 @@ export default function OnboardingPage() {
 
   if (isLoading || !user) return null;
 
-  // Layout: top-aligned, body scrolls. `min-h-svh` gives short steps
-  // (welcome) a full-viewport background so they don't feel cramped.
-  // Previous `my-auto` + `items-center` vertical-centering trick broke
-  // for long content (questionnaire with many options): the centered
-  // block's top could be pushed above the scroll origin, making
-  // Continue/Skip unreachable. Top-alignment with natural body scroll
-  // is the boring-but-correct baseline.
+  // Layout: the page owns its own scroll because the root layout
+  // sets `body { overflow: hidden }` for the app-shell convention
+  // (sidebar / topbar fixed, content scrolls inside). The outermost
+  // `h-full overflow-y-auto` is our scroll container; the inner
+  // `min-h-full flex flex-col items-center` lets the content claim
+  // full viewport height when short; `my-auto` on the content block
+  // then centers it vertically. When content is taller than the
+  // viewport the flex auto-margin harmlessly resolves to 0 (per the
+  // flex spec — auto margins absorb positive free space only, never
+  // negative), so Continue/Skip always remain reachable via scroll.
   return (
-    <div className="flex min-h-svh flex-col items-center bg-background px-6 py-12">
-      <div className="w-full max-w-xl">
-        <OnboardingFlow
-          onComplete={(ws) => {
-            if (ws) router.push(paths.workspace(ws.slug).issues());
-            else router.push(paths.root());
-          }}
-          runtimeInstructions={
-            <CliInstallInstructions
-              apiUrl={process.env.NEXT_PUBLIC_API_URL}
-              appUrl={appUrl}
-            />
-          }
-        />
+    <div className="h-full overflow-y-auto bg-background">
+      <div className="flex min-h-full flex-col items-center px-6 py-12">
+        <div className="my-auto w-full max-w-xl">
+          <OnboardingFlow
+            onComplete={(ws) => {
+              if (ws) router.push(paths.workspace(ws.slug).issues());
+              else router.push(paths.root());
+            }}
+            runtimeInstructions={
+              <CliInstallInstructions
+                apiUrl={process.env.NEXT_PUBLIC_API_URL}
+                appUrl={appUrl}
+              />
+            }
+          />
+        </div>
       </div>
     </div>
   );
