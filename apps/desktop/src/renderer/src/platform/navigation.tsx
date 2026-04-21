@@ -15,10 +15,11 @@ import {
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
-// Public web app URL — injected at build time via .env.production. Falls
-// back to the production host for dev builds so "Copy link" yields a URL
-// that actually points somewhere a teammate can open.
-const APP_URL = import.meta.env.VITE_APP_URL || "https://multica.ai";
+// Public web app URL — injected at build time via .env.production. In dev
+// (no VITE_APP_URL set) falls back to the local web dev server so "Copy
+// link" in a dev build yields a URL that points at the running dev
+// frontend, not the prod host. Matches the fallback used in pages/login.tsx.
+const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:3000";
 
 /**
  * Extract the leading workspace slug from a path, or null if the path isn't
