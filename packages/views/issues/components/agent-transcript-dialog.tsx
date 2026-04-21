@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   Bot,
   ChevronRight,
@@ -16,16 +16,24 @@ import {
   Monitor,
   Cloud,
   Cpu,
+  Filter,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuCheckboxItem,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { api } from "@multica/core/api";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "../utils/redact";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────
 
 interface TimelineItem {
   seq: number;
@@ -168,8 +176,43 @@ export function AgentTranscriptDialog({
   const [copied, setCopied] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+  const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Derive filter options from each item:
+  //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
+  //   text → filter value = "text", display = "Agent"
+  //   thinking / error → value/display = type itself
+  const filterOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const item of items) {
+      if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
+        const key = `tool:${item.tool}`;
+        if (!options.has(key)) options.set(key, key);
+      } else {
+        const value = item.type;
+        if (!options.has(value)) {
+          options.set(value, value === "text" ? "Agent" : value);
+        }
+      }
+    }
+    return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [items]);
+
+  // Resolve filter key for each item
+  const itemFilterKey = (item: TimelineItem) => {
+    if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
+      return `tool:${item.tool}`;
+    }
+    return item.type;
+  };
+
+  // Strict filter
+  const filteredItems = useMemo(() => {
+    if (selectedTools.size === 0) return items;
+    return items.filter((item) => selectedTools.has(itemFilterKey(item)));
+  }, [items, selectedTools]);
 
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
@@ -212,9 +255,9 @@ export function AgentTranscriptDialog({
     }
   }, []);
 
-  // Copy all events as text
+  // Copy all events as text (uses filtered items)
   const handleCopyAll = useCallback(() => {
-    const text = items
+    const text = filteredItems
       .map((item) => {
         const label = getEventLabel(item);
         const summary = getEventSummary(item);
@@ -225,7 +268,21 @@ export function AgentTranscriptDialog({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [items]);
+  }, [filteredItems]);
+
+  // Toggle tool filter
+  const toggleTool = useCallback((tool: string) => {
+    setSelectedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(tool)) next.delete(tool);
+      else next.add(tool);
+      return next;
+    });
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setSelectedTools(new Set());
+  }, []);
 
   // Duration
   const duration =
@@ -235,7 +292,7 @@ export function AgentTranscriptDialog({
         ? elapsed
         : null;
 
-  const toolCount = items.filter((i) => i.type === "tool_use").length;
+  const toolCount = filteredItems.filter((i) => i.type === "tool_use").length;
 
   // Status display
   const statusBadge = isLive ? (
@@ -285,6 +342,48 @@ export function AgentTranscriptDialog({
             {statusBadge}
 
             <div className="ml-auto flex items-center gap-1">
+              {filterOptions.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className={cn(
+                      "flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
+                      selectedTools.size > 0
+                        ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                    )}
+                  >
+                    <Filter className="h-3 w-3" />
+                    Filter
+                    {selectedTools.size > 0 && (
+                      <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
+                        {selectedTools.size}
+                      </span>
+                    )}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-auto">
+                    {filterOptions.map(([value, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={value}
+                        checked={selectedTools.has(value)}
+                        onCheckedChange={() => toggleTool(value)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                    {selectedTools.size > 0 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <button
+                          onClick={clearFilters}
+                          className="w-full px-2 py-1.5 text-left text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm transition-colors"
+                        >
+                          Clear filters
+                        </button>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <button
                 onClick={handleCopyAll}
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -338,7 +437,9 @@ export function AgentTranscriptDialog({
             {toolCount > 0 && (
               <MetadataChip>{toolCount} tool calls</MetadataChip>
             )}
-            <MetadataChip>{items.length} events</MetadataChip>
+            <MetadataChip>
+              {selectedTools.size > 0 ? `${filteredItems.length} of ${items.length}` : items.length} events
+            </MetadataChip>
 
             {/* Created time */}
             {task.created_at && (
@@ -355,10 +456,10 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
-        {items.length > 0 && (
+        {filteredItems.length > 0 && (
           <div className="border-b px-4 py-2.5 shrink-0">
             <TimelineBar
-              items={items}
+              items={filteredItems}
               selectedIdx={selectedIdx}
               onSegmentClick={handleSegmentClick}
             />
@@ -370,7 +471,7 @@ export function AgentTranscriptDialog({
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {items.length === 0 ? (
+          {filteredItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               {isLive ? (
                 <div className="flex items-center gap-2">
@@ -383,7 +484,7 @@ export function AgentTranscriptDialog({
             </div>
           ) : (
             <div className="divide-y">
-              {items.map((item, idx) => (
+              {filteredItems.map((item, idx) => (
                 <TranscriptEventRow
                   key={`${item.seq}-${idx}`}
                   ref={(el) => {
@@ -403,8 +504,6 @@ export function AgentTranscriptDialog({
     </Dialog>
   );
 }
-
-// ─── Timeline bar (colored segments) ────────────────────────────────────────
 
 // ─── Metadata chip ──────────────────────────────────────────────────────────
 
@@ -438,7 +537,6 @@ function TimelineBar({
   selectedIdx: number | null;
   onSegmentClick: (idx: number) => void;
 }) {
-  // Group consecutive items of the same color into segments for cleaner display
   const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
   let currentColor: EventColor | null = null;
   let currentStart = 0;
@@ -463,7 +561,6 @@ function TimelineBar({
       {segments.map((seg, segIdx) => {
         const isSelected = selectedIdx !== null && selectedIdx >= seg.startIdx && selectedIdx <= seg.endIdx;
         const color = colorClasses[seg.color];
-        // Width proportional to number of events in segment
         const widthPercent = (seg.count / items.length) * 100;
 
         return (
@@ -478,7 +575,6 @@ function TimelineBar({
             onClick={() => onSegmentClick(seg.startIdx)}
             title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
           >
-            {/* Tooltip on hover */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
               <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
                 {getEventLabel(items[seg.startIdx]!)}
