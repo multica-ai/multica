@@ -232,6 +232,72 @@ func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 	}
 }
 
+func TestFetchFromSkillsSh_ResolvesAliasedSkillNamesViaFrontmatter(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/vercel-labs/agent-skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/vercel-labs/agent-skills/git/trees/main":
+				if got := r.URL.Query().Get("recursive"); got != "1" {
+					t.Fatalf("tree recursive = %q, want 1", got)
+				}
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/composition-patterns/SKILL.md", Type: "blob"},
+						{Path: "skills/react-best-practices/SKILL.md", Type: "blob"},
+					},
+				})
+			case "/repos/vercel-labs/agent-skills/contents/skills/composition-patterns":
+				if got := r.URL.Query().Get("ref"); got != "main" {
+					t.Fatalf("resolved dir ref = %q, want main", got)
+				}
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "rules.md",
+						Path:        "skills/composition-patterns/rules.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/vercel-labs/agent-skills/main/skills/composition-patterns/rules.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/vercel-labs/agent-skills/main/skills/composition-patterns/SKILL.md":
+				w.Write([]byte("---\nname: vercel-composition-patterns\ndescription: aliased skill\n---\ncontent"))
+			case "/vercel-labs/agent-skills/main/skills/react-best-practices/SKILL.md":
+				w.Write([]byte("---\nname: vercel-react-best-practices\n---\ncontent"))
+			case "/vercel-labs/agent-skills/main/skills/composition-patterns/rules.md":
+				w.Write([]byte("rules"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/vercel-labs/agent-skills/vercel-composition-patterns")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+
+	if result.name != "vercel-composition-patterns" {
+		t.Fatalf("name = %q, want vercel-composition-patterns", result.name)
+	}
+	gotPaths := importedFilePaths(result.files)
+	wantPaths := []string{"rules.md"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
+	}
+	if !containsString(*requests, "api.github.com /repos/vercel-labs/agent-skills/git/trees/main?recursive=1") {
+		t.Fatalf("expected fallback tree lookup, got requests %v", *requests)
+	}
+}
+
 func TestFetchFromSkillsSh_AnthropicPptxIntegration(t *testing.T) {
 	if os.Getenv("MULTICA_RUN_SKILLS_SH_INTEGRATION") == "" {
 		t.Skip("set MULTICA_RUN_SKILLS_SH_INTEGRATION=1 to run live GitHub integration test")

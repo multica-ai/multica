@@ -471,6 +471,16 @@ type githubRepoInfo struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
+type githubTreeResponse struct {
+	Tree      []githubTreeEntry `json:"tree"`
+	Truncated bool              `json:"truncated"`
+}
+
+type githubTreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"` // "blob" or "tree"
+}
+
 // fetchGitHubDefaultBranch returns the default branch of a GitHub repository.
 // Falls back to "main" if the API call fails.
 func fetchGitHubDefaultBranch(httpClient *http.Client, owner, repo string) string {
@@ -681,7 +691,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	var skillMdBody []byte
 	var skillDir string
 	for _, dir := range candidatePaths {
-		body, err := fetchRawFile(httpClient, rawPrefix+"/"+dir+"/SKILL.md")
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, dir+"/SKILL.md"))
 		if err == nil {
 			skillMdBody = body
 			skillDir = dir
@@ -689,7 +699,10 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 	}
 	if skillMdBody == nil {
-		return nil, fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
+		skillDir, skillMdBody, err = resolveGitHubSkillDirByName(httpClient, owner, repo, defaultBranch, rawPrefix, skillName)
+		if err != nil {
+			return nil, fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
+		}
 	}
 
 	// Parse name and description from YAML frontmatter
@@ -705,8 +718,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	}
 
 	// 2. List supporting files via GitHub API
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
-		url.PathEscape(owner), url.PathEscape(repo), skillDir, url.QueryEscape(defaultBranch))
+	apiURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
 	dirResp, err := httpClient.Get(apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		// Can't list files — return what we have (SKILL.md only)
@@ -730,7 +742,10 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	slog.Info("skills.sh import: collected supporting files", "skill", skillName, "files", len(allFiles))
 
 	// 4. Download each file
-	basePath := skillDir + "/"
+	basePath := ""
+	if skillDir != "" {
+		basePath = skillDir + "/"
+	}
 	for _, entry := range allFiles {
 		if entry.DownloadURL == "" {
 			continue
@@ -746,6 +761,44 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	}
 
 	return result, nil
+}
+
+func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return "", nil, err
+	}
+	if tree.Truncated {
+		slog.Warn("skills.sh import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
+	}
+
+	for _, entry := range tree.Tree {
+		if entry.Type != "blob" || !strings.HasSuffix(entry.Path, "/SKILL.md") && entry.Path != "SKILL.md" {
+			continue
+		}
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, entry.Path))
+		if err != nil {
+			slog.Warn("skills.sh import: fallback SKILL.md fetch failed", "path", entry.Path, "error", err)
+			continue
+		}
+		name, _ := parseSkillFrontmatter(string(body))
+		if name == skillName {
+			return skillDirFromSkillFilePath(entry.Path), body, nil
+		}
+	}
+
+	return "", nil, fmt.Errorf("skill %q not found", skillName)
 }
 
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
@@ -830,6 +883,37 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+func buildRawGitHubURL(rawPrefix, repoPath string) string {
+	parts := strings.Split(strings.Trim(repoPath, "/"), "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	if len(escaped) == 0 {
+		return rawPrefix
+	}
+	return rawPrefix + "/" + strings.Join(escaped, "/")
+}
+
+func buildGitHubContentsURL(owner, repo, repoPath, ref string) string {
+	base := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents",
+		url.PathEscape(owner), url.PathEscape(repo))
+	if repoPath == "" {
+		return base + "?ref=" + url.QueryEscape(ref)
+	}
+	return base + "/" + strings.TrimPrefix(buildRawGitHubURL("", repoPath), "/") + "?ref=" + url.QueryEscape(ref)
+}
+
+func skillDirFromSkillFilePath(path string) string {
+	if path == "SKILL.md" {
+		return ""
+	}
+	return strings.TrimSuffix(path, "/SKILL.md")
 }
 
 // --- Import handler ---
