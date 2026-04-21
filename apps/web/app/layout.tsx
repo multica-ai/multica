@@ -43,6 +43,8 @@ const geistMono = Geist_Mono({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#05070b" },
@@ -89,9 +91,9 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable)}
+      className={cn("antialiased font-sans h-svh", inter.variable, geistMono.variable)}
     >
-      <body className="h-full overflow-hidden">
+      <body className="h-svh overflow-hidden">
         <LocaleSync />
         <ThemeProvider>
           <WebProviders>

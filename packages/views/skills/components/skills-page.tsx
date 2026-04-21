@@ -9,7 +9,9 @@ import {
   Save,
   AlertCircle,
   Download,
+  ArrowLeft,
 } from "lucide-react";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
 import {
   Dialog,
@@ -440,7 +442,7 @@ function SkillDetail({
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
             <Sparkles className="h-4 w-4 text-muted-foreground" />
           </div>
-          <div className="grid grid-cols-2 gap-3 flex-1 min-w-0">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3 flex-1 min-w-0">
             <Input
               type="text"
               value={name}
@@ -484,8 +486,8 @@ function SkillDetail({
 
       {/* File browser: tree + viewer */}
       <div className="flex flex-1 min-h-0">
-        {/* File tree */}
-        <div className="w-52 shrink-0 border-r flex flex-col">
+        {/* File tree — hidden on mobile */}
+        <div className="hidden md:flex w-52 shrink-0 border-r flex-col">
           <div className="flex h-10 items-center justify-between border-b px-3">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Files
@@ -668,6 +670,7 @@ export default function SkillsPage() {
   };
 
   const selected = skills.find((s) => s.id === selectedId) ?? null;
+  const isMobile = useIsMobile();
 
   if (isLoading) {
     return (
@@ -713,6 +716,84 @@ export default function SkillsPage() {
     );
   }
 
+  // -- Mobile layout: list / detail toggle --
+  if (isMobile) {
+    if (selected) {
+      return (
+        <div className="flex flex-1 flex-col min-h-0">
+          <div className="flex h-12 shrink-0 items-center border-b px-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedId("")}
+              className="gap-1.5 text-muted-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Skills
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <SkillDetail
+              key={selected.id}
+              skill={selected}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+            />
+          </div>
+          {showCreate && (
+            <CreateSkillDialog
+              onClose={() => setShowCreate(false)}
+              onCreate={handleCreate}
+              onImport={handleImport}
+            />
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-1 flex-col min-h-0">
+        <div className="flex h-12 items-center justify-between border-b px-4">
+          <h1 className="text-sm font-semibold">Skills</h1>
+          <Button variant="ghost" size="icon-xs" onClick={() => setShowCreate(true)}>
+            <Plus className="h-4 w-4 text-muted-foreground" />
+          </Button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {skills.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-4 py-12">
+              <Sparkles className="h-8 w-8 text-muted-foreground/40" />
+              <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
+              <Button onClick={() => setShowCreate(true)} size="xs" className="mt-3">
+                <Plus className="h-3 w-3" />
+                Create Skill
+              </Button>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {skills.map((skill) => (
+                <SkillListItem
+                  key={skill.id}
+                  skill={skill}
+                  isSelected={skill.id === selectedId}
+                  onClick={() => setSelectedId(skill.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {showCreate && (
+          <CreateSkillDialog
+            onClose={() => setShowCreate(false)}
+            onCreate={handleCreate}
+            onImport={handleImport}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // -- Desktop layout: resizable two-panel --
   return (
     <ResizablePanelGroup
       orientation="horizontal"
