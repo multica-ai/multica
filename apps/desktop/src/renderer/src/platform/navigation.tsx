@@ -21,6 +21,14 @@ import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 // frontend, not the prod host. Matches the fallback used in pages/login.tsx.
 const APP_URL = import.meta.env.VITE_APP_URL || "http://localhost:3000";
 
+function handleSessionNavigation(path: string): boolean {
+  if (path === "/login" || path === "/logout") {
+    useAuthStore.getState().logout();
+    return true;
+  }
+  return false;
+}
+
 /**
  * Extract the leading workspace slug from a path, or null if the path isn't
  * workspace-scoped (root, login, any reserved prefix).
@@ -125,16 +133,14 @@ export function DesktopNavigationProvider({
   const adapter: NavigationAdapter = useMemo(
     () => ({
       push: (path: string) => {
-        if (path === "/login") {
-          useAuthStore.getState().logout();
-          return;
-        }
+        if (handleSessionNavigation(path)) return;
         const active = currentActiveTab();
         if (tryRouteToOverlay(path, active?.router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
         active?.router.navigate(path);
       },
       replace: (path: string) => {
+        if (handleSessionNavigation(path)) return;
         const active = currentActiveTab();
         if (tryRouteToOverlay(path, active?.router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
@@ -195,11 +201,13 @@ export function TabNavigationProvider({
   const adapter: NavigationAdapter = useMemo(
     () => ({
       push: (path: string) => {
+        if (handleSessionNavigation(path)) return;
         if (tryRouteToOverlay(path, router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
         router.navigate(path);
       },
       replace: (path: string) => {
+        if (handleSessionNavigation(path)) return;
         if (tryRouteToOverlay(path, router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
         router.navigate(path, { replace: true });

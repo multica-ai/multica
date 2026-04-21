@@ -8,6 +8,7 @@ import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "sonner";
 import { DesktopLoginPage } from "./pages/login";
+import { requestDesktopBootstrapToken } from "./auth/bootstrap";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
@@ -26,6 +27,8 @@ function AppContent() {
   // finishes, so IndexRedirect gets a definitive workspace state on
   // first render.
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [bootstrapFallbackVisible, setBootstrapFallbackVisible] = useState(false);
+  const bootstrapAttemptedRef = useRef(false);
 
   // Tell the main process which backend URL we talk to, so daemon-manager
   // can pick the matching CLI profile (server_url from ~/.multica config).
@@ -66,6 +69,46 @@ function AppContent() {
       }
     });
   }, [qc]);
+
+  // Trusted single-user bootstrap: if the app reaches an unauthenticated
+  // steady state, ask the backend for a desktop token before showing the
+  // browser-login compatibility shell. This removes the native login form
+  // for the common single-user deployment, while still failing closed on
+  // multi-user or older servers that do not expose the bootstrap endpoint.
+  useEffect(() => {
+    if (user) {
+      bootstrapAttemptedRef.current = false;
+      setBootstrapFallbackVisible(false);
+      return;
+    }
+    if (isLoading || bootstrapping || bootstrapAttemptedRef.current) return;
+
+    bootstrapAttemptedRef.current = true;
+    setBootstrapping(true);
+    setBootstrapFallbackVisible(false);
+
+    (async () => {
+      const result = await requestDesktopBootstrapToken(DAEMON_TARGET_API_URL);
+      if (result.kind !== "success") {
+        setBootstrapFallbackVisible(true);
+        return;
+      }
+
+      try {
+        await useAuthStore.getState().loginWithToken(result.token);
+        try {
+          const wsList = await api.listWorkspaces();
+          qc.setQueryData(workspaceKeys.list(), wsList);
+        } catch {
+          // Non-fatal: authenticated shell can fetch the workspace list on demand.
+        }
+      } catch {
+        setBootstrapFallbackVisible(true);
+      }
+    })().finally(() => {
+      setBootstrapping(false);
+    });
+  }, [bootstrapping, isLoading, qc, user]);
 
   // Sync token and start the daemon whenever the user logs in.
   useEffect(() => {
@@ -158,7 +201,8 @@ function AppContent() {
     );
   }
 
-  if (!user) return <DesktopLoginPage />;
+  if (!user && bootstrapFallbackVisible) return <DesktopLoginPage />;
+  if (!user) return null;
   return <DesktopShell />;
 }
 

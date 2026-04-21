@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import {
   workspaceBySlugOptions,
   workspaceListOptions,
@@ -34,9 +34,12 @@ export function WorkspaceRouteLayout() {
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
 
-  // Workspace routes require auth. If user is unauthenticated, bounce to /login.
+  // Desktop has no in-app /login route anymore. When auth disappears
+  // (logout, 401 recovery, account switch), repoint the per-tab memory router
+  // to the harmless root index and let App.tsx render the bootstrap or browser
+  // sign-in shell at the window level.
   useEffect(() => {
-    if (!isAuthLoading && !user) navigate(paths.login(), { replace: true });
+    if (!isAuthLoading && !user) navigate("/", { replace: true });
   }, [isAuthLoading, user, navigate]);
 
   const { data: workspace, isFetched: listFetched } = useQuery({
