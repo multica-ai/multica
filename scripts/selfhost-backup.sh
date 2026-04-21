@@ -15,7 +15,7 @@ if [[ -z "${DEPLOY_APP_USER}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${DEPLOY_DIR}" ]]; then
+if ! sudo -u "${DEPLOY_APP_USER}" test -d "${DEPLOY_DIR}"; then
   echo "deploy directory does not exist: ${DEPLOY_DIR}" >&2
   exit 1
 fi
