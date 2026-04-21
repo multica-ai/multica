@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: multica-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      imagePullSecrets:
+        - name: swr-secret
+      containers:
+        - name: backend
+          image: swr.ap-southeast-1.myhuaweicloud.com/mazeai/multica-backend:bot
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: DATABASE_URL
+            - name: PORT
+              value: "8080"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: JWT_SECRET
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: POSTGRES_PASSWORD
+            - name: FRONTEND_ORIGIN
+              value: https://multica.wujieai.com
+            - name: ALLOWED_ORIGINS
+              value: https://multica.wujieai.com
+            - name: MULTICA_APP_URL
+              value: https://multica.wujieai.com
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: RESEND_API_KEY
+                  optional: true
+            - name: RESEND_FROM_EMAIL
+              value: noreply@multica.ai
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            - name: GOOGLE_REDIRECT_URI
+              value: https://multica.wujieai.com/auth/callback
+            - name: COOKIE_DOMAIN
+              value: .wujieai.com
+            - name: LOCAL_UPLOAD_DIR
+              value: ./data/uploads
+            - name: LOCAL_UPLOAD_BASE_URL
+              value: https://multica.wujieai.com
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/data/uploads
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: backend-uploads
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backend-uploads
+  namespace: multica-bot
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: multica-bot
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      targetPort: 8080
