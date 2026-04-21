@@ -705,6 +705,25 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {/* Quick status change button */}
+            <StatusPicker
+              status={issue.status}
+              onUpdate={handleUpdateField}
+              triggerRender={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "gap-1.5 text-xs font-medium",
+                    STATUS_CONFIG[issue.status].iconColor
+                  )}
+                >
+                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">{STATUS_CONFIG[issue.status].label}</span>
+                  <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+                </Button>
+              }
+            />
             <Tooltip>
               <TooltipTrigger
                 render={
