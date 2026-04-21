@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentfarm
+labels:
+  - pairs:
+      app: agentfarm-tools
+    includeSelectors: true
+    includeTemplates: true
+resources:
+  - ../../base/
+# patches:
+#   - path: patches/ingress.yaml
+#     target:
+#       group: networking.k8s.io
+#       version: v1
+#       kind: Ingress
+#       name: agentfarm-ingress
+#   - path: patches/service-account.yaml
+#     target:
+#       group: ""
+#       version: v1
+#       kind: ServiceAccount
+#       name: agentfarm
+# images:
+#   - name: agentfarm-image
+#     newName: ghcr.io/g2crowd/agentfarm-prod:latest
