@@ -35,6 +35,7 @@ linux:
   target:
     - AppImage
     - deb
+    - rpm
   artifactName: multica-desktop-${version}-linux-${arch}.${ext}
 win:
   target:
