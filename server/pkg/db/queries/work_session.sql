@@ -1,6 +1,6 @@
 -- name: CreateWorkSession :one
-INSERT INTO work_session (workspace_id, issue_id, user_id, session_type, work_dir)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO work_session (workspace_id, issue_id, user_id, session_type, work_dir, branch)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetWorkSession :one
@@ -21,6 +21,10 @@ SET status = 'failed',
     summary = $2,
     completed_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: UpdateWorkSessionName :one
+UPDATE work_session SET name = $2 WHERE id = $1
 RETURNING *;
 
 -- name: ListWorkSessionsByIssue :many

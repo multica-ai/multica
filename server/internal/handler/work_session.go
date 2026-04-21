@@ -17,6 +17,7 @@ func (h *Handler) CreateWorkSession(w http.ResponseWriter, r *http.Request) {
 		IssueID     string `json:"issue_id"`
 		SessionType string `json:"session_type"`
 		WorkDir     string `json:"work_dir"`
+		Branch      string `json:"branch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -49,6 +50,7 @@ func (h *Handler) CreateWorkSession(w http.ResponseWriter, r *http.Request) {
 		UserID:      parseUUID(userID),
 		SessionType: req.SessionType,
 		WorkDir:     pgtype.Text{String: req.WorkDir, Valid: req.WorkDir != ""},
+		Branch:      pgtype.Text{String: req.Branch, Valid: req.Branch != ""},
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create work session")
@@ -103,6 +105,40 @@ func (h *Handler) CompleteWorkSession(w http.ResponseWriter, r *http.Request) {
 		"id":           uuidToString(updated.ID),
 		"status":       updated.Status,
 		"completed_at": timestampToPtr(updated.CompletedAt),
+	})
+}
+
+// UpdateWorkSessionName sets the name of a work session.
+func (h *Handler) UpdateWorkSessionName(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ws, err := h.Queries.GetWorkSession(r.Context(), parseUUID(id))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "work session not found")
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	if uuidToString(ws.UserID) != userID {
+		writeError(w, http.StatusForbidden, "not your work session")
+		return
+	}
+	updated, err := h.Queries.UpdateWorkSessionName(r.Context(), db.UpdateWorkSessionNameParams{
+		ID:   parseUUID(id),
+		Name: pgtype.Text{String: req.Name, Valid: req.Name != ""},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update name")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":   uuidToString(updated.ID),
+		"name": textToPtr(updated.Name),
 	})
 }
 
@@ -227,6 +263,8 @@ func (h *Handler) ListWorkSessions(w http.ResponseWriter, r *http.Request) {
 			"user_id":      uuidToString(ws.UserID),
 			"session_type": ws.SessionType,
 			"work_dir":     textToPtr(ws.WorkDir),
+			"branch":       textToPtr(ws.Branch),
+			"name":         textToPtr(ws.Name),
 			"status":       ws.Status,
 			"summary":      textToPtr(ws.Summary),
 			"created_at":   timestampToString(ws.CreatedAt),

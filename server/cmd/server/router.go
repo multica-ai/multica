@@ -258,6 +258,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/messages", h.GetWorkSessionMessages)
 					r.Put("/complete", h.CompleteWorkSession)
+					r.Put("/name", h.UpdateWorkSessionName)
 					r.Post("/messages", h.ReportWorkSessionMessages)
 					r.Post("/resume", h.ResumeWorkSession)
 					r.Post("/fork", h.ForkWorkSession)
@@ -267,6 +268,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
+				r.Get("/by-repo", h.GetProjectByRepo)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {

@@ -18,7 +18,7 @@ SET status = 'completed',
     session_id = $3,
     completed_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at
+RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch
 `
 
 type CompleteWorkSessionParams struct {
@@ -42,14 +42,16 @@ func (q *Queries) CompleteWorkSession(ctx context.Context, arg CompleteWorkSessi
 		&i.Summary,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
 	)
 	return i, err
 }
 
 const createWorkSession = `-- name: CreateWorkSession :one
-INSERT INTO work_session (workspace_id, issue_id, user_id, session_type, work_dir)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at
+INSERT INTO work_session (workspace_id, issue_id, user_id, session_type, work_dir, branch)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch
 `
 
 type CreateWorkSessionParams struct {
@@ -58,6 +60,7 @@ type CreateWorkSessionParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 	SessionType string      `json:"session_type"`
 	WorkDir     pgtype.Text `json:"work_dir"`
+	Branch      pgtype.Text `json:"branch"`
 }
 
 func (q *Queries) CreateWorkSession(ctx context.Context, arg CreateWorkSessionParams) (WorkSession, error) {
@@ -67,6 +70,7 @@ func (q *Queries) CreateWorkSession(ctx context.Context, arg CreateWorkSessionPa
 		arg.UserID,
 		arg.SessionType,
 		arg.WorkDir,
+		arg.Branch,
 	)
 	var i WorkSession
 	err := row.Scan(
@@ -81,6 +85,8 @@ func (q *Queries) CreateWorkSession(ctx context.Context, arg CreateWorkSessionPa
 		&i.Summary,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
 	)
 	return i, err
 }
@@ -133,7 +139,7 @@ SET status = 'failed',
     summary = $2,
     completed_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at
+RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch
 `
 
 type FailWorkSessionParams struct {
@@ -156,12 +162,14 @@ func (q *Queries) FailWorkSession(ctx context.Context, arg FailWorkSessionParams
 		&i.Summary,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
 	)
 	return i, err
 }
 
 const getActiveWorkSessionForUser = `-- name: GetActiveWorkSessionForUser :one
-SELECT id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at FROM work_session
+SELECT id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch FROM work_session
 WHERE user_id = $1 AND workspace_id = $2 AND status = 'active'
 ORDER BY created_at DESC
 LIMIT 1
@@ -187,6 +195,8 @@ func (q *Queries) GetActiveWorkSessionForUser(ctx context.Context, arg GetActive
 		&i.Summary,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
 	)
 	return i, err
 }
@@ -204,7 +214,7 @@ func (q *Queries) GetLastWorkSessionSeq(ctx context.Context, workSessionID pgtyp
 }
 
 const getWorkSession = `-- name: GetWorkSession :one
-SELECT id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at FROM work_session WHERE id = $1
+SELECT id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch FROM work_session WHERE id = $1
 `
 
 func (q *Queries) GetWorkSession(ctx context.Context, id pgtype.UUID) (WorkSession, error) {
@@ -222,6 +232,8 @@ func (q *Queries) GetWorkSession(ctx context.Context, id pgtype.UUID) (WorkSessi
 		&i.Summary,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
 	)
 	return i, err
 }
@@ -264,7 +276,7 @@ func (q *Queries) ListWorkSessionMessages(ctx context.Context, workSessionID pgt
 }
 
 const listWorkSessionsByIssue = `-- name: ListWorkSessionsByIssue :many
-SELECT id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at FROM work_session
+SELECT id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch FROM work_session
 WHERE issue_id = $1
 ORDER BY created_at DESC
 `
@@ -290,6 +302,8 @@ func (q *Queries) ListWorkSessionsByIssue(ctx context.Context, issueID pgtype.UU
 			&i.Summary,
 			&i.CreatedAt,
 			&i.CompletedAt,
+			&i.Name,
+			&i.Branch,
 		); err != nil {
 			return nil, err
 		}
@@ -306,7 +320,7 @@ UPDATE work_session
 SET status = 'active',
     completed_at = NULL
 WHERE id = $1
-RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at
+RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch
 `
 
 func (q *Queries) ResumeWorkSession(ctx context.Context, id pgtype.UUID) (WorkSession, error) {
@@ -324,6 +338,39 @@ func (q *Queries) ResumeWorkSession(ctx context.Context, id pgtype.UUID) (WorkSe
 		&i.Summary,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
+	)
+	return i, err
+}
+
+const updateWorkSessionName = `-- name: UpdateWorkSessionName :one
+UPDATE work_session SET name = $2 WHERE id = $1
+RETURNING id, workspace_id, issue_id, user_id, session_type, session_id, work_dir, status, summary, created_at, completed_at, name, branch
+`
+
+type UpdateWorkSessionNameParams struct {
+	ID   pgtype.UUID `json:"id"`
+	Name pgtype.Text `json:"name"`
+}
+
+func (q *Queries) UpdateWorkSessionName(ctx context.Context, arg UpdateWorkSessionNameParams) (WorkSession, error) {
+	row := q.db.QueryRow(ctx, updateWorkSessionName, arg.ID, arg.Name)
+	var i WorkSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.UserID,
+		&i.SessionType,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.Summary,
+		&i.CreatedAt,
+		&i.CompletedAt,
+		&i.Name,
+		&i.Branch,
 	)
 	return i, err
 }

@@ -75,6 +75,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { projectDetailOptions } from "@multica/core/projects/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -419,6 +420,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     enabled: !!parentIssueId,
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
+  const { data: projectForBreadcrumb = null } = useQuery({
+    ...projectDetailOptions(wsId, issue?.project_id ?? ""),
+    enabled: !!issue?.project_id,
+  });
   const { data: childIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
@@ -683,6 +688,17 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
                 >
                   {workspace.name}
+                </AppLink>
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+              </>
+            )}
+            {issue.project_id && projectForBreadcrumb && (
+              <>
+                <AppLink
+                  href={paths.projectDetail(issue.project_id)}
+                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
+                >
+                  {projectForBreadcrumb.title}
                 </AppLink>
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>

@@ -86,6 +86,20 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
 
+	// Fallback: if no project from local binding, try matching git remote to a project's repo_url.
+	if projectID == "" && gitRoot != "" {
+		if repoURL := mcp.DetectGitRemote(gitRoot); repoURL != "" {
+			var resp struct {
+				Project *struct {
+					ID string `json:"id"`
+				} `json:"project"`
+			}
+			if err := client.GetJSON(context.Background(), "/api/projects/by-repo?url="+repoURL, &resp); err == nil && resp.Project != nil {
+				projectID = resp.Project.ID
+			}
+		}
+	}
+
 	// Build MCP server.
 	srv := mcp.NewServer("multica", version)
 
@@ -125,6 +139,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 // mcpSessionState tracks the active work session for attach/complete/progress tools.
 type mcpSessionState struct {
 	WorkSessionID string
+	Named         bool
 	IssueID       string
 	Seq           int
 }

@@ -44,6 +44,8 @@ export interface WorkSession {
   user_id: string;
   session_type: string;
   work_dir: string | null;
+  branch: string | null;
+  name: string | null;
   status: "active" | "completed" | "failed";
   summary: string | null;
   created_at: string;

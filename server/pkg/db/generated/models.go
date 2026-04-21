@@ -337,6 +337,7 @@ type Project struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
 	Color       pgtype.Text        `json:"color"`
+	RepoUrl     pgtype.Text        `json:"repo_url"`
 }
 
 type Skill struct {
@@ -416,6 +417,8 @@ type WorkSession struct {
 	Summary     pgtype.Text        `json:"summary"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	Name        pgtype.Text        `json:"name"`
+	Branch      pgtype.Text        `json:"branch"`
 }
 
 type Workspace struct {

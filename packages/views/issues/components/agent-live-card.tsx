@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Terminal, Play, GitFork } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
-import type { AgentTask } from "@multica/core/types/agent";
+import type { AgentTask, WorkSession } from "@multica/core/types/agent";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -16,10 +16,10 @@ import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 
 // ─── Shared types & helpers ─────────────────────────────────────────────────
 
-/** A unified timeline entry: tool calls, thinking, text, and errors in chronological order. */
+/** A unified timeline entry: tool calls, thinking, text, errors, and activity reports. */
 interface TimelineItem {
   seq: number;
-  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  type: string;
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;
@@ -590,6 +590,38 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
 
 // ─── Shared timeline row rendering ──────────────────────────────────────────
 
+const ACTIVITY_ICONS: Record<string, { icon: string; color: string }> = {
+  decision: { icon: "◆", color: "text-purple-500" },
+  verification: { icon: "✓", color: "text-success" },
+  blocker: { icon: "⚠", color: "text-warning" },
+  dependency: { icon: "⬡", color: "text-blue-500" },
+  error: { icon: "✕", color: "text-destructive" },
+  note: { icon: "●", color: "text-muted-foreground" },
+};
+
+function ActivityRow({ item }: { item: TimelineItem }) {
+  const cfg = ACTIVITY_ICONS[item.type] ?? { icon: "●", color: "text-muted-foreground" };
+  // Content format: "[type] summary\ndetails"
+  const content = item.content ?? "";
+  const withoutPrefix = content.replace(/^\[[^\]]*\]\s*/, "");
+  const [summary, ...detailLines] = withoutPrefix.split("\n");
+  const details = detailLines.join("\n").trim();
+  const files = (item.input as Record<string, unknown>)?.files as string[] | undefined;
+
+  return (
+    <div className="flex items-start gap-1.5 px-1 -mx-1 py-0.5 text-xs">
+      <span className={cn("shrink-0 mt-0.5 font-mono", cfg.color)}>{cfg.icon}</span>
+      <div className="min-w-0">
+        <span className="font-medium">{summary}</span>
+        {details && <p className="text-muted-foreground mt-0.5 whitespace-pre-wrap">{details}</p>}
+        {files && files.length > 0 && (
+          <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{files.join(", ")}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TimelineRow({ item }: { item: TimelineItem }) {
   switch (item.type) {
     case "tool_use":
@@ -602,7 +634,16 @@ function TimelineRow({ item }: { item: TimelineItem }) {
       return <TextRow item={item} />;
     case "error":
       return <ErrorRow item={item} />;
+    // Activity types from report_activity
+    case "decision":
+    case "verification":
+    case "blocker":
+    case "dependency":
+    case "note":
+      return <ActivityRow item={item} />;
     default:
+      // Fallback for unknown types — show as text
+      if (item.content) return <TextRow item={item} />;
       return null;
   }
 }
@@ -715,7 +756,7 @@ interface WorkSessionHistoryProps {
 }
 
 export function WorkSessionHistory({ issueId }: WorkSessionHistoryProps) {
-  const [sessions, setSessions] = useState<WorkSessionData[]>([]);
+  const [sessions, setSessions] = useState<WorkSession[]>([]);
 
   const refresh = useCallback(() => {
     api.listWorkSessions(issueId).then(setSessions).catch(console.error);
@@ -725,32 +766,36 @@ export function WorkSessionHistory({ issueId }: WorkSessionHistoryProps) {
     refresh();
   }, [refresh]);
 
-  if (sessions.length === 0) {
-    return <p className="text-xs text-muted-foreground py-4">No Claude Code sessions yet.</p>;
-  }
+  const copyStartCommand = () => {
+    const cmd = `claude --resume "Work on issue ${issueId}"`;
+    navigator.clipboard.writeText(cmd).then(() => {
+      toast.success("Command copied — paste in terminal to start a Claude Code session");
+    }).catch(() => {
+      toast.error("Failed to copy");
+    });
+  };
 
   return (
     <div className="space-y-2">
+      <button
+        type="button"
+        onClick={copyStartCommand}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      >
+        <Plus className="h-3 w-3" />
+        <span>Start new session</span>
+      </button>
       {sessions.map((ws) => (
         <WorkSessionEntry key={ws.id} session={ws} onUpdate={refresh} />
       ))}
+      {sessions.length === 0 && (
+        <p className="text-xs text-muted-foreground py-2">No sessions yet. Start one from your terminal.</p>
+      )}
     </div>
   );
 }
 
-interface WorkSessionData {
-  id: string;
-  issue_id: string;
-  user_id: string;
-  session_type: string;
-  work_dir: string | null;
-  status: "active" | "completed" | "failed";
-  summary: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
-function WorkSessionEntry({ session, onUpdate }: { session: WorkSessionData; onUpdate: () => void }) {
+function WorkSessionEntry({ session, onUpdate }: { session: WorkSession; onUpdate: () => void }) {
   const { getActorName } = useActorName();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TimelineItem[] | null>(null);
@@ -768,6 +813,14 @@ function WorkSessionEntry({ session, onUpdate }: { session: WorkSessionData; onU
   useEffect(() => {
     if (open) loadMessages();
   }, [open, loadMessages]);
+
+  const handleStop = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    api.completeWorkSession(session.id, "Stopped from UI").then(() => {
+      toast.success("Session stopped");
+      onUpdate();
+    }).catch(() => toast.error("Failed to stop session"));
+  };
 
   const handleResume = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -794,21 +847,39 @@ function WorkSessionEntry({ session, onUpdate }: { session: WorkSessionData; onU
     : <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />;
 
   const userName = getActorName("member", session.user_id);
+  const isActive = session.status === "active";
   const canResume = session.status === "completed" || session.status === "failed";
+
+  const duration = session.completed_at
+    ? formatDuration(session.created_at, session.completed_at)
+    : null;
+
+  const displayName = session.name ?? new Date(session.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent/30 transition-colors border border-transparent hover:border-border">
         <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
         {statusIcon}
-        <Terminal className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="text-muted-foreground truncate">{userName}</span>
-        <span className="text-muted-foreground">
-          {new Date(session.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-        </span>
-        <span className={cn("ml-auto capitalize", statusColor)}>
+        <span className="truncate font-medium">{displayName}</span>
+        <span className="text-muted-foreground shrink-0">{userName}</span>
+        {session.branch && <span className="text-[10px] text-muted-foreground font-mono shrink-0">{session.branch}</span>}
+        {duration && <span className="text-muted-foreground shrink-0">{duration}</span>}
+        <span className={cn("ml-auto capitalize shrink-0", statusColor)}>
           {session.status}
         </span>
+        {isActive && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={handleStop}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); handleStop(e as unknown as React.MouseEvent); } }}
+            className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-accent/50 transition-colors cursor-pointer"
+            title="Stop session"
+          >
+            <Square className="h-3 w-3" />
+          </span>
+        )}
         {canResume && (
           <>
             <span

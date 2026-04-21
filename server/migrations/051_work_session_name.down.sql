@@ -1,0 +1,2 @@
+ALTER TABLE work_session DROP COLUMN IF EXISTS name;
+ALTER TABLE work_session DROP COLUMN IF EXISTS branch;

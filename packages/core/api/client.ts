@@ -495,6 +495,13 @@ export class ApiClient {
     return this.fetch(`/api/work-sessions/${sessionId}/messages`);
   }
 
+  async completeWorkSession(sessionId: string, summary?: string): Promise<{ id: string; status: string }> {
+    return this.fetch(`/api/work-sessions/${sessionId}/complete`, {
+      method: "PUT",
+      body: JSON.stringify({ summary: summary ?? "" }),
+    });
+  }
+
   async resumeWorkSession(sessionId: string): Promise<{ id: string; issue_id: string; status: string }> {
     return this.fetch(`/api/work-sessions/${sessionId}/resume`, { method: "POST" });
   }

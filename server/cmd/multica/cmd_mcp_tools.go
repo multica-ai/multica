@@ -538,10 +538,17 @@ WRITING GUIDELINES:
 		}
 
 		cwd, _ := os.Getwd()
+		branch := ""
+		if gitRoot != "" {
+			if out, err := exec.Command("git", "-C", gitRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+				branch = strings.TrimSpace(string(out))
+			}
+		}
 		body := map[string]any{
 			"issue_id":     issueID,
 			"session_type": "claude-code",
 			"work_dir":     cwd,
+			"branch":       branch,
 		}
 
 		var result map[string]any
@@ -553,6 +560,7 @@ WRITING GUIDELINES:
 		session.WorkSessionID = id
 		session.IssueID = issueID
 		session.Seq = 0
+		session.Named = false
 
 		persistSession(gitRoot, session)
 
@@ -686,6 +694,12 @@ WRITING GUIDELINES:
 
 		if err := client.PostJSON(ctx, "/api/work-sessions/"+session.WorkSessionID+"/messages", body, nil); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
+		}
+
+		// Auto-name session from first activity.
+		if !session.Named {
+			session.Named = true
+			client.PutJSON(ctx, "/api/work-sessions/"+session.WorkSessionID+"/name", map[string]any{"name": summary}, nil)
 		}
 
 		return mcp.TextResult("activity reported"), nil
