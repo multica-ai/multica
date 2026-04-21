@@ -1,7 +1,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: agentfarm
+
 resources:
   - iam-resources.yaml
   - rds-credentials-external-secret.yaml
   - pgvector-init-job.yaml
+  - rds-instance.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: agentfarm
+      app.kubernetes.io/component: database
+      app.kubernetes.io/managed-by: crossplane
