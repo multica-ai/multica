@@ -3,12 +3,20 @@ import { describe, expect, it } from "vitest";
 import { selectPlatformReleaseAssetName } from "./cli-release-asset";
 
 describe("selectPlatformReleaseAssetName", () => {
-  it("matches the legacy archive name when present", () => {
+  it("prefers the versioned archive name when both exist", () => {
     const assetNames = [
       "checksums.txt",
       "multica_darwin_amd64.tar.gz",
       "multica-cli-1.2.3-darwin-amd64.tar.gz",
     ];
+
+    expect(selectPlatformReleaseAssetName(assetNames, "darwin", "x64")).toBe(
+      "multica-cli-1.2.3-darwin-amd64.tar.gz",
+    );
+  });
+
+  it("falls back to the legacy archive name when only legacy is present", () => {
+    const assetNames = ["checksums.txt", "multica_darwin_amd64.tar.gz"];
 
     expect(selectPlatformReleaseAssetName(assetNames, "darwin", "x64")).toBe(
       "multica_darwin_amd64.tar.gz",

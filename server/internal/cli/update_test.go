@@ -11,23 +11,23 @@ func TestReleaseAssetCandidates(t *testing.T) {
 		wantAssets    []string
 	}{
 		{
-			name:          "darwin returns legacy then renamed candidate",
+			name:          "darwin prefers versioned then legacy candidate",
 			targetVersion: "v1.2.3",
 			goos:          "darwin",
 			goarch:        "arm64",
 			wantAssets: []string{
-				"multica_darwin_arm64.tar.gz",
 				"multica-cli-1.2.3-darwin-arm64.tar.gz",
+				"multica_darwin_arm64.tar.gz",
 			},
 		},
 		{
-			name:          "linux adds missing v only to renamed fallback",
+			name:          "linux normalizes missing v in versioned candidate",
 			targetVersion: "1.2.3",
 			goos:          "linux",
 			goarch:        "amd64",
 			wantAssets: []string{
-				"multica_linux_amd64.tar.gz",
 				"multica-cli-1.2.3-linux-amd64.tar.gz",
+				"multica_linux_amd64.tar.gz",
 			},
 		},
 		{
@@ -36,8 +36,8 @@ func TestReleaseAssetCandidates(t *testing.T) {
 			goos:          "windows",
 			goarch:        "amd64",
 			wantAssets: []string{
-				"multica_windows_amd64.zip",
 				"multica-cli-1.2.3-windows-amd64.zip",
+				"multica_windows_amd64.zip",
 			},
 		},
 	}
@@ -58,31 +58,31 @@ func TestReleaseAssetCandidates(t *testing.T) {
 }
 
 func TestFindReleaseAsset(t *testing.T) {
-	t.Run("prefers legacy asset when both names exist", func(t *testing.T) {
+	t.Run("prefers versioned asset when both names exist", func(t *testing.T) {
 		assets := []GitHubReleaseAsset{
-			{Name: "multica-cli-1.2.3-darwin-amd64.tar.gz", BrowserDownloadURL: "new"},
 			{Name: "multica_darwin_amd64.tar.gz", BrowserDownloadURL: "old"},
+			{Name: "multica-cli-1.2.3-darwin-amd64.tar.gz", BrowserDownloadURL: "new"},
 		}
 
 		got, err := findReleaseAsset(assets, "v1.2.3", "darwin", "amd64")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got.Name != "multica_darwin_amd64.tar.gz" {
+		if got.Name != "multica-cli-1.2.3-darwin-amd64.tar.gz" {
 			t.Fatalf("asset mismatch: got %q", got.Name)
 		}
 	})
 
-	t.Run("falls back to renamed asset when legacy is absent", func(t *testing.T) {
+	t.Run("falls back to legacy asset when versioned is absent", func(t *testing.T) {
 		assets := []GitHubReleaseAsset{
-			{Name: "multica-cli-1.2.3-linux-amd64.tar.gz", BrowserDownloadURL: "new"},
+			{Name: "multica_linux_amd64.tar.gz", BrowserDownloadURL: "old"},
 		}
 
 		got, err := findReleaseAsset(assets, "1.2.3", "linux", "amd64")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got.Name != "multica-cli-1.2.3-linux-amd64.tar.gz" {
+		if got.Name != "multica_linux_amd64.tar.gz" {
 			t.Fatalf("asset mismatch: got %q", got.Name)
 		}
 	})

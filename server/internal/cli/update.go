@@ -48,9 +48,11 @@ func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
 	tag := normalizeReleaseTag(targetVersion)
 	version := strings.TrimPrefix(tag, "v")
 	ext := releaseArchiveExtension(goos)
+	// Prefer the versioned name (current scheme); fall back to the legacy
+	// `multica_{os}_{arch}` name for releases that still ship it.
 	return []string{
-		fmt.Sprintf("multica_%s_%s.%s", goos, goarch, ext),
 		fmt.Sprintf("multica-cli-%s-%s-%s.%s", version, goos, goarch, ext),
+		fmt.Sprintf("multica_%s_%s.%s", goos, goarch, ext),
 	}
 }
 
