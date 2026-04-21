@@ -473,6 +473,48 @@ func TestBootstrapFailsClosedForMultiUserDatabase(t *testing.T) {
 	}
 }
 
+func TestBootstrapTokenFailsClosedForMultiUserDatabase(t *testing.T) {
+	const extraEmail = "integration-bootstrap-token-extra@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, extraEmail)
+	})
+
+	if _, err := testPool.Exec(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2)`, "Extra Token User", extraEmail); err != nil {
+		t.Fatalf("insert extra user: %v", err)
+	}
+
+	resp, err := http.Post(testServer.URL+"/auth/bootstrap/token", "application/json", nil)
+	if err != nil {
+		t.Fatalf("bootstrap token failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bootstrap token: expected 409, got %d: %s", resp.StatusCode, body)
+	}
+
+	var conflictResp struct {
+		Mode           string `json:"mode"`
+		BootstrapState string `json:"bootstrap_state"`
+		Error          string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&conflictResp); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if conflictResp.Mode != "trusted_single_user" {
+		t.Fatalf("expected trusted_single_user mode, got %q", conflictResp.Mode)
+	}
+	if conflictResp.BootstrapState != "multi_user_conflict" {
+		t.Fatalf("expected bootstrap_state multi_user_conflict, got %q", conflictResp.BootstrapState)
+	}
+	if conflictResp.Error == "" {
+		t.Fatal("expected non-empty conflict error")
+	}
+}
+
 func TestLogoutClearsAuthCookies(t *testing.T) {
 	resp, err := http.Post(testServer.URL+"/auth/logout", "application/json", nil)
 	if err != nil {
