@@ -35,6 +35,17 @@ func (e SignupError) Error() string {
 
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
+var ErrTrustedBootstrapAdditionalUser = SignupError{Message: "trusted single-user bootstrap only allows the existing owner account"}
+
+const (
+	trustedBootstrapMode              = "trusted_single_user"
+	trustedBootstrapStateReady        = "ready"
+	trustedBootstrapStateMultiUserDB  = "multi_user_conflict"
+	trustedBootstrapOwnerResolutionNew = "created"
+	trustedBootstrapOwnerResolutionOld = "resumed"
+	trustedBootstrapOwnerName         = "Owner"
+	trustedBootstrapOwnerEmail        = "owner@multica.invalid"
+)
 
 type UserResponse struct {
 	ID        string  `json:"id"`
@@ -59,6 +70,21 @@ func userToResponse(u db.User) UserResponse {
 type LoginResponse struct {
 	Token string       `json:"token"`
 	User  UserResponse `json:"user"`
+}
+
+type BootstrapResponse struct {
+	Mode            string              `json:"mode"`
+	OwnerResolution string              `json:"owner_resolution"`
+	BootstrapState  string              `json:"bootstrap_state"`
+	Token           string              `json:"token,omitempty"`
+	User            UserResponse        `json:"user"`
+	Workspaces      []WorkspaceResponse `json:"workspaces"`
+}
+
+type BootstrapConflictResponse struct {
+	Mode           string `json:"mode"`
+	BootstrapState string `json:"bootstrap_state"`
+	Error          string `json:"error"`
 }
 
 type SendCodeRequest struct {
@@ -90,6 +116,88 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 	return token.SignedString(auth.JWTSecret())
 }
 
+type trustedBootstrapOwner struct {
+	user            db.User
+	ownerResolution string
+}
+
+type trustedBootstrapConflictError struct{}
+
+func (e trustedBootstrapConflictError) Error() string {
+	return "trusted bootstrap is unavailable for multi-user installations"
+}
+
+func (h *Handler) resolveTrustedBootstrapOwner(ctx context.Context) (trustedBootstrapOwner, error) {
+	if h.DB == nil {
+		return trustedBootstrapOwner{}, errors.New("trusted bootstrap authority unavailable")
+	}
+
+	var userCount int
+	if err := h.DB.QueryRow(ctx, `SELECT count(*) FROM "user"`).Scan(&userCount); err != nil {
+		return trustedBootstrapOwner{}, err
+	}
+
+	switch userCount {
+	case 0:
+		user, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
+			Name:  trustedBootstrapOwnerName,
+			Email: trustedBootstrapOwnerEmail,
+		})
+		if err != nil {
+			return trustedBootstrapOwner{}, err
+		}
+		return trustedBootstrapOwner{user: user, ownerResolution: trustedBootstrapOwnerResolutionNew}, nil
+	case 1:
+		var user db.User
+		if err := h.DB.QueryRow(ctx, `
+			SELECT id, name, email, avatar_url, created_at, updated_at
+			FROM "user"
+			ORDER BY created_at ASC, id ASC
+			LIMIT 1
+		`).Scan(
+			&user.ID,
+			&user.Name,
+			&user.Email,
+			&user.AvatarUrl,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+		); err != nil {
+			return trustedBootstrapOwner{}, err
+		}
+		return trustedBootstrapOwner{user: user, ownerResolution: trustedBootstrapOwnerResolutionOld}, nil
+	default:
+		return trustedBootstrapOwner{}, trustedBootstrapConflictError{}
+	}
+}
+
+func (h *Handler) buildBootstrapResponse(ctx context.Context, owner trustedBootstrapOwner, token string) (BootstrapResponse, error) {
+	workspaces, err := h.Queries.ListWorkspaces(ctx, owner.user.ID)
+	if err != nil {
+		return BootstrapResponse{}, err
+	}
+
+	resp := BootstrapResponse{
+		Mode:            trustedBootstrapMode,
+		OwnerResolution: owner.ownerResolution,
+		BootstrapState:  trustedBootstrapStateReady,
+		Token:           token,
+		User:            userToResponse(owner.user),
+		Workspaces:      make([]WorkspaceResponse, len(workspaces)),
+	}
+	for i, ws := range workspaces {
+		resp.Workspaces[i] = workspaceToResponse(ws)
+	}
+	return resp, nil
+}
+
+func writeBootstrapConflict(w http.ResponseWriter) {
+	writeJSON(w, http.StatusConflict, BootstrapConflictResponse{
+		Mode:           trustedBootstrapMode,
+		BootstrapState: trustedBootstrapStateMultiUserDB,
+		Error:          "trusted bootstrap is unavailable for multi-user installations",
+	})
+}
+
 // findOrCreateUser returns the existing user for an email, or creates one if
 // none exists. isNew reports whether this call created the user — the signup
 // event fires on that edge, covering both the verification-code and Google
@@ -107,6 +215,21 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 
 	if !isNew {
 		return user, false, nil
+	}
+
+	if h.DB != nil {
+		owner, bootstrapErr := h.resolveTrustedBootstrapOwner(ctx)
+		if bootstrapErr == nil {
+			if !strings.EqualFold(owner.user.Email, email) {
+				return db.User{}, false, ErrTrustedBootstrapAdditionalUser
+			}
+			return owner.user, owner.ownerResolution == trustedBootstrapOwnerResolutionNew, nil
+		}
+		var conflictErr trustedBootstrapConflictError
+		if errors.As(bootstrapErr, &conflictErr) {
+			return db.User{}, false, bootstrapErr
+		}
+		return db.User{}, false, bootstrapErr
 	}
 
 	name := email
@@ -312,6 +435,11 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		var conflictErr trustedBootstrapConflictError
+		if errors.As(err, &conflictErr) {
+			writeBootstrapConflict(w)
+			return
+		}
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
@@ -348,6 +476,40 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func (h *Handler) Bootstrap(w http.ResponseWriter, r *http.Request) {
+	owner, err := h.resolveTrustedBootstrapOwner(r.Context())
+	if err != nil {
+		var conflictErr trustedBootstrapConflictError
+		if errors.As(err, &conflictErr) {
+			writeBootstrapConflict(w)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to resolve trusted bootstrap owner")
+		return
+	}
+
+	tokenString, err := h.issueJWT(owner.user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("bootstrap: failed to set auth cookies", "error", err)
+	}
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	resp, err := h.buildBootstrapResponse(r.Context(), owner, "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build bootstrap response")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
@@ -476,6 +638,11 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		var conflictErr trustedBootstrapConflictError
+		if errors.As(err, &conflictErr) {
+			writeBootstrapConflict(w)
+			return
+		}
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
@@ -538,6 +705,32 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func (h *Handler) BootstrapToken(w http.ResponseWriter, r *http.Request) {
+	owner, err := h.resolveTrustedBootstrapOwner(r.Context())
+	if err != nil {
+		var conflictErr trustedBootstrapConflictError
+		if errors.As(err, &conflictErr) {
+			writeBootstrapConflict(w)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to resolve trusted bootstrap owner")
+		return
+	}
+
+	tokenString, err := h.issueJWT(owner.user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	resp, err := h.buildBootstrapResponse(r.Context(), owner, tokenString)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build bootstrap response")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // IssueCliToken returns a fresh JWT for the authenticated user.
