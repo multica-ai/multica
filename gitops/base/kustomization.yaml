@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agentfarm
+
+resources:
+  - rds-instance.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: agentfarm
+      app.kubernetes.io/component: database
+      app.kubernetes.io/managed-by: crossplane

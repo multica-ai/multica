@@ -1,0 +1,67 @@
+---
+apiVersion: rds.aws.crossplane.io/v1alpha1
+kind: DBInstance
+metadata:
+  name: agentfarm-postgres
+  namespace: agentfarm
+spec:
+  forProvider:
+    # Instance configuration
+    dbInstanceClass: db.t3.micro
+    engine: postgres
+    engineVersion: "17"
+
+    # Storage configuration
+    allocatedStorage: 20
+    storageType: gp3
+    storageEncrypted: true
+
+    # Database configuration
+    dbName: agentfarm
+    masterUsername: agentfarm_admin
+
+    # Auto-generate master password and store in AWS Secrets Manager
+    # RDS will automatically create and manage the password in Secrets Manager
+    manageMasterUserPassword: true
+    masterUserSecretKmsKeyId: alias/aws/secretsmanager
+
+    # Network configuration
+    dbSubnetGroupName: tools-cluster-db-subnet-group
+    vpcSecurityGroupIds:
+      # TODO: Replace sg-xxxxx with actual security group ID
+      # Security group must allow PostgreSQL ingress (port 5432) from tools cluster CIDR
+      # Query existing security groups: aws ec2 describe-security-groups --filters "Name=tag:Cluster,Values=tools"
+      - sg-xxxxx
+    publiclyAccessible: false
+
+    # Backup and maintenance
+    backupRetentionPeriod: 7
+    preferredBackupWindow: "03:00-04:00"
+    preferredMaintenanceWindow: "sun:04:00-sun:05:00"
+
+    # Deletion protection
+    skipFinalSnapshot: false
+    finalDBSnapshotIdentifier: agentfarm-postgres-final-snapshot
+    deletionProtection: false
+
+    # Parameter group and option group
+    # Using default parameter group for PostgreSQL 17
+
+    # Tags
+    tags:
+      - key: Environment
+        value: tools
+      - key: ManagedBy
+        value: Crossplane
+      - key: Application
+        value: AgentFarm
+
+  # Crossplane resource configuration
+  providerConfigRef:
+    name: default
+
+  writeConnectionSecretToRef:
+    name: agentfarm-rds-connection
+    namespace: agentfarm
+
+  deletionPolicy: Delete
