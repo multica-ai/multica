@@ -25,6 +25,19 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
 
+  async bootstrap() {
+    const res = await fetch(`${API_BASE}/auth/bootstrap/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      throw new Error(`bootstrap-token failed: ${res.status}`);
+    }
+    const data = await res.json();
+    this.token = data.token;
+    return data;
+  }
+
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
     await client.connect();

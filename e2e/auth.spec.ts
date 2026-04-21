@@ -1,39 +1,60 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { createTestApi, loginAsDefault, openWorkspaceMenu } from "./helpers";
 
 test.describe("Authentication", () => {
-  test("login page renders correctly", async ({ page }) => {
-    await page.goto("/login");
-
-    await expect(page.locator("h1")).toContainText("Multica");
-    await expect(page.locator('input[placeholder="Email"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="Name"]')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toContainText(
-      "Sign in",
+  test("root path bootstraps directly into issues", async ({ page }) => {
+    const api = await createTestApi();
+    const workspace = await api.ensureWorkspace(
+      "E2E Workspace",
+      "e2e-workspace",
     );
+
+    await page.goto("/");
+    await page.waitForURL(`**/${workspace.slug}/issues`, { timeout: 10000 });
+    await expect(page.locator("text=All Issues")).toBeVisible();
   });
 
-  test("login and redirect to /issues", async ({ page }) => {
+  test("login route acts as a compatibility shell and redirects to issues", async ({
+    page,
+  }) => {
+    const api = await createTestApi();
+    const workspace = await api.ensureWorkspace(
+      "E2E Workspace",
+      "e2e-workspace",
+    );
+
+    await page.goto("/login");
+    await page.waitForURL(`**/${workspace.slug}/issues`, { timeout: 10000 });
+    await expect(page.locator("text=All Issues")).toBeVisible();
+  });
+
+  test("bootstrap enters the workspace without a manual login step", async ({
+    page,
+  }) => {
     await loginAsDefault(page);
 
     await expect(page).toHaveURL(/\/issues/);
     await expect(page.locator("text=All Issues")).toBeVisible();
   });
 
-  test("unauthenticated user is redirected to /login", async ({ page }) => {
-    await page.goto("/login");
-    await page.evaluate(() => {
-      localStorage.removeItem("multica_token");
-    });
+  test("workspace route bootstraps without redirecting to a manual login flow", async ({
+    page,
+  }) => {
+    const api = await createTestApi();
+    const workspace = await api.ensureWorkspace(
+      "E2E Workspace",
+      "e2e-workspace",
+    );
 
-    // Visit a workspace-scoped route; DashboardGuard should redirect to /login.
-    // The slug here need not exist — the guard runs before workspace resolution
-    // for unauthenticated users.
-    await page.goto("/e2e-workspace/issues");
-    await page.waitForURL("**/login", { timeout: 10000 });
+    await page.goto(`/${workspace.slug}/issues`);
+    await page.waitForURL(`**/${workspace.slug}/issues`, { timeout: 10000 });
+    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page.locator("text=All Issues")).toBeVisible();
   });
 
-  test("logout redirects to /login", async ({ page }) => {
+  test("logout re-enters the app through bootstrap without staying on login", async ({
+    page,
+  }) => {
     await loginAsDefault(page);
 
     // Open the workspace dropdown menu
@@ -42,7 +63,8 @@ test.describe("Authentication", () => {
     // Click Sign out
     await page.locator("text=Sign out").click();
 
-    await page.waitForURL("**/login", { timeout: 10000 });
-    await expect(page).toHaveURL(/\/login/);
+    await page.waitForURL("**/issues", { timeout: 10000 });
+    await expect(page).not.toHaveURL(/\/login$/);
+    await expect(page.locator("text=All Issues")).toBeVisible();
   });
 });
