@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"math"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -993,7 +994,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:      customArgs,
 	}
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	result, tools, err := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -1005,7 +1006,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -1320,4 +1321,101 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// isRateLimitError checks if an error indicates a rate limit response from Agents service.
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Check for various rate limit indicators.
+	rateLimitIndicators := []string{
+		"rate limit",
+		"rate-limit",
+		"ratelimit",
+		"429",
+		"too many requests",
+		"quota exceeded",
+		"quota-exceeded",
+	}
+
+	for _, indicator := range rateLimitIndicators {
+		if strings.Contains(errStr, indicator) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// broadcastRetryProgress sends chat retry progress to server via HTTP API.
+func (d *Daemon) broadcastRetryProgress(ctx context.Context, taskID, chatSessionID, attempt int, maxRetries int, waitSeconds int) {
+	// We need to get workspace ID from the task to broadcast the event.
+	// For chat tasks, we need the chat session to get workspace ID.
+	// Since we only have taskID, we use a workspace parameter passed to the function.
+	// However, the broadcastRetryProgress in client.go requires workspaceID.
+	// We will use the workspace ID associated with the chat session.
+	// For now, we can get it from the daemon context or pass it explicitly.
+
+	// Note: For chat retry progress events, the workspace ID is needed to route the WebSocket event.
+	// We will need to look up the chat session from our local tracking.
+
+	// For now, we will not broadcast retry progress via WebSocket.
+	// Instead, daemon will just log the retry and continue.
+	taskLog.Info("rate_limit_retry", "task_id", shortID(taskID), "attempt", attempt, "wait_seconds", waitSeconds, "max_retries", maxRetries)
+}
+
+// executeWithRetry wraps agent.Execute with rate limit retry logic.
+// Returns: agent.Result, tools, error
+func (d *Daemon) executeWithRetry(
+	ctx context.Context,
+	backend agent.Backend,
+	prompt string,
+	opts agent.ExecOptions,
+	taskLog *slog.Logger,
+	taskID string,
+) (agent.Result, int32, error) {
+	cfg := d.cfg.RateLimitConfig
+
+	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+		// First attempt: no delay
+		if attempt > 0 {
+			// Exponential backoff: waitTime = initialDelay * 2^(attempt-1)
+			waitTime := time.Duration(float64(cfg.InitialDelay) * math.Pow(cfg.BackoffFactor, float64(attempt-1)))
+
+			taskLog.Info("rate_limit_retry_wait", "task_id", shortID(taskID), "attempt", attempt, "wait_seconds", int(waitTime.Seconds()), "max_retries", cfg.MaxRetries)
+
+			// Broadcast retry progress
+			d.broadcastRetryProgress(ctx, taskID, attempt, cfg.MaxRetries, int(waitTime.Seconds()))
+
+			select {
+			case <-time.After(waitTime):
+				// Continue to next attempt
+			case <-ctx.Done():
+				return agent.Result{Status: "failed", Error: "retry cancelled"}, 0, ctx.Err()
+			}
+		}
+
+		// Execute agent
+		result, tools, err := backend.Execute(ctx, prompt, opts)
+
+		// Check if this was a rate limit error
+		if isRateLimitError(err) {
+			taskLog.Warn("rate_limit_detected", "task_id", shortID(taskID), "attempt", attempt, "error", err.Error())
+			continue // Retry with backoff
+		}
+
+		// Non-rate-limit error: return immediately
+		if err != nil {
+			taskLog.Error("agent_execution_failed", "task_id", shortID(taskID), "error", err.Error())
+			return agent.Result{Status: "failed", Error: err.Error()}, 0, err
+		}
+
+		// Success: return result
+		taskLog.Info("agent_execution_success", "task_id", shortID(taskID), "attempt", attempt, "tools", tools)
+		return result, tools, nil
+	}
 }

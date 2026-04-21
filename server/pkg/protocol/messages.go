@@ -86,3 +86,18 @@ type HeartbeatPayload struct {
 	AgentID      string `json:"agent_id"`
 	CurrentTasks int    `json:"current_tasks"`
 }
+
+// ChatRetryProgressPayload is broadcast when daemon retries a message due to rate limit.
+type ChatRetryProgressPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id"`
+	RetryAttempt  int    `json:"retry_attempt"`
+	MaxRetries    int    `json:"max_retries"`
+	WaitSeconds   int    `json:"wait_seconds"`
+}
+
+// ChatMessageDeletedPayload is broadcast when a chat message is deleted.
+type ChatMessageDeletedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	MessageID     string `json:"message_id"`
+}

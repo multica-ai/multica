@@ -527,3 +527,12 @@ func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSess
 	)
 	return i, err
 }
+
+const deleteChatMessage = `-- name: DeleteChatMessage :exec
+DELETE FROM chat_message WHERE id = $1
+`
+
+func (q *Queries) DeleteChatMessage(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChatMessage, id)
+	return err
+}

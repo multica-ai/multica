@@ -22,6 +22,11 @@ const (
 	DefaultGCInterval            = 1 * time.Hour
 	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
+
+	// Rate Limit retry configuration
+	DefaultRateLimitInitialDelay  = 5 * time.Second  // 5 seconds
+	DefaultRateLimitMaxRetries     = 6                   // max 6 retries
+	DefaultRateLimitBackoffFactor = 2.0                 // exponential backoff
 )
 
 // Config holds all daemon configuration.
@@ -45,6 +50,14 @@ type Config struct {
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
+	RateLimitConfig RateLimitConfig
+}
+
+// RateLimitConfig holds configuration for automatic rate limit retries.
+type RateLimitConfig struct {
+	InitialDelay  time.Duration // initial delay before first retry (default: 5s)
+	MaxRetries    int           // maximum number of retries (default: 6)
+	BackoffFactor float64     // exponential backoff factor (default: 2.0)
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -273,6 +286,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,
+		RateLimitConfig:    rateLimitConfig,
 	}, nil
 }
 

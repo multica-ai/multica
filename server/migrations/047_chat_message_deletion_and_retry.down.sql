@@ -1,0 +1,1 @@
+-- Rollback: no schema changes, just drop queries handled by sqlc regen.
