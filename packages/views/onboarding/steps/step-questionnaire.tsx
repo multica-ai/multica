@@ -1,8 +1,9 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import type {
   QuestionnaireAnswers,
   Role,
@@ -36,6 +37,8 @@ export function StepQuestionnaire({
 }) {
   const [answers, setAnswers] = useState<QuestionnaireAnswers>(initial);
   const [submitting, setSubmitting] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  const fadeStyle = useScrollFade(mainRef);
 
   const setTeamSize = (v: TeamSize) =>
     setAnswers((a) => ({
@@ -108,8 +111,15 @@ export function StepQuestionnaire({
         {/* Scrollable middle — the only region that scrolls vertically.
             `min-h-0` is required on a flex-1 child inside a flex column
             so it can shrink below its content height and let
-            overflow-y-auto activate. */}
-        <main className="min-h-0 flex-1 overflow-y-auto">
+            overflow-y-auto activate. `useScrollFade` applies a dynamic
+            mask-image gradient so content softly fades into the header /
+            footer at the edges as the user scrolls, replacing the hard
+            border separator. */}
+        <main
+          ref={mainRef}
+          style={fadeStyle}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
               A few quick questions
