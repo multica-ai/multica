@@ -42,7 +42,7 @@ spec:
     # Deletion protection
     skipFinalSnapshot: false
     finalDBSnapshotIdentifier: agentfarm-postgres-final-snapshot
-    deletionProtection: false
+    deletionProtection: true  # Prevents accidental deletion via kubectl/AWS console
 
     # Parameter group and option group
     # Using default parameter group for PostgreSQL 17
