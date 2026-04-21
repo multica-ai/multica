@@ -613,7 +613,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.WorkspaceContext = ws.Context.String
 				}
 				// Inject workspace memory index so agents can fetch entries on demand.
-				if memRows, err := h.Queries.ListWorkspaceMemoryIndex(r.Context(), issue.WorkspaceID); err == nil && len(memRows) > 0 {
+				// Includes global memory (project_id IS NULL) + project-scoped memory for this issue's project.
+				if memRows, err := h.Queries.ListWorkspaceMemoryIndex(r.Context(), db.ListWorkspaceMemoryIndexParams{
+					WorkspaceID: issue.WorkspaceID,
+					ProjectID:   issue.ProjectID,
+				}); err == nil && len(memRows) > 0 {
 					resp.MemoryIndex = make([]MemoryIndexEntry, len(memRows))
 					for i, row := range memRows {
 						resp.MemoryIndex[i] = MemoryIndexEntry{

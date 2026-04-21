@@ -27,6 +27,7 @@ type MemoryResponse struct {
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	ProjectID   *string `json:"project_id"`
 }
 
 func memoryToResponse(m db.WorkspaceMemory) MemoryResponse {
@@ -39,16 +40,24 @@ func memoryToResponse(m db.WorkspaceMemory) MemoryResponse {
 		CreatedBy:   uuidToPtr(m.CreatedBy),
 		CreatedAt:   timestampToString(m.CreatedAt),
 		UpdatedAt:   timestampToString(m.UpdatedAt),
+		ProjectID:   uuidToPtr(m.ProjectID),
 	}
 }
 
 func (h *Handler) ListWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
 
-	rows, err := h.Queries.ListWorkspaceMemoryIndex(r.Context(), parseUUID(workspaceID))
+	params := db.ListWorkspaceMemoryIndexParams{
+		WorkspaceID: parseUUID(workspaceID),
+	}
+	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
+		params.ProjectID = parseUUID(projectID)
+	}
+
+	rows, err := h.Queries.ListWorkspaceMemoryIndex(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list memory")
 		return
@@ -67,7 +76,7 @@ func (h *Handler) ListWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
@@ -85,13 +94,14 @@ func (h *Handler) GetWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateMemoryRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Content     string  `json:"content"`
+	ProjectID   *string `json:"project_id"`
 }
 
 func (h *Handler) CreateWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
@@ -115,13 +125,26 @@ func (h *Handler) CreateWorkspaceMemory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	entry, err := h.Queries.CreateWorkspaceMemory(r.Context(), db.CreateWorkspaceMemoryParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Name:        req.Name,
-		Description: req.Description,
-		Content:     req.Content,
-		CreatedBy:   parseUUID(userID),
-	})
+	var entry db.WorkspaceMemory
+	var err error
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		entry, err = h.Queries.CreateWorkspaceMemoryForProject(r.Context(), db.CreateWorkspaceMemoryForProjectParams{
+			WorkspaceID: parseUUID(workspaceID),
+			Name:        req.Name,
+			Description: req.Description,
+			Content:     req.Content,
+			CreatedBy:   parseUUID(userID),
+			ProjectID:   parseUUID(*req.ProjectID),
+		})
+	} else {
+		entry, err = h.Queries.CreateWorkspaceMemory(r.Context(), db.CreateWorkspaceMemoryParams{
+			WorkspaceID: parseUUID(workspaceID),
+			Name:        req.Name,
+			Description: req.Description,
+			Content:     req.Content,
+			CreatedBy:   parseUUID(userID),
+		})
+	}
 	if err != nil {
 		slog.Warn("create workspace memory failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to create memory entry")
@@ -137,7 +160,7 @@ type UpdateMemoryRequest struct {
 }
 
 func (h *Handler) UpdateWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
@@ -173,7 +196,7 @@ func (h *Handler) UpdateWorkspaceMemory(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) DeleteWorkspaceMemory(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return

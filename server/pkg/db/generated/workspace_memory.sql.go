@@ -14,7 +14,7 @@ import (
 const createWorkspaceMemory = `-- name: CreateWorkspaceMemory :one
 INSERT INTO workspace_memory (workspace_id, name, description, content, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, name, description, content, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, created_by, created_at, updated_at, project_id
 `
 
 type CreateWorkspaceMemoryParams struct {
@@ -43,6 +43,46 @@ func (q *Queries) CreateWorkspaceMemory(ctx context.Context, arg CreateWorkspace
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ProjectID,
+	)
+	return i, err
+}
+
+const createWorkspaceMemoryForProject = `-- name: CreateWorkspaceMemoryForProject :one
+INSERT INTO workspace_memory (workspace_id, name, description, content, created_by, project_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, workspace_id, name, description, content, created_by, created_at, updated_at, project_id
+`
+
+type CreateWorkspaceMemoryForProjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Content     string      `json:"content"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) CreateWorkspaceMemoryForProject(ctx context.Context, arg CreateWorkspaceMemoryForProjectParams) (WorkspaceMemory, error) {
+	row := q.db.QueryRow(ctx, createWorkspaceMemoryForProject,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.Content,
+		arg.CreatedBy,
+		arg.ProjectID,
+	)
+	var i WorkspaceMemory
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }
@@ -63,7 +103,7 @@ func (q *Queries) DeleteWorkspaceMemory(ctx context.Context, arg DeleteWorkspace
 }
 
 const getWorkspaceMemory = `-- name: GetWorkspaceMemory :one
-SELECT id, workspace_id, name, description, content, created_by, created_at, updated_at FROM workspace_memory
+SELECT id, workspace_id, name, description, content, created_by, created_at, updated_at, project_id FROM workspace_memory
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -84,6 +124,7 @@ func (q *Queries) GetWorkspaceMemory(ctx context.Context, arg GetWorkspaceMemory
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }
@@ -92,8 +133,14 @@ const listWorkspaceMemoryIndex = `-- name: ListWorkspaceMemoryIndex :many
 SELECT id, name, description, created_at, updated_at
 FROM workspace_memory
 WHERE workspace_id = $1
-ORDER BY updated_at DESC
+  AND (project_id IS NULL OR project_id = $2)
+ORDER BY project_id NULLS LAST, updated_at DESC
 `
+
+type ListWorkspaceMemoryIndexParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
 
 type ListWorkspaceMemoryIndexRow struct {
 	ID          pgtype.UUID        `json:"id"`
@@ -103,8 +150,8 @@ type ListWorkspaceMemoryIndexRow struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) ListWorkspaceMemoryIndex(ctx context.Context, workspaceID pgtype.UUID) ([]ListWorkspaceMemoryIndexRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspaceMemoryIndex, workspaceID)
+func (q *Queries) ListWorkspaceMemoryIndex(ctx context.Context, arg ListWorkspaceMemoryIndexParams) ([]ListWorkspaceMemoryIndexRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceMemoryIndex, arg.WorkspaceID, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +183,7 @@ UPDATE workspace_memory SET
     content = COALESCE($5, content),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, description, content, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, created_by, created_at, updated_at, project_id
 `
 
 type UpdateWorkspaceMemoryParams struct {
@@ -165,6 +212,7 @@ func (q *Queries) UpdateWorkspaceMemory(ctx context.Context, arg UpdateWorkspace
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }

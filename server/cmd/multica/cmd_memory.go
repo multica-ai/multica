@@ -57,12 +57,14 @@ func init() {
 	memoryCmd.AddCommand(memoryDeleteCmd)
 
 	memoryListCmd.Flags().String("output", "table", "Output format: table or json")
+	memoryListCmd.Flags().String("project-id", "", "Filter by project ID (omit for global memory)")
 
 	memoryGetCmd.Flags().String("output", "json", "Output format: table or json")
 
 	memoryAddCmd.Flags().String("name", "", "Memory entry name (required)")
 	memoryAddCmd.Flags().String("description", "", "One-line description of this entry")
 	memoryAddCmd.Flags().String("content", "", "Full content of the memory entry (required)")
+	memoryAddCmd.Flags().String("project-id", "", "Scope this memory to a specific project (omit for global)")
 	memoryAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	memoryUpdateCmd.Flags().String("name", "", "New name")
@@ -82,8 +84,13 @@ func runMemoryList(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	path := "/api/memory"
+	if projectID, _ := cmd.Flags().GetString("project-id"); projectID != "" {
+		path += "?project_id=" + projectID
+	}
+
 	var entries []map[string]any
-	if err := client.GetJSON(ctx, "/api/memory", &entries); err != nil {
+	if err := client.GetJSON(ctx, path, &entries); err != nil {
 		return fmt.Errorf("list memory: %w", err)
 	}
 
@@ -162,6 +169,9 @@ func runMemoryAdd(cmd *cobra.Command, _ []string) error {
 		"name":        name,
 		"description": description,
 		"content":     content,
+	}
+	if projectID, _ := cmd.Flags().GetString("project-id"); projectID != "" {
+		body["project_id"] = projectID
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
