@@ -2,7 +2,7 @@
 
 import { use, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
 import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
@@ -22,14 +22,22 @@ export default function WorkspaceLayout({
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const nextPath = searchParams.toString()
+    ? `${pathname}?${searchParams.toString()}`
+    : pathname;
 
   // Workspace routes require auth. If user is unauthenticated (initial visit
   // without a session, token expired, another tab logged out, etc.), bounce
-  // to /login. Without this, the layout renders null and the user sees a
+  // to the /login compatibility shell with a return path. Without this, the
+  // layout renders null and the user sees a
   // blank page stuck on /{slug}/...
   useEffect(() => {
-    if (!isAuthLoading && !user) router.replace(paths.login());
-  }, [isAuthLoading, user, router]);
+    if (!isAuthLoading && !user) {
+      router.replace(`${paths.login()}?next=${encodeURIComponent(nextPath)}`);
+    }
+  }, [isAuthLoading, user, router, nextPath]);
 
   // Resolve workspace by slug from the React Query list cache.
   // Enabled only when user is authenticated — otherwise the list query isn't seeded.

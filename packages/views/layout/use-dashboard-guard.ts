@@ -23,7 +23,7 @@ import { useNavigation } from "../navigation";
  * to /workspaces/new before their workspace list arrives.
  */
 export function useDashboardGuard() {
-  const { pathname, replace } = useNavigation();
+  const { pathname, searchParams, replace } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useCurrentWorkspace();
@@ -31,11 +31,14 @@ export function useDashboardGuard() {
     ...workspaceListOptions(),
     enabled: !!user,
   });
+  const nextPath = searchParams.toString()
+    ? `${pathname}?${searchParams.toString()}`
+    : pathname;
 
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      replace(paths.login());
+      replace(`${paths.login()}?next=${encodeURIComponent(nextPath)}`);
       return;
     }
     // Wait for workspace list to settle before deciding "no workspace".
@@ -43,7 +46,7 @@ export function useDashboardGuard() {
     if (!workspace) {
       replace(paths.newWorkspace());
     }
-  }, [user, isLoading, workspaceListFetched, workspace, replace]);
+  }, [user, isLoading, workspaceListFetched, workspace, replace, nextPath]);
 
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);

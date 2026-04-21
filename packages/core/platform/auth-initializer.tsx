@@ -68,21 +68,27 @@ export function AuthInitializer({
     };
 
     if (cookieAuth) {
-      // Cookie mode: the HttpOnly cookie is sent automatically by the browser.
-      // Call the API to check if the session is still valid.
-      //
-      // Seed the workspace list into React Query so the URL-driven layout can
-      // resolve the slug without a second fetch. The active workspace itself
-      // is derived from the URL by [workspaceSlug]/layout.tsx — no imperative
-      // selection here.
-      Promise.all([api.getMe(), api.listWorkspaces()])
-        .then(([user, wsList]) => {
+      // Cookie mode first tries the trusted single-user bootstrap contract.
+      // If the backend does not support it or bootstrap is otherwise
+      // unavailable, fall back to the legacy "resume existing session via
+      // getMe + listWorkspaces" path so compatibility flows keep working.
+      api
+        .bootstrap()
+        .then(({ user, workspaces }) => {
           onAuthSuccess(user);
-          qc.setQueryData(workspaceKeys.list(), wsList);
+          qc.setQueryData(workspaceKeys.list(), workspaces);
         })
-        .catch((err) => {
-          logger.error("cookie auth init failed", err);
-          onAuthFailure();
+        .catch((bootstrapErr) => {
+          logger.warn("bootstrap init failed; falling back to session check", bootstrapErr);
+          Promise.all([api.getMe(), api.listWorkspaces()])
+            .then(([user, wsList]) => {
+              onAuthSuccess(user);
+              qc.setQueryData(workspaceKeys.list(), wsList);
+            })
+            .catch((err) => {
+              logger.error("cookie auth init failed", err);
+              onAuthFailure();
+            });
         });
       return;
     }

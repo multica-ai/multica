@@ -79,6 +79,15 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface BootstrapResponse {
+  mode: string;
+  owner_resolution: string;
+  bootstrap_state: string;
+  token?: string;
+  user: User;
+  workspaces: Workspace[];
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -210,6 +219,10 @@ export class ApiClient {
 
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
+  }
+
+  async bootstrap(): Promise<BootstrapResponse> {
+    return this.fetch("/auth/bootstrap", { method: "POST" });
   }
 
   async issueCliToken(): Promise<{ token: string }> {
