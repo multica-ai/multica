@@ -12,7 +12,6 @@ import {
   DialogFooter,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { Badge } from "@multica/ui/components/ui/badge";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -20,6 +19,7 @@ import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries
 import { runtimeListOptions, runtimeLocalSkillsOptions } from "@multica/core/runtimes";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RuntimeLocalSkillImportDialog } from "../../../skills/components/runtime-local-skill-import-dialog";
+import { RuntimeLocalSkillRow } from "../../../skills/components/runtime-local-skill-row";
 
 export function SkillsTab({
   agent,
@@ -199,39 +199,23 @@ export function SkillsTab({
           ) : (
             <div className="space-y-2">
               {(localSkillsQuery.data.skills ?? []).map((skill) => (
-                <div
+                <RuntimeLocalSkillRow
                   key={skill.key}
-                  className="flex items-start gap-3 rounded-lg border px-4 py-3"
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-medium">{skill.name}</div>
-                      <Badge variant="secondary">{skill.provider}</Badge>
-                    </div>
-                    {skill.description && (
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        {skill.description}
-                      </div>
-                    )}
-                    <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-                      {skill.source_path}
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    onClick={() => {
-                      setRuntimeImportSkillKey(skill.key);
-                      setShowRuntimeImport(true);
-                    }}
-                  >
-                    <Download className="h-3 w-3" />
-                    Import to Workspace
-                  </Button>
-                </div>
+                  skill={skill}
+                  action={
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => {
+                        setRuntimeImportSkillKey(skill.key);
+                        setShowRuntimeImport(true);
+                      }}
+                    >
+                      <Download className="h-3 w-3" />
+                      Import to Workspace
+                    </Button>
+                  }
+                />
               ))}
             </div>
           )}

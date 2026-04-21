@@ -22,6 +22,12 @@ const (
 	RuntimeLocalSkillTimeout   RuntimeLocalSkillRequestStatus = "timeout"
 )
 
+const (
+	runtimeLocalSkillPendingTimeout = 30 * time.Second
+	runtimeLocalSkillRunningTimeout = 60 * time.Second
+	runtimeLocalSkillStoreRetention = 2 * time.Minute
+)
+
 type RuntimeLocalSkillSummary struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
@@ -40,6 +46,7 @@ type RuntimeLocalSkillListRequest struct {
 	Error     string                         `json:"error,omitempty"`
 	CreatedAt time.Time                      `json:"created_at"`
 	UpdatedAt time.Time                      `json:"updated_at"`
+	RunStartedAt *time.Time                  `json:"-"`
 }
 
 type RuntimeLocalSkillImportRequest struct {
@@ -54,6 +61,7 @@ type RuntimeLocalSkillImportRequest struct {
 	CreatedAt   time.Time                      `json:"created_at"`
 	UpdatedAt   time.Time                      `json:"updated_at"`
 	CreatorID   string                         `json:"-"`
+	RunStartedAt *time.Time                    `json:"-"`
 }
 
 type RuntimeLocalSkillListStore struct {
@@ -70,7 +78,7 @@ func (s *RuntimeLocalSkillListStore) Create(runtimeID string) *RuntimeLocalSkill
 	defer s.mu.Unlock()
 
 	for id, req := range s.requests {
-		if time.Since(req.CreatedAt) > 2*time.Minute {
+		if time.Since(req.CreatedAt) > runtimeLocalSkillStoreRetention {
 			delete(s.requests, id)
 		}
 	}
@@ -95,11 +103,7 @@ func (s *RuntimeLocalSkillListStore) Get(id string) *RuntimeLocalSkillListReques
 	if !ok {
 		return nil
 	}
-	if req.Status == RuntimeLocalSkillPending && time.Since(req.CreatedAt) > 30*time.Second {
-		req.Status = RuntimeLocalSkillTimeout
-		req.Error = "daemon did not respond within 30 seconds"
-		req.UpdatedAt = time.Now()
-	}
+	s.applyTimeout(req, time.Now())
 	return req
 }
 
@@ -108,7 +112,9 @@ func (s *RuntimeLocalSkillListStore) PopPending(runtimeID string) *RuntimeLocalS
 	defer s.mu.Unlock()
 
 	var oldest *RuntimeLocalSkillListRequest
+	now := time.Now()
 	for _, req := range s.requests {
+		s.applyTimeout(req, now)
 		if req.RuntimeID == runtimeID && req.Status == RuntimeLocalSkillPending {
 			if oldest == nil || req.CreatedAt.Before(oldest.CreatedAt) {
 				oldest = req
@@ -117,7 +123,9 @@ func (s *RuntimeLocalSkillListStore) PopPending(runtimeID string) *RuntimeLocalS
 	}
 	if oldest != nil {
 		oldest.Status = RuntimeLocalSkillRunning
-		oldest.UpdatedAt = time.Now()
+		startedAt := now
+		oldest.RunStartedAt = &startedAt
+		oldest.UpdatedAt = now
 	}
 	return oldest
 }
@@ -145,6 +153,23 @@ func (s *RuntimeLocalSkillListStore) Fail(id string, errMsg string) {
 	}
 }
 
+func (s *RuntimeLocalSkillListStore) applyTimeout(req *RuntimeLocalSkillListRequest, now time.Time) {
+	switch req.Status {
+	case RuntimeLocalSkillPending:
+		if now.Sub(req.CreatedAt) > runtimeLocalSkillPendingTimeout {
+			req.Status = RuntimeLocalSkillTimeout
+			req.Error = "daemon did not respond within 30 seconds"
+			req.UpdatedAt = now
+		}
+	case RuntimeLocalSkillRunning:
+		if req.RunStartedAt != nil && now.Sub(*req.RunStartedAt) > runtimeLocalSkillRunningTimeout {
+			req.Status = RuntimeLocalSkillTimeout
+			req.Error = "daemon did not finish within 60 seconds"
+			req.UpdatedAt = now
+		}
+	}
+}
+
 type RuntimeLocalSkillImportStore struct {
 	mu       sync.Mutex
 	requests map[string]*RuntimeLocalSkillImportRequest
@@ -159,7 +184,7 @@ func (s *RuntimeLocalSkillImportStore) Create(runtimeID, creatorID, skillKey str
 	defer s.mu.Unlock()
 
 	for id, req := range s.requests {
-		if time.Since(req.CreatedAt) > 2*time.Minute {
+		if time.Since(req.CreatedAt) > runtimeLocalSkillStoreRetention {
 			delete(s.requests, id)
 		}
 	}
@@ -187,11 +212,7 @@ func (s *RuntimeLocalSkillImportStore) Get(id string) *RuntimeLocalSkillImportRe
 	if !ok {
 		return nil
 	}
-	if req.Status == RuntimeLocalSkillPending && time.Since(req.CreatedAt) > 30*time.Second {
-		req.Status = RuntimeLocalSkillTimeout
-		req.Error = "daemon did not respond within 30 seconds"
-		req.UpdatedAt = time.Now()
-	}
+	s.applyTimeout(req, time.Now())
 	return req
 }
 
@@ -200,7 +221,9 @@ func (s *RuntimeLocalSkillImportStore) PopPending(runtimeID string) *RuntimeLoca
 	defer s.mu.Unlock()
 
 	var oldest *RuntimeLocalSkillImportRequest
+	now := time.Now()
 	for _, req := range s.requests {
+		s.applyTimeout(req, now)
 		if req.RuntimeID == runtimeID && req.Status == RuntimeLocalSkillPending {
 			if oldest == nil || req.CreatedAt.Before(oldest.CreatedAt) {
 				oldest = req
@@ -209,7 +232,9 @@ func (s *RuntimeLocalSkillImportStore) PopPending(runtimeID string) *RuntimeLoca
 	}
 	if oldest != nil {
 		oldest.Status = RuntimeLocalSkillRunning
-		oldest.UpdatedAt = time.Now()
+		startedAt := now
+		oldest.RunStartedAt = &startedAt
+		oldest.UpdatedAt = now
 	}
 	return oldest
 }
@@ -233,6 +258,23 @@ func (s *RuntimeLocalSkillImportStore) Fail(id string, errMsg string) {
 		req.Status = RuntimeLocalSkillFailed
 		req.Error = errMsg
 		req.UpdatedAt = time.Now()
+	}
+}
+
+func (s *RuntimeLocalSkillImportStore) applyTimeout(req *RuntimeLocalSkillImportRequest, now time.Time) {
+	switch req.Status {
+	case RuntimeLocalSkillPending:
+		if now.Sub(req.CreatedAt) > runtimeLocalSkillPendingTimeout {
+			req.Status = RuntimeLocalSkillTimeout
+			req.Error = "daemon did not respond within 30 seconds"
+			req.UpdatedAt = now
+		}
+	case RuntimeLocalSkillRunning:
+		if req.RunStartedAt != nil && now.Sub(*req.RunStartedAt) > runtimeLocalSkillRunningTimeout {
+			req.Status = RuntimeLocalSkillTimeout
+			req.Error = "daemon did not finish within 60 seconds"
+			req.UpdatedAt = now
+		}
 	}
 }
 
@@ -262,6 +304,10 @@ func cleanOptionalString(value *string) *string {
 	return &trimmed
 }
 
+func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) bool {
+	return status == RuntimeLocalSkillCompleted || status == RuntimeLocalSkillFailed || status == RuntimeLocalSkillTimeout
+}
+
 func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
 	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
 	if err != nil {
@@ -270,13 +316,12 @@ func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.
 	}
 
 	wsID := uuidToString(rt.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "runtime not found", "owner", "admin", "member")
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
 	if !ok {
 		return runtimeIDAndWorkspace{}, false
 	}
 
-	userID := requestUserID(r)
-	if roleAllowed(member.Role, "owner", "admin") || (rt.OwnerID.Valid && uuidToString(rt.OwnerID) == userID) {
+	if rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID) {
 		return runtimeIDAndWorkspace{
 			runtimeID:   runtimeID,
 			workspaceID: wsID,
@@ -386,6 +431,16 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 	}
 
 	requestID := chi.URLParam(r, "requestId")
+	req := h.LocalSkillListStore.Get(requestID)
+	if req == nil || req.RuntimeID != runtimeID {
+		writeError(w, http.StatusNotFound, "request not found")
+		return
+	}
+	if runtimeLocalSkillRequestTerminal(req.Status) {
+		slog.Debug("ignoring stale runtime local skills report", "runtime_id", runtimeID, "request_id", requestID, "status", req.Status)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 
 	var body struct {
 		Status    string                     `json:"status"`
@@ -423,6 +478,11 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	req := h.LocalSkillImportStore.Get(requestID)
 	if req == nil || req.RuntimeID != runtimeID {
 		writeError(w, http.StatusNotFound, "request not found")
+		return
+	}
+	if runtimeLocalSkillRequestTerminal(req.Status) {
+		slog.Debug("ignoring stale runtime local skill import report", "runtime_id", runtimeID, "request_id", requestID, "status", req.Status)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 

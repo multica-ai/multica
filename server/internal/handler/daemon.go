@@ -539,12 +539,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 			"id":        pending.ID,
 			"skill_key": pending.SkillKey,
 		}
-		if pending.Name != nil {
-			payload["name"] = *pending.Name
-		}
-		if pending.Description != nil {
-			payload["description"] = *pending.Description
-		}
 		resp["pending_local_skill_import"] = payload
 	}
 

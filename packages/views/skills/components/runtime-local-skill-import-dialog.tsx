@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { HardDrive, Download, AlertCircle, FileText } from "lucide-react";
+import { HardDrive, Download, AlertCircle } from "lucide-react";
 import type { AgentRuntime, Skill } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -33,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { toast } from "sonner";
+import { RuntimeLocalSkillRow } from "./runtime-local-skill-row";
 
 function runtimeLabel(runtime: AgentRuntime): string {
   return `${runtime.name} (${runtime.provider})`;
@@ -228,33 +229,12 @@ export function RuntimeLocalSkillImportDialog({
       <div className="space-y-4">
         <div className="space-y-2">
           {runtimeSkills.map((skill) => (
-            <button
+            <RuntimeLocalSkillRow
               key={skill.key}
-              type="button"
-              onClick={() => setSelectedSkillKey(skill.key)}
-              className={`flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
-                selectedSkillKey === skill.key ? "border-primary bg-primary/5" : "hover:bg-accent/50"
-              }`}
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">{skill.name}</span>
-                  <Badge variant="secondary">{skill.provider}</Badge>
-                </div>
-                {skill.description && (
-                  <p className="mt-1 text-xs text-muted-foreground">{skill.description}</p>
-                )}
-                <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-                  {skill.source_path}
-                </p>
-              </div>
-              <Badge variant="outline">
-                {skill.file_count} file{skill.file_count === 1 ? "" : "s"}
-              </Badge>
-            </button>
+              skill={skill}
+              selected={selectedSkillKey === skill.key}
+              onSelect={() => setSelectedSkillKey(skill.key)}
+            />
           ))}
         </div>
 
@@ -323,6 +303,10 @@ export function RuntimeLocalSkillImportDialog({
           )}
 
           {renderSkillContent()}
+
+          <p className="text-xs text-muted-foreground">
+            Symlinks, unreadable files, oversized files, and very large bundles are ignored during import.
+          </p>
         </div>
 
         <DialogFooter>

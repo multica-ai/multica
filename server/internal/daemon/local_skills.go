@@ -9,7 +9,11 @@ import (
 	"strings"
 )
 
-const maxLocalSkillFileSize int64 = 1 << 20
+const (
+	maxLocalSkillFileSize   int64 = 1 << 20
+	maxLocalSkillBundleSize int64 = 8 << 20
+	maxLocalSkillFileCount        = 128
+)
 
 type runtimeLocalSkillSummary struct {
 	Key         string `json:"key"`
@@ -88,16 +92,16 @@ func normalizeLocalSkillKey(key string) (string, error) {
 func relativizeHomePath(path string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return path
+		return filepath.ToSlash(path)
 	}
 	if path == home {
 		return "~"
 	}
 	prefix := home + string(filepath.Separator)
 	if strings.HasPrefix(path, prefix) {
-		return "~" + string(filepath.Separator) + strings.TrimPrefix(path, prefix)
+		return filepath.ToSlash("~" + string(filepath.Separator) + strings.TrimPrefix(path, prefix))
 	}
-	return path
+	return filepath.ToSlash(path)
 }
 
 func parseLocalSkillFrontmatter(content string) (name, description string) {
@@ -138,6 +142,7 @@ func readLocalSkillMainFile(skillDir string) (string, error) {
 
 func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileData, error) {
 	files := make([]SkillFileData, 0)
+	var totalSize int64
 
 	err := filepath.WalkDir(skillDir, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -174,6 +179,13 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 		info, err := entry.Info()
 		if err != nil || info.Size() > maxLocalSkillFileSize {
 			return nil
+		}
+		if len(files) >= maxLocalSkillFileCount {
+			return fmt.Errorf("local skill exceeds %d files", maxLocalSkillFileCount)
+		}
+		totalSize += info.Size()
+		if totalSize > maxLocalSkillBundleSize {
+			return fmt.Errorf("local skill exceeds %d bytes in total", maxLocalSkillBundleSize)
 		}
 
 		file := SkillFileData{Path: filepath.ToSlash(rel)}

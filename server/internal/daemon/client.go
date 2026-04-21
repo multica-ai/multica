@@ -178,10 +178,8 @@ type PendingLocalSkills struct {
 
 // PendingLocalSkillImport represents a request to import a runtime local skill.
 type PendingLocalSkillImport struct {
-	ID          string `json:"id"`
-	SkillKey    string `json:"skill_key"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	ID       string `json:"id"`
+	SkillKey string `json:"skill_key"`
 }
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
