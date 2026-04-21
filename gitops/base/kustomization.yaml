@@ -4,6 +4,9 @@ kind: Kustomization
 namespace: agentfarm
 
 resources:
+  - iam-resources.yaml
+  - rds-credentials-external-secret.yaml
+  - pgvector-init-job.yaml
   - rds-instance.yaml
 
 labels:
