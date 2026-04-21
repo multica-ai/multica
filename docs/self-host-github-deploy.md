@@ -29,10 +29,13 @@ Add these repository secrets in `ninggc/multica`:
   - Private key content for the SSH key that can log into `louis.ning@101.35.232.18`
 - `DEPLOY_SSH_PORT`
   - Optional. Default is `22`
-- `DEPLOY_HOST_FINGERPRINT`
-  - Optional. The current workflow does not enforce host key fingerprint verification.
-  - If you want to re-enable strict verification later, current server ED25519 fingerprint is:
-    `SHA256:9pY+Mtsw27CILLhZx8ezHUf7U+x5RBOzzPe96xT58A0`
+- `DEPLOY_KNOWN_HOSTS`
+  - Required. Add the exact SSH host key lines for the deployment host.
+  - Current value for this server:
+    ```text
+    101.35.232.18 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAljUxNzXIO3XGcUWz0VfDkhXvXYrfUTD0sEwEt4lZ73
+    101.35.232.18 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCpL4egB5QAtQ2+nvZXQfDAfOe0igeI6qg/kn+jSxip7nlkN8gtE/Tobrx5adc4Ti3D1MJtyRk9IG+4Brd2gcy5Wbrzd1FuOHk6FcsHx2zLIB13Nk56BDeq0/T/TTJx5m+mxWKVZf1w425/cXesCT6e/H3ju74jwaVPbRAFQhxOSzH5dKBZGGrCrGLNayc6Ef+fF3TAn2pJGwRH0qYivTBHTlWl+h03cSQ9gTepsBtNNmyTn/KznsgkOODSlgQMFlBf9JmQi2IP6RTZ53i8J0cEm8ZqwcUZKx0RTHxnCKVlRYexHtu2RcCdg545lTHskxkrQM/39IwyKDDSfEgQS/T6hf6lF/odRJPMhtlAVAiVSovpTTucyzlqBucXuXBraWc9ZkVlZvrtkkeYIWXTVt9eOX4QRkjtG+w+1VWIBA+A+/Cx4eAPmFbTqDh9gNBZbjKlSoB9MaMkOFbWlyzoEyi7K9s3FKnzncibe3hVx/mxkXBQpbS+OOblgDNOWQzfEjc=
+    ```
 
 ## Optional GitHub Repository Variables
 

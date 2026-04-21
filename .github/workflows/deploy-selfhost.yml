@@ -45,69 +45,99 @@ jobs:
           tar -czf multica-deploy-assets.tgz -C deploy-assets .
           ls -lh multica-deploy-assets.tgz
 
+      - name: Prepare SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts_deploy
+          ssh-keygen -F "$DEPLOY_HOST" -f ~/.ssh/known_hosts_deploy >/dev/null
+
       - name: Upload bundle to server
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_SSH_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ env.DEPLOY_SSH_PORT }}
-          source: multica-deploy-assets.tgz
-          target: /tmp/multica-deploy-${{ github.run_id }}
-          overwrite: true
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          set -eu
+          ssh \
+            -p "${DEPLOY_SSH_PORT}" \
+            -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts_deploy \
+            "${DEPLOY_SSH_USER}@${DEPLOY_HOST}" \
+            "mkdir -p /tmp/multica-deploy-${GITHUB_RUN_ID}"
+          scp \
+            -P "${DEPLOY_SSH_PORT}" \
+            -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts_deploy \
+            multica-deploy-assets.tgz \
+            "${DEPLOY_SSH_USER}@${DEPLOY_HOST}:/tmp/multica-deploy-${GITHUB_RUN_ID}/multica-deploy-assets.tgz"
 
       - name: Deploy on server
-        uses: appleboy/ssh-action@v1
         env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
           DEPLOY_APP_USER: ${{ env.DEPLOY_APP_USER }}
           DEPLOY_SSH_PORT: ${{ env.DEPLOY_SSH_PORT }}
           DEPLOY_RUN_ID: ${{ github.run_id }}
           DEPLOY_SHA: ${{ github.sha }}
           DEPLOY_REPO: ${{ github.repository }}
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_SSH_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ env.DEPLOY_SSH_PORT }}
-          envs: DEPLOY_DIR,DEPLOY_APP_USER,DEPLOY_RUN_ID,DEPLOY_SHA,DEPLOY_REPO
-          command_timeout: 30m
-          script: |
-            set -eu
+        run: |
+          set -eu
+          ssh \
+            -p "${DEPLOY_SSH_PORT}" \
+            -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts_deploy \
+            "${DEPLOY_SSH_USER}@${DEPLOY_HOST}" \
+            "DEPLOY_DIR='${DEPLOY_DIR}' DEPLOY_APP_USER='${DEPLOY_APP_USER}' DEPLOY_RUN_ID='${DEPLOY_RUN_ID}' DEPLOY_SHA='${DEPLOY_SHA}' DEPLOY_REPO='${DEPLOY_REPO}' bash -se" <<'SCRIPT'
+          set -eu
 
-            deploy_tmp="/tmp/multica-deploy-${DEPLOY_RUN_ID}"
-            archive_path="${deploy_tmp}/multica-deploy-assets.tgz"
-            bundle_path="${deploy_tmp}/multica-deploy.bundle"
-            backup_script="${deploy_tmp}/scripts/selfhost-backup.sh"
+          deploy_tmp="/tmp/multica-deploy-${DEPLOY_RUN_ID}"
+          archive_path="${deploy_tmp}/multica-deploy-assets.tgz"
+          bundle_path="${deploy_tmp}/multica-deploy.bundle"
+          backup_script="${deploy_tmp}/scripts/selfhost-backup.sh"
 
-            if [ ! -f "$archive_path" ]; then
-              echo "deploy archive not found: $archive_path" >&2
-              exit 1
-            fi
+          if [ ! -f "$archive_path" ]; then
+            echo "deploy archive not found: $archive_path" >&2
+            exit 1
+          fi
 
-            if [ ! -d "$DEPLOY_DIR/.git" ]; then
-              echo "deploy target is not a git worktree: $DEPLOY_DIR" >&2
-              exit 1
-            fi
+          if [ ! -d "$DEPLOY_DIR/.git" ]; then
+            echo "deploy target is not a git worktree: $DEPLOY_DIR" >&2
+            exit 1
+          fi
 
-            mkdir -p "${deploy_tmp}/scripts"
-            tar -xzf "$archive_path" -C "$deploy_tmp"
-            chmod +x "$backup_script"
+          mkdir -p "${deploy_tmp}/scripts"
+          tar -xzf "$archive_path" -C "$deploy_tmp"
+          chmod +x "$backup_script"
 
-            "$backup_script" "$DEPLOY_DIR" "$DEPLOY_APP_USER" "$DEPLOY_SHA"
+          "$backup_script" "$DEPLOY_DIR" "$DEPLOY_APP_USER" "$DEPLOY_SHA"
 
-            sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" fetch "$bundle_path" HEAD
-            sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" reset --hard FETCH_HEAD
-            sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" clean -fd -e .env
-            sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" remote set-url origin "git@github.com:${DEPLOY_REPO}.git"
+          sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" fetch "$bundle_path" HEAD
+          sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" reset --hard FETCH_HEAD
+          sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" clean -fd -e .env
+          sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" remote set-url origin "git@github.com:${DEPLOY_REPO}.git"
 
-            sudo -u "$DEPLOY_APP_USER" docker compose -f "$DEPLOY_DIR/docker-compose.selfhost.yml" up -d --build
+          sudo docker compose -f "$DEPLOY_DIR/docker-compose.selfhost.yml" up -d --build
 
-            curl -fsS http://127.0.0.1:8080/health
-            curl -fsSI http://127.0.0.1:3000 >/dev/null
+          curl -fsS http://127.0.0.1:8080/health
+          curl -fsSI http://127.0.0.1:3000 >/dev/null
 
-            sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" rev-parse --short HEAD
-            sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" status --short
-            sudo -u "$DEPLOY_APP_USER" docker compose -f "$DEPLOY_DIR/docker-compose.selfhost.yml" ps
+          sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" rev-parse --short HEAD
+          sudo -u "$DEPLOY_APP_USER" git -C "$DEPLOY_DIR" status --short
+          sudo docker compose -f "$DEPLOY_DIR/docker-compose.selfhost.yml" ps
 
-            sudo rm -rf "/tmp/multica-deploy-${DEPLOY_RUN_ID}"
+          sudo rm -rf "/tmp/multica-deploy-${DEPLOY_RUN_ID}"
+          SCRIPT
