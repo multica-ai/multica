@@ -1,0 +1,2 @@
+# This directory will contain environment-specific Kustomize patches
+# Example patches: ingress.yaml, service-account.yaml, iam-role.yaml, iam-policy.yaml
