@@ -26,7 +26,7 @@ export
 
 MULTICA_ARGS ?= $(ARGS)
 
-COMPOSE := docker compose
+COMPOSE := ./scripts/compose.sh
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -36,9 +36,9 @@ define REQUIRE_ENV
 	fi
 endef
 
-# ---------- Self-hosting (Docker Compose) ----------
+# ---------- Self-hosting (Compose: Docker or Podman) ----------
 
-# One-command self-host: create env, start Docker Compose, wait for health
+# One-command self-host: create env, start Compose stack, wait for health
 selfhost:
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
@@ -51,8 +51,8 @@ selfhost:
 		fi; \
 		echo "==> Generated random JWT_SECRET"; \
 	fi
-	@echo "==> Starting Multica via Docker Compose..."
-	docker compose -f docker-compose.selfhost.yml up -d --build
+	@echo "==> Starting Multica via Compose..."
+	$(COMPOSE) -f docker-compose.selfhost.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
@@ -75,13 +75,13 @@ selfhost:
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
-		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
+		echo "  $(COMPOSE) -f docker-compose.selfhost.yml logs"; \
 	fi
 
 # Stop all Docker Compose self-host services
 selfhost-stop:
 	@echo "==> Stopping Multica services..."
-	docker compose -f docker-compose.selfhost.yml down
+	$(COMPOSE) -f docker-compose.selfhost.yml down
 	@echo "✓ All services stopped."
 
 # ---------- One-click commands ----------

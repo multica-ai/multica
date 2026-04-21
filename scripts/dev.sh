@@ -9,11 +9,14 @@ missing=()
 command -v node >/dev/null 2>&1 || missing+=("node")
 command -v pnpm >/dev/null 2>&1 || missing+=("pnpm")
 command -v go >/dev/null 2>&1 || missing+=("go")
-command -v docker >/dev/null 2>&1 || missing+=("docker")
+if ! bash "$REPO_ROOT/scripts/compose.sh" version >/dev/null 2>&1; then
+  missing+=("container-compose (Docker Engine + Compose v2, or Podman 4+ with compose)")
+fi
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "✗ Missing prerequisites: ${missing[*]}"
-  echo "  Please install: Node.js v20+, pnpm v10.28+, Go v1.26+, Docker"
+  echo "  Please install: Node.js v20+, pnpm v10.28+, Go v1.26+, and Docker or Podman (see SELF_HOSTING.md — Podman)."
+  echo "  Optional: export MULTICA_COMPOSE='podman compose' if your compose CLI is non-standard."
   exit 1
 fi
 

@@ -24,11 +24,11 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 multica setup self-host
 ```
 
-This clones the repository, starts all services via Docker Compose, installs the `multica` CLI, then configures it for localhost.
+This clones the repository, starts all services via **Compose** (Docker or Podman), installs the `multica` CLI, then configures it for localhost.
 
 Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or set `APP_ENV=development` in `.env` to enable the dev master code **`888888`**. See [Step 2 — Log In](#step-2--log-in) for details.
 
-> **Prerequisites:** Docker and Docker Compose must be installed. The script checks for this and provides install links if missing.
+> **Prerequisites:** **Docker Engine with Compose v2** or **Podman 4+ with `podman compose`**. The install script runs `./scripts/compose.sh version` to verify a working backend and prints install hints if missing.
 >
 > **CLI only?** If the self-host server is already running and you only need the CLI on a macOS/Linux machine, install it with Homebrew:
 >
@@ -44,7 +44,7 @@ If you prefer to run each step manually:
 
 ### Step 1 — Start the Server
 
-**Prerequisites:** Docker and Docker Compose.
+**Prerequisites:** Docker with Compose v2, or Podman with compose support (see [Podman (Linux)](#podman-linux) below).
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -52,14 +52,14 @@ cd multica
 make selfhost
 ```
 
-`make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
+`make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, and starts all services via Compose (`./scripts/compose.sh`).
 
 Once ready:
 
 - **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8080
 
-> **Note:** If you prefer to run the Docker Compose steps manually, see [Manual Docker Compose Setup](#manual-docker-compose-setup) below.
+> **Note:** If you prefer to run Compose steps manually, see [Manual Compose setup](#manual-compose-setup) below.
 
 ### Step 2 — Log In
 
@@ -137,7 +137,7 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 If you cloned the repo manually:
 
 ```bash
-# Stop the Docker Compose services (backend, frontend, database)
+# Stop the Compose services (backend, frontend, database)
 make selfhost-stop
 
 # Stop the local daemon
@@ -154,7 +154,15 @@ multica setup
 
 This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
 
-> Your local Docker services are unaffected. Stop them separately if you no longer need them.
+> Your local container services are unaffected. Stop them separately if you no longer need them.
+
+## Podman (Linux)
+
+Multica ships **`scripts/compose.sh`**: from the repo root it runs **`docker compose`** when Docker is available and working, otherwise **`podman compose`** if that works. **`Makefile`** and **`scripts/install.sh`** use this wrapper.
+
+- **Fedora / RHEL-style:** `sudo dnf install podman` and ensure compose works (`podman compose version`). Optional: `podman-docker` provides a `docker` CLI shim if you prefer Docker-compatible tooling.
+- **Override:** if auto-detection is wrong, set a whitespace-separated prefix, e.g. `export MULTICA_COMPOSE='podman compose'`, then run `make` or scripts as usual.
+- **Rootless:** follow [Podman rootless](https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md). This project uses Compose **named volumes**, which usually work without extra `:z` volume flags.
 
 ## Rebuilding After Updates
 
@@ -167,9 +175,9 @@ Migrations run automatically on backend startup.
 
 ---
 
-## Manual Docker Compose Setup
+## Manual Compose setup
 
-If you prefer running Docker Compose steps manually instead of `make selfhost`:
+If you prefer running Compose steps manually instead of `make selfhost`:
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -183,10 +191,10 @@ Edit `.env` — at minimum, change `JWT_SECRET`:
 JWT_SECRET=$(openssl rand -hex 32)
 ```
 
-Then start everything:
+Then start everything (from repo root):
 
 ```bash
-docker compose -f docker-compose.selfhost.yml up -d
+./scripts/compose.sh -f docker-compose.selfhost.yml up -d
 ```
 
 ## Manual CLI Configuration

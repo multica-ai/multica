@@ -85,7 +85,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 > multica setup self-host
 > ```
 >
-> Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
+> Requires Docker **or** Podman with Compose. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
 
 ---
 
@@ -175,7 +175,7 @@ See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference
 
 For contributors working on the Multica codebase, see the [Contributing Guide](CONTRIBUTING.md).
 
-**Prerequisites:** [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Go](https://go.dev/) v1.26+, [Docker](https://www.docker.com/)
+**Prerequisites:** [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Go](https://go.dev/) v1.26+, and [Docker](https://www.docker.com/) **or** [Podman](https://podman.io/) with Compose (see [SELF_HOSTING.md — Podman](SELF_HOSTING.md#podman-linux))
 
 ```bash
 make dev

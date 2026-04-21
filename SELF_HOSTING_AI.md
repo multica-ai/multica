@@ -4,7 +4,7 @@ This document is designed for AI agents to execute. Follow these steps exactly t
 
 ## Prerequisites
 
-- Docker and Docker Compose installed
+- Docker with Compose v2, or Podman 4+ with `podman compose` (see [SELF_HOSTING.md](SELF_HOSTING.md#podman-linux))
 - Homebrew installed (for CLI)
 - At least one AI agent CLI on PATH: `claude` or `codex`
 
@@ -55,7 +55,7 @@ Should show `running` with detected agents.
 # Stop the daemon
 multica daemon stop
 
-# Stop all Docker services
+# Stop all Compose services
 cd multica
 make selfhost-stop
 ```
@@ -70,7 +70,7 @@ If the default ports (8080/3000) are in use:
 
 ## Troubleshooting
 
-- **Backend not ready:** `docker compose -f docker-compose.selfhost.yml logs backend`
-- **Frontend not ready:** `docker compose -f docker-compose.selfhost.yml logs frontend`
+- **Backend not ready:** `./scripts/compose.sh -f docker-compose.selfhost.yml logs backend`
+- **Frontend not ready:** `./scripts/compose.sh -f docker-compose.selfhost.yml logs frontend`
 - **Daemon issues:** `multica daemon logs`
 - **Health check:** `curl http://localhost:8080/health`

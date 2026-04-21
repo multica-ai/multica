@@ -106,6 +106,7 @@ pnpm ui:add badge                # Adds component to packages/ui/components/ui/
 # Infrastructure
 make db-up            # Start shared PostgreSQL (pgvector/pg17 image)
 make db-down          # Stop shared PostgreSQL
+# Uses scripts/compose.sh → docker compose or podman compose (override: MULTICA_COMPOSE='podman compose')
 ```
 
 ### CI Requirements

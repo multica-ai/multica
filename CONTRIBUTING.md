@@ -29,7 +29,7 @@ This keeps Docker simple while still isolating schema and data.
 - Node.js `v20+`
 - `pnpm` `v10.28+`
 - Go `v1.26+`
-- Docker
+- Docker **or** Podman with Compose support (see [SELF_HOSTING.md — Podman](SELF_HOSTING.md#podman-linux)); `make dev` uses `scripts/compose.sh` to run `docker compose` or `podman compose`.
 
 ## Important Rules
 
@@ -107,7 +107,7 @@ This single command:
 
 - auto-detects whether you're in a main checkout or a worktree
 - creates the appropriate env file (`.env` or `.env.worktree`) if it doesn't exist
-- checks that prerequisites (Node.js, pnpm, Go, Docker) are installed
+- checks that prerequisites (Node.js, pnpm, Go, and a working Compose backend via `scripts/compose.sh`) are installed
 - installs JavaScript dependencies
 - ensures the shared PostgreSQL container is running
 - creates the application database if it does not exist
@@ -551,7 +551,7 @@ Look for:
 ### List All Local Databases in Shared PostgreSQL
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres -At -c "select datname from pg_database order by datname;"
+./scripts/compose.sh exec -T postgres psql -U multica -d postgres -At -c "select datname from pg_database order by datname;"
 ```
 
 ### Worktree Is Accidentally Using the Main Database
@@ -595,12 +595,12 @@ make db-down
 If you want to wipe all local PostgreSQL data for this repo:
 
 ```bash
-docker compose down -v
+./scripts/compose.sh down -v
 ```
 
 Warning:
 
-- this deletes the shared Docker volume
+- this deletes the shared PostgreSQL volume used by Compose
 - this deletes the main database and every worktree database in that volume
 - after that you must run `make setup-main` or `make setup-worktree` again
 
