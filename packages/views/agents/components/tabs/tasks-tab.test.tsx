@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentTask, Issue } from "@multica/core/types";
 
 const mockListAgentTasks = vi.hoisted(() => vi.fn());
+const mockListAgentExternalSessions = vi.hoisted(() => vi.fn());
 const mockListIssues = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
@@ -25,6 +26,8 @@ vi.mock("@multica/core/paths", async () => {
 vi.mock("@multica/core/api", () => ({
   api: {
     listAgentTasks: (...args: unknown[]) => mockListAgentTasks(...args),
+    listAgentExternalSessions: (...args: unknown[]) =>
+      mockListAgentExternalSessions(...args),
     listIssues: (...args: unknown[]) => mockListIssues(...args),
   },
 }));
@@ -66,6 +69,7 @@ const agent: Agent = {
 
 function renderTasksTab(tasks: AgentTask[], issues: Issue[]) {
   mockListAgentTasks.mockResolvedValue(tasks);
+  mockListAgentExternalSessions.mockResolvedValue([]);
   mockListIssues.mockImplementation(
     ({ open_only, status }: { open_only?: boolean; status?: string }) =>
       Promise.resolve({

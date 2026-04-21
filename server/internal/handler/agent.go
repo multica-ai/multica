@@ -1,13 +1,24 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -128,12 +139,41 @@ type AgentTaskResponse struct {
 	Agent                 *TaskAgentData `json:"agent,omitempty"`
 	Repos                 []RepoData     `json:"repos,omitempty"`
 	CreatedAt             string         `json:"created_at"`
+	SessionID             string         `json:"session_id,omitempty"`              // concrete session id from this task run
+	WorkDir               string         `json:"work_dir,omitempty"`                // concrete work dir from this task run
+	ResumeSessionID       string         `json:"resume_session_id,omitempty"`       // explicit session id selected for Continue/resume
+	ResumeSource          string         `json:"resume_source,omitempty"`           // source label (task/external/manual)
+	ResumeCommand         string         `json:"resume_command,omitempty"`          // ready-to-run command: codex resume <session_id>
 	PriorSessionID        string         `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
 	PriorWorkDir          string         `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+}
+
+type ExternalSessionResponse struct {
+	SessionID    string `json:"session_id"`
+	WorkDir      string `json:"work_dir,omitempty"`
+	LastSeenAt   string `json:"last_seen_at"`
+	IssueID      string `json:"issue_id,omitempty"`
+	SourceTaskID string `json:"source_task_id,omitempty"`
+	Source       string `json:"source,omitempty"`     // session_file/process/merged
+	IsRunning    bool   `json:"is_running,omitempty"` // true when discovered from live process table
+	LeaderPID    int    `json:"leader_pid,omitempty"` // process id that currently owns this resume session
+	Command      string `json:"command,omitempty"`    // full command line from process table
+	TTY          string `json:"tty,omitempty"`        // tty from process table, when available
+}
+
+type ResumeExternalSessionRequest struct {
+	SessionID string `json:"session_id"`
+	WorkDir   string `json:"work_dir"`
+	IssueID   string `json:"issue_id"`
+	Priority  *int32 `json:"priority,omitempty"`
+}
+
+type BindTaskIssueRequest struct {
+	IssueID string `json:"issue_id"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -149,12 +189,51 @@ type TaskAgentData struct {
 	Model        string                   `json:"model,omitempty"`
 }
 
+type codexSessionMetaEvent struct {
+	Type    string `json:"type"`
+	Payload struct {
+		ID      string `json:"id"`
+		Cwd     string `json:"cwd"`
+		WorkDir string `json:"work_dir"`
+	} `json:"payload"`
+}
+
+type codexSessionRecord struct {
+	SessionID  string
+	WorkDir    string
+	LastSeenAt time.Time
+}
+
+type codexResumeProcess struct {
+	SessionID string
+	PID       int
+	PPID      int
+	TTY       string
+	Command   string
+}
+
+const (
+	defaultExternalSessionLookbackDays = 7
+	maxExternalSessionLookbackDays     = 30
+	defaultManualResumePriority        = 50
+	resumeErrorCodeIssueRequired       = "issue_id_required"
+)
+
+var rolloutSessionIDPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+var codexResumeCommandSessionPattern = regexp.MustCompile(`(?i)\bresume\b\s+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
+
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
-	return AgentTaskResponse{
+	resumeSessionID, resumeSource := extractResumeMetadataFromTaskContext(t)
+	resumeCommand := ""
+	if resumeSessionID != "" {
+		resumeCommand = fmt.Sprintf("codex resume %s", resumeSessionID)
+	}
+
+	resp := AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
 		RuntimeID:        uuidToString(t.RuntimeID),
@@ -167,8 +246,39 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		Result:           result,
 		Error:            textToPtr(t.Error),
 		CreatedAt:        timestampToString(t.CreatedAt),
+		SessionID:        t.SessionID.String,
+		WorkDir:          t.WorkDir.String,
+		ResumeSessionID:  resumeSessionID,
+		ResumeSource:     resumeSource,
+		ResumeCommand:    resumeCommand,
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		ChatSessionID:    uuidToString(t.ChatSessionID),
 	}
+	// Keep backward compatibility for clients that already read prior_session_id.
+	if resp.PriorSessionID == "" && resp.ResumeSessionID != "" {
+		resp.PriorSessionID = resp.ResumeSessionID
+	}
+
+	return resp
+}
+
+func extractResumeMetadataFromTaskContext(task db.AgentTaskQueue) (sessionID, source string) {
+	if len(task.Context) == 0 {
+		return "", ""
+	}
+
+	var taskCtx map[string]any
+	if err := json.Unmarshal(task.Context, &taskCtx); err != nil {
+		return "", ""
+	}
+
+	if rawSessionID, ok := taskCtx["resume_session_id"].(string); ok {
+		sessionID = strings.TrimSpace(rawSessionID)
+	}
+	if rawSource, ok := taskCtx["resume_source"].(string); ok {
+		source = strings.TrimSpace(rawSource)
+	}
+	return sessionID, source
 }
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -645,4 +755,901 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ResumeAgentTask(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	sourceTaskID := chi.URLParam(r, "taskId")
+
+	agent, ok := h.loadAgentForUser(w, r, agentID)
+	if !ok {
+		return
+	}
+
+	sourceTask, err := h.Queries.GetAgentTask(r.Context(), parseUUID(sourceTaskID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "source task not found")
+		return
+	}
+
+	if uuidToString(sourceTask.AgentID) != agentID {
+		writeError(w, http.StatusForbidden, "task does not belong to this agent")
+		return
+	}
+	if sourceTask.Status != "completed" {
+		writeError(w, http.StatusBadRequest, "only completed tasks can be resumed")
+		return
+	}
+	if !sourceTask.IssueID.Valid {
+		writeError(w, http.StatusBadRequest, "only issue tasks can be resumed")
+		return
+	}
+	if !sourceTask.SessionID.Valid || sourceTask.SessionID.String == "" {
+		writeError(w, http.StatusBadRequest, "source task has no resumable session")
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeError(w, http.StatusConflict, "agent has no runtime")
+		return
+	}
+	if err := h.ensureWorkspaceHasRepos(r.Context(), agent.WorkspaceID); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "database executor unavailable")
+		return
+	}
+
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: sourceTask.IssueID,
+		AgentID: sourceTask.AgentID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check pending tasks")
+		return
+	}
+	if hasPending {
+		writeError(w, http.StatusConflict, "there is already a pending task for this issue")
+		return
+	}
+
+	newTask, err := h.Queries.CreateAgentTask(r.Context(), db.CreateAgentTaskParams{
+		AgentID:   sourceTask.AgentID,
+		RuntimeID: agent.RuntimeID,
+		IssueID:   sourceTask.IssueID,
+		Priority:  sourceTask.Priority,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enqueue resume task")
+		return
+	}
+
+	resumeContext := map[string]any{
+		"resume_session_id":   sourceTask.SessionID.String,
+		"resume_source_task":  sourceTaskID,
+		"resume_source_agent": agentID,
+	}
+	if sourceTask.WorkDir.Valid && sourceTask.WorkDir.String != "" {
+		resumeContext["resume_work_dir"] = sourceTask.WorkDir.String
+	}
+
+	ctxJSON, err := json.Marshal(resumeContext)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode resume context")
+		return
+	}
+
+	if _, err := h.DB.Exec(r.Context(), `UPDATE agent_task_queue SET context = $2 WHERE id = $1`, newTask.ID, ctxJSON); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save resume context")
+		return
+	}
+	newTask.Context = ctxJSON
+
+	writeJSON(w, http.StatusCreated, taskToResponse(newTask))
+}
+
+func (h *Handler) ListAgentExternalSessions(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, agentID)
+	if !ok {
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeJSON(w, http.StatusOK, []ExternalSessionResponse{})
+		return
+	}
+
+	runtime, err := h.Queries.GetAgentRuntime(r.Context(), agent.RuntimeID)
+	if err == nil && runtime.Provider != "codex" {
+		writeJSON(w, http.StatusOK, []ExternalSessionResponse{})
+		return
+	}
+
+	days := parseLookbackDays(r.URL.Query().Get("days"))
+	root := resolveCodexSessionRoot()
+
+	fileSessions := []ExternalSessionResponse{}
+	if root != "" {
+		scanned, err := scanCodexSessions(root, days)
+		if err != nil {
+			slog.Warn("scan codex session files failed", append(logger.RequestAttrs(r), "error", err, "root", root)...)
+		} else {
+			fileSessions = scanned
+		}
+	}
+
+	liveSessions, err := scanRunningCodexSessions()
+	if err != nil {
+		slog.Warn("scan running codex sessions failed", append(logger.RequestAttrs(r), "error", err)...)
+	}
+
+	external := mergeExternalSessions(fileSessions, liveSessions)
+
+	taskRows, err := h.Queries.ListAgentTasks(r.Context(), parseUUID(agentID))
+	if err == nil {
+		latestBySession := map[string]db.AgentTaskQueue{}
+		for _, task := range taskRows {
+			candidateSessionIDs := map[string]struct{}{}
+			if task.SessionID.Valid && task.SessionID.String != "" {
+				candidateSessionIDs[task.SessionID.String] = struct{}{}
+			}
+			if resumeSID, _ := extractResumeMetadataFromTaskContext(task); resumeSID != "" {
+				candidateSessionIDs[resumeSID] = struct{}{}
+			}
+
+			for sid := range candidateSessionIDs {
+				if cur, exists := latestBySession[sid]; !exists || taskReferenceTime(task).After(taskReferenceTime(cur)) {
+					latestBySession[sid] = task
+				}
+			}
+		}
+
+		for i := range external {
+			if task, exists := latestBySession[external[i].SessionID]; exists {
+				external[i].IssueID = uuidToString(task.IssueID)
+				external[i].SourceTaskID = uuidToString(task.ID)
+				if external[i].WorkDir == "" && task.WorkDir.Valid {
+					external[i].WorkDir = task.WorkDir.String
+				}
+			}
+		}
+	}
+
+	sortExternalSessions(external)
+
+	writeJSON(w, http.StatusOK, external)
+}
+
+func (h *Handler) ResumeExternalSession(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, agentID)
+	if !ok {
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeError(w, http.StatusConflict, "agent has no runtime")
+		return
+	}
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "database executor unavailable")
+		return
+	}
+
+	var req ResumeExternalSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.WorkDir = strings.TrimSpace(req.WorkDir)
+	req.IssueID = strings.TrimSpace(req.IssueID)
+	if req.SessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	if req.IssueID == "" {
+		writeErrorWithCode(
+			w,
+			http.StatusBadRequest,
+			resumeErrorCodeIssueRequired,
+			"issue_id is required when continuing a Codex session; create or reuse an issue first",
+		)
+		return
+	}
+	if err := h.ensureWorkspaceHasRepos(r.Context(), agent.WorkspaceID); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	issueID := parseUUID(req.IssueID)
+	if !issueID.Valid {
+		writeError(w, http.StatusBadRequest, "invalid issue_id")
+		return
+	}
+	if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          issueID,
+		WorkspaceID: agent.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "issue_id does not belong to this workspace")
+		return
+	}
+
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: parseUUID(agentID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check pending tasks")
+		return
+	}
+	if hasPending {
+		writeError(w, http.StatusConflict, "there is already a pending task for this issue")
+		return
+	}
+
+	priority := int32(defaultManualResumePriority)
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+
+	newTask, err := h.Queries.CreateAgentTask(r.Context(), db.CreateAgentTaskParams{
+		AgentID:   parseUUID(agentID),
+		RuntimeID: agent.RuntimeID,
+		IssueID:   issueID,
+		Priority:  priority,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enqueue resume task")
+		return
+	}
+
+	resumeContext := map[string]any{
+		"resume_session_id": req.SessionID,
+		"resume_source":     "external_codex_session",
+	}
+	if req.WorkDir != "" {
+		resumeContext["resume_work_dir"] = req.WorkDir
+	}
+
+	ctxJSON, err := json.Marshal(resumeContext)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode resume context")
+		return
+	}
+	if _, err := h.DB.Exec(r.Context(), `UPDATE agent_task_queue SET context = $2 WHERE id = $1`, newTask.ID, ctxJSON); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save resume context")
+		return
+	}
+	newTask.Context = ctxJSON
+
+	writeJSON(w, http.StatusCreated, taskToResponse(newTask))
+}
+
+func (h *Handler) ensureWorkspaceHasRepos(ctx context.Context, workspaceID pgtype.UUID) error {
+	workspace, err := h.Queries.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to load workspace repositories")
+	}
+
+	repos := parseWorkspaceRepos(workspace.Repos)
+	if len(repos) > 0 {
+		return nil
+	}
+
+	return fmt.Errorf("workspace has no repositories configured; attach at least one repository in Settings > Repositories before continuing")
+}
+
+func (h *Handler) BindAgentTaskIssue(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	taskID := chi.URLParam(r, "taskId")
+
+	agent, ok := h.loadAgentForUser(w, r, agentID)
+	if !ok {
+		return
+	}
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "database executor unavailable")
+		return
+	}
+
+	var req BindTaskIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.IssueID = strings.TrimSpace(req.IssueID)
+	if req.IssueID == "" {
+		writeError(w, http.StatusBadRequest, "issue_id is required")
+		return
+	}
+
+	issueID := parseUUID(req.IssueID)
+	if !issueID.Valid {
+		writeError(w, http.StatusBadRequest, "invalid issue_id")
+		return
+	}
+	if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          issueID,
+		WorkspaceID: agent.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "issue_id does not belong to this workspace")
+		return
+	}
+
+	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if uuidToString(task.AgentID) != agentID {
+		writeError(w, http.StatusForbidden, "task does not belong to this agent")
+		return
+	}
+	if task.ChatSessionID.Valid {
+		writeError(w, http.StatusBadRequest, "chat tasks cannot be bound to issues")
+		return
+	}
+	if task.IssueID.Valid {
+		if uuidToString(task.IssueID) == req.IssueID {
+			writeJSON(w, http.StatusOK, taskToResponse(task))
+			return
+		}
+		writeError(w, http.StatusConflict, "task is already bound to a different issue")
+		return
+	}
+	if task.Status != "queued" && task.Status != "dispatched" && task.Status != "running" {
+		writeError(w, http.StatusBadRequest, "only queued/dispatched/running tasks can be bound")
+		return
+	}
+
+	cmdTag, err := h.DB.Exec(
+		r.Context(),
+		`UPDATE agent_task_queue
+		 SET issue_id = $2
+		 WHERE id = $1
+		   AND issue_id IS NULL
+		   AND status IN ('queued', 'dispatched', 'running')`,
+		task.ID,
+		issueID,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "issue already has a pending task for this agent")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to bind task issue")
+		return
+	}
+	if cmdTag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, "task cannot be bound in current state")
+		return
+	}
+
+	updatedTask, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load updated task")
+		return
+	}
+
+	// Re-broadcast a dispatch-style event so issue pages can pick up an already
+	// running task immediately after it gets bound to an issue.
+	dispatchPayload := map[string]any{}
+	if len(updatedTask.Context) > 0 {
+		_ = json.Unmarshal(updatedTask.Context, &dispatchPayload)
+	}
+	if dispatchPayload == nil {
+		dispatchPayload = map[string]any{}
+	}
+	dispatchPayload["task_id"] = uuidToString(updatedTask.ID)
+	dispatchPayload["runtime_id"] = uuidToString(updatedTask.RuntimeID)
+	dispatchPayload["issue_id"] = uuidToString(updatedTask.IssueID)
+	dispatchPayload["agent_id"] = uuidToString(updatedTask.AgentID)
+
+	wsID := uuidToString(agent.WorkspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, wsID)
+	h.publish(protocol.EventTaskDispatch, wsID, actorType, actorID, dispatchPayload)
+
+	writeJSON(w, http.StatusOK, taskToResponse(updatedTask))
+}
+
+func parseLookbackDays(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultExternalSessionLookbackDays
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultExternalSessionLookbackDays
+	}
+	if n > maxExternalSessionLookbackDays {
+		return maxExternalSessionLookbackDays
+	}
+	return n
+}
+
+func resolveCodexSessionRoot() string {
+	candidates := []string{
+		strings.TrimSpace(os.Getenv("MULTICA_CODEX_SESSIONS_ROOT")),
+		strings.TrimSpace(os.Getenv("CODEX_SESSION_DIR")),
+	}
+	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
+		candidates = append(candidates, filepath.Join(codexHome, "sessions"))
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".codex", "sessions"))
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func resolveCodexProcRoot() string {
+	candidates := []string{
+		strings.TrimSpace(os.Getenv("MULTICA_CODEX_PROC_ROOT")),
+		"/proc",
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func scanCodexSessions(root string, days int) ([]ExternalSessionResponse, error) {
+	now := time.Now()
+	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	bySessionID := map[string]codexSessionRecord{}
+
+	for offset := 0; offset < days; offset++ {
+		day := now.AddDate(0, 0, -offset)
+		dayDir := filepath.Join(root,
+			fmt.Sprintf("%04d", day.Year()),
+			fmt.Sprintf("%02d", int(day.Month())),
+			fmt.Sprintf("%02d", day.Day()),
+		)
+
+		files, err := filepath.Glob(filepath.Join(dayDir, "*.jsonl"))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			record, ok := parseCodexSessionFile(f)
+			if !ok || record.SessionID == "" {
+				continue
+			}
+			if record.LastSeenAt.Before(cutoff) {
+				continue
+			}
+			if cur, exists := bySessionID[record.SessionID]; !exists || record.LastSeenAt.After(cur.LastSeenAt) {
+				bySessionID[record.SessionID] = record
+			}
+		}
+	}
+
+	result := make([]ExternalSessionResponse, 0, len(bySessionID))
+	for _, record := range bySessionID {
+		result = append(result, ExternalSessionResponse{
+			SessionID:  record.SessionID,
+			WorkDir:    record.WorkDir,
+			LastSeenAt: record.LastSeenAt.UTC().Format(time.RFC3339),
+			Source:     "session_file",
+		})
+	}
+	sortExternalSessions(result)
+	return result, nil
+}
+
+func scanRunningCodexSessions() ([]ExternalSessionResponse, error) {
+	if runtime.GOOS != "linux" {
+		return []ExternalSessionResponse{}, nil
+	}
+
+	procRoot := resolveCodexProcRoot()
+	if procRoot != "" {
+		sessions, err := scanRunningCodexSessionsFromProc(procRoot)
+		if err == nil {
+			return sessions, nil
+		}
+		// Fallback to ps when proc-root scan fails, to keep behavior resilient.
+		slog.Warn("scan codex sessions from proc root failed; fallback to ps", "proc_root", procRoot, "error", err)
+	}
+
+	return scanRunningCodexSessionsFromPS()
+}
+
+func scanRunningCodexSessionsFromPS() ([]ExternalSessionResponse, error) {
+	cmd := exec.Command("ps", "-eo", "pid=,ppid=,tty=,args=")
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	processes := parseCodexResumeProcesses(string(raw))
+	if len(processes) == 0 {
+		return []ExternalSessionResponse{}, nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	bySessionID := map[string]ExternalSessionResponse{}
+
+	for _, proc := range processes {
+		workDir := readProcessCwd("/proc", proc.PID)
+		candidate := ExternalSessionResponse{
+			SessionID:  proc.SessionID,
+			WorkDir:    workDir,
+			LastSeenAt: now,
+			Source:     "process",
+			IsRunning:  true,
+			LeaderPID:  proc.PID,
+			Command:    proc.Command,
+			TTY:        proc.TTY,
+		}
+
+		if existing, ok := bySessionID[proc.SessionID]; ok {
+			bySessionID[proc.SessionID] = mergeExternalSession(existing, candidate)
+			continue
+		}
+		bySessionID[proc.SessionID] = candidate
+	}
+
+	result := make([]ExternalSessionResponse, 0, len(bySessionID))
+	for _, session := range bySessionID {
+		result = append(result, session)
+	}
+	sortExternalSessions(result)
+	return result, nil
+}
+
+func scanRunningCodexSessionsFromProc(procRoot string) ([]ExternalSessionResponse, error) {
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	bySessionID := map[string]ExternalSessionResponse{}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		command := readProcessCommand(procRoot, pid)
+		if command == "" {
+			continue
+		}
+
+		sessionID := sessionIDFromCodexResumeCommand(command)
+		if sessionID == "" {
+			continue
+		}
+
+		candidate := ExternalSessionResponse{
+			SessionID:  sessionID,
+			WorkDir:    readProcessCwd(procRoot, pid),
+			LastSeenAt: now,
+			Source:     "process",
+			IsRunning:  true,
+			LeaderPID:  pid,
+			Command:    command,
+			TTY:        readProcessTTY(procRoot, pid),
+		}
+
+		if existing, ok := bySessionID[sessionID]; ok {
+			bySessionID[sessionID] = mergeExternalSession(existing, candidate)
+			continue
+		}
+		bySessionID[sessionID] = candidate
+	}
+
+	result := make([]ExternalSessionResponse, 0, len(bySessionID))
+	for _, session := range bySessionID {
+		result = append(result, session)
+	}
+	sortExternalSessions(result)
+	return result, nil
+}
+
+func parseCodexResumeProcesses(psOutput string) []codexResumeProcess {
+	scanner := bufio.NewScanner(strings.NewReader(psOutput))
+	scanner.Buffer(make([]byte, 0, 256*1024), 2*1024*1024)
+
+	result := make([]codexResumeProcess, 0)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 {
+			continue
+		}
+		ppid, _ := strconv.Atoi(fields[1])
+		tty := strings.TrimSpace(fields[2])
+		command := strings.TrimSpace(strings.Join(fields[3:], " "))
+		if command == "" {
+			continue
+		}
+
+		sessionID := sessionIDFromCodexResumeCommand(command)
+		if sessionID == "" {
+			continue
+		}
+
+		result = append(result, codexResumeProcess{
+			SessionID: sessionID,
+			PID:       pid,
+			PPID:      ppid,
+			TTY:       tty,
+			Command:   command,
+		})
+	}
+
+	return result
+}
+
+func sessionIDFromCodexResumeCommand(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	lowerCommand := strings.ToLower(command)
+	if !strings.Contains(lowerCommand, "codex") || !strings.Contains(lowerCommand, "resume") {
+		return ""
+	}
+
+	match := codexResumeCommandSessionPattern.FindStringSubmatch(command)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(match[1]))
+}
+
+func readProcessCommand(procRoot string, pid int) string {
+	if procRoot == "" || pid <= 0 {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "cmdline"))
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+
+	parts := strings.Split(string(raw), "\x00")
+	args := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		args = append(args, part)
+	}
+	if len(args) == 0 {
+		return ""
+	}
+	return strings.Join(args, " ")
+}
+
+func readProcessCwd(procRoot string, pid int) string {
+	if procRoot == "" || pid <= 0 {
+		return ""
+	}
+	cwd, err := os.Readlink(filepath.Join(procRoot, strconv.Itoa(pid), "cwd"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cwd)
+}
+
+func readProcessTTY(procRoot string, pid int) string {
+	if procRoot == "" || pid <= 0 {
+		return ""
+	}
+	target, err := os.Readlink(filepath.Join(procRoot, strconv.Itoa(pid), "fd", "0"))
+	if err != nil {
+		return ""
+	}
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	target = strings.TrimPrefix(target, "/dev/")
+	if strings.HasPrefix(target, "pts/") || target == "tty" || target == "console" {
+		return target
+	}
+	return ""
+}
+
+func mergeExternalSessions(groups ...[]ExternalSessionResponse) []ExternalSessionResponse {
+	bySessionID := map[string]ExternalSessionResponse{}
+
+	for _, group := range groups {
+		for _, candidate := range group {
+			candidate.SessionID = strings.TrimSpace(candidate.SessionID)
+			if candidate.SessionID == "" {
+				continue
+			}
+
+			if existing, ok := bySessionID[candidate.SessionID]; ok {
+				bySessionID[candidate.SessionID] = mergeExternalSession(existing, candidate)
+				continue
+			}
+			bySessionID[candidate.SessionID] = candidate
+		}
+	}
+
+	result := make([]ExternalSessionResponse, 0, len(bySessionID))
+	for _, session := range bySessionID {
+		result = append(result, session)
+	}
+	sortExternalSessions(result)
+	return result
+}
+
+func mergeExternalSession(existing ExternalSessionResponse, incoming ExternalSessionResponse) ExternalSessionResponse {
+	merged := existing
+
+	if merged.WorkDir == "" || (incoming.IsRunning && incoming.WorkDir != "") {
+		merged.WorkDir = incoming.WorkDir
+	}
+
+	if merged.IssueID == "" && incoming.IssueID != "" {
+		merged.IssueID = incoming.IssueID
+	}
+	if merged.SourceTaskID == "" && incoming.SourceTaskID != "" {
+		merged.SourceTaskID = incoming.SourceTaskID
+	}
+
+	if compareSessionTimes(incoming.LastSeenAt, merged.LastSeenAt) > 0 {
+		merged.LastSeenAt = incoming.LastSeenAt
+	}
+
+	merged.IsRunning = merged.IsRunning || incoming.IsRunning
+
+	if merged.LeaderPID == 0 || (incoming.LeaderPID > 0 && incoming.LeaderPID < merged.LeaderPID) {
+		merged.LeaderPID = incoming.LeaderPID
+	}
+	if merged.Command == "" && incoming.Command != "" {
+		merged.Command = incoming.Command
+	}
+	if merged.TTY == "" && incoming.TTY != "" {
+		merged.TTY = incoming.TTY
+	}
+
+	switch {
+	case merged.Source == "":
+		merged.Source = incoming.Source
+	case incoming.Source == "":
+	case merged.Source == incoming.Source:
+	default:
+		merged.Source = "merged"
+	}
+
+	return merged
+}
+
+func sortExternalSessions(sessions []ExternalSessionResponse) {
+	sort.Slice(sessions, func(i, j int) bool {
+		ti := parseSessionTimestamp(sessions[i].LastSeenAt)
+		tj := parseSessionTimestamp(sessions[j].LastSeenAt)
+		if ti.Equal(tj) {
+			return sessions[i].SessionID < sessions[j].SessionID
+		}
+		return ti.After(tj)
+	})
+}
+
+func parseSessionTimestamp(raw string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func compareSessionTimes(a, b string) int {
+	ta := parseSessionTimestamp(a)
+	tb := parseSessionTimestamp(b)
+	switch {
+	case ta.After(tb):
+		return 1
+	case ta.Before(tb):
+		return -1
+	default:
+		return 0
+	}
+}
+
+func parseCodexSessionFile(path string) (codexSessionRecord, bool) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return codexSessionRecord{}, false
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return codexSessionRecord{}, false
+	}
+	defer f.Close()
+
+	record := codexSessionRecord{
+		LastSeenAt: stat.ModTime(),
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.Contains(line, `"session_meta"`) {
+			continue
+		}
+
+		var evt codexSessionMetaEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil || evt.Type != "session_meta" {
+			continue
+		}
+
+		record.SessionID = strings.TrimSpace(evt.Payload.ID)
+		record.WorkDir = strings.TrimSpace(evt.Payload.Cwd)
+		if record.WorkDir == "" {
+			record.WorkDir = strings.TrimSpace(evt.Payload.WorkDir)
+		}
+		if record.SessionID != "" {
+			return record, true
+		}
+	}
+
+	record.SessionID = sessionIDFromRolloutFilename(path)
+	if record.SessionID != "" {
+		return record, true
+	}
+
+	return codexSessionRecord{}, false
+}
+
+func sessionIDFromRolloutFilename(path string) string {
+	base := filepath.Base(path)
+	return rolloutSessionIDPattern.FindString(base)
+}
+
+func taskReferenceTime(task db.AgentTaskQueue) time.Time {
+	if task.CompletedAt.Valid {
+		return task.CompletedAt.Time
+	}
+	if task.StartedAt.Valid {
+		return task.StartedAt.Time
+	}
+	if task.DispatchedAt.Valid {
+		return task.DispatchedAt.Time
+	}
+	if task.CreatedAt.Valid {
+		return task.CreatedAt.Time
+	}
+	return time.Time{}
 }

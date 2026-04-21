@@ -5,6 +5,7 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  AgentExternalSession,
   AgentRuntime,
   RuntimeDevice,
   CreateAgentRequest,

@@ -36,6 +36,27 @@ export interface AgentTask {
   result: unknown;
   error: string | null;
   created_at: string;
+  session_id?: string;
+  work_dir?: string;
+  resume_session_id?: string;
+  resume_source?: string;
+  resume_command?: string;
+  prior_session_id?: string;
+  prior_work_dir?: string;
+  chat_session_id?: string;
+}
+
+export interface AgentExternalSession {
+  session_id: string;
+  work_dir?: string;
+  last_seen_at: string;
+  issue_id?: string;
+  source_task_id?: string;
+  source?: "session_file" | "process" | "merged";
+  is_running?: boolean;
+  leader_pid?: number;
+  command?: string;
+  tty?: string;
 }
 
 export interface Agent {

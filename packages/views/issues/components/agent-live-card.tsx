@@ -44,6 +44,23 @@ function formatDuration(start: string, end: string): string {
   return `${minutes}m ${secs}s`;
 }
 
+function resolveResumeSessionId(task: AgentTask): string | null {
+  const candidate = (
+    task.resume_session_id ||
+    task.prior_session_id ||
+    task.session_id ||
+    ""
+  ).trim();
+  return candidate ? candidate : null;
+}
+
+function resolveResumeCommand(task: AgentTask): string | null {
+  const explicit = (task.resume_command || "").trim();
+  if (explicit) return explicit;
+  const sid = resolveResumeSessionId(task);
+  return sid ? `codex resume ${sid}` : null;
+}
+
 function shortenPath(p: string): string {
   const parts = p.split("/");
   if (parts.length <= 3) return p;
@@ -276,6 +293,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [cancelling, setCancelling] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const resumeCommand = resolveResumeCommand(task);
 
   // Elapsed time
   useEffect(() => {
@@ -339,12 +357,25 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             <Bot className="h-3 w-3" />
           </div>
         )}
-        <div className="flex items-center gap-1.5 text-xs min-w-0">
-          <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
-          <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
-          {toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs min-w-0">
+            <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
+            <span className="font-medium text-foreground truncate">{agentName} is working</span>
+            <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
+            {toolCount > 0 && (
+              <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+            )}
+          </div>
+          {resumeCommand && (
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">
+              <span className="text-muted-foreground shrink-0">Resume</span>
+              <code
+                className="min-w-0 max-w-[420px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                title={resumeCommand}
+              >
+                {resumeCommand}
+              </code>
+            </div>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
@@ -494,6 +525,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TimelineItem[] | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const resumeCommand = resolveResumeCommand(task);
 
   const loadMessages = useCallback(() => {
     if (items !== null) return; // already loaded
@@ -526,6 +558,14 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           {new Date(task.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
         {duration && <span className="text-muted-foreground">{duration}</span>}
+        {resumeCommand && (
+          <code
+            className="max-w-[360px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+            title={resumeCommand}
+          >
+            {resumeCommand}
+          </code>
+        )}
         <span className={cn("ml-auto capitalize", task.status === "completed" ? "text-success" : "text-destructive")}>
           {task.status}
         </span>

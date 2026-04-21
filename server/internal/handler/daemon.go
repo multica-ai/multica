@@ -602,6 +602,31 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:    mcpConfig,
 			Model:        agent.Model.String,
 		}
+
+		// Fallback workspace/repo context for tasks that are not issue/chat scoped,
+		// such as manual external session resume tasks.
+		resp.WorkspaceID = uuidToString(agent.WorkspaceID)
+		if ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID); err == nil && ws.Repos != nil {
+			var repos []RepoData
+			if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+				resp.Repos = repos
+			}
+		}
+	}
+
+	// Include workspace ID and repos so the daemon can set up worktrees.
+	// Manual resume can carry an explicit session/workdir override in task.context.
+	// When present, this takes precedence over auto-discovered prior sessions.
+	if len(task.Context) > 0 {
+		var taskCtx map[string]any
+		if err := json.Unmarshal(task.Context, &taskCtx); err == nil {
+			if sid, ok := taskCtx["resume_session_id"].(string); ok && sid != "" {
+				resp.PriorSessionID = sid
+			}
+			if wd, ok := taskCtx["resume_work_dir"].(string); ok && wd != "" {
+				resp.PriorWorkDir = wd
+			}
+		}
 	}
 
 	// Include workspace ID and repos so the daemon can set up worktrees.
@@ -626,14 +651,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context.
-		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-			AgentID: task.AgentID,
-			IssueID: task.IssueID,
-		}); err == nil && prior.SessionID.Valid {
-			resp.PriorSessionID = prior.SessionID.String
-			if prior.WorkDir.Valid {
-				resp.PriorWorkDir = prior.WorkDir.String
+		// can resume the coding-agent conversation context when no explicit
+		// session override exists in task.context.
+		if resp.PriorSessionID == "" {
+			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
+				AgentID: task.AgentID,
+				IssueID: task.IssueID,
+			}); err == nil && prior.SessionID.Valid {
+				resp.PriorSessionID = prior.SessionID.String
+				if prior.WorkDir.Valid {
+					resp.PriorWorkDir = prior.WorkDir.String
+				}
 			}
 		}
 	}
@@ -801,6 +829,16 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			workspaceID = uuidToString(issue.WorkspaceID)
+		}
+	}
+	if workspaceID == "" && task.ChatSessionID.Valid {
+		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
+			workspaceID = uuidToString(cs.WorkspaceID)
+		}
+	}
+	if workspaceID == "" {
+		if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+			workspaceID = uuidToString(agent.WorkspaceID)
 		}
 	}
 
@@ -978,6 +1016,11 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	if workspaceID == "" && task.ChatSessionID.Valid {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			workspaceID = uuidToString(cs.WorkspaceID)
+		}
+	}
+	if workspaceID == "" {
+		if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+			workspaceID = uuidToString(agent.WorkspaceID)
 		}
 	}
 

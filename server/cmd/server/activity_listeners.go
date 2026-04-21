@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -228,8 +229,12 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 	if !ok {
 		return
 	}
+	taskID, _ := payload["task_id"].(string)
 	agentID, _ := payload["agent_id"].(string)
 	issueID, _ := payload["issue_id"].(string)
+	status, _ := payload["status"].(string)
+	taskErr, _ := payload["error"].(string)
+	taskErr = strings.TrimSpace(taskErr)
 	if issueID == "" {
 		return
 	}
@@ -242,13 +247,30 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 		return
 	}
 
+	detailsMap := map[string]string{}
+	if taskID != "" {
+		detailsMap["task_id"] = taskID
+	}
+	if status != "" {
+		detailsMap["status"] = status
+	}
+	if taskErr != "" {
+		detailsMap["error"] = taskErr
+	}
+	details := []byte("{}")
+	if len(detailsMap) > 0 {
+		if encoded, err := json.Marshal(detailsMap); err == nil {
+			details = encoded
+		}
+	}
+
 	activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     parseUUID(issueID),
 		ActorType:   util.StrToText("agent"),
 		ActorID:     parseUUID(agentID),
 		Action:      action,
-		Details:     []byte("{}"),
+		Details:     details,
 	})
 	if err != nil {
 		slog.Error("activity: failed to record task activity",
