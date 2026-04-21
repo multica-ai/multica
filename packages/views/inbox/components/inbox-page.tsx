@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -94,6 +94,9 @@ export function InboxPage() {
   const { data: pins = [] } = useQuery(pinListOptions(wsId, userId));
   const qc = useQueryClient();
 
+  // Track newly created chat sessions that aren't in the cache yet
+  const pendingChatIdRef = useRef<string | null>(null);
+
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
   // so the URL still resolves to something meaningful.
@@ -103,8 +106,17 @@ export function InboxPage() {
     if (selected) return;
     // Don't redirect for chat sessions or new-chat state
     if (selectedChatSession || selectedKey === "new-chat") return;
+    // Don't redirect for a just-created chat session not yet in cache
+    if (pendingChatIdRef.current === selectedKey) return;
     replace(wsPaths.issueDetail(selectedKey));
   }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths]);
+
+  // Clear pending ref once session appears in cache
+  useEffect(() => {
+    if (pendingChatIdRef.current && chatSessions.some((s) => s.id === pendingChatIdRef.current)) {
+      pendingChatIdRef.current = null;
+    }
+  }, [chatSessions]);
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
@@ -354,7 +366,10 @@ export function InboxPage() {
     <InboxChatPanel
       key={selectedChatSession?.id ?? "new"}
       sessionId={selectedChatSession?.id ?? null}
-      onSessionCreated={(id) => setSelectedKey(id)}
+      onSessionCreated={(id) => {
+        pendingChatIdRef.current = id;
+        setSelectedKey(id);
+      }}
     />
   ) : selected?.issue_id ? (
     <IssueDetail

@@ -167,7 +167,7 @@ export function InboxChatPanel({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Messages — scrollable */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0">
         {showSkeleton ? (
           <ChatMessageSkeleton />
         ) : hasMessages ? (
