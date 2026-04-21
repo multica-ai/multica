@@ -31,6 +31,10 @@ export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
+export type {
+  WorkspaceColumnConfig,
+  UpdateWorkspaceColumnConfigRequest,
+} from "./column-config";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";

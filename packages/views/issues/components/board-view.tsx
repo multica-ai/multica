@@ -16,6 +16,8 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useColumnConfigs } from "@multica/core/issues";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
@@ -124,12 +126,18 @@ export function BoardView({
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
 }) {
+  const wsId = useWorkspaceId();
+  const { data: columnConfigs = [] } = useColumnConfigs(wsId);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const myIssuesOpts = myIssuesScope ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} } : undefined;
   const { loadMore, hasMore, isLoading: loadingMore, doneTotal: hookDoneTotal } =
     useLoadMoreDoneIssues(myIssuesOpts);
   const displayDoneTotal = doneTotalOverride ?? hookDoneTotal;
+  const columnConfigMap = useMemo(
+    () => new Map(columnConfigs.map((config) => [config.status, config])),
+    [columnConfigs],
+  );
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -292,6 +300,7 @@ export function BoardView({
             status={status}
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
+            columnConfig={columnConfigMap.get(status)}
             childProgressMap={childProgressMap}
             totalCount={status === "done" ? displayDoneTotal : undefined}
             footer={
