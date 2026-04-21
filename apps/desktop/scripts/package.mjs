@@ -25,7 +25,7 @@
 // version-derivation logic without shelling out.
 
 import { execFileSync, spawnSync, execSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -118,6 +118,23 @@ function deriveVersion() {
 
 function uniqueOrdered(values) {
   return [...new Set(values)];
+}
+
+export function envWithLocalBins(env = process.env, root = desktopRoot) {
+  const pathKey =
+    Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+  const existingPath = env[pathKey] ?? "";
+  const localBins = uniqueOrdered([
+    resolve(root, "node_modules", ".bin"),
+    resolve(root, "..", "..", "node_modules", ".bin"),
+  ]);
+  const mergedPath = uniqueOrdered([
+    ...localBins,
+    ...String(existingPath)
+      .split(delimiter)
+      .filter(Boolean),
+  ]).join(delimiter);
+  return { ...env, [pathKey]: mergedPath };
 }
 
 function hostPlatformKey(platform = process.platform) {
@@ -309,9 +326,13 @@ function main() {
   // this step electron-builder silently packages whatever is already in
   // out/, which on a fresh checkout (or after a partial build) ships an
   // app that white-screens because the renderer bundle is missing.
+  //
+  // CI invokes this script via `node scripts/package.mjs`, so we cannot
+  // rely on pnpm/npm to inject package-local binaries into PATH.
   const viteResult = spawnSync("electron-vite", ["build"], {
     stdio: "inherit",
     cwd: desktopRoot,
+    env: envWithLocalBins(),
   });
   if (viteResult.error) {
     console.error(
@@ -373,6 +394,7 @@ function main() {
     const result = spawnSync("electron-builder", builderArgs, {
       stdio: "inherit",
       cwd: desktopRoot,
+      env: envWithLocalBins(),
     });
 
     if (result.error) {
