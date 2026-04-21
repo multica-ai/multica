@@ -755,7 +755,7 @@ CLI 是 Multica 对开发者友好度的体现。对于 agent 自己来说，也
                                  ▼
                       ┌──────────────────────┐
                       │  PostgreSQL 17       │
-                      │  + pgcrypto          │
+                      │  + pgvector          │
                       │  (28 tables)         │
                       └──────────────────────┘
 
