@@ -269,7 +269,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     return <div className="flex items-center justify-center h-full text-muted-foreground">Project not found</div>;
   }
 
-  const issueMetrics = getProjectIssueMetrics(project, projectIssues);
+  const issueMetrics = getProjectIssueMetrics(projectIssues);
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
 
