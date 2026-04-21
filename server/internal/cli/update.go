@@ -240,8 +240,9 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
 
-	// Replace the original binary.
-	if err := os.Rename(tmpPath, exePath); err != nil {
+	// Replace the original binary. On Windows this moves the running executable
+	// aside first; on Unix a plain rename over the running inode is fine.
+	if err := replaceBinary(tmpPath, exePath); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("replace binary: %w", err)
 	}

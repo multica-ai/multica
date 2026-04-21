@@ -29,6 +29,9 @@ var reservedSlugs = map[string]bool{
 	// Platform / marketing routes (current + likely-future)
 	"api":       true,
 	"admin":     true,
+	"multica":   true, // brand name — prevent impersonation workspaces
+	"www":       true, // hostname confusable; never a legitimate workspace slug
+	"new":       true, // ambiguous verb-as-slug; reserved for future global create routes
 	"help":      true,
 	"about":     true,
 	"pricing":   true,

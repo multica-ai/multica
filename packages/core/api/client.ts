@@ -35,6 +35,7 @@ import type {
   RuntimeHourlyActivity,
   RuntimePing,
   RuntimeUpdate,
+  RuntimeModelListRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -468,6 +469,17 @@ export class ApiClient {
     updateId: string,
   ): Promise<RuntimeUpdate> {
     return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+  }
+
+  async initiateListModels(runtimeId: string): Promise<RuntimeModelListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/models`, { method: "POST" });
+  }
+
+  async getListModelsResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeModelListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/models/${requestId}`);
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {

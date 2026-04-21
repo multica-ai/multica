@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -18,6 +19,62 @@ import (
 // overridden by user-configured custom_args.
 var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
+}
+
+// codexStderrTailBytes bounds the stderr tail captured for inclusion in
+// error messages when codex exits before the JSON-RPC handshake (e.g. the
+// user supplied a custom_args flag that the `app-server` subcommand
+// rejects). Large enough to contain typical CLI error lines, small enough
+// to stay sensible inside a task-level Result.Error string.
+const codexStderrTailBytes = 2048
+
+// stderrTail forwards writes to an inner writer (typically the daemon's
+// log) while also retaining a bounded tail of the bytes written. Consumers
+// call Tail() to include that context in error messages when the codex
+// process exits before we can read a structured JSON-RPC error — otherwise
+// all the user sees is "codex process exited", with the real reason stuck
+// in daemon logs.
+type stderrTail struct {
+	inner io.Writer
+	max   int
+
+	mu  sync.Mutex
+	buf []byte
+}
+
+func newStderrTail(inner io.Writer, max int) *stderrTail {
+	return &stderrTail{inner: inner, max: max}
+}
+
+func (s *stderrTail) Write(p []byte) (int, error) {
+	if _, err := s.inner.Write(p); err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	s.buf = append(s.buf, p...)
+	if len(s.buf) > s.max {
+		s.buf = s.buf[len(s.buf)-s.max:]
+	}
+	s.mu.Unlock()
+	return len(p), nil
+}
+
+// Tail returns the captured stderr with leading/trailing whitespace
+// trimmed; empty string means nothing was written or everything was
+// whitespace.
+func (s *stderrTail) Tail() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.TrimSpace(string(s.buf))
+}
+
+// withCodexStderr appends a stderr tail hint to an error message when
+// non-empty, otherwise returns msg unchanged.
+func withCodexStderr(msg, tail string) string {
+	if tail == "" {
+		return msg
+	}
+	return msg + "; codex stderr: " + tail
 }
 
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
@@ -59,7 +116,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("codex stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[codex:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), codexStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -115,6 +173,22 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.closeAllPending(fmt.Errorf("codex process exited"))
 	}()
 
+	// drainAndWait closes stdin so codex shuts down, then joins cmd.Wait().
+	// cmd.Wait() is the only Go-stdlib-documented synchronization point for
+	// os/exec's internal stderr/stdout copy goroutines — until it returns,
+	// stderrBuf may not have observed every byte codex wrote before it
+	// exited, and stderrBuf.Tail() can come back empty or truncated. Any
+	// code that reads stderrBuf.Tail() must call drainAndWait() first.
+	// sync.Once makes it safe to call from both error paths and the deferred
+	// cleanup.
+	var waitOnce sync.Once
+	drainAndWait := func() {
+		waitOnce.Do(func() {
+			stdin.Close()
+			_ = cmd.Wait()
+		})
+	}
+
 	// Drive the session lifecycle in a goroutine.
 	// Shutdown sequence: lifecycle goroutine closes stdin + cancels context →
 	// codex process exits → reader goroutine's scanner.Scan() returns false →
@@ -123,10 +197,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
-		defer func() {
-			stdin.Close()
-			_ = cmd.Wait()
-		}()
+		defer drainAndWait()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -144,8 +215,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			},
 		})
 		if err != nil {
+			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("codex initialize failed: %v", err)
+			finalError = withCodexStderr(fmt.Sprintf("codex initialize failed: %v", err), stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -156,8 +228,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// back to a fresh thread so the task still makes progress.
 		threadID, resumed, err := c.startOrResumeThread(runCtx, opts, b.cfg.Logger)
 		if err != nil {
+			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = err.Error()
+			finalError = withCodexStderr(err.Error(), stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -176,8 +249,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			},
 		})
 		if err != nil {
+			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("codex turn/start failed: %v", err)
+			finalError = withCodexStderr(fmt.Sprintf("codex turn/start failed: %v", err), stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -315,14 +389,14 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg       Config
-	stdin     interface{ Write([]byte) (int, error) }
-	mu        sync.Mutex
-	nextID    int
-	pending   map[int]*pendingRPC
-	threadID  string
-	turnID    string
-	onMessage func(Message)
+	cfg        Config
+	stdin      interface{ Write([]byte) (int, error) }
+	mu         sync.Mutex
+	nextID     int
+	pending    map[int]*pendingRPC
+	threadID   string
+	turnID     string
+	onMessage  func(Message)
 	onTurnDone func(aborted bool)
 
 	notificationProtocol string // "unknown", "legacy", "raw"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -203,6 +204,122 @@ func TestCreateComment_WithParentID(t *testing.T) {
 	// Verify parent comment has no parent_id
 	if parentComment.ParentID != nil {
 		t.Fatalf("expected parent comment to have nil parent_id, got %q", *parentComment.ParentID)
+	}
+}
+
+func TestCreateComment_AgentWithWrongParentRejected(t *testing.T) {
+	ctx := context.Background()
+
+	// Find the fixture agent + its runtime.
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("find test agent: %v", err)
+	}
+
+	// Two issues: A hosts the comment-triggered task; B exists to prove the
+	// guard is scoped to the task's own issue and does not block cross-issue
+	// agent activity. (The CLI stamps X-Task-ID on every request, so an agent
+	// legitimately commenting on another issue must still succeed.)
+	createIssue := func(title string) string {
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": title})
+		testHandler.CreateIssue(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue(%s): %d: %s", title, w.Code, w.Body.String())
+		}
+		var issue IssueResponse
+		json.NewDecoder(w.Body).Decode(&issue)
+		return issue.ID
+	}
+	issueA := createIssue("agent parent guard test — issue A")
+	issueB := createIssue("agent parent guard test — issue B")
+
+	var freshTaskID string
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, freshTaskID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id IN ($1, $2)`, issueA, issueB)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id IN ($1, $2)`, issueA, issueB)
+	})
+
+	postComment := func(t *testing.T, issueID string, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		testHandler.CreateComment(w, r)
+		return w
+	}
+
+	w := postComment(t, issueA, map[string]any{"content": "stale comment"}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create stale parent: %d: %s", w.Code, w.Body.String())
+	}
+	var staleParent CommentResponse
+	json.NewDecoder(w.Body).Decode(&staleParent)
+
+	w = postComment(t, issueA, map[string]any{"content": "fresh comment"}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create fresh parent: %d: %s", w.Code, w.Body.String())
+	}
+	var freshParent CommentResponse
+	json.NewDecoder(w.Body).Decode(&freshParent)
+
+	// Comment-triggered task bound to issueA.
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
+		 VALUES ($1, $2, $3, 'queued', 0, $4) RETURNING id`,
+		agentID, runtimeID, issueA, freshParent.ID,
+	).Scan(&freshTaskID); err != nil {
+		t.Fatalf("insert fresh task: %v", err)
+	}
+
+	agentHeaders := map[string]string{"X-Agent-ID": agentID, "X-Task-ID": freshTaskID}
+
+	// Same issue + wrong parent → 409.
+	w = postComment(t, issueA,
+		map[string]any{"content": "drifted reply", "parent_id": staleParent.ID},
+		agentHeaders,
+	)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 when agent replies with wrong parent, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), freshParent.ID) {
+		t.Fatalf("expected error body to reference the correct trigger comment id, got %s", w.Body.String())
+	}
+
+	// Same issue + no parent → 409 (must reply to trigger).
+	w = postComment(t, issueA,
+		map[string]any{"content": "no parent"},
+		agentHeaders,
+	)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 when agent replies with no parent, got %d", w.Code)
+	}
+
+	// Same issue + correct parent → 201.
+	w = postComment(t, issueA,
+		map[string]any{"content": "correct reply", "parent_id": freshParent.ID},
+		agentHeaders,
+	)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 when agent replies with matching parent, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Cross-issue: agent carries X-Task-ID (bound to issueA) but comments on
+	// issueB. The guard must NOT fire — this is the cross-issue regression
+	// covering the fix for gpt-boy's review.
+	w = postComment(t, issueB,
+		map[string]any{"content": "cross-issue note"},
+		agentHeaders,
+	)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent posting on a different issue should not be blocked by its current task's trigger, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

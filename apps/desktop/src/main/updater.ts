@@ -1,8 +1,20 @@
 import { autoUpdater } from "electron-updater";
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+
+const STARTUP_CHECK_DELAY_MS = 5_000;
+const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+export type ManualUpdateCheckResult =
+  | {
+      ok: true;
+      currentVersion: string;
+      latestVersion: string;
+      available: boolean;
+    }
+  | { ok: false; error: string };
 
 export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
   autoUpdater.on("update-available", (info) => {
@@ -37,10 +49,42 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     autoUpdater.quitAndInstall(false, true);
   });
 
-  // Check for updates after a short delay to avoid blocking startup
+  ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      const currentVersion = app.getVersion();
+      // Trust electron-updater's own decision rather than re-deriving it from
+      // a version-string compare. The two diverge for pre-release channels,
+      // staged rollouts, downgrades, and minimum-system-version gates — in
+      // those cases updateInfo.version differs from app.getVersion() but no
+      // `update-available` event fires, so showing "available" here would
+      // promise a download prompt that never appears.
+      return {
+        ok: true,
+        currentVersion,
+        latestVersion: result?.updateInfo.version ?? currentVersion,
+        available: result?.isUpdateAvailable ?? false,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  // Initial check shortly after startup so we don't block boot.
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch((err) => {
       console.error("Failed to check for updates:", err);
     });
-  }, 5000);
+  }, STARTUP_CHECK_DELAY_MS);
+
+  // Background poll so long-running sessions still pick up new releases
+  // without requiring the user to restart the app.
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error("Periodic update check failed:", err);
+    });
+  }, PERIODIC_CHECK_INTERVAL_MS);
 }

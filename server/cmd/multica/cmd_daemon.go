@@ -360,17 +360,19 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	if health["status"] == "running" {
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
-			if p, err := os.FindProcess(int(pid)); err == nil {
-				fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
-				_ = stopDaemonProcess(p)
-				for i := 0; i < 10; i++ {
-					time.Sleep(500 * time.Millisecond)
-					sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
-					h := checkDaemonHealthOnPort(sctx, healthPort)
-					scancel()
-					if h["status"] != "running" {
-						break
-					}
+			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+			if err := requestDaemonShutdown(healthPort); err != nil {
+				if p, perr := os.FindProcess(int(pid)); perr == nil {
+					_ = p.Kill()
+				}
+			}
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
+				h := checkDaemonHealthOnPort(sctx, healthPort)
+				scancel()
+				if h["status"] != "running" {
+					break
 				}
 			}
 		}
@@ -409,8 +411,17 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("find process %d: %w", int(pid), err)
 	}
 
-	if err := stopDaemonProcess(process); err != nil {
-		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
+	// Request graceful shutdown via the daemon's HTTP /shutdown endpoint
+	// rather than an OS signal. On Windows the daemon is spawned with
+	// DETACHED_PROCESS so it shares no console with us, which means
+	// GenerateConsoleCtrlEvent can't reach it; HTTP works on both
+	// platforms and triggers the same context-cancel path the daemon
+	// already uses for self-restart.
+	if err := requestDaemonShutdown(healthPort); err != nil {
+		fmt.Fprintf(os.Stderr, "Graceful shutdown request failed: %v — falling back to forced kill.\n", err)
+		if kerr := process.Kill(); kerr != nil {
+			return fmt.Errorf("kill daemon (pid %d): %w", int(pid), kerr)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
@@ -429,6 +440,27 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "Daemon is still stopping. It may be finishing a running task.")
+	return nil
+}
+
+// requestDaemonShutdown POSTs to the daemon's /shutdown endpoint to ask it
+// to exit gracefully. Returns an error if the request could not be delivered
+// (network error, non-2xx status, or the endpoint predates this change).
+func requestDaemonShutdown(healthPort int) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
 	return nil
 }
 

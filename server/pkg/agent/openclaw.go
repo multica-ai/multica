@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -14,10 +15,12 @@ import (
 // openclawBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var openclawBlockedArgs = map[string]blockedArgMode{
-	"--local":      blockedStandalone, // local mode for daemon execution
-	"--json":       blockedStandalone, // JSON output for daemon communication
-	"--session-id": blockedWithValue,  // managed by daemon for session resumption
-	"--message":    blockedWithValue,  // prompt is set by daemon
+	"--local":         blockedStandalone, // local mode for daemon execution
+	"--json":          blockedStandalone, // JSON output for daemon communication
+	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
+	"--message":       blockedWithValue,  // prompt is set by daemon
+	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at registration via `openclaw agents add/update --model`
+	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
 }
 
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
@@ -46,18 +49,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if sessionID == "" {
 		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
 	}
-	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--system-prompt", opts.SystemPrompt)
-	}
-	if opts.Timeout > 0 {
-		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
-	}
-	args = append(args, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, b.cfg.Logger)...)
-	args = append(args, "--message", prompt)
+	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
@@ -139,6 +131,50 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// buildOpenclawArgs assembles the argv for a one-shot `openclaw agent` invocation.
+//
+// The CLI only accepts --local, --json, --session-id, --timeout, --message (and
+// flags like --agent / --channel that users pass through CustomArgs). Notably
+// it does NOT accept --model or --system-prompt — model is bound at agent
+// registration time via `openclaw agents add/update --model`, and instructions
+// must be injected inline into --message because openclaw loads AGENTS.md from
+// its own workspace directory, not from cwd.
+func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
+	if opts.Timeout > 0 {
+		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
+	}
+	// OpenClaw binds models to pre-registered agents at `openclaw agents
+	// add/update --model` time; the daemon selects one at runtime by
+	// passing --agent <name>. The model dropdown populates its list from
+	// `openclaw agents list`, so opts.Model here is an agent name. Only
+	// inject when the user hasn't already set --agent via custom_args —
+	// custom_args wins for backward compatibility with existing configs.
+	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
+	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
+		args = append(args, "--agent", opts.Model)
+	}
+	args = append(args, customArgs...)
+
+	if opts.SystemPrompt != "" {
+		prompt = opts.SystemPrompt + "\n\n" + prompt
+	}
+	args = append(args, "--message", prompt)
+	return args
+}
+
+// customArgsContains reports whether args contains the given flag
+// (either as a standalone token "--flag" or in "--flag=value" form).
+func customArgsContains(args []string, flag string) bool {
+	prefix := flag + "="
+	for _, a := range args {
+		if a == flag || strings.HasPrefix(a, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Event handlers ──
@@ -425,9 +461,9 @@ type openclawEvent struct {
 	CallID    string          `json:"callId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	Usage     map[string]any  `json:"usage,omitempty"`
-	Phase     string          `json:"phase,omitempty"`     // lifecycle event phase
-	Error     *openclawError  `json:"error,omitempty"`     // structured error object
-	Message   string          `json:"message,omitempty"`   // alternative error message field
+	Phase     string          `json:"phase,omitempty"`   // lifecycle event phase
+	Error     *openclawError  `json:"error,omitempty"`   // structured error object
+	Message   string          `json:"message,omitempty"` // alternative error message field
 }
 
 // errorMessage extracts a human-readable error message from the event,

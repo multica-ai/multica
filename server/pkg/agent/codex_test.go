@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -909,5 +912,117 @@ func TestCodexProtocolDetectionLegacyBlocksRaw(t *testing.T) {
 
 	if len(messages) != messagesBefore {
 		t.Fatal("raw notification should be ignored in legacy mode")
+	}
+}
+
+func TestStderrTailForwardsAndCapturesTail(t *testing.T) {
+	t.Parallel()
+
+	var sink strings.Builder
+	s := newStderrTail(&sink, 16)
+
+	if _, err := s.Write([]byte("first line\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := s.Write([]byte("error: unexpected argument '-m' found\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Inner writer sees every byte verbatim.
+	want := "first line\nerror: unexpected argument '-m' found\n"
+	if sink.String() != want {
+		t.Errorf("inner sink: got %q, want %q", sink.String(), want)
+	}
+
+	// Tail is bounded by max; earlier bytes get dropped.
+	tail := s.Tail()
+	if len(tail) > 16 {
+		t.Errorf("tail exceeds bound: got %d bytes (%q)", len(tail), tail)
+	}
+	if tail == "" {
+		t.Fatal("expected non-empty tail")
+	}
+	// Tail must be a suffix of what was written (whitespace-trimmed).
+	if !strings.HasSuffix(strings.TrimSpace(want), tail) {
+		t.Errorf("tail %q is not a suffix of %q", tail, want)
+	}
+}
+
+func TestStderrTailEmptyWhenNothingWritten(t *testing.T) {
+	t.Parallel()
+
+	var sink strings.Builder
+	s := newStderrTail(&sink, 16)
+	if tail := s.Tail(); tail != "" {
+		t.Errorf("expected empty tail, got %q", tail)
+	}
+}
+
+func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Fake codex binary: writes a canonical CLI rejection line to stderr and
+	// exits before ever responding to `initialize`, mimicking what real codex
+	// does when `app-server` gets a flag it doesn't accept. This exercises the
+	// real os/exec stderr pipe-copy goroutine — without drainAndWait joining
+	// cmd.Wait() before sampling stderrBuf.Tail(), Result.Error would come
+	// back empty or truncated here.
+	fakePath := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\n" +
+		"echo \"error: unexpected argument '-m' found\" >&2\n" +
+		"exit 2\n"
+	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain message stream so the lifecycle goroutine can progress.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "codex initialize failed") {
+			t.Fatalf("expected error to mention initialize failure, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "unexpected argument '-m' found") {
+			t.Fatalf("expected error to include stderr hint, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestWithCodexStderrAppendsHint(t *testing.T) {
+	t.Parallel()
+
+	if got := withCodexStderr("codex initialize failed: process exited", ""); got != "codex initialize failed: process exited" {
+		t.Errorf("empty tail should not modify msg, got %q", got)
+	}
+	msg := withCodexStderr("codex initialize failed: process exited", "unexpected argument '-m' found")
+	want := "codex initialize failed: process exited; codex stderr: unexpected argument '-m' found"
+	if msg != want {
+		t.Errorf("got %q, want %q", msg, want)
 	}
 }

@@ -96,6 +96,10 @@ const updaterAPI = {
   },
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
   installUpdate: () => ipcRenderer.invoke("updater:install"),
+  checkForUpdates: (): Promise<
+    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
+    | { ok: false; error: string }
+  > => ipcRenderer.invoke("updater:check"),
 };
 
 if (process.contextIsolated) {

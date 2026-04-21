@@ -447,7 +447,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listIssues = `-- name: ListIssues :many
-SELECT id, workspace_id, title, status, priority,
+SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
        parent_issue_id, position, due_date, created_at, updated_at, number, project_id
 FROM issue
@@ -478,6 +478,7 @@ type ListIssuesRow struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	Title         string             `json:"title"`
+	Description   pgtype.Text        `json:"description"`
 	Status        string             `json:"status"`
 	Priority      string             `json:"priority"`
 	AssigneeType  pgtype.Text        `json:"assignee_type"`
@@ -516,6 +517,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.ID,
 			&i.WorkspaceID,
 			&i.Title,
+			&i.Description,
 			&i.Status,
 			&i.Priority,
 			&i.AssigneeType,
@@ -541,7 +543,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 }
 
 const listOpenIssues = `-- name: ListOpenIssues :many
-SELECT id, workspace_id, title, status, priority,
+SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
        parent_issue_id, position, due_date, created_at, updated_at, number, project_id
 FROM issue
@@ -568,6 +570,7 @@ type ListOpenIssuesRow struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	Title         string             `json:"title"`
+	Description   pgtype.Text        `json:"description"`
 	Status        string             `json:"status"`
 	Priority      string             `json:"priority"`
 	AssigneeType  pgtype.Text        `json:"assignee_type"`
@@ -603,6 +606,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.ID,
 			&i.WorkspaceID,
 			&i.Title,
+			&i.Description,
 			&i.Status,
 			&i.Priority,
 			&i.AssigneeType,

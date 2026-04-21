@@ -15,10 +15,6 @@ func daemonSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }
 
-func stopDaemonProcess(process *os.Process) error {
-	return process.Signal(syscall.SIGTERM)
-}
-
 func notifyShutdownContext(parent context.Context) (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 }

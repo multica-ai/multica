@@ -112,14 +112,20 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 		Agent:                 &AgentData{Name: "Test"},
 	})
 
-	// Prompt should contain the comment content directly.
+	// Prompt should contain the comment content, the trigger comment id, and
+	// the full reply command with --parent. Re-emitting --parent on every turn
+	// is what prevents resumed sessions from reusing the previous turn's
+	// --parent UUID.
 	for _, want := range []string{
 		issueID,
 		commentContent,
 		"comment that triggered this task",
+		commentID,
+		"multica issue comment add " + issueID + " --parent " + commentID,
+		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q", want)
+			t.Fatalf("prompt missing %q\n---\n%s", want, prompt)
 		}
 	}
 

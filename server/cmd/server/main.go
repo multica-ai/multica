@@ -9,8 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -41,7 +39,7 @@ func main() {
 
 	// Connect to database
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := newDBPool(ctx, dbURL)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
@@ -53,6 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("connected to database")
+	logPoolConfig(pool)
 
 	bus := events.New()
 	hub := realtime.NewHub()
@@ -77,13 +76,14 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
-	taskSvc := service.NewTaskService(queries, hub, bus)
+	taskSvc := service.NewTaskService(queries, pool, hub, bus)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
+	go runDBStatsLogger(sweepCtx, pool)
 
 	// Graceful shutdown
 	go func() {

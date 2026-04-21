@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../navigation";
 import {
@@ -78,6 +78,16 @@ import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 
+// Stable empty arrays for query defaults. Using an inline `= []` default on
+// `useQuery` creates a new array reference on every render when `data` is
+// undefined (e.g. query disabled or loading) — which in turn breaks any
+// `useEffect`/`useMemo` that depends on the value, and can trigger infinite
+// re-render loops when the effect itself calls `setState`.
+const EMPTY_PINS: PinnedItem[] = [];
+const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
+const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
+const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
 // Only parameterless paths are valid nav destinations.
@@ -139,7 +149,7 @@ function SortablePinItem({ pin, href, pathname, onUnpin }: { pin: PinnedItem; hr
       <SidebarMenuButton
         size="sm"
         isActive={isActive}
-        render={<AppLink href={href} />}
+        render={<AppLink href={href} draggable={false} />}
         onClick={(event) => {
           if (wasDragged.current) {
             wasDragged.current = false;
@@ -147,7 +157,10 @@ function SortablePinItem({ pin, href, pathname, onUnpin }: { pin: PinnedItem; hr
             return;
           }
         }}
-        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+        className={cn(
+          "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
+          isDragging && "pointer-events-none",
+        )}
       >
         {pin.item_type === "issue" && pin.status ? (
           /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
@@ -199,11 +212,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const logout = useLogout();
   const workspace = useCurrentWorkspace();
   const p = useWorkspacePaths();
-  const { data: workspaces = [] } = useQuery(workspaceListOptions());
-  const { data: myInvitations = [] } = useQuery(myInvitationListOptions());
+  const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
+  const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
 
   const wsId = workspace?.id;
-  const { data: inboxItems = [] } = useQuery({
+  const { data: inboxItems = EMPTY_INBOX } = useQuery({
     queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
     queryFn: () => api.listInbox(),
     enabled: !!wsId,
@@ -213,24 +226,42 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     [inboxItems],
   );
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
-  const { data: pinnedItems = [] } = useQuery({
+  const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  // Local presentational copy of pinnedItems for drop-animation stability.
+  // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
+  // write (our own optimistic update, or a WS refetch) cannot reorder the
+  // DOM under dnd-kit while its drop animation is still interpolating.
+  const [localPinned, setLocalPinned] = useState<PinnedItem[]>(pinnedItems);
+  const isDraggingRef = useRef(false);
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      setLocalPinned(pinnedItems);
+    }
+  }, [pinnedItems]);
+
+  const handleDragStart = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      isDraggingRef.current = false;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const oldIndex = pinnedItems.findIndex((p) => p.id === active.id);
-      const newIndex = pinnedItems.findIndex((p) => p.id === over.id);
+      const oldIndex = localPinned.findIndex((p) => p.id === active.id);
+      const newIndex = localPinned.findIndex((p) => p.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
-      const reordered = arrayMove(pinnedItems, oldIndex, newIndex);
+      const reordered = arrayMove(localPinned, oldIndex, newIndex);
+      setLocalPinned(reordered);
       reorderPins.mutate(reordered);
     },
-    [pinnedItems, reorderPins],
+    [localPinned, reorderPins],
   );
 
   const queryClient = useQueryClient();
@@ -445,7 +476,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {pinnedItems.length > 0 && (
+          {localPinned.length > 0 && (
             <Collapsible defaultOpen>
               <SidebarGroup className="group/pinned">
                 <SidebarGroupLabel
@@ -454,14 +485,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 >
                   <span>Pinned</span>
                   <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
-                  <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{pinnedItems.length}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{localPinned.length}</span>
                 </SidebarGroupLabel>
                 <CollapsibleContent>
                   <SidebarGroupContent>
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                      <SortableContext items={pinnedItems.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                      <SortableContext items={localPinned.map((p) => p.id)} strategy={verticalListSortingStrategy}>
                         <SidebarMenu className="gap-0.5">
-                          {pinnedItems.map((pin: PinnedItem) => (
+                          {localPinned.map((pin: PinnedItem) => (
                             <SortablePinItem
                               key={pin.id}
                               pin={pin}

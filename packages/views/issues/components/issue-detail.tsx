@@ -697,8 +697,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0">
+            <span className="shrink-0 text-muted-foreground">
               {issue.identifier}
+            </span>
+            <span className="truncate font-medium text-foreground">
+              {issue.title}
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -1046,6 +1049,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
+              currentIssueId={id}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -1269,12 +1273,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </div>
 
             {/* Agent live output — sticky inside the Activity section so it
-                stays pinned while scrolling through TaskRunHistory + comments. */}
-            <AgentLiveCard issueId={id} />
+                stays pinned while scrolling through TaskRunHistory + comments.
+                Keyed by issue id so switching issues remounts the card and
+                clears any in-flight task state from the previous issue. */}
+            <AgentLiveCard key={id} issueId={id} />
 
             {/* Agent execution history */}
             <div className="mt-3">
-              <TaskRunHistory issueId={id} />
+              <TaskRunHistory key={id} issueId={id} />
             </div>
 
             {/* Timeline entries */}

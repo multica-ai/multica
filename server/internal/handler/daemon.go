@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -103,10 +104,15 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 type DaemonRegisterRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	DaemonID    string `json:"daemon_id"`
-	DeviceName  string `json:"device_name"`
-	CLIVersion  string `json:"cli_version"` // multica CLI version
-	LaunchedBy  string `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes    []struct {
+	// LegacyDaemonIDs lists prior hostname-derived daemon_ids this machine
+	// may have registered under before switching to a persistent UUID. The
+	// handler merges any matching runtime rows into the new row so agents
+	// and tasks keep working without manual intervention.
+	LegacyDaemonIDs []string `json:"legacy_daemon_ids"`
+	DeviceName      string   `json:"device_name"`
+	CLIVersion      string   `json:"cli_version"` // multica CLI version
+	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -272,26 +278,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Migrate agents from old offline runtimes on the same machine to the
-		// newly registered runtime. Uses the runtime's owner_id (preserved via
-		// COALESCE on upsert) so migration works with both PAT and daemon tokens.
-		// Scoped by daemon_id prefix so that only old profile-suffixed runtimes
-		// (e.g. "hostname-staging") from this machine are affected.
-		effectiveOwnerID := registered.OwnerID
-		if effectiveOwnerID.Valid {
-			migrated, err := h.Queries.MigrateAgentsToRuntime(r.Context(), db.MigrateAgentsToRuntimeParams{
-				NewRuntimeID:   registered.ID,
-				WorkspaceID:    parseUUID(req.WorkspaceID),
-				Provider:       provider,
-				OwnerID:        effectiveOwnerID,
-				DaemonIDPrefix: strToText(req.DaemonID),
-			})
-			if err != nil {
-				slog.Warn("failed to migrate agents to new runtime", "runtime_id", uuidToString(registered.ID), "error", err)
-			} else if migrated > 0 {
-				slog.Info("migrated agents to new runtime", "runtime_id", uuidToString(registered.ID), "provider", provider, "migrated_count", migrated)
-			}
-		}
+		// Seamless migration from the previous hostname-derived identity. The
+		// daemon sends every legacy daemon_id it may have registered under
+		// (e.g. "host.local", "host", "host-staging"); for each match we
+		// reassign agents + tasks onto the new UUID-keyed row, then delete
+		// the stale row so there's only ever one runtime per machine.
+		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 
 		resp = append(resp, runtimeToResponse(registered))
 	}
@@ -308,6 +300,88 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
 	})
+}
+
+// mergeLegacyRuntimes folds every runtime row keyed on a prior hostname-derived
+// daemon_id into the newly registered UUID-keyed row. For each legacy id the
+// lookup is case-insensitive and returns *all* matching rows — case-only drift
+// may have already minted duplicates historically (e.g. `Foo.local` AND
+// `foo.local` coexisting), and we need to consolidate every one of them, not
+// just the first. Per match we reassign agents and tasks, record the legacy
+// id on the new row for audit, then delete the stale row.
+//
+// Scoping by (workspace_id, provider) is sufficient since provider is single-
+// runtime-per-daemon; `unique (workspace_id, daemon_id, provider)` prevents
+// any two *exact* matches but the `LOWER(...)` comparison crosses that bound
+// precisely when case-duplicate rows exist — which is the bug we're fixing.
+// We also dedupe across legacy ids so overlapping candidates (e.g. `foo` and
+// `foo.local` both resolving to the same stored row) don't double-process.
+func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntime, provider string, legacyIDs []string) {
+	newID := uuidToString(registered.ID)
+	merged := make(map[string]struct{})
+
+	for _, legacyID := range legacyIDs {
+		legacyID = strings.TrimSpace(legacyID)
+		if legacyID == "" {
+			continue
+		}
+
+		matches, err := h.Queries.FindLegacyRuntimesByDaemonID(r.Context(), db.FindLegacyRuntimesByDaemonIDParams{
+			WorkspaceID: registered.WorkspaceID,
+			Provider:    provider,
+			DaemonID:    legacyID,
+		})
+		if err != nil {
+			slog.Warn("legacy runtime merge: lookup failed", "legacy_daemon_id", legacyID, "error", err)
+			continue
+		}
+		for _, old := range matches {
+			oldID := uuidToString(old.ID)
+			if oldID == newID {
+				continue
+			}
+			if _, seen := merged[oldID]; seen {
+				continue
+			}
+			merged[oldID] = struct{}{}
+
+			agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
+				NewRuntimeID: registered.ID,
+				OldRuntimeID: old.ID,
+			})
+			if err != nil {
+				slog.Warn("legacy runtime merge: reassign agents failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				continue
+			}
+			tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
+				NewRuntimeID: registered.ID,
+				OldRuntimeID: old.ID,
+			})
+			if err != nil {
+				slog.Warn("legacy runtime merge: reassign tasks failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+				continue
+			}
+			if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
+				ID:             registered.ID,
+				LegacyDaemonID: strToText(legacyID),
+			}); err != nil {
+				slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
+			}
+			if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
+				slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
+				continue
+			}
+
+			slog.Info("legacy runtime merged",
+				"legacy_daemon_id", legacyID,
+				"old_runtime_id", oldID,
+				"new_runtime_id", newID,
+				"provider", provider,
+				"agents_reassigned", agents,
+				"tasks_reassigned", tasks,
+			)
+		}
+	}
 }
 
 func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
@@ -420,21 +494,70 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check for pending model-list requests for this runtime.
+	if pending := h.ModelListStore.PopPending(req.RuntimeID); pending != nil {
+		resp["pending_model_list"] = map[string]string{"id": pending.ID}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// logClaimEndpointSlow emits one structured log when the /tasks/claim endpoint
+// exceeds 500ms, splitting auth / claim / response-build phases so the prod
+// tail can be diagnosed without flooding logs at normal poll rates.
+func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64) {
+	totalMs := time.Since(start).Milliseconds()
+	if totalMs < 500 {
+		return
+	}
+	slog.Info("claim_endpoint slow",
+		"runtime_id", runtimeID,
+		"outcome", outcome,
+		"total_ms", totalMs,
+		"auth_ms", authMs,
+		"claim_ms", claimMs,
+		"build_ms", buildMs,
+	)
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
 // The response includes the agent's name and skills, fetched fresh from the DB.
 func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
+	start := time.Now()
 
-	// Verify the caller owns this runtime's workspace.
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+	var (
+		outcome                    = "unauth"
+		authMs, claimMs, buildMs   int64
+		buildStart                 time.Time
+	)
+	defer func() {
+		// Emit at function exit so error / unauth paths also carry timing.
+		// build_ms is computed from buildStart only when we entered the
+		// response-build phase (otherwise stays 0).
+		if !buildStart.IsZero() {
+			buildMs = time.Since(buildStart).Milliseconds()
+		}
+		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs)
+	}()
+
+	// Verify the caller owns this runtime's workspace. The runtime's
+	// workspace_id is the authoritative value a claimed task must match
+	// below — a task whose resolved workspace doesn't equal this runtime's
+	// workspace is rejected even if it was enqueued against this
+	// runtime_id (defense-in-depth against upstream routing bugs).
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
+	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
+	authMs = time.Since(start).Milliseconds()
 
+	claimStart := time.Now()
 	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
+	claimMs = time.Since(claimStart).Milliseconds()
 	if err != nil {
+		outcome = "error_claim"
 		writeError(w, http.StatusInternalServerError, "failed to claim task: "+err.Error())
 		return
 	}
@@ -442,8 +565,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task == nil {
 		slog.Debug("no task to claim", "runtime_id", runtimeID)
 		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		outcome = "no_task"
 		return
 	}
+
+	outcome = "claimed"
+	buildStart = time.Now()
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task)
@@ -461,6 +588,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
+		var mcpConfig json.RawMessage
+		if agent.McpConfig != nil {
+			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
@@ -468,6 +599,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Skills:       skills,
 			CustomEnv:    customEnv,
 			CustomArgs:   customArgs,
+			McpConfig:    mcpConfig,
+			Model:        agent.Model.String,
 		}
 	}
 
@@ -516,12 +649,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume from the chat session's persistent session.
+			// Resume from the chat session's persistent session, falling back
+			// to the most recent task that recorded a session_id when the
+			// chat_session pointer is missing or stale (e.g. a previous task
+			// failed before reporting completion). Without this fallback a
+			// single failed turn would silently drop the entire conversation
+			// memory on the next message.
 			if cs.SessionID.Valid {
 				resp.PriorSessionID = cs.SessionID.String
 			}
 			if cs.WorkDir.Valid {
 				resp.PriorWorkDir = cs.WorkDir.String
+			}
+			if resp.PriorSessionID == "" {
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					resp.PriorSessionID = prior.SessionID.String
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
+				}
 			}
 			// Load the latest user message for the chat prompt.
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
@@ -534,6 +680,48 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+
+	// Autopilot run_only task: resolve workspace from autopilot_run → autopilot.
+	if task.AutopilotRunID.Valid && resp.WorkspaceID == "" {
+		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
+			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
+				resp.WorkspaceID = uuidToString(ap.WorkspaceID)
+				if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
+				}
+			}
+		}
+	}
+
+	// Workspace isolation check: the daemon uses this response's workspace_id
+	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
+	// empty value would make the CLI silently fall back to the user-global
+	// config and talk to whatever workspace the user happened to last
+	// configure; a value that doesn't match the runtime's workspace means
+	// upstream routed a foreign-workspace task here. Both cases must hard-
+	// fail AND cancel the just-dispatched task so the queue / agent status
+	// don't sit stuck until the stale-task sweeper fires minutes later.
+	if resp.WorkspaceID == "" || resp.WorkspaceID != runtimeWorkspaceID {
+		outcome = "error_workspace"
+		slog.Error("task claim: workspace isolation check failed, cancelling task",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"runtime_workspace", runtimeWorkspaceID,
+			"resolved_workspace", resp.WorkspaceID,
+			"has_issue", task.IssueID.Valid,
+			"has_chat", task.ChatSessionID.Valid,
+			"has_autopilot_run", task.AutopilotRunID.Valid,
+		)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after workspace check failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
+		}
+		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
+		return
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
@@ -714,7 +902,9 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 // FailTask marks a running task as failed.
 type TaskFailRequest struct {
-	Error string `json:"error"`
+	Error     string `json:"error"`
+	SessionID string `json:"session_id,omitempty"`
+	WorkDir   string `json:"work_dir,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -731,7 +921,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir)
 	if err != nil {
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

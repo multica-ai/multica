@@ -332,6 +332,27 @@ multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 multica issue comment delete <comment-id>
 ```
 
+### Subscribers
+
+```bash
+# List subscribers of an issue
+multica issue subscriber list <issue-id>
+
+# Subscribe yourself to an issue
+multica issue subscriber add <issue-id>
+
+# Subscribe another member or agent by name
+multica issue subscriber add <issue-id> --user "Lambda"
+
+# Unsubscribe yourself
+multica issue subscriber remove <issue-id>
+
+# Unsubscribe another member or agent
+multica issue subscriber remove <issue-id> --user "Lambda"
+```
+
+Subscribers receive notifications about issue activity (new comments, status changes, etc.). Without `--user`, the command acts on the caller.
+
 ### Execution History
 
 ```bash
@@ -496,14 +517,15 @@ multica autopilot runs <id>
 multica autopilot runs <id> --limit 50 --output json
 ```
 
-### Triggers (Schedule / Webhook / API)
+### Schedule Triggers
 
 ```bash
-multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * 1-5" --timezone "America/New_York"
-multica autopilot trigger-add <autopilot-id> --kind webhook
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
 multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
 multica autopilot trigger-delete <autopilot-id> <trigger-id>
 ```
+
+Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
 
 ## Other Commands
 

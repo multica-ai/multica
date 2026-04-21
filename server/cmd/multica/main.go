@@ -6,6 +6,8 @@ import (
 	"runtime"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 var (
@@ -73,6 +75,7 @@ func init() {
 }
 
 func main() {
+	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {
 			fmt.Fprintln(os.Stderr, "Error:", err)

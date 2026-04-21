@@ -89,11 +89,34 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 	}
 }
 
+// shutdownHandler triggers a graceful daemon shutdown by cancelling the
+// top-level context. Used by `multica daemon stop` so we don't depend on
+// OS-signal delivery, which is unreliable on Windows once the daemon is
+// spawned with DETACHED_PROCESS (no shared console with the stop caller).
+// The listener is bound to 127.0.0.1 only, so only local processes can hit
+// this endpoint.
+func (d *Daemon) shutdownHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "shutting down"})
+		if d.cancelFunc != nil {
+			// Cancel asynchronously so the response flushes first; otherwise
+			// srv.Close() races with the writer.
+			go d.cancelFunc()
+		}
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
+	mux.HandleFunc("/shutdown", d.shutdownHandler())
 
 	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

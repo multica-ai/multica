@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 )
@@ -221,9 +222,9 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	t.Parallel()
 
 	blocked := map[string]blockedArgMode{
-		"--output-format":  blockedWithValue,
+		"--output-format":   blockedWithValue,
 		"--permission-mode": blockedWithValue,
-		"-p":               blockedStandalone,
+		"-p":                blockedStandalone,
 	}
 	logger := slog.Default()
 
@@ -406,6 +407,129 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	env := buildEnv(nil)
 	if len(env) == 0 {
 		t.Fatal("expected at least system env vars")
+	}
+}
+
+func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
+	args := buildClaudeArgs(ExecOptions{
+		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
+	}, slog.Default())
+
+	for i, a := range args {
+		if a == "--mcp-config" {
+			t.Fatalf("--mcp-config should be blocked from custom_args, found at index %d: %v", i, args)
+		}
+		if a == "/tmp/evil.json" {
+			t.Fatalf("--mcp-config value should be consumed when blocking, but found it at index %d: %v", i, args)
+		}
+	}
+
+	// Non-blocked args should still pass through.
+	foundModel := false
+	for i, a := range args {
+		if a == "--model" && i+1 < len(args) && args[i+1] == "o3" {
+			foundModel = true
+		}
+	}
+	if !foundModel {
+		t.Fatalf("expected --model o3 in args after blocking --mcp-config: %v", args)
+	}
+}
+
+func TestWriteMcpConfigToTemp(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"mcpServers":{"test":{"command":"echo","args":["hello"]}}}`)
+	path, err := writeMcpConfigToTemp(raw)
+	if err != nil {
+		t.Fatalf("writeMcpConfigToTemp: %v", err)
+	}
+
+	// File should exist and contain exactly the raw JSON.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read temp file %s: %v", path, err)
+	}
+	if !bytes.Equal(data, []byte(raw)) {
+		t.Fatalf("expected %s, got %s", raw, data)
+	}
+
+	// Cleanup should remove the file.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected temp file to be removed, but it still exists")
+	}
+}
+
+func TestResolveSessionID(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		requested string
+		emitted   string
+		failed    bool
+		want      string
+	}{
+		{
+			name:      "no resume requested propagates emitted",
+			requested: "",
+			emitted:   "fresh-abc",
+			failed:    false,
+			want:      "fresh-abc",
+		},
+		{
+			name:      "resume succeeded keeps matching id",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    false,
+			want:      "sess-old",
+		},
+		{
+			name:      "resume succeeded but run failed mid-turn keeps id for later retry",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			want:      "sess-old",
+		},
+		{
+			name:      "resume did not land and run failed clears id so daemon fallback fires",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    true,
+			want:      "",
+		},
+		{
+			name:      "resume did not land but run succeeded keeps fresh id (defensive)",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    false,
+			want:      "fresh-new",
+		},
+		{
+			name:      "no emitted id leaves result empty",
+			requested: "sess-old",
+			emitted:   "",
+			failed:    true,
+			want:      "",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveSessionID(tc.requested, tc.emitted, tc.failed)
+			if got != tc.want {
+				t.Fatalf("resolveSessionID(%q, %q, %v) = %q, want %q",
+					tc.requested, tc.emitted, tc.failed, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -68,7 +68,7 @@ var autopilotRunsCmd = &cobra.Command{
 
 var autopilotTriggerAddCmd = &cobra.Command{
 	Use:   "trigger-add <autopilot-id>",
-	Short: "Add a trigger (schedule/webhook/api) to an autopilot",
+	Short: "Add a schedule trigger to an autopilot",
 	Args:  exactArgs(1),
 	RunE:  runAutopilotTriggerAdd,
 }
@@ -138,10 +138,9 @@ func init() {
 	autopilotRunsCmd.Flags().Int("offset", 0, "Pagination offset")
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
 
-	// trigger-add
-	autopilotTriggerAddCmd.Flags().String("kind", "", "Trigger kind: schedule, webhook, or api (required)")
-	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for kind=schedule)")
-	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone for schedule (default UTC)")
+	// trigger-add — only schedule triggers are supported end-to-end today
+	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required)")
+	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -470,21 +469,18 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	kind, _ := cmd.Flags().GetString("kind")
-	if kind == "" {
-		return fmt.Errorf("--kind is required (schedule, webhook, or api)")
-	}
-	if kind != "schedule" && kind != "webhook" && kind != "api" {
-		return fmt.Errorf("--kind must be schedule, webhook, or api")
-	}
+	// Only schedule triggers are dispatched end-to-end today. The server
+	// schema also defines "webhook" and "api" kinds, but no inbound endpoint
+	// fires them — they'd sit in the DB forever. Re-add kind selection here
+	// when those paths are implemented.
 	cron, _ := cmd.Flags().GetString("cron")
-	if kind == "schedule" && cron == "" {
-		return fmt.Errorf("--cron is required for kind=schedule")
+	if cron == "" {
+		return fmt.Errorf("--cron is required")
 	}
 
-	body := map[string]any{"kind": kind}
-	if cron != "" {
-		body["cron_expression"] = cron
+	body := map[string]any{
+		"kind":            "schedule",
+		"cron_expression": cron,
 	}
 	if v, _ := cmd.Flags().GetString("timezone"); v != "" {
 		body["timezone"] = v

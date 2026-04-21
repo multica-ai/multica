@@ -23,6 +23,7 @@ import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { ProviderLogo } from "../../../runtimes/components/provider-logo";
+import { ModelDropdown } from "../model-dropdown";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -44,6 +45,7 @@ export function SettingsTab({
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
+  const [model, setModel] = useState(agent.model ?? "");
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
   const [saving, setSaving] = useState(false);
@@ -90,7 +92,8 @@ export function SettingsTab({
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
-    selectedRuntimeId !== agent.runtime_id;
+    selectedRuntimeId !== agent.runtime_id ||
+    model !== (agent.model ?? "");
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -106,6 +109,7 @@ export function SettingsTab({
         visibility,
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
+        model,
       });
       toast.success("Settings saved");
     } catch {
@@ -320,6 +324,14 @@ export function SettingsTab({
           </PopoverContent>
         </Popover>
       </div>
+
+      <ModelDropdown
+        runtimeId={selectedRuntime?.id ?? null}
+        runtimeOnline={selectedRuntime?.status === "online"}
+        value={model}
+        onChange={setModel}
+        disabled={!selectedRuntime}
+      />
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}

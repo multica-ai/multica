@@ -51,8 +51,18 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 	switch evt.Type {
 	case "session.start":
 		var ss copilotSessionStart
-		if err := json.Unmarshal(evt.Data, &ss); err == nil && ss.SelectedModel != "" {
-			st.activeModel = ss.SelectedModel
+		if err := json.Unmarshal(evt.Data, &ss); err == nil {
+			if ss.SelectedModel != "" {
+				st.activeModel = ss.SelectedModel
+			}
+			// Capture sessionId from session.start as well: the synthetic
+			// "result" event may never arrive (timeout, cancel, crash, or a
+			// session.error before result), and without this the daemon
+			// reports SessionID="" and the chat-session resume pointer can
+			// drift to a stale turn. result still wins when it does arrive.
+			if ss.SessionID != "" {
+				st.sessionID = ss.SessionID
+			}
 		}
 
 	case "assistant.message_delta":
@@ -158,7 +168,9 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		}
 
 	case "result":
-		st.sessionID = evt.SessionID
+		if evt.SessionID != "" {
+			st.sessionID = evt.SessionID
+		}
 		if evt.ExitCode != 0 {
 			st.finalStatus = "failed"
 			st.finalError = fmt.Sprintf("copilot exited with code %d", evt.ExitCode)
@@ -238,12 +250,16 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 			var evt copilotEvent
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
+				slog.Warn("copilot event parse failed", "err", err, "line", line)
 				continue
 			}
 
 			for _, m := range handleCopilotEvent(evt, st) {
 				trySend(msgCh, m)
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			slog.Warn("copilot stdout scanner error", "err", err)
 		}
 
 		exitErr := cmd.Wait()
@@ -372,7 +388,7 @@ type copilotSessionWarning struct {
 
 // copilotResultUsage is the usage on the final "result" line.
 type copilotResultUsage struct {
-	PremiumRequests    int                 `json:"premiumRequests"`
+	PremiumRequests    float64             `json:"premiumRequests"`
 	TotalAPIDurationMs int64               `json:"totalApiDurationMs"`
 	SessionDurationMs  int64               `json:"sessionDurationMs"`
 	CodeChanges        *copilotCodeChanges `json:"codeChanges,omitempty"`

@@ -479,6 +479,56 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "copilot-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "copilot", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Copilot CLI natively discovers project-level skills from .github/skills/.
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".github", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .github/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	// Supporting files should also be under .github/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".github", "skills", "go-conventions", "templates", "example.go"))
+	if err != nil {
+		t.Fatalf("failed to read supporting file: %v", err)
+	}
+	if string(supportFile) != "package main" {
+		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	// .agent_context/skills/ should NOT exist for Copilot.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Copilot provider")
+	}
+
+	// issue_context.md should still be in .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
+		t.Error("expected .agent_context/issue_context.md to exist")
+	}
+}
+
 func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -618,6 +668,66 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing %q", want)
 		}
+	}
+}
+
+// TestInjectRuntimeConfigRequiresExplicitCommentPost ensures the injected
+// workflow makes "post a comment with results" an explicit, unmissable step in
+// both the assignment- and comment-triggered branches, plus hard-warns in the
+// Output section that terminal/log text is not user-visible. Agents were
+// silently finishing tasks without ever posting their result to the issue; see
+// MUL-1124. Covering this in a test prevents the guidance from decaying back
+// into a nested clause again.
+func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
+	t.Parallel()
+
+	assignmentCtx := TaskContextForEnv{IssueID: "issue-1"}
+	commentCtx := TaskContextForEnv{IssueID: "issue-1", TriggerCommentID: "comment-1"}
+
+	for _, tc := range []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"assignment-triggered", assignmentCtx},
+		{"comment-triggered", commentCtx},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := InjectRuntimeConfig(dir, "claude", tc.ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+			if err != nil {
+				t.Fatalf("read CLAUDE.md: %v", err)
+			}
+			s := string(data)
+
+			// The workflow must contain an explicit `multica issue comment add`
+			// invocation for this issue — not just a prose mention of posting.
+			mustContain := []string{
+				"multica issue comment add issue-1",
+				"mandatory",
+			}
+			for _, want := range mustContain {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s: CLAUDE.md missing %q\n---\n%s", tc.name, want, s)
+				}
+			}
+
+			// The Output section must carry a hard warning that terminal/log
+			// output is not user-visible. This is the second line of defense
+			// in case the agent skips past the workflow steps.
+			for _, want := range []string{
+				"Final results MUST be delivered via `multica issue comment add`",
+				"does NOT see your terminal output",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s: Output warning missing %q", tc.name, want)
+				}
+			}
+		})
 	}
 }
 
@@ -1006,11 +1116,11 @@ network_access = true
 func TestCodexSandboxPolicyFor(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name      string
-		goos      string
-		version   string
-		wantMode  string
-		wantNet   bool
+		name     string
+		goos     string
+		version  string
+		wantMode string
+		wantNet  bool
 	}{
 		{"linux any version", "linux", "0.100.0", "workspace-write", true},
 		{"linux unknown version", "linux", "", "workspace-write", true},

@@ -1,6 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
+export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
+
 export const en: LandingDict = {
   header: {
     github: "GitHub",
@@ -120,9 +122,10 @@ export const en: LandingDict = {
     headlineFaded: "in the next hour.",
     steps: [
       {
-        title: "Sign up & create your workspace",
-        description:
-          "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms.",
+        title: ALLOW_SIGNUP ? "Sign up & create your workspace" : "Login to your workspace",
+        description: ALLOW_SIGNUP
+          ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
+          : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
       },
       {
         title: "Install the CLI & connect your machine",
@@ -279,6 +282,64 @@ export const en: LandingDict = {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.2.8",
+        date: "2026-04-20",
+        title: "Per-Agent Models, Kimi Runtime & Self-Host Auth",
+        changes: [],
+        features: [
+          "Per-agent `model` field with a provider-aware dropdown — pick the LLM model for each agent from the UI or via `multica agent create/update --model`, with live discovery from each runtime's CLI",
+          "Kimi CLI as a new agent runtime (Moonshot AI's `kimi-cli` over ACP), with model selection, auto-approved tool permissions, and streaming tool-call rendering",
+          "Expand toggle on inline comment and reply editors for composing long text",
+        ],
+        fixes: [
+          "Posting the result comment is now an explicit, numbered step in agent workflows so final replies reach the issue instead of terminal output",
+          "Agent live status card no longer leaks across issues when switching via Cmd+K",
+          "Self-hosted session cookies honor the `FRONTEND_ORIGIN` scheme — plain-HTTP deployments stop silently dropping cookies, and `COOKIE_DOMAIN=<ip>` now falls back to host-only with a warning instead of breaking login",
+        ],
+      },
+      {
+        version: "0.2.7",
+        date: "2026-04-18",
+        title: "Sub-Issues from Editor, Self-Host Gating & MCP",
+        changes: [],
+        features: [
+          "Create sub-issue directly from selected text in the editor bubble menu",
+          "Self-hosted instance gating — `ALLOW_SIGNUP` and `ALLOWED_EMAIL_*` env vars to restrict account creation",
+          "Per-agent `mcp_config` field to restore MCP access",
+          "Desktop app hourly update poll with manual check button in settings",
+        ],
+        fixes: [
+          "Session hand-off to desktop when already logged in on web",
+          "Open redirect vulnerability on `?next=` validated",
+          "OpenClaw stops passing unsupported flags and properly delivers AgentInstructions",
+        ],
+      },
+      {
+        version: "0.2.5",
+        date: "2026-04-17",
+        title: "CLI Autopilot, Cmd+K & Daemon Identity",
+        changes: [],
+        features: [
+          "CLI `autopilot` commands for managing scheduled and triggered automations",
+          "CLI `issue subscriber` commands for subscription management",
+          "Cmd+K palette extended — theme toggle, quick new issue/project, copy link, switch workspace",
+          "Project and sub-issue progress as optional card properties on the issue list",
+          "Persistent daemon UUID identity — CLI and desktop share one daemon across restarts and machine moves",
+          "Sole-owner workspace leave preflight check",
+          "Persist comment collapse state across sessions",
+        ],
+        fixes: [
+          "Agents now triggered on comments regardless of issue status",
+          "Codex sandbox config fixed for macOS network access",
+          "Editor bubble menu rewritten with @floating-ui/dom for reliable scroll hiding",
+          "Autopilot creator automatically subscribed to autopilot-created issues",
+          "Autopilot workspace ID correctly resolved for run-only tasks",
+          "Desktop restricts `shell.openExternal` to http/https schemes (security)",
+          "Duplicate agent names return 409 instead of silently failing",
+          "New tabs in desktop inherit current workspace",
+        ],
+      },
       {
         version: "0.2.1",
         date: "2026-04-16",

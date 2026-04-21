@@ -8,9 +8,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { CalendarDays } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config";
@@ -49,6 +52,12 @@ export const BoardCardContent = memo(function BoardCardContent({
 }) {
   const storeProperties = useViewStore((s) => s.cardProperties);
   const priorityCfg = PRIORITY_CONFIG[issue.priority];
+  const wsId = useWorkspaceId();
+  const { data: projects = [] } = useQuery({
+    ...projectListOptions(wsId),
+    enabled: storeProperties.project && !!issue.project_id,
+  });
+  const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
 
   const updateIssueMutation = useUpdateIssue();
   const handleUpdate = useCallback(
@@ -65,6 +74,8 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showDescription = storeProperties.description && issue.description;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
+  const showProject = storeProperties.project && project;
+  const showChildProgress = storeProperties.childProgress && childProgress;
 
   return (
     <div className="rounded-lg border-[0.5px] bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-shadow group-hover:shadow-sm">
@@ -76,13 +87,23 @@ export const BoardCardContent = memo(function BoardCardContent({
         {issue.title}
       </p>
 
-      {/* Sub-issue progress */}
-      {childProgress && (
-        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-          <ProgressRing done={childProgress.done} total={childProgress.total} size={14} />
-          <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-            {childProgress.done}/{childProgress.total}
-          </span>
+      {/* Sub-issue progress + project */}
+      {(showChildProgress || showProject) && (
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          {showChildProgress && (
+            <div className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+              <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
+              <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                {childProgress!.done}/{childProgress!.total}
+              </span>
+            </div>
+          )}
+          {showProject && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
+              <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
+              <span className="truncate">{project!.title}</span>
+            </span>
+          )}
         </div>
       )}
 
