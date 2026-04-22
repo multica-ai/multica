@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Collapsible,
   CollapsibleContent,
@@ -86,16 +87,16 @@ export function ChatMessageSkeleton() {
     <div className="flex-1 overflow-hidden">
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-5">
         <div className="space-y-2">
-          <div className="h-3.5 w-3/4 rounded bg-muted animate-pulse" />
-          <div className="h-3.5 w-1/2 rounded bg-muted animate-pulse" />
+          <Skeleton className="h-3.5 w-3/4" />
+          <Skeleton className="h-3.5 w-1/2" />
         </div>
         <div className="flex justify-end">
-          <div className="h-8 w-48 rounded-2xl bg-muted animate-pulse" />
+          <Skeleton className="h-8 w-48 rounded-2xl" />
         </div>
         <div className="space-y-2">
-          <div className="h-3.5 w-2/3 rounded bg-muted animate-pulse" />
-          <div className="h-3.5 w-5/6 rounded bg-muted animate-pulse" />
-          <div className="h-3.5 w-1/3 rounded bg-muted animate-pulse" />
+          <Skeleton className="h-3.5 w-2/3" />
+          <Skeleton className="h-3.5 w-5/6" />
+          <Skeleton className="h-3.5 w-1/3" />
         </div>
       </div>
     </div>

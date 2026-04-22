@@ -125,7 +125,7 @@ func waitForWorkspaceCreation(cmd *cobra.Command, client *cli.APIClient) ([]stru
 		return nil, nil
 	}
 
-	createWorkspaceURL := appURL + "/new-workspace"
+	createWorkspaceURL := appURL + "/workspaces/new"
 
 	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening workspace creation in your browser...")
 	if err := openBrowser(createWorkspaceURL); err != nil {

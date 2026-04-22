@@ -1,1 +1,0 @@
--- No-op: 046 is an audit-only migration. Nothing to roll back.

@@ -28,6 +28,11 @@ function runtimeNeedsUpdate(
   if (rt.runtime_mode !== "local") return false;
   // Only show to the user who owns this runtime.
   if (rt.owner_id !== userId) return false;
+  // Desktop-managed runtimes are updated by the Desktop app's own auto-updater;
+  // the platform should not surface CLI update prompts for them.
+  if (rt.metadata && rt.metadata.launched_by === "desktop") {
+    return false;
+  }
   const cliVersion =
     rt.metadata && typeof rt.metadata.cli_version === "string"
       ? rt.metadata.cli_version

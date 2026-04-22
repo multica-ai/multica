@@ -208,7 +208,9 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 
 const getLastChatTaskSession = `-- name: GetLastChatTaskSession :one
 SELECT session_id, work_dir FROM agent_task_queue
-WHERE chat_session_id = $1 AND status = 'completed' AND session_id IS NOT NULL
+WHERE chat_session_id = $1
+  AND status IN ('completed', 'failed')
+  AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1
 `
@@ -218,6 +220,11 @@ type GetLastChatTaskSessionRow struct {
 	WorkDir   pgtype.Text `json:"work_dir"`
 }
 
+// Returns the most recent task in this chat session that managed to record a
+// session_id. Includes both completed and failed tasks: even a failed task
+// may have established a real agent session before failing, and we'd rather
+// resume there than start over and lose conversation memory. Used as a
+// fallback when chat_session.session_id is NULL.
 func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgtype.UUID) (GetLastChatTaskSessionRow, error) {
 	row := q.db.QueryRow(ctx, getLastChatTaskSession, chatSessionID)
 	var i GetLastChatTaskSessionRow
@@ -483,18 +490,26 @@ func (q *Queries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 }
 
 const updateChatSessionSession = `-- name: UpdateChatSessionSession :exec
-UPDATE chat_session SET session_id = $2, work_dir = $3, updated_at = now()
-WHERE id = $1
+UPDATE chat_session
+SET session_id = COALESCE($1, session_id),
+    work_dir = COALESCE($2, work_dir),
+    updated_at = now()
+WHERE id = $3
 `
 
 type UpdateChatSessionSessionParams struct {
-	ID        pgtype.UUID `json:"id"`
 	SessionID pgtype.Text `json:"session_id"`
 	WorkDir   pgtype.Text `json:"work_dir"`
+	ID        pgtype.UUID `json:"id"`
 }
 
+// Updates the resume pointer for a chat session. Empty/NULL inputs are
+// ignored via COALESCE so a task that completes without a session_id (e.g.
+// the agent crashed before establishing one) cannot wipe out a previously
+// recorded resume pointer. This makes the chat memory robust against
+// intermittent agent failures.
 func (q *Queries) UpdateChatSessionSession(ctx context.Context, arg UpdateChatSessionSessionParams) error {
-	_, err := q.db.Exec(ctx, updateChatSessionSession, arg.ID, arg.SessionID, arg.WorkDir)
+	_, err := q.db.Exec(ctx, updateChatSessionSession, arg.SessionID, arg.WorkDir, arg.ID)
 	return err
 }
 

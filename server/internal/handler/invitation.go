@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -140,6 +141,13 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		eventPayload["workspace_name"] = ws.Name
 	}
 	h.publish(protocol.EventInvitationCreated, workspaceID, "member", userID, eventPayload)
+
+	h.Analytics.Capture(analytics.TeamInviteSent(
+		uuidToString(requester.UserID),
+		workspaceID,
+		email,
+		"email",
+	))
 
 	// Send invitation email (fire-and-forget).
 	if h.EmailService != nil && workspaceName != "" {
@@ -408,6 +416,19 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		"invitation_id": invitationID,
 		"member":        memberResp,
 	})
+
+	// days_since_invite rounds down to whole days so the funnel segments
+	// "accepted same day" cleanly from "accepted later". inv.CreatedAt is
+	// the invitation row's insertion time so this is safe to compute here.
+	var daysSinceInvite int64
+	if inv.CreatedAt.Valid {
+		daysSinceInvite = int64(time.Since(inv.CreatedAt.Time).Hours() / 24)
+	}
+	h.Analytics.Capture(analytics.TeamInviteAccepted(
+		userID,
+		wsID,
+		daysSinceInvite,
+	))
 
 	writeJSON(w, http.StatusOK, memberResp)
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -84,6 +85,49 @@ func TestHealthHandlerActiveTaskCountTracksCounter(t *testing.T) {
 
 	d.activeTasks.Add(-1)
 	assertActiveTaskCount(t, handler, 0)
+}
+
+func TestShutdownHandlerPostCancelsDaemonContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &Daemon{cancelFunc: cancel}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/shutdown", nil)
+	d.shutdownHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("daemon context was not cancelled after POST /shutdown")
+	}
+}
+
+func TestShutdownHandlerRejectsNonPost(t *testing.T) {
+	t.Parallel()
+
+	cancelled := false
+	d := &Daemon{cancelFunc: func() { cancelled = true }}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/shutdown", nil)
+	d.shutdownHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+	// Give the handler's deferred cancel goroutine a moment to fire
+	// in case a bug causes it to run anyway.
+	time.Sleep(10 * time.Millisecond)
+	if cancelled {
+		t.Fatal("GET request should not trigger cancellation")
+	}
 }
 
 func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, want int64) {

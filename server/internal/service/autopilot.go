@@ -321,7 +321,7 @@ func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRu
 // user-provided description, asking the agent to rename the issue after
 // it understands the actual work.
 func (s *AutopilotService) buildIssueDescription(ap db.Autopilot) pgtype.Text {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
 	note := fmt.Sprintf("\n\n---\n*Autopilot run triggered at %s. After starting work, rename this issue to accurately reflect what you are doing.*", now)
 	base := ap.Description.String
 	return pgtype.Text{String: base + note, Valid: true}

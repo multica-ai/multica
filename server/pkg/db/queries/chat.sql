@@ -34,8 +34,16 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateChatSessionSession :exec
-UPDATE chat_session SET session_id = $2, work_dir = $3, updated_at = now()
-WHERE id = $1;
+-- Updates the resume pointer for a chat session. Empty/NULL inputs are
+-- ignored via COALESCE so a task that completes without a session_id (e.g.
+-- the agent crashed before establishing one) cannot wipe out a previously
+-- recorded resume pointer. This makes the chat memory robust against
+-- intermittent agent failures.
+UPDATE chat_session
+SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
+    work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
+    updated_at = now()
+WHERE id = sqlc.arg('id');
 
 -- name: ArchiveChatSession :exec
 UPDATE chat_session SET status = 'archived', updated_at = now()
@@ -65,8 +73,15 @@ VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
 
 -- name: GetLastChatTaskSession :one
+-- Returns the most recent task in this chat session that managed to record a
+-- session_id. Includes both completed and failed tasks: even a failed task
+-- may have established a real agent session before failing, and we'd rather
+-- resume there than start over and lose conversation memory. Used as a
+-- fallback when chat_session.session_id is NULL.
 SELECT session_id, work_dir FROM agent_task_queue
-WHERE chat_session_id = $1 AND status = 'completed' AND session_id IS NOT NULL
+WHERE chat_session_id = $1
+  AND status IN ('completed', 'failed')
+  AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1;
 

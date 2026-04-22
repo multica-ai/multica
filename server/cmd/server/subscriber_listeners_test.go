@@ -357,6 +357,39 @@ func TestSubscriberAddedEventPublished(t *testing.T) {
 	}
 }
 
+// Autopilot publishes EventIssueCreated with a map[string]any payload (not handler.IssueResponse).
+// The listener must still subscribe the creator.
+func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": map[string]any{
+				"id":           issueID,
+				"workspace_id": testWorkspaceID,
+				"title":        "autopilot test issue",
+				"status":       "todo",
+				"priority":     "medium",
+				"creator_type": "member",
+				"creator_id":   testUserID,
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("expected creator to be subscribed when autopilot publishes map payload")
+	}
+}
+
 // Verify parseUUID is consistent — pgtype.UUID from our local helper should match util.ParseUUID
 func TestParseUUIDConsistency(t *testing.T) {
 	uuid := "550e8400-e29b-41d4-a716-446655440000"

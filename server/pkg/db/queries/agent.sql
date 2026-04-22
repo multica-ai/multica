@@ -20,8 +20,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    instructions, custom_env, custom_args, mcp_config, model
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -38,7 +38,14 @@ UPDATE agent SET
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
     custom_env = COALESCE(sqlc.narg('custom_env'), custom_env),
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
+    mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
+    model = COALESCE(sqlc.narg('model'), model),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentMcpConfig :one
+UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -123,8 +130,18 @@ ORDER BY completed_at DESC
 LIMIT 1;
 
 -- name: FailAgentTask :one
+-- Marks a task as failed. session_id and work_dir are merged via COALESCE so
+-- if the agent already established a real session before failing (e.g. it
+-- crashed mid-conversation, was cancelled, or hit a tool error) the resume
+-- pointer is preserved on the task row. The next chat task can then fall
+-- back to GetLastChatTaskSession and continue the conversation instead of
+-- silently starting over.
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = $2
+SET status = 'failed',
+    completed_at = now(),
+    error = $2,
+    session_id = COALESCE(sqlc.narg('session_id'), session_id),
+    work_dir = COALESCE(sqlc.narg('work_dir'), work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running')
 RETURNING *;
 

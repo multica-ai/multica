@@ -366,11 +366,21 @@ export function AutopilotsPage() {
       {/* Table */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
-          <div className="p-5 space-y-1">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-11 w-full" />
-            ))}
-          </div>
+          <>
+            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5">
+              <span className="shrink-0 w-4" />
+              <Skeleton className="h-3 w-12 flex-1 max-w-[48px]" />
+              <Skeleton className="h-3 w-12 shrink-0" />
+              <Skeleton className="h-3 w-10 shrink-0" />
+              <Skeleton className="h-3 w-10 shrink-0" />
+              <Skeleton className="h-3 w-12 shrink-0" />
+            </div>
+            <div className="p-5 pt-1 space-y-1">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-11 w-full" />
+              ))}
+            </div>
+          </>
         ) : autopilots.length === 0 ? (
           <div className="flex flex-col items-center py-16 px-5">
             <Zap className="h-10 w-10 mb-3 text-muted-foreground opacity-30" />

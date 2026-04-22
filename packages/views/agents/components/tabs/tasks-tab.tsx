@@ -6,14 +6,17 @@ import type { Agent, AgentTask } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useQuery } from "@tanstack/react-query";
+import { AppLink } from "../../../navigation";
 import { taskStatusConfig } from "../../config";
 
 export function TasksTab({ agent }: { agent: Agent }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
 
   useEffect(() => {
@@ -82,18 +85,16 @@ export function TasksTab({ agent }: { agent: Agent }) {
             const issue = issueMap.get(task.issue_id);
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
+            const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
+              isRunning
+                ? "border-success/40 bg-success/5"
+                : task.status === "dispatched"
+                  ? "border-info/40 bg-info/5"
+                  : ""
+            }`;
 
-            return (
-              <div
-                key={task.id}
-                className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
-                  isRunning
-                    ? "border-success/40 bg-success/5"
-                    : task.status === "dispatched"
-                      ? "border-info/40 bg-info/5"
-                      : ""
-                }`}
-              >
+            const content = (
+              <>
                 <Icon
                   className={`h-4 w-4 shrink-0 ${config.color} ${
                     isRunning ? "animate-spin" : ""
@@ -110,7 +111,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
                     </span>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
+                  <div className="mt-0.5 text-xs text-muted-foreground">
                     {isRunning && task.started_at
                       ? `Started ${new Date(task.started_at).toLocaleString()}`
                       : task.status === "dispatched" && task.dispatched_at
@@ -125,7 +126,17 @@ export function TasksTab({ agent }: { agent: Agent }) {
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>
                   {config.label}
                 </span>
-              </div>
+              </>
+            );
+
+            return (
+              <AppLink
+                key={task.id}
+                href={paths.issueDetail(task.issue_id)}
+                className={`${rowClassName} text-foreground no-underline hover:no-underline`}
+              >
+                {content}
+              </AppLink>
             );
           })}
         </div>

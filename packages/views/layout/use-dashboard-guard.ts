@@ -15,12 +15,12 @@ import { useNavigation } from "../navigation";
  *  - Auth still loading → wait
  *  - Not logged in → /login
  *  - Logged in but workspace list not yet loaded → wait (don't bounce prematurely)
- *  - Logged in but URL slug doesn't resolve to any workspace → /new-workspace
+ *  - Logged in but URL slug doesn't resolve to any workspace → /workspaces/new
  *
  * We read the workspace list query state directly (rather than relying on
  * useCurrentWorkspace's null return) so we can distinguish "list loading"
  * from "slug not found". Otherwise users could see a transient redirect
- * to /new-workspace before their workspace list arrives.
+ * to /workspaces/new before their workspace list arrives.
  */
 export function useDashboardGuard() {
   const { pathname, replace } = useNavigation();

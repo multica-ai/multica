@@ -1,5 +1,4 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
-import { BookOpen, Terminal, Rocket, Code } from "lucide-react";
 
 export const baseOptions: BaseLayoutProps = {
   nav: {
@@ -8,11 +7,6 @@ export const baseOptions: BaseLayoutProps = {
     ),
   },
   links: [
-    {
-      text: "Documentation",
-      url: "/docs",
-      active: "nested-url",
-    },
     {
       text: "GitHub",
       url: "https://github.com/multica-ai/multica",

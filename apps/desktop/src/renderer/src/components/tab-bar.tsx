@@ -29,7 +29,8 @@ import {
 } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@multica/ui/lib/utils";
-import { useTabStore, resolveRouteIcon, type Tab } from "@/stores/tab-store";
+import { useTabStore, useActiveGroup, resolveRouteIcon, type Tab } from "@/stores/tab-store";
+import { paths } from "@multica/core/paths";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
@@ -66,16 +67,13 @@ function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolea
   const handleClick = () => {
     if (isActive) return;
     setActiveTab(tab.id);
-    // No navigate() — Activity handles visibility
   };
 
   const handleClose = (e: React.MouseEvent) => {
     e.stopPropagation();
     closeTab(tab.id);
-    // No navigate() — store handles activeTabId switch
   };
 
-  // Stop pointer down on close so it doesn't start a drag on the parent button.
   const stopDragOnClose = (e: React.PointerEvent) => {
     e.stopPropagation();
   };
@@ -124,10 +122,13 @@ function NewTabButton() {
   const setActiveTab = useTabStore((s) => s.setActiveTab);
 
   const handleClick = () => {
-    const path = "/issues";
+    // New tab opens in the currently active workspace — tabs are scoped
+    // per workspace, so there is no cross-workspace ambiguity to resolve.
+    const activeSlug = useTabStore.getState().activeWorkspaceSlug;
+    if (!activeSlug) return;
+    const path = paths.workspace(activeSlug).issues();
     const tabId = addTab(path, "Issues", resolveRouteIcon(path));
-    setActiveTab(tabId);
-    // No navigate() — new tab's router starts at /issues automatically
+    if (tabId) setActiveTab(tabId);
   };
 
   return (
@@ -142,17 +143,17 @@ function NewTabButton() {
 }
 
 export function TabBar() {
-  const tabs = useTabStore((s) => s.tabs);
-  const activeTabId = useTabStore((s) => s.activeTabId);
+  const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
 
-  // distance: 5 — pointer must move 5px to start a drag, otherwise it's a click.
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     }),
   );
 
+  const tabs = group?.tabs ?? [];
+  const activeTabId = group?.activeTabId ?? "";
   const tabIds = tabs.map((t) => t.id);
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -182,7 +183,7 @@ export function TabBar() {
           ))}
         </SortableContext>
       </DndContext>
-      <NewTabButton />
+      {group && <NewTabButton />}
     </div>
   );
 }

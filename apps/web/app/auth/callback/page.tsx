@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
+import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
@@ -42,7 +42,9 @@ function CallbackContent() {
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    const nextUrl = nextPart ? nextPart.slice(5) : null; // strip "next:" prefix
+    // Strip "next:" prefix, then drop anything that isn't a safe relative path
+    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
+    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
@@ -66,7 +68,7 @@ function CallbackContent() {
           // URL is now the source of truth for the current workspace — the
           // [workspaceSlug]/layout syncs stores + cookie once we navigate.
           // Honor ?next= first (e.g. came from /invite/{id}), otherwise land
-          // in the first workspace's issues, or /new-workspace for zero-workspace users.
+          // in the first workspace's issues, or /workspaces/new for zero-workspace users.
           const [first] = wsList;
           const defaultDest = first
             ? paths.workspace(first.slug).issues()

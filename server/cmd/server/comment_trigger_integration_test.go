@@ -58,6 +58,27 @@ func clearTasks(t *testing.T, issueID string) {
 	}
 }
 
+// latestTriggerCommentID returns the trigger_comment_id of the most recently
+// created queued/dispatched task for the given issue, or empty string if none.
+func latestTriggerCommentID(t *testing.T, issueID string) string {
+	t.Helper()
+	var triggerID *string
+	err := testPool.QueryRow(context.Background(),
+		`SELECT trigger_comment_id::text
+		   FROM agent_task_queue
+		  WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
+		  ORDER BY created_at DESC
+		  LIMIT 1`,
+		issueID).Scan(&triggerID)
+	if err != nil {
+		t.Fatalf("failed to fetch trigger_comment_id: %v", err)
+	}
+	if triggerID == nil {
+		return ""
+	}
+	return *triggerID
+}
+
 // getAgentID returns the ID of the first agent in the test workspace.
 func getAgentID(t *testing.T) string {
 	t.Helper()
@@ -225,6 +246,25 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		postComment(t, issueID, "Looks good, please proceed", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 1 {
 			t.Errorf("expected 1 pending task, got %d", n)
+		}
+	})
+
+	// Regression guard for #1301: the assignee on_comment path must record
+	// the NEW reply as trigger_comment_id, not the thread root. Otherwise
+	// the daemon feeds stale content to the agent prompt, which with
+	// `--resume` sessions surfaces as "already replied, no further action".
+	// Reply placement (flat-thread grouping) is handled downstream in
+	// TaskService.createAgentComment, not here.
+	t.Run("reply records new comment id (not thread root) as trigger_comment_id", func(t *testing.T) {
+		clearTasks(t, issueID)
+		threadID := postCommentAsAgent(t, issueID, "First pass analysis.", agentID, nil)
+		replyID := postComment(t, issueID, "Please also check the edge case", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected 1 pending task, got %d", n)
+		}
+		if got := latestTriggerCommentID(t, issueID); got != replyID {
+			t.Errorf("trigger_comment_id = %q, want reply id %q (thread root was %q)",
+				got, replyID, threadID)
 		}
 	})
 

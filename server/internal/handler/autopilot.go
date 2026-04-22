@@ -359,6 +359,13 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["assignee_id"]; ok {
 		if req.AssigneeID != nil {
+			if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+				ID:          parseUUID(*req.AssigneeID),
+				WorkspaceID: parseUUID(workspaceID),
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "assignee must be a valid agent in this workspace")
+				return
+			}
 			params.AssigneeID = parseUUID(*req.AssigneeID)
 		}
 	}

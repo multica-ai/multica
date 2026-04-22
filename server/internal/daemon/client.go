@@ -122,10 +122,15 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), map[string]any{
-		"error": errMsg,
-	}, nil)
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir string) error {
+	body := map[string]any{"error": errMsg}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil)
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
@@ -142,9 +147,10 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 
 // HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
 type HeartbeatResponse struct {
-	Status        string         `json:"status"`
-	PendingPing   *PendingPing   `json:"pending_ping,omitempty"`
-	PendingUpdate *PendingUpdate `json:"pending_update,omitempty"`
+	Status           string            `json:"status"`
+	PendingPing      *PendingPing      `json:"pending_ping,omitempty"`
+	PendingUpdate    *PendingUpdate    `json:"pending_update,omitempty"`
+	PendingModelList *PendingModelList `json:"pending_model_list,omitempty"`
 }
 
 // PendingPing represents a ping test request from the server.
@@ -156,6 +162,11 @@ type PendingPing struct {
 type PendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+}
+
+// PendingModelList represents a request to enumerate supported models.
+type PendingModelList struct {
+	ID string `json:"id"`
 }
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
@@ -175,6 +186,11 @@ func (c *Client) ReportPingResult(ctx context.Context, runtimeID, pingID string,
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
+}
+
+// ReportModelListResult sends the model-discovery result back to the server.
+func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.

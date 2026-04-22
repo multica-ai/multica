@@ -111,6 +111,20 @@ function CursorLogo({ className }: { className: string }) {
   );
 }
 
+// Kimi (Moonshot AI) — wordmark "K" mark in Moonshot brand purple, simple
+// rounded-square logotype suitable for small icon sizes.
+function KimiLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#1F1147" />
+      <path
+        d="M7.2 6h2.4v5.1l4.3-5.1h2.9l-4.4 5.1L17 18h-2.9l-3.2-5.2-1.3 1.5V18H7.2V6z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -135,6 +149,8 @@ export function ProviderLogo({
       return <CopilotLogo className={className} />;
     case "cursor":
       return <CursorLogo className={className} />;
+    case "kimi":
+      return <KimiLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

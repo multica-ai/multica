@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -31,6 +32,12 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+type Config struct {
+	AllowSignup         bool
+	AllowedEmails       []string
+	AllowedEmailDomains []string
+}
+
 type Handler struct {
 	Queries          *db.Queries
 	DB               dbExecutor
@@ -42,17 +49,24 @@ type Handler struct {
 	EmailService     *service.EmailService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
+	ModelListStore   *ModelListStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
+	Analytics        analytics.Client
+	cfg              Config
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
 	}
 
-	taskSvc := service.NewTaskService(queries, hub, bus)
+	if analyticsClient == nil {
+		analyticsClient = analytics.NoopClient{}
+	}
+
+	taskSvc := service.NewTaskService(queries, txStarter, hub, bus)
 	return &Handler{
 		Queries:          queries,
 		DB:               executor,
@@ -64,8 +78,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmailService:     emailService,
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),
+		ModelListStore:   NewModelListStore(),
 		Storage:          store,
 		CFSigner:         cfSigner,
+		Analytics:        analyticsClient,
+		cfg:              cfg,
 	}
 }
 

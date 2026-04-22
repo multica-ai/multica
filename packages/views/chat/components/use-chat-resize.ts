@@ -34,11 +34,16 @@ export function useChatResize(
     if (!parent) return;
 
     const update = () => {
-      boundsRef.current = {
-        maxW: Math.floor(parent.clientWidth * MAX_RATIO),
-        maxH: Math.floor(parent.clientHeight * MAX_RATIO),
-      };
-      setBoundsReady(true);
+      const maxW = Math.floor(parent.clientWidth * MAX_RATIO);
+      const maxH = Math.floor(parent.clientHeight * MAX_RATIO);
+      setBoundsReady(true); // idempotent once true
+      // Only trigger a re-render if the bounds actually changed. Without this
+      // guard, any spurious ResizeObserver notification (including sub-pixel
+      // layout jitter during mount) schedules a setState that feeds back into
+      // the observer, producing "Maximum update depth exceeded".
+      const prev = boundsRef.current;
+      if (prev.maxW === maxW && prev.maxH === maxH) return;
+      boundsRef.current = { maxW, maxH };
       setRevision((r) => r + 1);
     };
 

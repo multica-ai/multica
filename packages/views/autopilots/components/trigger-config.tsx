@@ -15,7 +15,7 @@ export type TriggerFrequency = "hourly" | "daily" | "weekdays" | "weekly" | "cus
 export interface TriggerConfig {
   frequency: TriggerFrequency;
   time: string; // HH:MM
-  dayOfWeek: number; // 0=Sun … 6=Sat
+  daysOfWeek: number[]; // 0=Sun … 6=Sat — used when frequency === "weekly"
   cronExpression: string; // only used when frequency === "custom"
   timezone: string; // IANA
 }
@@ -28,7 +28,7 @@ const FREQUENCIES: { value: TriggerFrequency; label: string }[] = [
   { value: "hourly", label: "Hourly" },
   { value: "daily", label: "Daily" },
   { value: "weekdays", label: "Weekdays" },
-  { value: "weekly", label: "Weekly" },
+  { value: "weekly", label: "Days" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -102,10 +102,20 @@ export function getDefaultTriggerConfig(): TriggerConfig {
   return {
     frequency: "daily",
     time: "09:00",
-    dayOfWeek: 1,
+    daysOfWeek: [1],
     cronExpression: "0 9 * * 1-5",
     timezone: getLocalTimezone(),
   };
+}
+
+function sortedDays(days: number[]): number[] {
+  return [...new Set(days)].sort((a, b) => a - b);
+}
+
+function formatDayList(days: number[]): string {
+  const sorted = sortedDays(days);
+  if (sorted.length === 0) return "—";
+  return sorted.map((d) => DAYS_OF_WEEK[d]).join(", ");
 }
 
 export function toCronExpression(cfg: TriggerConfig): string {
@@ -119,8 +129,11 @@ export function toCronExpression(cfg: TriggerConfig): string {
       return `${min} ${hour} * * *`;
     case "weekdays":
       return `${min} ${hour} * * 1-5`;
-    case "weekly":
-      return `${min} ${hour} * * ${cfg.dayOfWeek}`;
+    case "weekly": {
+      const days = sortedDays(cfg.daysOfWeek);
+      const dow = days.length > 0 ? days.join(",") : "1";
+      return `${min} ${hour} * * ${dow}`;
+    }
     case "custom":
       return cfg.cronExpression;
   }
@@ -138,7 +151,7 @@ export function describeTrigger(cfg: TriggerConfig): string {
     case "weekdays":
       return `Runs weekdays at ${formatTime12h(cfg.time)} ${offset}`;
     case "weekly":
-      return `Runs every ${DAYS_OF_WEEK[cfg.dayOfWeek]} at ${formatTime12h(cfg.time)} ${offset}`;
+      return `Runs every ${formatDayList(cfg.daysOfWeek)} at ${formatTime12h(cfg.time)} ${offset}`;
     case "custom":
       return `Custom schedule: ${cfg.cronExpression}`;
   }
@@ -251,26 +264,39 @@ export function TriggerConfigSection({
             )}
           </div>
 
-          {/* Day-of-week selector for weekly */}
+          {/* Day-of-week multi-selector for weekly */}
           {config.frequency === "weekly" && (
             <div>
-              <label className="text-xs text-muted-foreground">Day</label>
+              <label className="text-xs text-muted-foreground">Days</label>
               <div className="flex gap-1 mt-1">
-                {DAYS_OF_WEEK.map((day, i) => (
-                  <button
-                    key={day}
-                    type="button"
-                    className={cn(
-                      "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                      config.dayOfWeek === i
-                        ? "bg-foreground text-background"
-                        : "bg-muted text-muted-foreground hover:text-foreground",
-                    )}
-                    onClick={() => onChange({ ...config, dayOfWeek: i })}
-                  >
-                    {day}
-                  </button>
-                ))}
+                {DAYS_OF_WEEK.map((day, i) => {
+                  const selected = config.daysOfWeek.includes(i);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      aria-pressed={selected}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                        selected
+                          ? "bg-foreground text-background"
+                          : "bg-muted text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => {
+                        const next = selected
+                          ? config.daysOfWeek.filter((d) => d !== i)
+                          : [...config.daysOfWeek, i];
+                        // Keep at least one day selected so the cron stays valid.
+                        onChange({
+                          ...config,
+                          daysOfWeek: next.length > 0 ? next : config.daysOfWeek,
+                        });
+                      }}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

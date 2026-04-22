@@ -1,11 +1,13 @@
 "use client";
 
+import { Suspense } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { WebNavigationProvider } from "@/platform/navigation";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
+import { PageviewTracker } from "./pageview-tracker";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -42,6 +44,11 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
       onLogin={setLoggedInCookie}
       onLogout={clearLoggedInCookie}
     >
+      {/* Suspense boundary is required by Next.js for useSearchParams in
+          a client component mounted this high in the tree. */}
+      <Suspense fallback={null}>
+        <PageviewTracker />
+      </Suspense>
       <WebNavigationProvider>{children}</WebNavigationProvider>
     </CoreProvider>
   );

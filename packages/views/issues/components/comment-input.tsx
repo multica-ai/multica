@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { ArrowUp, Loader2 } from "lucide-react";
+import { useRef, useState, useCallback } from "react";
+import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -17,29 +19,35 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
   const [isEmpty, setIsEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
     if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+      uploadMapRef.current.set(result.link, result.id);
     }
     return result;
-  };
+  }, [uploadWithToast, issueId]);
 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // Only send attachment IDs for uploads still present in the content.
+    const activeIds: string[] = [];
+    for (const [url, id] of uploadMapRef.current) {
+      if (content.includes(url)) activeIds.push(id);
+    }
     setSubmitting(true);
     try {
-      await onSubmit(content, attachmentIds.length > 0 ? attachmentIds : undefined);
+      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
-      setAttachmentIds([]);
+      uploadMapRef.current.clear();
     } finally {
       setSubmitting(false);
     }
@@ -48,7 +56,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   return (
     <div
       {...dropZoneProps}
-      className="relative flex max-h-56 flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+      className={cn(
+        "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border",
+        isExpanded ? "h-[70vh]" : "max-h-56",
+      )}
     >
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
         <ContentEditor
@@ -58,9 +69,27 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onSubmit={handleSubmit}
           onUploadFile={handleUpload}
           debounceMs={100}
+          currentIssueId={issueId}
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => {
+                  setIsExpanded((v) => !v);
+                  editorRef.current?.focus();
+                }}
+                className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+              >
+                {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              </button>
+            }
+          />
+          <TooltipContent side="top">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+        </Tooltip>
         <FileUploadButton
           size="sm"
           onSelect={(file) => editorRef.current?.uploadFile(file)}

@@ -5,13 +5,13 @@ import { describe, it, expect } from "vitest";
 // persistence — otherwise lastPath could contain /login etc, and on next
 // app load we'd "restore" a user to the login page.
 describe("useNavigationStore.lastPath excludes global paths", () => {
-  it("does not persist /login, /new-workspace, /invite/, /auth/, /logout, /signup", async () => {
+  it("does not persist /login, /workspaces/new, /invite/, /auth/, /logout, /signup", async () => {
     const { useNavigationStore } = await import("./store");
     const globalPrefixes = [
       "/login",
       "/logout",
       "/signup",
-      "/new-workspace",
+      "/workspaces/new",
       "/invite/abc",
       "/auth/callback",
     ];

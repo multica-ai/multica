@@ -1,0 +1,207 @@
+# Product Analytics
+
+This document is the source of truth for the analytics events Multica ships
+to PostHog. Events feed the acquisition → activation → expansion funnel that
+drives our weekly Active Workspaces (WAW) north-star metric.
+
+See [MUL-1122](https://github.com/multica-ai/multica) for the design context.
+
+## Configuration
+
+All analytics shipping is toggled by environment variables (see `.env.example`):
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `POSTHOG_API_KEY` | PostHog project API key. Empty = no events are shipped. | `""` |
+| `POSTHOG_HOST` | PostHog host (US or EU cloud, or self-hosted URL). | `https://us.i.posthog.com` |
+| `ANALYTICS_DISABLED` | Set to `true`/`1` to force the no-op client even when `POSTHOG_API_KEY` is set. | `""` |
+
+Local dev and self-hosted instances run with `POSTHOG_API_KEY=""`, so **no
+events leave the process unless the operator explicitly opts in**.
+
+### Self-hosted instances
+
+Self-hosters should **never inherit a Multica-issued `POSTHOG_API_KEY`** —
+that would route their users' behavior to our analytics project. The
+defaults guarantee this:
+
+- `.env.example` ships `POSTHOG_API_KEY=` empty. The Docker self-host
+  compose does not set a default either.
+- With the key unset, `NewFromEnv` returns `NoopClient` and logs
+  `analytics: POSTHOG_API_KEY not set, using noop client` at startup — a
+  visible confirmation that nothing is shipped.
+- Operators who want their own analytics can set `POSTHOG_API_KEY` and
+  `POSTHOG_HOST` to point at their own PostHog project (Cloud or
+  self-hosted PostHog).
+- The frontend receives the key via `/api/config` (planned for PR 2), so
+  self-hosts' blank server config also disables frontend event shipping
+  automatically — no separate frontend opt-out plumbing required.
+
+## Architecture
+
+```
+handler → analytics.Client.Capture(Event)   ← non-blocking, returns immediately
+                    │
+                    ▼
+           bounded queue (1024 events)
+                    │
+                    ▼
+     background worker: batch + POST /batch/
+                    │
+                    ▼
+                PostHog
+```
+
+- `analytics.Capture` is **never allowed to block a request handler**. A
+  broken backend must not degrade the product — when the queue is full,
+  events are dropped and counted (visible via `slog` + the `dropped` counter
+  on shutdown).
+- Batches flush either when `BatchSize` is reached or every `FlushEvery`
+  (default 10 s), whichever comes first.
+- `Close()` drains remaining events during graceful shutdown. Called from
+  `server/cmd/server/main.go` via `defer`.
+
+## Identity model
+
+- **`distinct_id`** — always the user's UUID for logged-in events. The
+  frontend's `posthog.identify(user.id)` merges any prior anonymous events
+  under the same identity, so acquisition attribution (UTM / referrer) stays
+  intact across signup.
+- **`workspace_id`** — added to every event as a property when present. v1
+  uses event property filtering (free tier) rather than PostHog Groups
+  Analytics (paid) to compute workspace-level metrics.
+- **PII** — events carry `email_domain` (e.g. `gmail.com`), not the full
+  email. Full email is stored once in person properties via `$set_once` so
+  it's available for individual debugging but not broadcast with every
+  event.
+
+## Event contract
+
+### `signup`
+
+Fires when a new user is created. Covers both verification-code and Google
+OAuth entry points (`findOrCreateUser` is the single emission site).
+
+| Property | Type | Description |
+|---|---|---|
+| `email_domain` | string | Lower-cased domain portion of the user's email. |
+| `signup_source` | string | Opaque attribution bundle from the frontend cookie `multica_signup_source` (UTM + referrer). Empty when the cookie is absent. |
+| `auth_method` | string | Optional. `"google"` for Google OAuth signups. Absent for verification-code signups. |
+
+Person properties set with `$set_once`:
+
+| Property | Type | Description |
+|---|---|---|
+| `email` | string | Full email. Never broadcast per-event. |
+| `signup_source` | string | Same as above; kept on the person for later segmentation. |
+
+### `workspace_created`
+
+Fires after a `CreateWorkspace` transaction commits successfully.
+
+| Property | Type | Description |
+|---|---|---|
+| `workspace_id` | string (UUID) | Added globally; present here for clarity. |
+
+**Note on "first workspace" segmentation** — we deliberately do *not* stamp
+an `is_first_workspace` boolean at emit time. Computing it correctly would
+require an extra column or transaction-scoped logic that still races under
+concurrent creates. Instead, PostHog answers the same question exactly by
+looking at whether the user has a prior `workspace_created` event (use a
+funnel with "first time user does X" or a cohort on
+`person_properties.$initial_event`). No information is lost.
+
+### `runtime_registered`
+
+Fires the first time a `(workspace_id, daemon_id, provider)` tuple is
+upserted. Heartbeats and repeat registrations never re-emit. First-time
+detection uses Postgres `xmax = 0` on the upsert RETURNING clause — no
+extra query, no race.
+
+| Property | Type | Description |
+|---|---|---|
+| `runtime_id` | string (UUID) | The newly created agent_runtime row id. |
+| `provider` | string | e.g. `"codex"`, `"claude"`. |
+| `runtime_version` | string | Version of the agent runtime binary. |
+| `cli_version` | string | Version of the `multica` CLI that registered it. |
+
+`distinct_id` is the authenticated owner's user id when the daemon was
+registered via a member's JWT/PAT; daemon-token registrations fall back to
+`workspace:<workspace_id>` so PostHog doesn't bucket unrelated daemons
+under a single "anonymous" person.
+
+### `issue_executed`
+
+Fires **at most once per issue** — when the first task on that issue
+reaches terminal `done` state. Backed by an atomic
+`UPDATE issue SET first_executed_at = now() WHERE id = $1 AND first_executed_at IS NULL RETURNING *`;
+retries, re-assignments, and comment-triggered follow-up tasks all hit the
+WHERE clause and no-op, so the `≥1 / ≥2 / ≥5 / ≥10` funnel buckets count
+distinct issues, not tasks.
+
+| Property | Type | Description |
+|---|---|---|
+| `issue_id` | string (UUID) | |
+| `task_duration_ms` | int64 | Wall-clock time between `task.started_at` and `task.completed_at`. Zero when the task was created in a completed state (rare). |
+
+`distinct_id` prefers the issue's human creator so agent-executed events
+flow into the issue-author's person profile (same place `signup` and
+`workspace_created` land). Agent-created issues prefix with `agent:` to
+keep PostHog from merging the agent into a user record.
+
+**Note on workspace-Nth ordinals** — we deliberately do *not* stamp
+`nth_issue_for_workspace` at emit time. Computing it correctly would
+require either a serialised transaction or an advisory lock per workspace;
+two concurrent first-completions could otherwise both read `count=1` and
+emit `n=1`. PostHog answers the same question at query time via
+`row_number() OVER (PARTITION BY properties.workspace_id ORDER BY timestamp)`,
+and funnel steps of the form "workspace has had ≥2 `issue_executed`
+events" are expressible without the property. No information is lost.
+
+### `team_invite_sent`
+
+Fires from `CreateInvitation` after the DB row is written.
+
+| Property | Type | Description |
+|---|---|---|
+| `invited_email_domain` | string | Lower-cased domain; full email lives in the invitation row, not the event. |
+| `invite_method` | string | Currently always `"email"`. Future non-email invite flows (share link, SCIM) should pass their own value. |
+
+`distinct_id` is the inviter's user id.
+
+### `team_invite_accepted`
+
+Fires from `AcceptInvitation` after both the invitation row is marked
+accepted and the member row is inserted in the same transaction.
+
+| Property | Type | Description |
+|---|---|---|
+| `days_since_invite` | int64 | Whole days from invitation creation to acceptance. Lets us segment "accepted same day" (warm) from "dug out of email weeks later" (cold). |
+
+`distinct_id` is the invitee's user id — this is the event that closes the
+expansion funnel.
+
+### Frontend-only events
+
+- `$pageview` — fired by `apps/web/components/pageview-tracker.tsx` on
+  every Next.js App Router path or query-string change. The tracker
+  mounts once under `WebProviders` and drives the acquisition funnel's
+  `/ → signup` step. posthog-js's automatic pageview capture is
+  disabled in `initAnalytics` so we own the event shape.
+- Attribution is NOT a separate event; UTM + referrer origin are written
+  to the `multica_signup_source` cookie on the first anonymous pageview
+  and read by the backend's `signup` emission. The cookie carries a JSON
+  payload URL-encoded at write time (`encodeURIComponent`) and
+  URL-decoded at read time (`url.QueryUnescape`) — the JSON is never
+  mid-truncated; individual values are capped at 96 chars before
+  `JSON.stringify`, and the entire payload is dropped if it still exceeds
+  512 chars. That way PostHog sees either intact JSON or nothing at all.
+
+## Governance
+
+Before adding, renaming, or removing any event:
+
+1. Update this document first.
+2. Update `server/internal/analytics/events.go` constants and helpers to
+   match.
+3. PR description must state which existing funnel / insight is affected.

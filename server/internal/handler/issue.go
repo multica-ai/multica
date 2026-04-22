@@ -77,6 +77,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
+		Description:   textToPtr(i.Description),
 		Status:        i.Status,
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
@@ -100,6 +101,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
+		Description:   textToPtr(i.Description),
 		Status:        i.Status,
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
@@ -1185,13 +1187,10 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 }
 
 // shouldEnqueueOnComment returns true if a member comment on this issue should
-// trigger the assigned agent. Fires for any non-terminal status — comments are
-// conversational and can happen at any stage of active work.
+// trigger the assigned agent. Fires for any status — comments are
+// conversational and can happen at any stage, including after completion
+// (e.g. follow-up questions on a done issue).
 func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
-	// Don't trigger on terminal statuses (done, cancelled).
-	if issue.Status == "done" || issue.Status == "cancelled" {
-		return false
-	}
 	if !h.isAgentAssigneeReady(ctx, issue) {
 		return false
 	}

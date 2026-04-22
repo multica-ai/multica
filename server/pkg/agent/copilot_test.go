@@ -155,6 +155,24 @@ func TestCopilotParseToolExecCompleteError(t *testing.T) {
 	}
 }
 
+func TestCopilotParseResultFractionalPremiumRequests(t *testing.T) {
+	t.Parallel()
+	// Regression: real Copilot CLI v1.0.32 emits premiumRequests as a float
+	// (e.g. 7.5). Decoding into an int field used to fail the entire result
+	// line, dropping sessionId and breaking chat-session resume.
+	const line = `{"type":"result","timestamp":"2026-04-20T05:34:30.469Z","sessionId":"349793b7-7067-49d4-a807-8788561643bd","exitCode":0,"usage":{"premiumRequests":7.5,"totalApiDurationMs":1500,"sessionDurationMs":5842,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}`
+	var evt copilotEvent
+	if err := json.Unmarshal([]byte(line), &evt); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if evt.SessionID != "349793b7-7067-49d4-a807-8788561643bd" {
+		t.Fatalf("unexpected sessionId: %q", evt.SessionID)
+	}
+	if evt.Usage == nil || evt.Usage.PremiumRequests != 7.5 {
+		t.Fatalf("expected premiumRequests=7.5, got %#v", evt.Usage)
+	}
+}
+
 func TestCopilotParseResult(t *testing.T) {
 	t.Parallel()
 	evt := parseCopilotEvent(t, fixtureResult)
@@ -172,7 +190,7 @@ func TestCopilotParseResult(t *testing.T) {
 		t.Fatal("expected usage to be present")
 	}
 	if evt.Usage.PremiumRequests != 3 {
-		t.Fatalf("expected 3 premiumRequests, got %d", evt.Usage.PremiumRequests)
+		t.Fatalf("expected 3 premiumRequests, got %v", evt.Usage.PremiumRequests)
 	}
 	if evt.Usage.TotalAPIDurationMs != 1763 {
 		t.Fatalf("expected totalApiDurationMs 1763, got %d", evt.Usage.TotalAPIDurationMs)
@@ -351,6 +369,54 @@ func TestCopilotEventLoopToolExecError(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected tool result with error message")
+	}
+}
+
+func TestCopilotEventLoopSessionStartCapturesSessionID(t *testing.T) {
+	t.Parallel()
+	// session.start arrives but the run is killed (timeout/cancel/crash) before
+	// the synthetic "result" line is emitted. We must still report the session
+	// id from session.start so the chat-session resume pointer can advance.
+	lines := []string{fixtureSessionStart}
+
+	_, sessionID, _, _ := simulateCopilotEventLoop(t, lines)
+
+	if sessionID != "35059dc3-d928-4ffb-8616-b78938621d85" {
+		t.Fatalf("expected session id captured from session.start, got %q", sessionID)
+	}
+}
+
+func TestCopilotEventLoopResultOverridesSessionStart(t *testing.T) {
+	t.Parallel()
+	// When both session.start and result carry a session id, the result event
+	// wins (it is the authoritative end-of-turn record).
+	lines := []string{
+		fixtureSessionStart,
+		// Different sessionId on the result event (defensive: in practice
+		// they should match, but the contract is "result wins").
+		`{"type":"result","sessionId":"final-id","exitCode":0}`,
+	}
+
+	_, sessionID, _, _ := simulateCopilotEventLoop(t, lines)
+
+	if sessionID != "final-id" {
+		t.Fatalf("expected result session id to win, got %q", sessionID)
+	}
+}
+
+func TestCopilotEventLoopResultWithoutSessionIDPreservesSessionStart(t *testing.T) {
+	t.Parallel()
+	// Defensive: if a result line arrives without a sessionId (older CLI,
+	// truncated output), the session.start id must not be wiped.
+	lines := []string{
+		fixtureSessionStart,
+		`{"type":"result","exitCode":0}`,
+	}
+
+	_, sessionID, _, _ := simulateCopilotEventLoop(t, lines)
+
+	if sessionID != "35059dc3-d928-4ffb-8616-b78938621d85" {
+		t.Fatalf("expected session.start id to be preserved when result has none, got %q", sessionID)
 	}
 }
 

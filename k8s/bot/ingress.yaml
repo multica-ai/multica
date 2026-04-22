@@ -3,9 +3,12 @@ kind: Ingress
 metadata:
   name: multica-bot
   namespace: multica-bot
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - multica.wujieai.com
+      secretName: all-wujieai-cert
   rules:
     - host: multica.wujieai.com
       http:

@@ -78,8 +78,8 @@ func openBrowser(url string) error {
 		cmd = "xdg-open"
 		args = []string{url}
 	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", "", url}
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", url}
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

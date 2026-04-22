@@ -228,6 +228,14 @@ vi.mock("@multica/core/issues/stores", () => ({
     },
     { getState: () => ({ items: [], recordVisit: mockRecordVisit }) },
   ),
+  useCommentCollapseStore: (selector?: any) => {
+    const state = {
+      collapsedByIssue: {},
+      isCollapsed: () => false,
+      toggle: () => {},
+    };
+    return selector ? selector(state) : state;
+  },
 }));
 
 // Mock modals

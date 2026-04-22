@@ -88,6 +88,34 @@ var issueCommentDeleteCmd = &cobra.Command{
 	RunE:  runIssueCommentDelete,
 }
 
+// Subscriber subcommands.
+
+var issueSubscriberCmd = &cobra.Command{
+	Use:   "subscriber",
+	Short: "Work with issue subscribers",
+}
+
+var issueSubscriberListCmd = &cobra.Command{
+	Use:   "list <issue-id>",
+	Short: "List subscribers of an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueSubscriberList,
+}
+
+var issueSubscriberAddCmd = &cobra.Command{
+	Use:   "add <issue-id>",
+	Short: "Subscribe a user or agent to an issue (defaults to the caller)",
+	Args:  exactArgs(1),
+	RunE:  runIssueSubscriberAdd,
+}
+
+var issueSubscriberRemoveCmd = &cobra.Command{
+	Use:   "remove <issue-id>",
+	Short: "Unsubscribe a user or agent from an issue (defaults to the caller)",
+	Args:  exactArgs(1),
+	RunE:  runIssueSubscriberRemove,
+}
+
 // Execution history subcommands.
 
 var issueRunsCmd = &cobra.Command{
@@ -123,6 +151,7 @@ func init() {
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueCommentCmd)
+	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueSearchCmd)
@@ -130,6 +159,10 @@ func init() {
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
 	issueCommentCmd.AddCommand(issueCommentDeleteCmd)
+
+	issueSubscriberCmd.AddCommand(issueSubscriberListCmd)
+	issueSubscriberCmd.AddCommand(issueSubscriberAddCmd)
+	issueSubscriberCmd.AddCommand(issueSubscriberRemoveCmd)
 
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -198,6 +231,17 @@ func init() {
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue subscriber list
+	issueSubscriberListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue subscriber add
+	issueSubscriberAddCmd.Flags().String("user", "", "Member or agent name to subscribe (defaults to the caller)")
+	issueSubscriberAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue subscriber remove
+	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (defaults to the caller)")
+	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -916,6 +960,100 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Subscriber commands
+// ---------------------------------------------------------------------------
+
+func runIssueSubscriberList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var subscribers []map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+args[0]+"/subscribers", &subscribers); err != nil {
+		return fmt.Errorf("list subscribers: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, subscribers)
+	}
+
+	headers := []string{"USER_TYPE", "USER_ID", "REASON", "CREATED"}
+	rows := make([][]string, 0, len(subscribers))
+	for _, s := range subscribers {
+		created := strVal(s, "created_at")
+		if len(created) >= 16 {
+			created = created[:16]
+		}
+		rows = append(rows, []string{
+			strVal(s, "user_type"),
+			truncateID(strVal(s, "user_id")),
+			strVal(s, "reason"),
+			created,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runIssueSubscriberAdd(cmd *cobra.Command, args []string) error {
+	return runIssueSubscriberMutation(cmd, args[0], "subscribe")
+}
+
+func runIssueSubscriberRemove(cmd *cobra.Command, args []string) error {
+	return runIssueSubscriberMutation(cmd, args[0], "unsubscribe")
+}
+
+// runIssueSubscriberMutation shares subscribe/unsubscribe logic — both endpoints
+// take the same request body and only differ in the path.
+func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{}
+	userName, _ := cmd.Flags().GetString("user")
+	if userName != "" {
+		uType, uID, resolveErr := resolveAssignee(ctx, client, userName)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve user: %w", resolveErr)
+		}
+		body["user_type"] = uType
+		body["user_id"] = uID
+	}
+
+	var result map[string]any
+	path := "/api/issues/" + issueID + "/" + action
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("%s issue: %w", action, err)
+	}
+
+	target := "caller"
+	if userName != "" {
+		target = userName
+	}
+	if action == "subscribe" {
+		fmt.Fprintf(os.Stderr, "Subscribed %s to issue %s.\n", target, truncateID(issueID))
+	} else {
+		fmt.Fprintf(os.Stderr, "Unsubscribed %s from issue %s.\n", target, truncateID(issueID))
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------
