@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -17,7 +23,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -54,6 +59,142 @@ func priorityLabel(p string) string {
 }
 
 var emptyDetails = []byte("{}")
+
+type telegramSettings struct {
+	BotToken string `json:"bot_token"`
+	UserID   string `json:"user_id"`
+}
+
+type workspaceNotificationSettings struct {
+	Telegram *telegramSettings `json:"telegram"`
+}
+
+var telegramSendMessage = func(ctx context.Context, botToken, userID, text string) error {
+	payload, err := json.Marshal(map[string]any{
+		"chat_id":                  userID,
+		"text":                     text,
+		"disable_web_page_preview": true,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal telegram payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken),
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return fmt.Errorf("build telegram request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return fmt.Errorf("telegram request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram sendMessage returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func workspaceTelegramConfig(ctx context.Context, queries *db.Queries, workspaceID string) *telegramSettings {
+	ws, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil {
+		slog.Error("failed to load workspace for telegram notification", "workspace_id", workspaceID, "error", err)
+		return nil
+	}
+	if len(ws.Settings) == 0 {
+		return nil
+	}
+
+	var settings workspaceNotificationSettings
+	if err := json.Unmarshal(ws.Settings, &settings); err != nil {
+		slog.Error("failed to parse workspace notification settings", "workspace_id", workspaceID, "error", err)
+		return nil
+	}
+	if settings.Telegram == nil {
+		return nil
+	}
+	if strings.TrimSpace(settings.Telegram.BotToken) == "" || strings.TrimSpace(settings.Telegram.UserID) == "" {
+		return nil
+	}
+	return settings.Telegram
+}
+
+func sendWorkspaceTelegramMessage(ctx context.Context, queries *db.Queries, workspaceID, text string) {
+	cfg := workspaceTelegramConfig(ctx, queries, workspaceID)
+	if cfg == nil {
+		return
+	}
+	if err := telegramSendMessage(ctx, cfg.BotToken, cfg.UserID, text); err != nil {
+		slog.Error("failed to send telegram notification", "workspace_id", workspaceID, "error", err)
+	}
+}
+
+func valueAsString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	value, ok := m[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case *string:
+		if v == nil {
+			return ""
+		}
+		return *v
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func formatTelegramInboxMessage(queries *db.Queries, workspaceID string, item map[string]any) string {
+	workspaceName := workspaceID
+	if ws, err := queries.GetWorkspace(context.Background(), parseUUID(workspaceID)); err == nil && strings.TrimSpace(ws.Name) != "" {
+		workspaceName = ws.Name
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("[%s] Inbox notification", workspaceName))
+	if title := valueAsString(item, "title"); title != "" {
+		lines = append(lines, title)
+	}
+	if issueID := valueAsString(item, "issue_id"); issueID != "" {
+		lines = append(lines, "Issue ID: "+issueID)
+	}
+	if body := strings.TrimSpace(valueAsString(item, "body")); body != "" {
+		lines = append(lines, body)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatTelegramStatusTransitionMessage(queries *db.Queries, workspaceID string, issue handler.IssueResponse, fromStatus string) string {
+	workspaceName := workspaceID
+	if ws, err := queries.GetWorkspace(context.Background(), parseUUID(workspaceID)); err == nil && strings.TrimSpace(ws.Name) != "" {
+		workspaceName = ws.Name
+	}
+
+	identifier := strings.TrimSpace(issue.Identifier)
+	if identifier == "" {
+		identifier = issue.ID
+	}
+
+	return strings.Join([]string{
+		fmt.Sprintf("[%s] Task transition", workspaceName),
+		fmt.Sprintf("%s — %s", identifier, issue.Title),
+		fmt.Sprintf("%s → %s", statusLabel(fromStatus), statusLabel(issue.Status)),
+	}, "\n")
+}
 
 // parseMentions extracts mentions from markdown content.
 // Delegates to the shared util.ParseMentions and converts to the local type.
@@ -336,6 +477,18 @@ func notifyMentionedMembers(
 func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	ctx := context.Background()
 
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		item, ok := payload["item"].(map[string]any)
+		if !ok {
+			return
+		}
+		sendWorkspaceTelegramMessage(ctx, queries, e.WorkspaceID, formatTelegramInboxMessage(queries, e.WorkspaceID, item))
+	})
+
 	// issue:created — Direct notification to assignee if assignee != actor
 	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
@@ -454,6 +607,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				nil, "status_changed", "info",
 				issue.Title, "",
 				statusDetails)
+			sendWorkspaceTelegramMessage(ctx, queries, e.WorkspaceID, formatTelegramStatusTransitionMessage(queries, e.WorkspaceID, issue, prevStatus))
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {

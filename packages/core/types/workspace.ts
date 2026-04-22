@@ -5,13 +5,23 @@ export interface WorkspaceRepo {
   description: string;
 }
 
+export interface WorkspaceTelegramSettings {
+  bot_token: string;
+  user_id: string;
+}
+
+export interface WorkspaceSettings {
+  telegram?: WorkspaceTelegramSettings;
+  [key: string]: unknown;
+}
+
 export interface Workspace {
   id: string;
   name: string;
   slug: string;
   description: string | null;
   context: string | null;
-  settings: Record<string, unknown>;
+  settings: WorkspaceSettings;
   repos: WorkspaceRepo[];
   issue_prefix: string;
   created_at: string;
