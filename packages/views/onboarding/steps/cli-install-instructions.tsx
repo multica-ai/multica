@@ -63,8 +63,9 @@ export function CliInstallInstructions() {
     <Card className="w-full">
       <CardContent className="space-y-4 pt-4">
         <p className="text-xs leading-[1.55] text-muted-foreground">
-          You&apos;ll need a local AI coding tool (Claude Code, Codex,
-          Cursor, …) installed for the runtime to do real work.
+          You&apos;ll need an AI coding tool on this machine (Claude
+          Code, Codex, Cursor, …) for the daemon to do real work. Also
+          works on servers and remote dev boxes.
         </p>
         <Step n={1} label="Install the Multica CLI" cmd={INSTALL_CMD} />
         <Step n={2} label="Start the daemon" cmd={SETUP_CMD} />

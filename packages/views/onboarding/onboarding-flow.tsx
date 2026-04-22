@@ -84,6 +84,12 @@ export function OnboardingFlow({
   const existingWorkspace = workspace ?? workspaces[0] ?? null;
   const canSkipWelcome = workspacesFetched && workspaces.length > 0;
 
+  // The `runtimeInstructions` slot is only plumbed by the web shell
+  // (desktop bundles a daemon, so a CLI install card would be noise
+  // there). We reuse its presence as the web signal rather than
+  // introducing a redundant prop.
+  const isWeb = !!runtimeInstructions;
+
   const handleWelcomeNext = useCallback(() => {
     setStep("questionnaire");
   }, []);
@@ -158,6 +164,7 @@ export function OnboardingFlow({
       <StepWelcome
         onNext={handleWelcomeNext}
         onSkip={canSkipWelcome ? handleWelcomeSkip : undefined}
+        isWeb={isWeb}
       />
     );
   }
