@@ -9,6 +9,7 @@ import {
   Save,
   AlertCircle,
   Download,
+  HardDrive,
 } from "lucide-react";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
 import {
@@ -40,6 +41,7 @@ import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries
 import { PageHeader } from "../../layout/page-header";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
+import { RuntimeLocalSkillImportDialog } from "./runtime-local-skill-import-dialog";
 
 // ---------------------------------------------------------------------------
 // Create Skill Dialog
@@ -618,6 +620,7 @@ export default function SkillsPage() {
   const { data: skills = [], isLoading } = useQuery(skillListOptions(wsId));
   const [selectedId, setSelectedId] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showRuntimeImport, setShowRuntimeImport] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_skills_layout",
   });
@@ -725,20 +728,36 @@ export default function SkillsPage() {
         <div className="overflow-y-auto h-full border-r">
           <PageHeader className="justify-between">
             <h1 className="text-sm font-semibold">Skills</h1>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Create skill</TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setShowRuntimeImport(true)}
+                    >
+                      <HardDrive className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Import from runtime</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setShowCreate(true)}
+                    >
+                      <Plus className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Create skill</TooltipContent>
+              </Tooltip>
+            </div>
           </PageHeader>
           {skills.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
@@ -747,14 +766,23 @@ export default function SkillsPage() {
               <p className="mt-1 text-xs text-muted-foreground text-center max-w-[280px]">
                 Workspace skills are shared across your team and injected into agent runs. Skills already installed in your local runtime are used automatically.
               </p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
+              <div className="mt-3 flex items-center gap-2">
+                <Button
+                  onClick={() => setShowRuntimeImport(true)}
+                  size="xs"
+                  variant="outline"
+                >
+                  <HardDrive className="h-3 w-3" />
+                  Import From Runtime
+                </Button>
+                <Button
+                  onClick={() => setShowCreate(true)}
+                  size="xs"
+                >
+                  <Plus className="h-3 w-3" />
+                  Create Skill
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="divide-y">
@@ -798,6 +826,15 @@ export default function SkillsPage() {
                 <Plus className="h-3 w-3" />
                 Create Skill
               </Button>
+              <Button
+                onClick={() => setShowRuntimeImport(true)}
+                size="xs"
+                variant="outline"
+                className="mt-2"
+              >
+                <HardDrive className="h-3 w-3" />
+                Import From Runtime
+              </Button>
             </div>
           )}
         </div>
@@ -808,6 +845,13 @@ export default function SkillsPage() {
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
           onImport={handleImport}
+        />
+      )}
+      {showRuntimeImport && (
+        <RuntimeLocalSkillImportDialog
+          open={showRuntimeImport}
+          onClose={() => setShowRuntimeImport(false)}
+          onImported={(skill) => setSelectedId(skill.id)}
         />
       )}
     </ResizablePanelGroup>

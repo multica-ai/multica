@@ -528,6 +528,20 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		resp["pending_model_list"] = map[string]string{"id": pending.ID}
 	}
 
+	// Check for pending local-skill list requests for this runtime.
+	if pending := h.LocalSkillListStore.PopPending(req.RuntimeID); pending != nil {
+		resp["pending_local_skills"] = map[string]string{"id": pending.ID}
+	}
+
+	// Check for pending local-skill import requests for this runtime.
+	if pending := h.LocalSkillImportStore.PopPending(req.RuntimeID); pending != nil {
+		payload := map[string]string{
+			"id":        pending.ID,
+			"skill_key": pending.SkillKey,
+		}
+		resp["pending_local_skill_import"] = payload
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -556,9 +570,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	var (
-		outcome                    = "unauth"
-		authMs, claimMs, buildMs   int64
-		buildStart                 time.Time
+		outcome                  = "unauth"
+		authMs, claimMs, buildMs int64
+		buildStart               time.Time
 	)
 	defer func() {
 		// Emit at function exit so error / unauth paths also carry timing.

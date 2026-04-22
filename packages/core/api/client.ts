@@ -36,6 +36,9 @@ import type {
   RuntimePing,
   RuntimeUpdate,
   RuntimeModelListRequest,
+  RuntimeLocalSkillListRequest,
+  CreateRuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillImportRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -575,6 +578,38 @@ export class ApiClient {
     requestId: string,
   ): Promise<RuntimeModelListRequest> {
     return this.fetch(`/api/runtimes/${runtimeId}/models/${requestId}`);
+  }
+
+  async initiateListLocalSkills(
+    runtimeId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
+      method: "POST",
+    });
+  }
+
+  async getListLocalSkillsResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
+  }
+
+  async initiateImportLocalSkill(
+    runtimeId: string,
+    data: CreateRuntimeLocalSkillImportRequest,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getImportLocalSkillResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
