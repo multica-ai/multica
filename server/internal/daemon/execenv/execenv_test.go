@@ -1170,6 +1170,89 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	}
 }
 
+func TestSyncCodexSkillsMirrorsSharedLocalSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	localSkillDir := filepath.Join(sharedHome, "skills", "personal-review")
+	if err := os.MkdirAll(filepath.Join(localSkillDir, "templates"), 0o755); err != nil {
+		t.Fatalf("mkdir local skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("Review carefully."), 0o644); err != nil {
+		t.Fatalf("write local SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "templates", "checklist.md"), []byte("- tests"), 0o644); err != nil {
+		t.Fatalf("write local support file: %v", err)
+	}
+
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+	if err := syncCodexSkills(codexHome, nil, testLogger()); err != nil {
+		t.Fatalf("syncCodexSkills failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(codexHome, "skills", "personal-review", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read mirrored SKILL.md: %v", err)
+	}
+	if string(skillMd) != "Review carefully." {
+		t.Errorf("mirrored SKILL.md = %q", string(skillMd))
+	}
+
+	checklist, err := os.ReadFile(filepath.Join(codexHome, "skills", "personal-review", "templates", "checklist.md"))
+	if err != nil {
+		t.Fatalf("read mirrored support file: %v", err)
+	}
+	if string(checklist) != "- tests" {
+		t.Errorf("mirrored support file = %q", string(checklist))
+	}
+}
+
+func TestSyncCodexSkillsWorkspaceSkillWinsCollision(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	localSkillDir := filepath.Join(sharedHome, "skills", "code-review")
+	if err := os.MkdirAll(localSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir local skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte("local"), 0o644); err != nil {
+		t.Fatalf("write local SKILL.md: %v", err)
+	}
+
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+	if err := syncCodexSkills(codexHome, []SkillContextForEnv{
+		{Name: "Code Review", Content: "workspace"},
+	}, testLogger()); err != nil {
+		t.Fatalf("syncCodexSkills failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(codexHome, "skills", "code-review", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read workspace SKILL.md: %v", err)
+	}
+	if string(skillMd) != "workspace" {
+		t.Errorf("workspace skill content = %q", string(skillMd))
+	}
+
+	sharedSkillMd, err := os.ReadFile(filepath.Join(localSkillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read shared local SKILL.md: %v", err)
+	}
+	if string(sharedSkillMd) != "local" {
+		t.Errorf("shared local skill was mutated: %q", string(sharedSkillMd))
+	}
+}
+
 func TestReuseRestoresCodexHome(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
@@ -1213,6 +1296,55 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 	if !strings.Contains(string(data), multicaManagedBeginMarker) {
 		t.Error("reused config.toml missing multica-managed block")
+	}
+}
+
+func TestReuseRefreshesCodexWorkspaceSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-refresh",
+		TaskID:         "a5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "refresh-test",
+			AgentSkills: []SkillContextForEnv{
+				{Name: "Legacy Skill", Content: "old"},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "refresh-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "New Skill", Content: "new"},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "legacy-skill")); !os.IsNotExist(err) {
+		t.Fatal("expected stale managed skill to be removed on reuse")
+	}
+
+	newSkill, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "new-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read refreshed SKILL.md: %v", err)
+	}
+	if string(newSkill) != "new" {
+		t.Errorf("refreshed skill content = %q", string(newSkill))
 	}
 }
 
