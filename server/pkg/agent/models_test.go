@@ -93,6 +93,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsKiloCodeWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "kilocode")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "kilocode", "/nonexistent/kilo")
+	if err != nil {
+		t.Fatalf("ListModels(kilocode) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")

@@ -20,6 +20,7 @@ import (
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:     skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
+// KiloCode: skills → {workDir}/.kilo/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	contextDir := filepath.Join(workDir, ".agent_context")
@@ -147,6 +148,11 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "kilocode":
+		// Kilo Code CLI natively discovers project-level skills from
+		// .kilo/skills/ in the workdir; it also reads AGENTS.md from the
+		// project root.
+		skillsDir = filepath.Join(workDir, ".kilo", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

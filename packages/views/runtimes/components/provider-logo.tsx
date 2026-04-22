@@ -165,6 +165,20 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// KiloCode — compact "K" glyph on the project's teal accent. This keeps the
+// runtime list visually distinct until an official standalone SVG is added.
+function KiloCodeLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0F766E" />
+      <path
+        d="M7 6h2.6v5.12L14.14 6H17.4l-4.8 5.42L17.7 18h-3.23l-3.57-4.86-1.3 1.43V18H7V6z"
+        fill="#F8FAFC"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -193,6 +207,8 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "kilocode":
+      return <KiloCodeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
