@@ -25,6 +25,7 @@ import type { ChildProgress } from "./list-row";
 
 export function BoardColumn({
   status,
+  label: labelProp,
   issueIds,
   issueMap,
   columnConfig,
@@ -33,6 +34,7 @@ export function BoardColumn({
   footer,
 }: {
   status: string;
+  label?: string;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   columnConfig?: WorkspaceColumnConfig;
@@ -41,6 +43,7 @@ export function BoardColumn({
   footer?: ReactNode;
 }) {
   const cfg = getStatusConfig(status);
+  const label = labelProp ?? cfg.label;
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const viewStoreApi = useViewStoreApi();
   const [instructionsOpen, setInstructionsOpen] = useState(false);
@@ -65,7 +68,7 @@ export function BoardColumn({
               <div className="flex items-center gap-2">
                 <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
                   <StatusIcon status={status} className="h-3 w-3" inheritColor />
-                  {cfg.label}
+                  {label}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {totalCount ?? issueIds.length}
@@ -106,7 +109,7 @@ export function BoardColumn({
                   </Tooltip>
                   <PopoverContent align="end" className="w-80 max-w-[calc(100vw-3rem)] p-0">
                     <div className="border-b px-3 py-2.5">
-                      <div className="text-sm font-semibold">{cfg.label} instructions</div>
+                      <div className="text-sm font-semibold">{label} instructions</div>
                       <div className="text-xs text-muted-foreground">
                         Shared guidance for this board column.
                       </div>

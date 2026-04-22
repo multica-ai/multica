@@ -15,7 +15,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { PriorityIcon } from "./priority-icon";
-import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
+import { PriorityPicker, AssigneePicker, DueDatePicker, IssuePipelinePicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
@@ -76,6 +76,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
+  const showPipeline = storeProperties.pipeline;
 
   return (
     <div className="rounded-lg border-[0.5px] bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-shadow group-hover:shadow-sm">
@@ -103,6 +104,27 @@ export const BoardCardContent = memo(function BoardCardContent({
               <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
               <span className="truncate">{project!.title}</span>
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Pipeline */}
+      {showPipeline && (
+        <div className="mt-1.5">
+          {editable ? (
+            <PickerWrapper>
+              <IssuePipelinePicker
+                wsId={wsId}
+                pipelineId={issue.pipeline_id}
+                onUpdate={handleUpdate}
+              />
+            </PickerWrapper>
+          ) : (
+            issue.pipeline_id && (
+              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground bg-muted/60">
+                <span className="truncate">{issue.pipeline_id}</span>
+              </span>
+            )
           )}
         </div>
       )}

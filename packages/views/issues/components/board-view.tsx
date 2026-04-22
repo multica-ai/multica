@@ -103,6 +103,7 @@ export function BoardView({
   issues,
   visibleStatuses,
   hiddenStatuses,
+  columnLabels,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
@@ -111,6 +112,7 @@ export function BoardView({
   issues: Issue[];
   visibleStatuses: string[];
   hiddenStatuses: string[];
+  columnLabels?: Record<string, string>;
   onMoveIssue: (
     issueId: string,
     newStatus: string,
@@ -294,6 +296,7 @@ export function BoardView({
           <PaginatedBoardColumn
             key={status}
             status={status}
+            label={columnLabels?.[status]}
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             columnConfig={columnConfigMap.get(status as import("@multica/core/types").IssueStatus)}
@@ -323,6 +326,7 @@ export function BoardView({
 
 function PaginatedBoardColumn({
   status,
+  label,
   issueIds,
   issueMap,
   childProgressMap,
@@ -330,6 +334,7 @@ function PaginatedBoardColumn({
   myIssuesOpts,
 }: {
   status: string;
+  label?: string;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
@@ -343,6 +348,7 @@ function PaginatedBoardColumn({
   return (
     <BoardColumn
       status={status}
+      label={label}
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}

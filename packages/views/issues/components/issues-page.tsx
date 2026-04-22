@@ -82,6 +82,11 @@ export function IssuesPage() {
     return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));
   }, [activePipelineId, visibleStatuses]);
 
+  const columnLabels = useMemo((): Record<string, string> | undefined => {
+    if (!activePipelineId || !activePipelineColumns?.length) return undefined;
+    return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.label]));
+  }, [activePipelineId, activePipelineColumns]);
+
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: string, newPosition?: number) => {
@@ -175,6 +180,7 @@ export function IssuesPage() {
                 issues={issues}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
+                columnLabels={columnLabels}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />
