@@ -8,8 +8,6 @@
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:8080 (also used by CLI/daemon)
 
-name: multica
-
 services:
   postgres:
     image: pgvector/pgvector:pg17

@@ -262,7 +262,7 @@ setup_server() {
 
   # Start Docker Compose
   info "Starting Multica services (this may take a few minutes on first run)..."
-  docker compose -f docker-compose.selfhost.yml up -d --build
+  docker compose -p multica -f docker-compose.selfhost.yml up -d --build
 
   # Wait for health check
   info "Waiting for backend to be ready..."
@@ -279,7 +279,7 @@ setup_server() {
     ok "Multica server is running"
   else
     warn "Server is still starting. You can check logs with:"
-    echo "  cd $INSTALL_DIR && docker compose -f docker-compose.selfhost.yml logs"
+    echo "  cd $INSTALL_DIR && docker compose -p multica -f docker-compose.selfhost.yml logs"
     echo ""
   fi
 }
@@ -356,7 +356,7 @@ run_stop() {
   if [ -d "$INSTALL_DIR" ]; then
     cd "$INSTALL_DIR"
     if [ -f docker-compose.selfhost.yml ]; then
-      docker compose -f docker-compose.selfhost.yml down
+      docker compose -p multica -f docker-compose.selfhost.yml down
       ok "Docker services stopped"
     else
       warn "No docker-compose.selfhost.yml found at $INSTALL_DIR"

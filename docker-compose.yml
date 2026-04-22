@@ -1,5 +1,3 @@
-name: multica
-
 services:
   postgres:
     image: pgvector/pgvector:pg17

@@ -241,7 +241,7 @@ function Install-Server {
     }
 
     Write-Info "Starting Multica services (this may take a few minutes on first run)..."
-    docker compose -f docker-compose.selfhost.yml up -d --build
+    docker compose -p multica -f docker-compose.selfhost.yml up -d --build
 
     Write-Info "Waiting for backend to be ready..."
     $ready = $false
@@ -259,7 +259,7 @@ function Install-Server {
         Write-Ok "Multica server is running"
     } else {
         Write-Warn "Server is still starting. Check logs with:"
-        Write-Host "  cd $InstallDir; docker compose -f docker-compose.selfhost.yml logs"
+        Write-Host "  cd $InstallDir; docker compose -p multica -f docker-compose.selfhost.yml logs"
     }
 
     Pop-Location
@@ -335,7 +335,7 @@ function Start-Stop {
     if (Test-Path $InstallDir) {
         Push-Location $InstallDir
         if (Test-Path "docker-compose.selfhost.yml") {
-            docker compose -f docker-compose.selfhost.yml down
+            docker compose -p multica -f docker-compose.selfhost.yml down
             Write-Ok "Docker services stopped"
         } else {
             Write-Warn "No docker-compose.selfhost.yml found at $InstallDir"
