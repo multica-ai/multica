@@ -114,6 +114,9 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.5
         version: 5.2.8
+      '@fontsource-variable/source-serif-4':
+        specifier: ^5.2.9
+        version: 5.2.9
       '@fontsource/geist-mono':
         specifier: ^5.2.7
         version: 5.2.7
@@ -1317,6 +1320,9 @@ packages:
 
   '@fontsource-variable/inter@5.2.8':
     resolution: {integrity: sha512-kOfP2D+ykbcX/P3IFnokOhVRNoTozo5/JxhAIVYLpea/UBmCQ/YWPBfWIDuBImXX/15KH+eKh4xpEUyS2sQQGQ==}
+
+  '@fontsource-variable/source-serif-4@5.2.9':
+    resolution: {integrity: sha512-PPcxjLFk/fS0WHg79pDM2YNvz61kC+oYZ5cWZZyCS0DHpJncmuYOuiZAsvj4tDxlWPBEvxxcRLQQNmSaRbPkqw==}
 
   '@fontsource/geist-mono@5.2.7':
     resolution: {integrity: sha512-xVPVFISJg/K0VVd+aQN0Y7X/sw9hUcJPyDWFJ5GpyU3bHELhoRsJkPSRSHXW32mOi0xZCUQDOaPj1sqIFJ1FGg==}
@@ -7662,6 +7668,8 @@ snapshots:
   '@floating-ui/utils@0.2.11': {}
 
   '@fontsource-variable/inter@5.2.8': {}
+
+  '@fontsource-variable/source-serif-4@5.2.9': {}
 
   '@fontsource/geist-mono@5.2.7': {}
 

@@ -81,7 +81,9 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
-  issueListOptions: () => ({ queryKey: ["issues", "ws-test", "list"], enabled: false }),
+  issueDetailOptions: (_wsId: string, id: string) => ({
+    queryKey: ["issues", "ws-test", "detail", id],
+  }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -94,12 +96,24 @@ vi.mock("@multica/core/modals", () => ({
   }),
 }));
 
+function resolveIssue(key: readonly unknown[]) {
+  // issueDetailOptions key shape: ["issues", wsId, "detail", id]
+  if (key[0] === "issues" && key[2] === "detail") {
+    const id = key[3];
+    return mockAllIssues.current.find((i) => i.id === id);
+  }
+  return undefined;
+}
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (opts: { queryKey: readonly unknown[] }) => {
+  useQuery: (opts: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     const key = opts.queryKey;
     if (key[0] === "workspaces") return { data: mockWorkspaces.current };
-    return { data: mockAllIssues.current };
+    if (opts.enabled === false) return { data: undefined };
+    return { data: resolveIssue(key) };
   },
+  useQueries: (opts: { queries: Array<{ queryKey: readonly unknown[] }> }) =>
+    opts.queries.map((q) => ({ data: resolveIssue(q.queryKey) })),
 }));
 
 vi.mock("../navigation", () => ({

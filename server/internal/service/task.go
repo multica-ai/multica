@@ -372,8 +372,19 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 		return nil
 	}); err != nil {
-		// Log the current task state to help debug why the update matched no rows.
+		// When parallel agents race, a task may already be completed,
+		// cancelled, or failed by the time this call runs. The UPDATE
+		// … WHERE status = 'running' returns no rows in that case.
+		// Treat it as an idempotent success — same pattern as CancelTask.
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Info("complete task: already finalized",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return &existing, nil
+			}
 			slog.Warn("complete task failed",
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
@@ -393,12 +404,15 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
-	// Post agent output as a comment, but only for assignment-triggered issue tasks
-	// where the agent did NOT already post a comment during execution.
-	// Comment-triggered tasks: the agent replies via CLI with --parent, so
-	// posting here would create a duplicate.
-	// Chat tasks: no comment posting needed.
-	if task.IssueID.Valid && !task.TriggerCommentID.Valid {
+	// Invariant: every completed issue task must have at least one agent
+	// comment on the issue, so the user always sees something when a run
+	// ends. If the agent posted a comment during execution (result, progress
+	// ping, or CLI reply), HasAgentCommentedSince returns true and we skip.
+	// Otherwise, synthesize one from the final output. For comment-triggered
+	// tasks, TriggerCommentID threads the fallback under the original comment;
+	// for assignment-triggered tasks it is NULL and the fallback is top-level.
+	// Chat tasks have no IssueID and are handled separately below.
+	if task.IssueID.Valid {
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
 			AuthorID: task.AgentID,
@@ -482,6 +496,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		return nil
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Info("fail task: already finalized",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return &existing, nil
+			}
 			slog.Warn("fail task failed",
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -19,11 +19,11 @@ import {
   onIssueUpdated,
   onIssueDeleted,
 } from "../issues/ws-updaters";
-import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged } from "../inbox/ws-updaters";
+import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
-import { paths } from "../paths";
+import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -81,6 +81,14 @@ export function useRealtimeSync(
 ) {
   const { authStore } = stores;
   const qc = useQueryClient();
+
+  // Captured via ref so the (rare) hasOnboarded change doesn't re-subscribe
+  // every WS handler in this effect. The resolver reads `.current` at the
+  // moment workspace-loss fires, which is what we want.
+  const hasOnboarded = useHasOnboarded();
+  const hasOnboardedRef = useRef(hasOnboarded);
+  hasOnboardedRef.current = hasOnboarded;
+
   // Main sync: onAny -> refreshMap with debounce
   useEffect(() => {
     if (!ws) return;
@@ -186,7 +194,10 @@ export function useRealtimeSync(
       const { issue_id } = p as IssueDeletedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueDeleted(qc, wsId, issue_id);
+      if (wsId) {
+        onIssueDeleted(qc, wsId, issue_id);
+        onInboxIssueDeleted(qc, wsId, issue_id);
+      }
     });
 
     const unsubInboxNew = ws.on("inbox:new", (p) => {
@@ -271,8 +282,11 @@ export function useRealtimeSync(
         ...workspaceListOptions(),
         staleTime: 0,
       });
-      const next = wsList.find((w) => w.id !== lostWsId);
-      const target = next ? paths.workspace(next.slug).issues() : paths.newWorkspace();
+      const remaining = wsList.filter((w) => w.id !== lostWsId);
+      const target = resolvePostAuthDestination(
+        remaining,
+        hasOnboardedRef.current,
+      );
       if (typeof window !== "undefined") {
         window.location.assign(target);
       }

@@ -25,6 +25,19 @@ export function onInboxIssueStatusChanged(
   );
 }
 
+// Mirrors the DB-level ON DELETE CASCADE on inbox_item.issue_id: when an issue
+// is deleted, all inbox items that referenced it are gone server-side, so drop
+// them from the cache too.
+export function onInboxIssueDeleted(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+    old?.filter((i) => i.issue_id !== issueId),
+  );
+}
+
 export function onInboxInvalidate(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
 }

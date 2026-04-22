@@ -4,6 +4,7 @@ import { ArrowLeft, LogOut } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Workspace } from "@multica/core/types";
 import { useLogout } from "../auth";
+import { DragStrip } from "../platform";
 import { CreateWorkspaceForm } from "./create-workspace-form";
 
 /**
@@ -29,12 +30,13 @@ export function NewWorkspacePage({
   const logout = useLogout();
 
   return (
-    <div className="relative flex min-h-svh flex-col bg-background px-6 py-12">
+    <div className="relative flex min-h-svh flex-col bg-background">
+      <DragStrip />
       {onBack && (
         <Button
           variant="ghost"
           size="sm"
-          className="absolute top-12 left-12 text-muted-foreground"
+          className="absolute top-16 left-12 text-muted-foreground"
           onClick={onBack}
         >
           <ArrowLeft />
@@ -44,24 +46,28 @@ export function NewWorkspacePage({
       <Button
         variant="ghost"
         size="sm"
-        className="absolute top-12 right-12 text-muted-foreground hover:text-destructive"
+        className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
         onClick={logout}
       >
         <LogOut />
         Log out
       </Button>
 
-      <div className="flex flex-1 flex-col items-center justify-center">
+      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-3xl font-semibold tracking-tight">
               Welcome to Multica
             </h1>
-            <p className="mt-2 text-muted-foreground">
-              Create your workspace to get started.
+            <p className="mt-3 text-muted-foreground">
+              One workspace where you and your AI teammates work side by side —
+              taking issues, leaving comments, sharing the same context.
             </p>
           </div>
           <CreateWorkspaceForm onSuccess={onSuccess} />
+          <p className="text-center text-xs text-muted-foreground">
+            You can invite teammates once your workspace is ready.
+          </p>
         </div>
       </div>
     </div>

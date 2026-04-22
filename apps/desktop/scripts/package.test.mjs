@@ -1,6 +1,8 @@
+import { delimiter, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   builderArgsForTarget,
+  envWithLocalBins,
   normalizeGitVersion,
   parsePackageArgs,
   resolveBuildMatrix,
@@ -234,6 +236,38 @@ describe("builderArgsForTarget", () => {
       "--x64",
       "--publish",
       "never",
+    ]);
+  });
+});
+
+describe("envWithLocalBins", () => {
+  it("prepends desktop-local binary directories to PATH", () => {
+    const desktopRoot = "/repo/apps/desktop";
+    const result = envWithLocalBins(
+      { PATH: ["/usr/local/bin", "/usr/bin"].join(delimiter) },
+      desktopRoot,
+    );
+    expect(result.PATH.split(delimiter)).toEqual([
+      resolve(desktopRoot, "node_modules", ".bin"),
+      resolve(desktopRoot, "..", "..", "node_modules", ".bin"),
+      "/usr/local/bin",
+      "/usr/bin",
+    ]);
+  });
+
+  it("preserves an existing Path key and avoids duplicate entries", () => {
+    const desktopRoot = "/repo/apps/desktop";
+    const desktopBin = resolve(desktopRoot, "node_modules", ".bin");
+    const workspaceBin = resolve(desktopRoot, "..", "..", "node_modules", ".bin");
+    const result = envWithLocalBins(
+      { Path: [desktopBin, "runner-bin", workspaceBin].join(delimiter) },
+      desktopRoot,
+    );
+    expect(result).not.toHaveProperty("PATH");
+    expect(result.Path.split(delimiter)).toEqual([
+      desktopBin,
+      workspaceBin,
+      "runner-bin",
     ]);
   });
 });
