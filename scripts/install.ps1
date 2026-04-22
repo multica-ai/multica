@@ -1,6 +1,6 @@
 # Multica installer for Windows — one command to get started.
 #
-# Install CLI (default): connects to multica.ai
+# Install CLI (default): connects to the internal cloud
 #   irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 #
 # Self-host: starts a local Multica server + installs CLI + configures
@@ -16,6 +16,8 @@ $RepoUrl       = "https://github.com/multica-ai/multica.git"
 $RepoWebUrl    = "https://github.com/multica-ai/multica"
 $DefaultInstallDir = Join-Path $env:USERPROFILE ".multica\server"
 $InstallDir    = if ($env:MULTICA_INSTALL_DIR) { $env:MULTICA_INSTALL_DIR } else { $DefaultInstallDir }
+$AppUrl        = if ($env:MULTICA_APP_URL) { $env:MULTICA_APP_URL } else { "https://multica.wujieai.com" }
+$ServerUrl     = if ($env:MULTICA_SERVER_URL) { $env:MULTICA_SERVER_URL } else { "https://multica.wujieai.com" }
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -173,6 +175,44 @@ function Install-Cli {
     }
 }
 
+function Configure-InternalCloud {
+    Write-Info "Configuring Multica CLI for $AppUrl ..."
+    multica config set server_url $ServerUrl | Out-Null
+    multica config set app_url $AppUrl | Out-Null
+    Write-Ok "CLI config updated for the internal cloud"
+}
+
+function Test-DaemonRunning {
+    try {
+        $status = multica daemon status 2>$null | Out-String
+        return $status -match 'running'
+    } catch {
+        return $false
+    }
+}
+
+function Start-LoginAndDaemon {
+    Write-Host ""
+    Write-Info "Opening browser login for $AppUrl ..."
+    Write-Info "Complete authorization in the browser, then return here."
+    multica login
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Login did not complete successfully."
+    }
+
+    if (Test-DaemonRunning) {
+        Write-Ok "Multica daemon is already running"
+        return
+    }
+
+    Write-Info "Starting Multica daemon..."
+    multica daemon start
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to start the Multica daemon."
+    }
+    Write-Ok "Multica daemon started"
+}
+
 # ---------------------------------------------------------------------------
 # Docker check
 # ---------------------------------------------------------------------------
@@ -272,19 +312,23 @@ function Install-Server {
 function Start-DefaultInstall {
     Write-Host ""
     Write-Host "  Multica - Installer" -ForegroundColor White
+    Write-Host "  Configuring the internal cloud at $AppUrl"
     Write-Host ""
 
     Install-Cli
+    Configure-InternalCloud
+    Start-LoginAndDaemon
 
     Write-Host ""
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host "  [OK] Multica CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Next: configure your environment"
+    Write-Host "  Configured server: $ServerUrl"
+    Write-Host "  Configured app:    $AppUrl"
     Write-Host ""
-    Write-Host "     multica setup               " -NoNewline; Write-Host "# Connect to Multica Cloud (multica.ai)" -ForegroundColor DarkGray
-    Write-Host "     multica setup self-host      " -NoNewline; Write-Host "# Connect to a self-hosted server" -ForegroundColor DarkGray
+    Write-Host "     multica config list          " -NoNewline; Write-Host "# Verify config values" -ForegroundColor DarkGray
+    Write-Host "     multica daemon status        " -NoNewline; Write-Host "# Verify daemon status" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  Self-hosting? Install the server first:"
     Write-Host '     $env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex'
