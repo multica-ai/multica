@@ -71,12 +71,15 @@
     "@tiptap/suggestion": "^3.22.1",
     "cmdk": "^1.1.1",
     "hast-util-to-html": "^4.0.1",
+    "katex": "catalog:",
     "lowlight": "^3.3.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
     "recharts": "3.8.0",
+    "rehype-katex": "catalog:",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
+    "remark-math": "catalog:",
     "sonner": "^2.0.7"
   },
   "peerDependencies": {

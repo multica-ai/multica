@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -21,11 +21,9 @@ import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboardin
  * otherwise fall back to root (proxy / landing picks the user's first ws
  * or bounces to onboarding if still zero).
  *
- * The CLI install card is wired here so its `multica setup` command
- * points at THIS server — dev landing on localhost gets a localhost
- * self-host command, prod cloud gets the plain `multica setup`, prod
- * self-host gets one with explicit URLs. `appUrl` lives in useState
- * so SSR doesn't error on `window` — it fills in on mount.
+ * `CliInstallInstructions` is passed in as the `runtimeInstructions`
+ * slot so the flow can render it inside the CLI dialog. The commands it
+ * shows are hardcoded — nothing environmental to thread through.
  */
 export default function OnboardingPage() {
   const router = useRouter();
@@ -36,11 +34,6 @@ export default function OnboardingPage() {
     ...workspaceListOptions(),
     enabled: !!user && hasOnboarded,
   });
-  const [appUrl, setAppUrl] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    setAppUrl(window.location.origin);
-  }, []);
 
   useEffect(() => {
     if (isLoading || !user) {
@@ -72,12 +65,7 @@ export default function OnboardingPage() {
             router.push(paths.root());
           }
         }}
-        runtimeInstructions={
-          <CliInstallInstructions
-            apiUrl={process.env.NEXT_PUBLIC_API_URL}
-            appUrl={appUrl}
-          />
-        }
+        runtimeInstructions={<CliInstallInstructions />}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
@@ -10,6 +10,7 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
+import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
@@ -160,8 +161,15 @@ function AppContent() {
     );
   }
 
-  if (!user) return <DesktopLoginPage />;
-  return <DesktopShell />;
+  // Pageview tracker sits at the app root so it covers every visible
+  // surface (login, overlays, tab paths) — mounting it inside DesktopShell
+  // would miss the logged-out and overlay states.
+  return (
+    <>
+      <PageviewTracker />
+      {user ? <DesktopShell /> : <DesktopLoginPage />}
+    </>
+  );
 }
 
 // Backend the daemon should connect to — same URL the renderer talks to.
@@ -189,12 +197,20 @@ async function handleDaemonLogout() {
 }
 
 export default function App() {
+  const { version, os } = window.desktopAPI.appInfo;
+  // Stable identity reference so downstream effects (WS reconnect) don't
+  // tear down on every parent render.
+  const identity = useMemo(
+    () => ({ platform: "desktop", version, os }),
+    [version, os],
+  );
   return (
     <ThemeProvider>
       <CoreProvider
         apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
         wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
         onLogout={handleDaemonLogout}
+        identity={identity}
       >
         <AppContent />
       </CoreProvider>

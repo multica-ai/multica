@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import { completeOnboarding } from "@multica/core/onboarding";
+import {
+  completeOnboarding,
+  type OnboardingCompletionPath,
+} from "@multica/core/onboarding";
 
 /**
  * Step 5 — the final onboarding beat.
@@ -25,23 +28,30 @@ import { completeOnboarding } from "@multica/core/onboarding";
  */
 export function StepFirstIssue({
   onFinished,
+  completionPath,
 }: {
   /** Called after `onboarded_at` is set server-side. Parent handles
    *  navigation to the workspace landing page. */
   onFinished: () => void;
+  /** Which exit label the server should record on `onboarding_completed`.
+   *  Computed in the parent shell where runtime + waitlist state are
+   *  both in scope. */
+  completionPath: OnboardingCompletionPath;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const started = useRef(false);
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
+  const completionPathRef = useRef(completionPath);
+  completionPathRef.current = completionPath;
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     (async () => {
       try {
-        await completeOnboarding();
+        await completeOnboarding(completionPathRef.current);
         onFinishedRef.current();
       } catch (err) {
         setError(
@@ -56,7 +66,7 @@ export function StepFirstIssue({
     setRetrying(true);
     setError(null);
     try {
-      await completeOnboarding();
+      await completeOnboarding(completionPathRef.current);
       onFinishedRef.current();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");

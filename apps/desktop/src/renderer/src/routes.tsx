@@ -13,9 +13,8 @@ import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
-import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
+import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
@@ -114,7 +113,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "runtimes",
-            element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
+            element: <DesktopRuntimesPage />,
             handle: { title: "Runtimes" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },

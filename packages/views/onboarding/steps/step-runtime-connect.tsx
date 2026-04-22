@@ -41,10 +41,15 @@ export function StepRuntimeConnect({
   wsId,
   onNext,
   onBack,
+  onWaitlistSubmitted,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
+  /** Parent-level latch used to label the onboarding completion path
+   *  as `cloud_waitlist` when the user ends up skipping this step
+   *  after submitting the waitlist form. */
+  onWaitlistSubmitted?: () => void;
 }) {
   const { runtimes, selected, selectedId, setSelectedId } =
     useRuntimePicker(wsId);
@@ -57,6 +62,7 @@ export function StepRuntimeConnect({
       setSelectedId={setSelectedId}
       onNext={onNext}
       onBack={onBack}
+      onWaitlistSubmitted={onWaitlistSubmitted}
     />
   );
 }
@@ -77,6 +83,7 @@ function FancyView({
   setSelectedId,
   onNext,
   onBack,
+  onWaitlistSubmitted,
 }: {
   runtimes: AgentRuntime[];
   selected: AgentRuntime | null;
@@ -84,6 +91,7 @@ function FancyView({
   setSelectedId: (id: string) => void;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
+  onWaitlistSubmitted?: () => void;
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
@@ -199,7 +207,10 @@ function FancyView({
             {phase === "empty" && (
               <EmptyView
                 waitlistSubmitted={waitlistSubmitted}
-                onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
+                onWaitlistSubmitted={() => {
+                  setWaitlistSubmitted(true);
+                  onWaitlistSubmitted?.();
+                }}
                 onSkip={() => onNext(null)}
               />
             )}
