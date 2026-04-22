@@ -1,0 +1,1 @@
+ALTER TABLE pipeline_column ADD COLUMN IF NOT EXISTS instructions TEXT NOT NULL DEFAULT '';
