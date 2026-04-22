@@ -55,7 +55,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { ActorAvatar } from "@/components/common/actor-avatar";
-import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@/shared/types";
+import type { Issue, UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@/shared/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, AssigneePicker, canAssignAgent } from "@/features/issues/components";
 import { CommentCard } from "./comment-card";
@@ -75,6 +75,7 @@ import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { Link, useRouter } from "@/shared/router";
 import { timeAgo } from "@/shared/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -174,6 +175,149 @@ function PropRow({
   );
 }
 
+function IssueSidebarSections({
+  issue,
+  propertiesOpen,
+  detailsOpen,
+  onToggleProperties,
+  onToggleDetails,
+  onUpdateField,
+  getActorName,
+}: {
+  issue: Issue;
+  propertiesOpen: boolean;
+  detailsOpen: boolean;
+  onToggleProperties: () => void;
+  onToggleDetails: () => void;
+  onUpdateField: (updates: Partial<UpdateIssueRequest>) => void;
+  getActorName: (type: string, id: string) => string;
+}) {
+  return (
+    <>
+      <div>
+        <button
+          className={`mb-2 flex w-full items-center gap-1 text-xs font-medium transition-colors ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={onToggleProperties}
+        >
+          <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+          Properties
+        </button>
+
+        {propertiesOpen ? (
+          <div className="space-y-0.5 pl-2">
+            <PropRow label="Status">
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 overflow-hidden transition-colors hover:bg-accent/30">
+                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-44">
+                  {ALL_STATUSES.map((status) => (
+                    <DropdownMenuItem key={status} onClick={() => onUpdateField({ status })}>
+                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      {STATUS_CONFIG[status].label}
+                      {status === issue.status ? <Check className="ml-auto h-3.5 w-3.5" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </PropRow>
+
+            <PropRow label="Priority">
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 overflow-hidden transition-colors hover:bg-accent/30">
+                  <PriorityIcon priority={issue.priority} className="shrink-0" />
+                  <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-44">
+                  {PRIORITY_ORDER.map((priority) => (
+                    <DropdownMenuItem key={priority} onClick={() => onUpdateField({ priority })}>
+                      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[priority].badgeBg} ${PRIORITY_CONFIG[priority].badgeText}`}>
+                        <PriorityIcon priority={priority} className="h-3 w-3" inheritColor />
+                        {PRIORITY_CONFIG[priority].label}
+                      </span>
+                      {priority === issue.priority ? <Check className="ml-auto h-3.5 w-3.5" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </PropRow>
+
+            <PropRow label="Assignee">
+              <AssigneePicker
+                assigneeType={issue.assignee_type}
+                assigneeId={issue.assignee_id}
+                onUpdate={onUpdateField}
+                align="start"
+              />
+            </PropRow>
+
+            <PropRow label="Project">
+              <ProjectPicker
+                projectId={issue.project_id}
+                onUpdate={onUpdateField}
+                align="start"
+              />
+            </PropRow>
+
+            <PropRow label="Start date">
+              <IssueDateTimePicker
+                field="start_date"
+                dateTimeValue={issue.start_date}
+                onUpdate={onUpdateField}
+              />
+            </PropRow>
+
+            <PropRow label="End date">
+              <IssueDateTimePicker
+                field="end_date"
+                dateTimeValue={issue.end_date}
+                onUpdate={onUpdateField}
+              />
+            </PropRow>
+
+            <PropRow label="Due date">
+              <DueDatePicker
+                dueDate={issue.due_date}
+                onUpdate={onUpdateField}
+              />
+            </PropRow>
+          </div>
+        ) : null}
+      </div>
+
+      <div>
+        <button
+          className={`mb-2 flex w-full items-center gap-1 text-xs font-medium transition-colors ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={onToggleDetails}
+        >
+          <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
+          Details
+        </button>
+
+        {detailsOpen ? (
+          <div className="space-y-0.5 pl-2">
+            <PropRow label="Created by">
+              <ActorAvatar
+                actorType={issue.creator_type}
+                actorId={issue.creator_id}
+                size={18}
+              />
+              <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+            </PropRow>
+            <PropRow label="Created">
+              <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
+            </PropRow>
+            <PropRow label="Updated">
+              <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
+            </PropRow>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // Props
@@ -194,6 +338,7 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
+  const isMobile = useIsMobile();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -226,13 +371,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const { updateIssue, deleteIssue } = useIssueMutations();
 
   useEffect(() => {
-    if (!defaultSidebarOpen) return;
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!defaultSidebarOpen || isMobile) return;
 
     const panel = sidebarRef.current;
     if (!panel || !panel.isCollapsed()) return;
 
     panel.expand();
-  }, [defaultSidebarOpen, sidebarRef]);
+  }, [defaultSidebarOpen, isMobile, sidebarRef]);
 
   // Single source of truth: read issue directly from global store
   const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? issueDetailQuery.data ?? null;
@@ -293,8 +444,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleUpdateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issue) return;
-      void updateIssue(id, updates).catch(() => {
-        toast.error("Failed to update issue");
+      void updateIssue(id, updates).catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Failed to update issue");
       });
     },
     [id, issue, updateIssue],
@@ -594,26 +745,28 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={sidebarOpen ? "secondary" : "ghost"}
-                    size="icon-xs"
-                    className={sidebarOpen ? "" : "text-muted-foreground"}
-                    onClick={() => {
-                      const panel = sidebarRef.current;
-                      if (!panel) return;
-                      if (panel.isCollapsed()) panel.expand();
-                      else panel.collapse();
-                    }}
-                  >
-                    <PanelRight className="h-4 w-4" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
-            </Tooltip>
+            {!isMobile ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant={sidebarOpen ? "secondary" : "ghost"}
+                      size="icon-xs"
+                      className={sidebarOpen ? "" : "text-muted-foreground"}
+                      onClick={() => {
+                        const panel = sidebarRef.current;
+                        if (!panel) return;
+                        if (panel.isCollapsed()) panel.expand();
+                        else panel.collapse();
+                      }}
+                    >
+                      <PanelRight className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
 
             {/* Delete confirmation dialog (controlled by state) */}
@@ -680,6 +833,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <FileUploadButton
               size="sm"
               onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+            />
+          </div>
+
+          <div className="mt-6 space-y-5 rounded-xl border bg-card p-4 md:hidden">
+            <IssueSidebarSections
+              issue={issue}
+              propertiesOpen={propertiesOpen}
+              detailsOpen={detailsOpen}
+              onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
+              onToggleDetails={() => setDetailsOpen(!detailsOpen)}
+              onUpdateField={handleUpdateField}
+              getActorName={getActorName}
             />
           </div>
 
@@ -947,149 +1112,36 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>
       </div>
       </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel
-        id="sidebar"
-        defaultSize={defaultSidebarOpen ? 320 : 0}
-        minSize={260}
-        maxSize={420}
-        collapsible
-        groupResizeBehavior="preserve-pixel-size"
-        panelRef={sidebarRef}
-        onResize={(size) => setSidebarOpen(size.inPixels > 0)}
-      >
-      {/* RIGHT: Properties sidebar */}
-      <div className="overflow-y-auto border-l h-full">
-        <div className="p-4 space-y-5">
-          {/* Properties section */}
-          <div>
-            <button
-              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setPropertiesOpen(!propertiesOpen)}
-            >
-              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-              Properties
-            </button>
-
-            {propertiesOpen && <div className="space-y-0.5 pl-2">
-              {/* Status */}
-              <PropRow label="Status">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {ALL_STATUSES.map((s) => (
-                      <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s })}>
-                        <StatusIcon status={s} className="h-3.5 w-3.5" />
-                        {STATUS_CONFIG[s].label}
-                        {s === issue.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </PropRow>
-
-              {/* Priority */}
-              <PropRow label="Priority">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <PriorityIcon priority={issue.priority} className="shrink-0" />
-                    <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {PRIORITY_ORDER.map((p) => (
-                      <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p })}>
-                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                          <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                          {PRIORITY_CONFIG[p].label}
-                        </span>
-                        {p === issue.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </PropRow>
-
-              {/* Assignee */}
-              <PropRow label="Assignee">
-                <AssigneePicker
-                  assigneeType={issue.assignee_type}
-                  assigneeId={issue.assignee_id}
-                  onUpdate={handleUpdateField}
-                  align="start"
-                />
-              </PropRow>
-
-              {/* Project */}
-              <PropRow label="Project">
-                <ProjectPicker
-                  projectId={issue.project_id}
-                  onUpdate={handleUpdateField}
-                  align="start"
-                />
-              </PropRow>
-
-              {/* Start date */}
-              <PropRow label="Start date">
-                <IssueDateTimePicker
-                  field="start_date"
-                  dateTimeValue={issue.start_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-
-              {/* End date */}
-              <PropRow label="End date">
-                <IssueDateTimePicker
-                  field="end_date"
-                  dateTimeValue={issue.end_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-
-              {/* Due date */}
-              <PropRow label="Due date">
-                <DueDatePicker
-                  dueDate={issue.due_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-            </div>}
+      {!isMobile ? (
+        <>
+          <ResizableHandle />
+          <ResizablePanel
+            id="sidebar"
+            defaultSize={defaultSidebarOpen ? 320 : 0}
+            minSize={260}
+            maxSize={420}
+            collapsible
+            groupResizeBehavior="preserve-pixel-size"
+            panelRef={sidebarRef}
+            onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+          >
+          {/* RIGHT: Properties sidebar */}
+          <div className="h-full overflow-y-auto border-l">
+            <div className="space-y-5 p-4">
+              <IssueSidebarSections
+                issue={issue}
+                propertiesOpen={propertiesOpen}
+                detailsOpen={detailsOpen}
+                onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
+                onToggleDetails={() => setDetailsOpen(!detailsOpen)}
+                onUpdateField={handleUpdateField}
+                getActorName={getActorName}
+              />
+            </div>
           </div>
-
-          {/* Details section */}
-          <div>
-            <button
-              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setDetailsOpen(!detailsOpen)}
-            >
-              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
-              Details
-            </button>
-
-            {detailsOpen && <div className="space-y-0.5 pl-2">
-              <PropRow label="Created by">
-                <ActorAvatar
-                  actorType={issue.creator_type}
-                  actorId={issue.creator_id}
-                  size={18}
-                />
-                <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-              </PropRow>
-              <PropRow label="Created">
-                <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
-              </PropRow>
-              <PropRow label="Updated">
-                <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
-              </PropRow>
-            </div>}
-          </div>
-
-        </div>
-      </div>
-      </ResizablePanel>
+          </ResizablePanel>
+        </>
+      ) : null}
     </ResizablePanelGroup>
   );
 }

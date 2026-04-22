@@ -8,6 +8,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ALL_STATUSES, STATUS_CONFIG } from "@/features/issues/config";
 import { useIssuesListQuery } from "@/features/issues/queries";
 import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
 import { registerViewStoreForWorkspaceSync } from "@/features/issues/stores/view-store";
@@ -22,8 +23,10 @@ import { IssueTaskStatusSync } from "@/features/issues/components/issue-task-sta
 import { IssuesHeader } from "@/features/issues/components/issues-header";
 import { FlatIssueList } from "@/features/issues/components/flat-issue-list";
 import { BatchActionToolbar } from "@/features/issues/components/batch-action-toolbar";
+import { StatusIcon } from "@/features/issues/components";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { useWorkspaceStore, WorkspaceAvatar } from "@/features/workspace";
+import type { IssueStatus } from "@/shared/types";
 
 type DateFilterField = "due" | "start" | "end";
 
@@ -182,6 +185,8 @@ function IssueListDateFilter({
 function IssueListFiltersRow({
   searchQuery,
   onSearchChange,
+  statusFilters,
+  onToggleStatus,
   projectId,
   onProjectChange,
   dueFrom,
@@ -198,6 +203,8 @@ function IssueListFiltersRow({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  statusFilters: IssueStatus[];
+  onToggleStatus: (status: IssueStatus) => void;
   projectId: string | null;
   onProjectChange: (value: string | null) => void;
   dueFrom: string;
@@ -286,6 +293,25 @@ function IssueListFiltersRow({
           {isSearching ? "Searching issues..." : `${visibleCount} visible · ${total} matched`}
         </span>
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {ALL_STATUSES.map((status) => {
+          const selected = statusFilters.includes(status);
+          return (
+            <Button
+              key={status}
+              type="button"
+              variant={selected ? "secondary" : "outline"}
+              size="sm"
+              className="h-8 gap-1.5 rounded-full px-3"
+              onClick={() => onToggleStatus(status)}
+            >
+              <StatusIcon status={status} className="h-3.5 w-3.5" />
+              <span>{STATUS_CONFIG[status].label}</span>
+            </Button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -295,6 +321,7 @@ function IssueListPageContent() {
   const scope = useIssuesScopeStore((state) => state.scope);
   const setViewMode = useViewStore((state) => state.setViewMode);
   const statusFilters = useViewStore((state) => state.statusFilters);
+  const toggleStatusFilter = useViewStore((state) => state.toggleStatusFilter);
   const priorityFilters = useViewStore((state) => state.priorityFilters);
   const assigneeFilters = useViewStore((state) => state.assigneeFilters);
   const includeNoAssignee = useViewStore((state) => state.includeNoAssignee);
@@ -444,6 +471,8 @@ function IssueListPageContent() {
       <IssueListFiltersRow
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        statusFilters={statusFilters}
+        onToggleStatus={toggleStatusFilter}
         projectId={projectId}
         onProjectChange={setProjectId}
         dueFrom={dueFrom}

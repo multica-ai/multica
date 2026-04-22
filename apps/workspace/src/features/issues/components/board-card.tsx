@@ -53,7 +53,6 @@ export const BoardCardContent = memo(function BoardCardContent({
   );
 
   const showPriority = storeProperties.priority;
-  const showDescription = storeProperties.description && issue.description;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const scheduleLabel = storeProperties.dueDate ? formatIssueSchedule(issue) : null;
   const showSchedule = !!scheduleLabel;
@@ -68,13 +67,6 @@ export const BoardCardContent = memo(function BoardCardContent({
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
         {issue.title}
       </p>
-
-      {/* Description */}
-      {showDescription && (
-        <p className="mt-1 text-xs text-muted-foreground line-clamp-1">
-          {issue.description}
-        </p>
-      )}
 
       <IssueTaskStatusBadge issue={issue} variant="board" />
 

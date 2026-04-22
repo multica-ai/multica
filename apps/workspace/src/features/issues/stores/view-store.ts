@@ -12,7 +12,6 @@ export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
   priority: boolean;
-  description: boolean;
   assignee: boolean;
   dueDate: boolean;
 }
@@ -32,7 +31,6 @@ export const SORT_OPTIONS: { value: SortField; label: string }[] = [
 
 export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }[] = [
   { key: "priority", label: "Priority" },
-  { key: "description", label: "Description" },
   { key: "assignee", label: "Assignee" },
   { key: "dueDate", label: "Due date" },
 ];
@@ -74,7 +72,6 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   sortDirection: "asc",
   cardProperties: {
     priority: true,
-    description: true,
     assignee: true,
     dueDate: true,
   },
