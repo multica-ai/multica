@@ -413,6 +413,20 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// for assignment-triggered tasks it is NULL and the fallback is top-level.
 	// Chat tasks have no IssueID and are handled separately below.
 	if task.IssueID.Valid {
+		issue, issueErr := s.Queries.GetIssue(ctx, task.IssueID)
+		if issueErr == nil {
+			if issue.Status != "done" && issue.Status != "blocked" && issue.Status != "cancelled" && issue.Status != "in_review" {
+				if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+					ID:     task.IssueID,
+					Status: "in_review",
+				}); err != nil {
+					slog.Warn("failed to auto-advance issue to in_review", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
+				}
+			}
+		} else {
+			slog.Warn("failed to load issue for completion auto-advance", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", issueErr)
+		}
+
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
 			AuthorID: task.AgentID,
