@@ -1,0 +1,45 @@
+# Deploy the Next.js web app from the monorepo root.
+# Keep apps/web, shared packages, and root workspace metadata.
+# Exclude unrelated workspaces and local artifacts that can make
+# `vercel deploy` upload far more than the web app needs.
+
+.agent_context
+.claude
+.context
+.tool-versions
+_features
+.kilo
+.idea
+.DS_Store
+
+.github
+docker
+docs
+e2e
+server
+apps/desktop
+apps/docs
+
+*.log
+*.pid
+*.tsbuildinfo
+
+.cache
+.next
+.pnpm-store
+.turbo
+.vercel
+coverage
+test-results
+playwright-report
+data
+
+node_modules
+bin
+dist
+out
+build
+dist-electron
+
+*.app
+*.dmg
