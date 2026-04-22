@@ -14,6 +14,7 @@ test.describe("Authentication", () => {
     await loginAsDefault(page, test.info().parallelIndex);
 
     await expect(page).toHaveURL(/\/issues/);
+    await expect(page.getByRole("link", { name: "Issues", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Board", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Notifications", exact: true })).toBeVisible();
   });

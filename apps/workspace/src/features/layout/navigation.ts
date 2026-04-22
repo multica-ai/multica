@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 export const primaryNav = [
+  { href: "/issues", label: "Issues", icon: ListTodo },
   { href: "/board", label: "Board", icon: Columns3 },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/backlog", label: "Backlog", icon: ListTodo },
@@ -33,8 +34,10 @@ export const workspaceNav = [
 
 export function isWorkspaceNavActive(pathname: string, href: string): boolean {
   switch (href) {
+    case "/issues":
+      return pathname === "/issues" || pathname.startsWith("/issues/");
     case "/board":
-      return pathname === "/board" || pathname === "/issues" || pathname.startsWith("/issues/");
+      return pathname === "/board";
     case "/notifications":
       return pathname === "/" || pathname === "/inbox" || pathname === "/notifications";
     case "/my-work":

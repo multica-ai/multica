@@ -278,9 +278,11 @@ function ActorSubContent({
 export function IssuesHeader({
   scopedIssues,
   hideViewToggle = false,
+  hideCardProperties = false,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
+  hideCardProperties?: boolean;
 }) {
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
@@ -548,26 +550,28 @@ export function IssuesHeader({
               </div>
             </div>
 
-            <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Card properties
-              </span>
-              <div className="mt-2 space-y-2">
-                {CARD_PROPERTY_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.key}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="text-sm">{opt.label}</span>
-                    <Switch
-                      size="sm"
-                      checked={cardProperties[opt.key]}
-                      onCheckedChange={() => act.toggleCardProperty(opt.key)}
-                    />
-                  </label>
-                ))}
+            {!hideCardProperties && (
+              <div className="px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Card properties
+                </span>
+                <div className="mt-2 space-y-2">
+                  {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.key}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="text-sm">{opt.label}</span>
+                      <Switch
+                        size="sm"
+                        checked={cardProperties[opt.key]}
+                        onCheckedChange={() => act.toggleCardProperty(opt.key)}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </PopoverContent>
         </Popover>
 

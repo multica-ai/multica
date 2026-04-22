@@ -41,6 +41,13 @@ export interface ListIssuesParams {
   creator_id?: string;
   creator_type?: "member" | "agent";
   project_id?: string;
+  search?: string;
+  due_from?: string;
+  due_to?: string;
+  start_from?: string;
+  start_to?: string;
+  end_from?: string;
+  end_to?: string;
   view?: "backlog" | "today" | "upcoming";
 }
 

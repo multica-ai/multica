@@ -12,6 +12,7 @@ import { useAuthStore } from "@/features/auth";
 import LoginPage from "@/features/auth/components/login-page";
 import InboxPage from "@/features/inbox/components/inbox-page";
 import { DashboardLayout } from "@/features/layout/components/dashboard-layout";
+import { IssueListPage } from "@/features/issues/components/issue-list-page";
 import { IssuesPage } from "@/features/issues/components/issues-page";
 import { WorkbenchIssuesPage } from "@/features/issues/components/workbench-issues-page";
 import { useIssueViewStore } from "@/features/issues/stores/view-store";
@@ -170,7 +171,7 @@ const protectedRoute = createRoute({
 const issuesRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "issues",
-  component: IssuesPage,
+  component: IssueListPage,
 });
 
 const issueDetailRoute = createRoute({

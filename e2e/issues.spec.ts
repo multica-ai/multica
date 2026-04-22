@@ -26,24 +26,24 @@ test.describe("Issues", () => {
     }
   });
 
-  test("issues page loads with board view", async ({ page }) => {
+  test("issues page loads with list view", async ({ page }) => {
     await expect(page).toHaveURL(/\/issues/);
-    await expect(page.getByRole("link", { name: "Board" })).toBeVisible();
-    await expect(page.getByText("Backlog").first()).toBeVisible();
-    await expect(page.getByText("Todo").first()).toBeVisible();
-    await expect(page.getByText("In Progress").first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Issues", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: new RegExp(seedIssue.title) }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "View options" })).toHaveCount(0);
   });
 
-  test("can switch between board and list view", async ({ page }) => {
-    await expect(page.getByText("Backlog").first()).toBeVisible();
+  test("can search issues from the list page", async ({ page }) => {
+    const searchableTitle = "E2E Searchable Issue " + Date.now();
+    await api.createIssue(searchableTitle, {
+      description: "E2E searchable description",
+    });
 
-    await page.getByRole("button", { name: "View options" }).click();
-    await page.getByRole("menuitem", { name: "List" }).click();
-    await expect(page.getByText(seedIssue.title).first()).toBeVisible();
+    await page.reload();
+    await page.getByPlaceholder("Search by title, description, issue number, or issue ID").fill(searchableTitle);
 
-    await page.getByRole("button", { name: "View options" }).click();
-    await page.getByRole("menuitem", { name: "Board" }).click();
-    await expect(page.getByText("Backlog").first()).toBeVisible();
+    await expect(page.getByText(searchableTitle).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(seedIssue.title).first()).not.toBeVisible();
   });
 
   test("can create a new issue", async ({ page }) => {

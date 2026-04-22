@@ -62,6 +62,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
 import { useAuthStore } from "@/features/auth";
+import { useNavigationStore } from "@/features/navigation";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
 import { useIssueTimeline } from "@/features/issues/hooks/use-issue-timeline";
@@ -206,6 +207,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const prevIssue = currentIndex > 0 ? allIssues[currentIndex - 1] : null;
   const nextIssue = currentIndex < allIssues.length - 1 ? allIssues[currentIndex + 1] : null;
   const { getActorName } = useActorName();
+  const lastPath = useNavigationStore((state) => state.lastPath);
   const { uploadWithToast } = useFileUpload();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
@@ -222,6 +224,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const didHighlightRef = useRef<string | null>(null);
   const issueDetailQuery = useIssueDetailQuery(id);
   const { updateIssue, deleteIssue } = useIssueMutations();
+
+  useEffect(() => {
+    if (!defaultSidebarOpen) return;
+
+    const panel = sidebarRef.current;
+    if (!panel || !panel.isCollapsed()) return;
+
+    panel.expand();
+  }, [defaultSidebarOpen, sidebarRef]);
 
   // Single source of truth: read issue directly from global store
   const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? issueDetailQuery.data ?? null;
@@ -243,6 +254,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   } = useIssueSubscribers(id, user?.id);
 
   const loading = issueLoading;
+  const backHref = lastPath && !lastPath.startsWith("/issues/") ? lastPath : "/issues";
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
@@ -300,7 +312,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       await deleteIssue(issue!.id);
       toast.success("Issue deleted");
       if (onDelete) onDelete();
-      else router.push("/issues");
+      else router.push(backHref);
     } catch {
       toast.error("Failed to delete issue");
       setDeleting(false);
@@ -363,7 +375,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <p>This issue does not exist or has been deleted in this workspace.</p>
         {!onDelete && (
-          <Button variant="outline" size="sm" onClick={() => router.push("/issues")}>
+          <Button variant="outline" size="sm" onClick={() => router.push(backHref)}>
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
             Back to Issues
           </Button>
@@ -383,7 +395,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             {workspace && (
               <>
                 <Link
-                  href="/issues"
+                  href={backHref}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {workspace.name}

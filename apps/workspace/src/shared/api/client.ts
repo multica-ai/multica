@@ -176,6 +176,13 @@ export class ApiClient {
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.creator_type) search.set("creator_type", params.creator_type);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.search) search.set("search", params.search);
+    if (params?.due_from) search.set("due_from", params.due_from);
+    if (params?.due_to) search.set("due_to", params.due_to);
+    if (params?.start_from) search.set("start_from", params.start_from);
+    if (params?.start_to) search.set("start_to", params.start_to);
+    if (params?.end_from) search.set("end_from", params.end_from);
+    if (params?.end_to) search.set("end_to", params.end_to);
     if (params?.view) search.set("view", params.view);
     return this.fetch(`/api/issues?${search}`);
   }
