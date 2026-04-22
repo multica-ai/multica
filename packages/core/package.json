@@ -55,6 +55,7 @@
     "./realtime": "./realtime/index.ts",
     "./navigation": "./navigation/index.ts",
     "./modals": "./modals/index.ts",
+    "./onboarding": "./onboarding/index.ts",
     "./paths": "./paths/index.ts",
     "./hooks": "./hooks.tsx",
     "./hooks/*": "./hooks/*.ts",

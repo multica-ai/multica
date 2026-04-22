@@ -106,6 +106,7 @@ pnpm ui:add badge                # Adds component to packages/ui/components/ui/
 # Infrastructure
 make db-up            # Start shared PostgreSQL (pgvector/pg17 image)
 make db-down          # Stop shared PostgreSQL
+make db-reset         # Drop + recreate current env's DB, then re-run migrations (local only; stop backend first)
 ```
 
 ### CI Requirements
@@ -219,26 +220,35 @@ Cross-workspace `push(path)` is detected by the navigation adapter (`platform/na
 
 ### Drag region (macOS window-move)
 
-Every full-window desktop view (login, overlay, any page that covers the native title bar) needs a top drag strip so users can move the window. On macOS the traffic lights are hidden via `useImmersiveMode` in overlay-style contexts, so the drag strip also gives back that corner for pointer-drag.
+Every full-window desktop view (login, onboarding, new-workspace, invite, no-access, create-workspace modal) — i.e. anything that isn't inside the dashboard shell — needs a top drag strip so users can move the window. The native macOS traffic lights are **kept visible** for every such surface (Linear/Notion/Arc pattern); no `useImmersiveMode` by default.
 
-**Pattern**: flex child at top, not absolute overlay.
+**Pattern**: use the shared `<DragStrip />` from `@multica/views/platform` as the first flex child of the page root. It's a 48px transparent row with `-webkit-app-region: drag` — the parent's bg fills through it so the page reads edge-to-edge while the top 48px stays draggable under the traffic lights.
 
 ```tsx
-<div className="fixed inset-0 z-50 flex flex-col bg-background">
-  <div className="h-12 shrink-0" style={{ WebkitAppRegion: "drag" }} />
-  <div className="flex-1 overflow-auto" style={{ WebkitAppRegion: "no-drag" }}>
-    {/* page content — interactive elements need their own "no-drag" */}
+import { DragStrip } from "@multica/views/platform";
+
+return (
+  <div className="flex min-h-svh flex-col bg-background">
+    <DragStrip />
+    <div className="flex flex-1 flex-col px-6 pb-12">
+      {/* page content — interactive elements placed at y ≥ 48 clear the strip;
+          any element at y < 48 needs WebkitAppRegion: "no-drag" */}
+    </div>
   </div>
-</div>
+);
 ```
 
-Why flex, not absolute: the absolute-strip + `z-index` approach relies on stacking-context hit-testing, which isn't reliable for `-webkit-app-region`. A real flex row with no siblings at that pixel is unambiguous. Height matches `MainTopBar` (48px / `h-12`) for consistency.
+Why flex, not absolute: the absolute-strip + `z-index` approach relies on stacking-context hit-testing, which isn't reliable for `-webkit-app-region`. A real flex row with no siblings at that pixel is unambiguous. Web browsers silently ignore `-webkit-app-region`, so shared views render the strip as a plain 48px spacer on web — safe cross-platform.
 
-Canonical examples: `components/window-overlay.tsx`, `pages/login.tsx`.
+**Horizontal clearance**: traffic lights occupy roughly x ∈ [16, 76] on macOS. Interactive UI (Back buttons, menus) should start at x ≥ 80 on desktop-sized viewports. The shared views default to sufficient `lg:px-20` padding; re-examine when laying out anything in the top-left corner.
+
+Canonical example: `packages/views/platform/drag-strip.tsx`. Used by `onboarding/steps/step-welcome.tsx` (per-column), `onboarding/onboarding-flow.tsx`, `workspace/new-workspace-page.tsx`, `invite/invite-page.tsx`, `workspace/no-access-page.tsx`, `modals/create-workspace.tsx`, and desktop's `pages/login.tsx`.
+
+**When to use `useImmersiveMode`**: only when a view must place interactive UI in the traffic-light hit-zone (y < 28 AND x < 80). For every current non-dashboard surface, buttons sit at y ≥ 48, so immersive mode is unnecessary. Hook is preserved as an escape hatch but has no callers.
 
 ### UX vs platform chrome
 
-UX affordances (Back button, Log out button, welcome copy, invite card) belong in `packages/views/` so web and desktop render identical content. Platform chrome (drag strip, `useImmersiveMode`, tab system interaction, traffic-light accommodation) lives in desktop-only code. Violating this split always produces platform divergence — if a button exists on desktop but not on web for the same flow, it's a signal the UX escaped into platform code.
+UX affordances (Back button, Log out button, welcome copy, invite card) belong in `packages/views/` so web and desktop render identical content. Platform chrome (tab system interaction, native-window IPC, `useImmersiveMode`) lives in desktop-only code. The `DragStrip` + `useImmersiveMode` primitives live in `packages/views/platform/` because they're cross-platform safe (web no-op) and need to be callable from shared views that own the page layout — keeping them in desktop-only would force every shared page to leave top-padding decisions to the platform shell, fragmenting the design.
 
 ## UI/UX Rules
 

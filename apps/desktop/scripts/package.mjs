@@ -25,7 +25,7 @@
 // version-derivation logic without shelling out.
 
 import { execFileSync, spawnSync, execSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -118,6 +118,23 @@ function deriveVersion() {
 
 function uniqueOrdered(values) {
   return [...new Set(values)];
+}
+
+export function envWithLocalBins(env = process.env, root = desktopRoot) {
+  const pathKey =
+    Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+  const existingPath = env[pathKey] ?? "";
+  const localBins = uniqueOrdered([
+    resolve(root, "node_modules", ".bin"),
+    resolve(root, "..", "..", "node_modules", ".bin"),
+  ]);
+  const mergedPath = uniqueOrdered([
+    ...localBins,
+    ...String(existingPath)
+      .split(delimiter)
+      .filter(Boolean),
+  ]).join(delimiter);
+  return { ...env, [pathKey]: mergedPath };
 }
 
 function hostPlatformKey(platform = process.platform) {
@@ -309,9 +326,21 @@ function main() {
   // this step electron-builder silently packages whatever is already in
   // out/, which on a fresh checkout (or after a partial build) ships an
   // app that white-screens because the renderer bundle is missing.
+  //
+  // CI invokes this script via `node scripts/package.mjs`, so we cannot
+  // rely on pnpm/npm to inject package-local binaries into PATH.
+  //
+  // `shell: true` is required on Windows: `node_modules/.bin/electron-vite`
+  // ships as a `.cmd` shim there, and Node's `spawnSync` does not honour
+  // PATHEXT when spawning a bare command without a shell — it would fail
+  // with `ENOENT`. On POSIX hosts the shim is a real executable so going
+  // through the shell is harmless. See
+  // https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows
   const viteResult = spawnSync("electron-vite", ["build"], {
     stdio: "inherit",
     cwd: desktopRoot,
+    env: envWithLocalBins(),
+    shell: true,
   });
   if (viteResult.error) {
     console.error(
@@ -370,9 +399,13 @@ function main() {
     });
 
     // Step 4: invoke electron-builder for the current target only.
+    // `shell: true` for the same Windows `.cmd` shim reason as the
+    // electron-vite invocation above.
     const result = spawnSync("electron-builder", builderArgs, {
       stdio: "inherit",
       cwd: desktopRoot,
+      env: envWithLocalBins(),
+      shell: true,
     });
 
     if (result.error) {

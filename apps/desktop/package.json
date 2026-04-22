@@ -2,6 +2,18 @@
   "name": "@multica/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Multica Desktop — native desktop client for the Multica platform.",
+  "homepage": "https://multica.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/multica-ai/multica.git",
+    "directory": "apps/desktop"
+  },
+  "author": {
+    "name": "Multica",
+    "email": "support@multica.ai"
+  },
+  "license": "UNLICENSED",
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
@@ -26,6 +38,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.5",
+    "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

@@ -169,6 +169,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Get("/api/config", h.GetConfig)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		r.Patch("/api/me/onboarding", h.PatchOnboarding)
+		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
+		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
+		r.Post("/api/me/starter-content/import", h.ImportStarterContent)
+		r.Post("/api/me/starter-content/dismiss", h.DismissStarterContent)
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 

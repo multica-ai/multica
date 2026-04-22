@@ -64,9 +64,19 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // the billed events until they actually identify, which aligns with how
     // our funnel is set up: signup is the first real funnel step.
     person_profiles: "identified_only",
-    // We set attribution ourselves (see captureSignupSource); posthog's own
-    // autocapture-based attribution would double-count.
+    // Turn off every on-by-default auto-capture surface. Our funnel is
+    // narrow and explicit (the events in docs/analytics.md + a manual
+    // $pageview). Autocapture floods the Activity view with anonymous
+    // "clicked button" / "clicked link" noise, burns the billed event
+    // budget, and risks capturing user-typed content in input values.
+    // Turn things back on deliberately if we ever want them.
     capture_pageview: false,
+    autocapture: false,
+    capture_heatmaps: false,
+    capture_dead_clicks: false,
+    capture_exceptions: false,
+    disable_session_recording: true,
+    disable_surveys: true,
   });
   initialized = true;
 
