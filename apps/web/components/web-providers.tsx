@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
@@ -43,6 +43,12 @@ const WEB_VERSION =
 
 export function WebProviders({ children }: { children: React.ReactNode }) {
   const cookieAuth = !hasLegacyToken();
+  // Stable identity reference so downstream effects keyed on it don't see a
+  // new object on every parent render.
+  const identity = useMemo(
+    () => ({ platform: "web", version: WEB_VERSION }),
+    [],
+  );
   return (
     <CoreProvider
       apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
@@ -50,7 +56,7 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
       cookieAuth={cookieAuth}
       onLogin={setLoggedInCookie}
       onLogout={clearLoggedInCookie}
-      identity={{ platform: "web", version: WEB_VERSION }}
+      identity={identity}
     >
       {/* Suspense boundary is required by Next.js for useSearchParams in
           a client component mounted this high in the tree. */}

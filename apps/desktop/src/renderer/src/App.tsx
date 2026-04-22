@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
@@ -190,13 +190,19 @@ async function handleDaemonLogout() {
 
 export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
+  // Stable identity reference so downstream effects (WS reconnect) don't
+  // tear down on every parent render.
+  const identity = useMemo(
+    () => ({ platform: "desktop", version, os }),
+    [version, os],
+  );
   return (
     <ThemeProvider>
       <CoreProvider
         apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
         wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
         onLogout={handleDaemonLogout}
-        identity={{ platform: "desktop", version, os }}
+        identity={identity}
       >
         <AppContent />
       </CoreProvider>

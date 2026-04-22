@@ -68,6 +68,14 @@ export function WSProvider({
   );
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
 
+  // Depend on identity primitives instead of the object reference so a parent
+  // re-render that passes a new `{ platform, version, os }` literal does not
+  // tear down and reconnect the WS when nothing about the identity actually
+  // changed.
+  const identityPlatform = identity?.platform;
+  const identityVersion = identity?.version;
+  const identityOS = identity?.os;
+
   useEffect(() => {
     if (!user || !wsSlug) return;
 
@@ -79,7 +87,14 @@ export function WSProvider({
     const ws = new WSClient(wsUrl, {
       logger: createLogger("ws"),
       cookieAuth,
-      identity,
+      identity:
+        identityPlatform || identityVersion || identityOS
+          ? {
+              platform: identityPlatform,
+              version: identityVersion,
+              os: identityOS,
+            }
+          : undefined,
     });
     ws.setAuth(token, wsSlug);
     setWsClient(ws);
@@ -89,7 +104,16 @@ export function WSProvider({
       ws.disconnect();
       setWsClient(null);
     };
-  }, [user, wsSlug, wsUrl, storage, cookieAuth, identity]);
+  }, [
+    user,
+    wsSlug,
+    wsUrl,
+    storage,
+    cookieAuth,
+    identityPlatform,
+    identityVersion,
+    identityOS,
+  ]);
 
   const stores: RealtimeSyncStores = { authStore };
 
