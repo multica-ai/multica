@@ -1100,6 +1100,42 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// SetTaskAwaitingUserRequest is the daemon → server payload for pausing a
+// task while the user picks a target repo from a repo_clarification card.
+type SetTaskAwaitingUserRequest struct {
+	Confidence float32 `json:"confidence,omitempty"`
+}
+
+// SetTaskAwaitingUser pauses a chat task before it starts executing. Called
+// by the daemon's planner when it can't pick a target repo on its own. The
+// user's subsequent POST to /api/chat/tasks/{id}/resolve-repo flips the
+// status back to 'queued' so the same runtime can re-claim it.
+func (h *Handler) SetTaskAwaitingUser(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var req SetTaskAwaitingUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	updated, err := h.Queries.SetChatTaskAwaitingUser(r.Context(), db.SetChatTaskAwaitingUserParams{
+		ID:             parseUUID(taskID),
+		RepoConfidence: req.Confidence,
+	})
+	if err != nil {
+		writeError(w, http.StatusConflict, "task is not pausable: "+err.Error())
+		return
+	}
+
+	slog.Info("task set to awaiting_user", "task_id", taskID, "confidence", req.Confidence)
+	writeJSON(w, http.StatusOK, taskToResponse(updated))
+}
+
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).
 func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")

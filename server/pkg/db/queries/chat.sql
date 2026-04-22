@@ -88,10 +88,39 @@ LIMIT 1;
 -- name: GetPendingChatTask :one
 -- Returns the most recent in-flight task for a chat session, if any.
 -- Used by the frontend to recover pending state after refresh / reopen.
+-- `awaiting_user` is included so the UI can keep showing the clarification
+-- card and the FAB's unread indicator until the user responds.
 SELECT id, status FROM agent_task_queue
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'awaiting_user')
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: GetChatTaskByID :one
+SELECT atq.*, cs.workspace_id AS chat_workspace_id, cs.creator_id AS chat_creator_id
+FROM agent_task_queue atq
+JOIN chat_session cs ON cs.id = atq.chat_session_id
+WHERE atq.id = $1;
+
+-- name: SetChatTaskAwaitingUser :one
+-- Daemon-initiated: pause the task while the user picks a repo. The status
+-- guard keeps this endpoint idempotent and prevents a late planner from
+-- clobbering a completed/cancelled task.
+UPDATE agent_task_queue
+SET status = 'awaiting_user',
+    repo_confidence = sqlc.arg(repo_confidence)::real
+WHERE id = $1 AND status IN ('queued', 'dispatched')
+RETURNING *;
+
+-- name: ResolveChatTaskRepo :one
+-- Atomically resolve a chat task's target repo once the user has picked one
+-- from a repo_clarification card. The status guard prevents double-resolve
+-- from racing clients.
+UPDATE agent_task_queue
+SET target_repo_url = $2,
+    repo_confidence = 1.0,
+    status = 'queued'
+WHERE id = $1 AND status = 'awaiting_user'
+RETURNING *;
 
 -- name: ListPendingChatTasksByCreator :many
 -- Aggregate view of all in-flight chat tasks owned by a given creator in a
@@ -102,7 +131,7 @@ FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.creator_id = $2
-  AND atq.status IN ('queued', 'dispatched', 'running')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'awaiting_user')
 ORDER BY atq.created_at DESC;
 
 -- name: MarkChatSessionRead :exec

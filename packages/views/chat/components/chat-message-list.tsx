@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -9,13 +9,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle, GitBranch, HelpCircle } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
+import { api } from "@multica/core/api";
+import { createLogger } from "@multica/core/logger";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+
+const logger = createLogger("chat.repo-plan");
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -65,7 +69,7 @@ export function ChatMessageList({
         ))}
         {hasLive && (
           <div className="w-full space-y-1.5">
-            <TimelineView items={liveTimeline} />
+            <TimelineView items={liveTimeline} taskId={pendingTaskId ?? undefined} />
           </div>
         )}
         {isWaiting && !hasLive && !pendingAlreadyPersisted && (
@@ -156,7 +160,7 @@ function AssistantMessage({
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
-        <TimelineView items={timeline} />
+        <TimelineView items={timeline} taskId={taskId ?? undefined} />
       ) : (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown>{message.content}</Markdown>
@@ -169,11 +173,15 @@ function AssistantMessage({
 // ─── Timeline: flat interleaved text + collapsible tool groups ───────────
 
 interface TimelineSegment {
-  kind: "text" | "tools";
+  kind: "text" | "tools" | "plan";
   items: ChatTimelineItem[];
 }
 
-/** Split items into segments: consecutive non-text → "tools", consecutive text → merged "text". */
+function isPlanType(t: ChatTimelineItem["type"]): boolean {
+  return t === "repo_plan" || t === "repo_clarification";
+}
+
+/** Split items into segments: text, collapsible tool groups, and standalone repo-plan cards. */
 function segmentTimeline(items: ChatTimelineItem[]): TimelineSegment[] {
   const segments: TimelineSegment[] = [];
   let toolBuf: ChatTimelineItem[] = [];
@@ -194,7 +202,13 @@ function segmentTimeline(items: ChatTimelineItem[]): TimelineSegment[] {
   };
 
   for (const item of items) {
-    if (item.type === "text") {
+    if (isPlanType(item.type)) {
+      flushText();
+      flushTools();
+      // Each plan item is its own segment so the card / chip is never
+      // buried inside a collapsed tool group.
+      segments.push({ kind: "plan", items: [item] });
+    } else if (item.type === "text") {
       flushTools();
       textBuf.push(item);
     } else {
@@ -207,24 +221,35 @@ function segmentTimeline(items: ChatTimelineItem[]): TimelineSegment[] {
   return segments;
 }
 
-function TimelineView({ items }: { items: ChatTimelineItem[] }) {
+function TimelineView({ items, taskId }: { items: ChatTimelineItem[]; taskId?: string }) {
   const segments = segmentTimeline(items);
 
   return (
     <>
-      {segments.map((seg, i) =>
-        seg.kind === "text" ? (
-          <div key={seg.items[0]!.seq} className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-            <Markdown>{seg.items.map((t) => t.content ?? "").join("")}</Markdown>
-          </div>
-        ) : (
+      {segments.map((seg, i) => {
+        if (seg.kind === "text") {
+          return (
+            <div key={seg.items[0]!.seq} className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+              <Markdown>{seg.items.map((t) => t.content ?? "").join("")}</Markdown>
+            </div>
+          );
+        }
+        if (seg.kind === "plan") {
+          const item = seg.items[0]!;
+          return item.type === "repo_plan" ? (
+            <RepoPlanChip key={item.seq} item={item} />
+          ) : (
+            <RepoClarificationCard key={item.seq} item={item} taskId={taskId} />
+          );
+        }
+        return (
           <ToolGroupCollapsible
             key={seg.items[0]!.seq}
             items={seg.items}
             defaultOpen={i === segments.length - 1}
           />
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
@@ -385,6 +410,191 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
     <div className="flex items-start gap-1.5 px-1 -mx-1 py-0.5 text-xs">
       <AlertCircle className="h-3 w-3 shrink-0 text-destructive mt-0.5" />
       <span className="text-destructive">{item.content}</span>
+    </div>
+  );
+}
+
+// ─── Repo plan (router decision for chat tasks) ──────────────────────────
+
+interface RepoPlanInput {
+  repo_url?: string;
+  repo_description?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+interface RepoClarificationCandidate {
+  url: string;
+  description?: string;
+  reason?: string;
+}
+
+interface RepoClarificationInput {
+  question?: string;
+  candidates?: RepoClarificationCandidate[];
+}
+
+function repoShortName(url: string): string {
+  // Strip trailing .git and pick the last path segment; fall back to url.
+  const cleaned = url.replace(/\.git$/i, "");
+  const parts = cleaned.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? url;
+}
+
+/**
+ * Small chip announcing which repo the planner chose. Sits inline in the
+ * assistant timeline so it never feels heavier than a tool row, but uses
+ * a solid pill shape to read as a decision rather than an operation.
+ */
+function RepoPlanChip({ item }: { item: ChatTimelineItem }) {
+  const input = (item.input ?? {}) as RepoPlanInput;
+  const url = input.repo_url ?? "";
+  if (!url) return null;
+  const confidence = typeof input.confidence === "number" ? input.confidence : 1;
+  const low = confidence < 0.8;
+
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-xs">
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          low ? "bg-amber-500 animate-pulse" : "bg-emerald-500",
+        )}
+      />
+      <GitBranch className="size-3 text-muted-foreground" />
+      <span className="font-medium">{repoShortName(url)}</span>
+      {input.repo_description && (
+        <span className="text-muted-foreground">· {input.repo_description}</span>
+      )}
+      {low && (
+        <span className="text-muted-foreground">· 置信 {Math.round(confidence * 100)}%</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Interactive card surfaced when the planner was unsure. The task is paused
+ * (status='awaiting_user') until the user picks a repo and the backend flips
+ * it back to 'queued'. We optimistically hide the buttons after submit so a
+ * slow network doesn't invite a double-click.
+ */
+function RepoClarificationCard({
+  item,
+  taskId,
+}: {
+  item: ChatTimelineItem;
+  taskId?: string;
+}) {
+  const input = (item.input ?? {}) as RepoClarificationInput;
+  const candidates = input.candidates ?? [];
+  const question = input.question ?? "需要你确认一下仓库";
+  const qc = useQueryClient();
+
+  const [selected, setSelected] = useState<string | null>(candidates[0]?.url ?? null);
+  const [submitting, setSubmitting] = useState(false);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (resolvedUrl) {
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-xs">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        <GitBranch className="size-3 text-muted-foreground" />
+        <span className="font-medium">{repoShortName(resolvedUrl)}</span>
+        <span className="text-muted-foreground">· 已确认</span>
+      </div>
+    );
+  }
+
+  const handleConfirm = async () => {
+    if (!taskId || !selected || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.resolveChatTaskRepo(taskId, selected);
+      setResolvedUrl(selected);
+      // Let the task/message caches refetch so we re-render with any
+      // new timeline entries the daemon emits after resuming.
+      qc.invalidateQueries({ queryKey: ["task-messages", taskId] });
+      qc.invalidateQueries({ queryKey: ["pending-chat-tasks"] });
+    } catch (e) {
+      logger.warn("resolve-repo failed", { taskId, err: e });
+      setError(e instanceof Error ? e.message : "操作失败");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border bg-card p-3 max-w-md">
+      <div className="mb-1 flex items-center gap-1.5 text-sm font-medium">
+        <HelpCircle className="size-3.5 text-muted-foreground" />
+        {question}
+      </div>
+      <div className="mb-3 text-xs text-muted-foreground">
+        请选择这个任务在哪个仓库执行：
+      </div>
+      <div className="space-y-1.5" role="radiogroup">
+        {candidates.map((c) => {
+          const isSelected = c.url === selected;
+          return (
+            <button
+              key={c.url}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              disabled={submitting}
+              onClick={() => setSelected(c.url)}
+              className={cn(
+                "flex w-full items-start gap-2 rounded-lg border p-2.5 text-left transition-colors",
+                isSelected
+                  ? "border-foreground bg-accent"
+                  : "hover:border-muted-foreground/50 hover:bg-muted/40",
+                submitting && "opacity-60",
+              )}
+            >
+              <span
+                className={cn(
+                  "mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full border-2",
+                  isSelected ? "border-foreground" : "border-muted-foreground/40",
+                )}
+              >
+                {isSelected && <span className="size-1.5 rounded-full bg-foreground" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">
+                  {repoShortName(c.url)}
+                </span>
+                {c.description && (
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {c.description}
+                  </span>
+                )}
+                {c.reason && (
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground/80">
+                    {c.reason}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {error && <div className="mt-2 text-[11px] text-destructive">{error}</div>}
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          disabled={!taskId || !selected || submitting}
+          onClick={handleConfirm}
+          className={cn(
+            "rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background",
+            "disabled:opacity-40 disabled:cursor-not-allowed",
+            "hover:bg-foreground/90 transition-colors",
+          )}
+        >
+          {submitting ? "确认中…" : "确认"}
+        </button>
+      </div>
     </div>
   );
 }

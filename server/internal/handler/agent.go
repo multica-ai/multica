@@ -138,6 +138,8 @@ type AgentTaskResponse struct {
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+	TargetRepoUrl         string         `json:"target_repo_url,omitempty"`         // planner-chosen target repo (empty = planner hasn't run or user hasn't confirmed)
+	RepoConfidence        float32        `json:"repo_confidence,omitempty"`         // planner's self-reported confidence, 0-1
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -180,6 +182,8 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		TargetRepoUrl:    t.TargetRepoUrl.String,
+		RepoConfidence:   t.RepoConfidence.Float32,
 	}
 }
 

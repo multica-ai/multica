@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -475,6 +476,102 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, taskToResponse(*cancelled))
+}
+
+// ---------------------------------------------------------------------------
+// Repo plan resolution
+// ---------------------------------------------------------------------------
+
+type ResolveChatTaskRepoRequest struct {
+	RepoURL string `json:"repo_url"`
+}
+
+// ResolveChatTaskRepo lets a user pick the target repo for a chat task that
+// paused with status='awaiting_user' after the planner couldn't decide. The
+// task returns to the queue once resolved; the daemon will claim it again
+// and now find target_repo_url populated.
+func (h *Handler) ResolveChatTaskRepo(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	taskID := chi.URLParam(r, "taskId")
+
+	var req ResolveChatTaskRepoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.RepoURL == "" {
+		writeError(w, http.StatusBadRequest, "repo_url is required")
+		return
+	}
+
+	task, err := h.Queries.GetChatTaskByID(r.Context(), parseUUID(taskID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if uuidToString(task.ChatWorkspaceID) != workspaceID {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if uuidToString(task.ChatCreatorID) != userID {
+		writeError(w, http.StatusForbidden, "not your task")
+		return
+	}
+	if task.Status != "awaiting_user" {
+		writeError(w, http.StatusConflict, "task is not awaiting user input")
+		return
+	}
+
+	// Validate the picked URL is actually one of the workspace's repos.
+	ws, err := h.Queries.GetWorkspace(r.Context(), task.ChatWorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace")
+		return
+	}
+	if !workspaceHasRepo(ws.Repos, req.RepoURL) {
+		writeError(w, http.StatusBadRequest, "repo_url is not registered on this workspace")
+		return
+	}
+
+	updated, err := h.Queries.ResolveChatTaskRepo(r.Context(), db.ResolveChatTaskRepoParams{
+		ID:            task.ID,
+		TargetRepoUrl: pgtype.Text{String: req.RepoURL, Valid: true},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve repo")
+		return
+	}
+
+	// Notify other tabs/devices that this task progressed.
+	h.publish(protocol.EventChatMessage, workspaceID, "member", userID, protocol.ChatMessagePayload{
+		ChatSessionID: uuidToString(task.ChatSessionID),
+		TaskID:        uuidToString(updated.ID),
+		Role:          "assistant",
+	})
+
+	writeJSON(w, http.StatusOK, taskToResponse(updated))
+}
+
+func workspaceHasRepo(reposJSON []byte, url string) bool {
+	if len(reposJSON) == 0 {
+		return false
+	}
+	var repos []struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(reposJSON, &repos); err != nil {
+		return false
+	}
+	for _, r := range repos {
+		if r.URL == url {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

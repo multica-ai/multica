@@ -928,6 +928,13 @@ export class ApiClient {
     await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }
 
+  async resolveChatTaskRepo(taskId: string, repoUrl: string): Promise<void> {
+    await this.fetch(`/api/chat/tasks/${taskId}/resolve-repo`, {
+      method: "POST",
+      body: JSON.stringify({ repo_url: repoUrl }),
+    });
+  }
+
   async listAttachments(issueId: string): Promise<Attachment[]> {
     return this.fetch(`/api/issues/${issueId}/attachments`);
   }

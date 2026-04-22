@@ -38,6 +38,8 @@ type Task struct {
 	TriggerCommentContent string     `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string     `json:"chat_message,omitempty"`            // user message content for chat tasks
+	TargetRepoUrl         string     `json:"target_repo_url,omitempty"`         // planner result / user confirmation — empty means not yet decided
+	RepoConfidence        float32    `json:"repo_confidence,omitempty"`         // 0-1, planner's self-reported confidence
 }
 
 // AgentData holds agent details returned by the claim endpoint.

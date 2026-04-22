@@ -142,6 +142,15 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
+// SetTaskAwaitingUser asks the server to pause a task while the user picks a
+// target repo from a repo_clarification card. Returns nil on success; caller
+// should return from handleTask without invoking StartTask.
+func (c *Client) SetTaskAwaitingUser(ctx context.Context, taskID string, confidence float32) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/await-user", taskID), map[string]any{
+		"confidence": confidence,
+	}, nil)
+}
+
 func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {

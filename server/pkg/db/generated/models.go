@@ -90,6 +90,8 @@ type AgentTaskQueue struct {
 	ParentTaskID     pgtype.UUID        `json:"parent_task_id"`
 	FailureReason    pgtype.Text        `json:"failure_reason"`
 	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
+	TargetRepoUrl    pgtype.Text        `json:"target_repo_url"`
+	RepoConfidence   pgtype.Float4      `json:"repo_confidence"`
 }
 
 type Attachment struct {

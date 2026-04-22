@@ -29,7 +29,7 @@ import { redactSecrets } from "../utils/redact";
 
 interface TimelineItem {
   seq: number;
-  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  type: "tool_use" | "tool_result" | "thinking" | "text" | "error" | "repo_plan" | "repo_clarification";
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;

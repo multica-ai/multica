@@ -921,6 +921,25 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
 
+	// Repo planner: chat tasks without a confirmed target repo get routed
+	// here before the agent starts. Issue/autopilot tasks and re-claims
+	// (task.TargetRepoUrl already set from a prior user confirmation) fall
+	// through unchanged.
+	if task.ChatSessionID != "" && task.TargetRepoUrl == "" {
+		plan := planRepo(task)
+		if paused := d.emitPlanAndMaybePause(ctx, task, plan, taskLog); paused {
+			// Task is now 'awaiting_user' on the server. When the user
+			// resolves the clarification card, the status flips back to
+			// 'queued' and a future poll will reclaim it with
+			// TargetRepoUrl populated, short-circuiting this planner.
+			return
+		}
+		if plan.chosen != nil {
+			task.TargetRepoUrl = plan.chosen.URL
+			task.RepoConfidence = plan.confidence
+		}
+	}
+
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
@@ -1058,7 +1077,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentName:         agentName,
 		AgentInstructions: instructions,
 		AgentSkills:       convertSkillsForEnv(skills),
-		Repos:             convertReposForEnv(task.Repos),
+		Repos:             convertReposForEnv(filterReposForTarget(task.Repos, task.TargetRepoUrl)),
 		ChatSessionID:     task.ChatSessionID,
 	}
 
