@@ -6,10 +6,7 @@ import {
   CalendarRange,
   ListTodo,
   FolderKanban,
-  Bot,
-  Monitor,
   Settings,
-  BookOpenText,
   CircleUser,
   Columns3,
 } from "lucide-react";
@@ -26,9 +23,6 @@ export const primaryNav = [
 ];
 
 export const workspaceNav = [
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/runtimes", label: "Runtimes", icon: Monitor },
-  { href: "/skills", label: "Skills", icon: BookOpenText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
