@@ -1,16 +1,43 @@
-# Deploy the Next.js web app from the monorepo root.
-# Keep apps/web, shared packages, and root workspace metadata.
+# Deploy the frontend apps from the monorepo root.
+# Keep apps/web, apps/docs, shared packages, and root workspace metadata.
 # Exclude unrelated workspaces and local artifacts that can make
-# `vercel deploy` upload far more than the web app needs.
+# `vercel deploy` upload far more than the app needs.
 
 .agent_context
 .claude
 .context
+.env*
+.envrc
 .tool-versions
 _features
 .kilo
 .idea
 .DS_Store
+.husky
+.vscode
+
+!.env.example
+
+.dockerignore
+.goreleaser.yml
+AGENTS.md
+CLAUDE.md
+CLI_AND_DAEMON.md
+CLI_INSTALL.md
+CONTRIBUTING.md
+Dockerfile
+Dockerfile.web
+HANDOFF_ARCHITECTURE_AUDIT.md
+Makefile
+README.md
+README.zh-CN.md
+SELF_HOSTING.md
+SELF_HOSTING_ADVANCED.md
+SELF_HOSTING_AI.md
+docker-compose*.yml
+playwright.config.ts
+scripts
+skills-lock.json
 
 .github
 docker
@@ -18,7 +45,6 @@ docs
 e2e
 server
 apps/desktop
-apps/docs
 
 *.log
 *.pid
