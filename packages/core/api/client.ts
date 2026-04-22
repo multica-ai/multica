@@ -337,6 +337,11 @@ export class ApiClient {
     await this.fetch(`/api/comments/${commentId}`, { method: "DELETE" });
   }
 
+  /** Re-queue the agent for this reply (issue threads only). */
+  async retryAgentComment(commentId: string): Promise<void> {
+    await this.fetch(`/api/comments/${commentId}/retry-agent`, { method: "POST" });
+  }
+
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {
     return this.fetch(`/api/comments/${commentId}/reactions`, {
       method: "POST",
@@ -744,6 +749,18 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  }
+
+  async deleteChatMessage(sessionId: string, messageId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async retryChatMessage(sessionId: string, messageId: string): Promise<SendChatMessageResponse> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}/retry`, {
+      method: "POST",
     });
   }
 

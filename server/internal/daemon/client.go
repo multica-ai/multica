@@ -178,11 +178,13 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 }
 
 // ReportChatRetryProgress sends chat retry progress to server for WebSocket broadcasting.
-func (c *Client) ReportChatRetryProgress(ctx context.Context, workspaceID, chatSessionID, taskID, retryAttempt, maxRetries, waitSeconds int) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/chats/%s/tasks/%s/retry-progress", workspaceID, taskID), map[string]any{
+func (c *Client) ReportChatRetryProgress(ctx context.Context, workspaceID, chatSessionID, taskID string, retryAttempt, maxRetries, waitSeconds int) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/chats/%s/tasks/%s/retry-progress", chatSessionID, taskID), map[string]any{
+		"workspace_id":    workspaceID,
 		"chat_session_id": chatSessionID,
+		"task_id":         taskID,
 		"retry_attempt":   retryAttempt,
-		"max_retries":    maxRetries,
+		"max_retries":     maxRetries,
 		"wait_seconds":    waitSeconds,
 	}, nil)
 }

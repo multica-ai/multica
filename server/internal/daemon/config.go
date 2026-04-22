@@ -268,6 +268,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
+	rateLimitCfg := RateLimitConfig{
+		InitialDelay:  DefaultRateLimitInitialDelay,
+		MaxRetries:    DefaultRateLimitMaxRetries,
+		BackoffFactor: DefaultRateLimitBackoffFactor,
+	}
+
 	return Config{
 		ServerBaseURL:      serverBaseURL,
 		DaemonID:           daemonID,
@@ -286,7 +292,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,
-		RateLimitConfig:    rateLimitConfig,
+		RateLimitConfig:    rateLimitCfg,
 	}, nil
 }
 

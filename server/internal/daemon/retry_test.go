@@ -213,7 +213,7 @@ func TestExecuteWithRetry_SuccessNoRetry(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -258,7 +258,7 @@ func TestExecuteWithRetry_RateLimitRetries(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -303,7 +303,7 @@ func TestExecuteWithRetry_MaxRetriesExceeded(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 
 	if err == nil {
 		t.Fatal("expected error after max retries, got nil")
@@ -343,7 +343,7 @@ func TestExecuteWithRetry_NonRateLimitError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -392,7 +392,7 @@ func TestExecuteWithRetry_ContextCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 
 	if err == nil {
 		t.Fatal("expected error after context cancellation, got nil")
@@ -403,8 +403,9 @@ func TestExecuteWithRetry_ContextCancellation(t *testing.T) {
 	if !strings.Contains(result.Error, "retry cancelled") {
 		t.Fatalf("expected error message to contain 'retry cancelled', got '%s'", result.Error)
 	}
-	if attempts < 2 {
-		t.Fatalf("expected at least 2 attempts before cancellation, got %d", attempts)
+	// First execute runs; cancellation happens during backoff wait before the second execute.
+	if attempts < 1 {
+		t.Fatalf("expected at least 1 attempt before cancellation, got %d", attempts)
 	}
 	if tools != 0 {
 		t.Fatalf("expected tools 0, got %d", tools)
@@ -421,8 +422,9 @@ func TestExecuteWithRetry_ExponentialBackoffSequence(t *testing.T) {
 		BackoffFactor: 2.0,
 	}
 
-	// Test the exponential backoff formula
-	expectedDelays := []time.Duration{0, 10, 20, 40, 80} // for attempts 0-4
+	// Test the exponential backoff formula (same units as cfg.InitialDelay).
+	base := 10 * time.Millisecond
+	expectedDelays := []time.Duration{0, base, 2 * base, 4 * base, 8 * base}
 
 	for i, expected := range expectedDelays {
 		delay := time.Duration(float64(cfg.InitialDelay) * math.Pow(cfg.BackoffFactor, float64(i-1)))
@@ -460,9 +462,10 @@ func TestBroadcastRetryProgress(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	// This function currently only logs, so we just verify it doesn't panic
-	d.broadcastRetryProgress(ctx, "task-1", "session-1", 1, 6, 5)
-	// Function should not panic
+	d.broadcastRetryProgress(ctx, slog.Default(), "ws-1", "session-1", "task-1", 1, 6, 5)
+	if !broadcastReceived {
+		t.Fatal("expected retry-progress POST to test server")
+	}
 }
 
 // TestRateLimitConfigDefaults tests default RateLimitConfig values.
@@ -507,7 +510,7 @@ func TestExecuteWithRetry_ImmediateSuccess(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -557,7 +560,7 @@ func TestExecuteWithRetry_ConsecutiveRateLimits(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, backend, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -640,7 +643,7 @@ func TestExecuteWithRetry_NilBackend(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, tools, err := d.executeWithRetry(ctx, nil, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1")
+	result, tools, err := d.executeWithRetry(ctx, nil, "test prompt", agent.ExecOptions{}, slog.Default(), "task-1", "", "")
 
 	// Should return error without panicking
 	if err == nil {

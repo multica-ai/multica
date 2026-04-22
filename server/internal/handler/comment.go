@@ -525,8 +525,14 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	isAuthor := comment.AuthorType == actorType && uuidToString(comment.AuthorID) == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	if !isAuthor && !isAdmin {
-		writeError(w, http.StatusForbidden, "only comment author or admin can delete")
+	var isAgentOwner bool
+	if comment.AuthorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), comment.AuthorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == userID
+		}
+	}
+	if !isAuthor && !isAdmin && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only comment author, agent owner, or admin can delete")
 		return
 	}
 
@@ -545,5 +551,120 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		"comment_id": commentId,
 		"issue_id":   uuidToString(comment.IssueID),
 	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// findAncestorMemberComment walks parent_id chain from start until it finds a member-authored comment.
+func (h *Handler) findAncestorMemberComment(ctx context.Context, start db.Comment) (*db.Comment, error) {
+	seen := map[string]struct{}{}
+	cur := start
+	for range 50 {
+		idKey := uuidToString(cur.ID)
+		if _, dup := seen[idKey]; dup {
+			break
+		}
+		seen[idKey] = struct{}{}
+		if cur.AuthorType == "member" {
+			return &cur, nil
+		}
+		if !cur.ParentID.Valid {
+			return nil, nil
+		}
+		parent, err := h.Queries.GetComment(ctx, cur.ParentID)
+		if err != nil {
+			return nil, err
+		}
+		cur = parent
+	}
+	return nil, nil
+}
+
+// RetryAgentComment enqueues a new agent task to regenerate a reply, using the nearest
+// member comment in the thread as trigger context (when present).
+func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
+	commentID := chi.URLParam(r, "commentId")
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+		ID:          parseUUID(commentID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if comment.AuthorType != "agent" {
+		writeError(w, http.StatusBadRequest, "only agent replies can be retried")
+		return
+	}
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		writeError(w, http.StatusBadRequest, "issue is closed")
+		return
+	}
+
+	agent, err := h.Queries.GetAgent(r.Context(), comment.AuthorID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		writeError(w, http.StatusBadRequest, "agent is not available")
+		return
+	}
+
+	triggerMember, err := h.findAncestorMemberComment(r.Context(), comment)
+	if err != nil {
+		slog.Warn("retry agent comment: ancestor walk failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve thread")
+		return
+	}
+	triggerID := pgtype.UUID{}
+	if triggerMember != nil {
+		triggerID = triggerMember.ID
+	}
+
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAgentOwner := agent.OwnerID.Valid && uuidToString(agent.OwnerID) == userID
+	isTriggerAuthor := triggerMember != nil && triggerMember.AuthorType == "member" && uuidToString(triggerMember.AuthorID) == userID
+	if !isAdmin && !isAgentOwner && !isTriggerAuthor {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	isAssigneeAgent := issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" &&
+		issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == uuidToString(comment.AuthorID)
+
+	if isAssigneeAgent {
+		if triggerID.Valid {
+			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, triggerID)
+		} else {
+			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+	} else {
+		if !triggerID.Valid {
+			writeError(w, http.StatusBadRequest, "cannot retry: no member message in thread to use as context")
+			return
+		}
+		_, err = h.TaskService.EnqueueTaskForMention(r.Context(), issue, comment.AuthorID, triggerID)
+	}
+	if err != nil {
+		slog.Warn("retry agent comment: enqueue failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentID)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue task: "+err.Error())
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

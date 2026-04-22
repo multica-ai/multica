@@ -775,7 +775,8 @@ func (h *Handler) ReportChatRetryProgress(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Verify daemon has access to this workspace.
-	if daemonWsID := middleware.DaemonWorkspaceIDFromContext(r.Context()); daemonWsID == "" {
+	daemonWsID := middleware.DaemonWorkspaceIDFromContext(r.Context())
+	if daemonWsID == "" {
 		writeError(w, http.StatusUnauthorized, "daemon auth required")
 		return
 	}

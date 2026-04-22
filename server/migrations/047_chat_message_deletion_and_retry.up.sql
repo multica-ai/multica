@@ -1,11 +1,4 @@
--- Add support for deleting chat messages and retrying messages.
-
--- Get a single chat message by ID.
--- name: GetChatMessage :one
-SELECT * FROM chat_message WHERE id = $1;
-
--- Delete a chat message by ID.
--- Note: task_message table has task_id foreign key ON DELETE CASCADE,
--- so associated task_message rows are automatically deleted.
--- name: DeleteChatMessage :exec
-DELETE FROM chat_message WHERE id = $1;
+-- Chat message delete / retry: no DDL required — uses existing `chat_message`.
+-- Queries live in pkg/db/queries/chat.sql (sqlc). Do not put sqlc statements here;
+-- migrate runs this file as plain PostgreSQL and does not substitute $1.
+SELECT 1;

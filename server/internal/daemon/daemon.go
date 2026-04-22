@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +18,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
-	"math"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -28,7 +29,7 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
-	reposVersion    string             // stored for future use: skip refresh when version unchanged
+	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
@@ -994,7 +995,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:      customArgs,
 	}
 
-	result, tools, err := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	result, tools, err := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID, task.WorkspaceID, task.ChatSessionID)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -1006,7 +1007,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID, task.WorkspaceID, task.ChatSessionID)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -1323,6 +1324,9 @@ func isBlockedEnvKey(key string) bool {
 	return false
 }
 
+// http429StatusRE matches HTTP 429 as a status (not a substring of e.g. 4290).
+var http429StatusRE = regexp.MustCompile(`(?:^|[^0-9])429(?:[^0-9]|$)`)
+
 // isRateLimitError checks if an error indicates a rate limit response from Agents service.
 func isRateLimitError(err error) bool {
 	if err == nil {
@@ -1331,12 +1335,15 @@ func isRateLimitError(err error) bool {
 
 	errStr := strings.ToLower(err.Error())
 
+	if http429StatusRE.MatchString(errStr) {
+		return true
+	}
+
 	// Check for various rate limit indicators.
 	rateLimitIndicators := []string{
 		"rate limit",
 		"rate-limit",
 		"ratelimit",
-		"429",
 		"too many requests",
 		"quota exceeded",
 		"quota-exceeded",
@@ -1351,24 +1358,30 @@ func isRateLimitError(err error) bool {
 	return false
 }
 
-// broadcastRetryProgress sends chat retry progress to server via HTTP API.
-func (d *Daemon) broadcastRetryProgress(ctx context.Context, taskID, chatSessionID, attempt int, maxRetries int, waitSeconds int) {
-	// We need to get workspace ID from the task to broadcast the event.
-	// For chat tasks, we need the chat session to get workspace ID.
-	// Since we only have taskID, we use a workspace parameter passed to the function.
-	// However, the broadcastRetryProgress in client.go requires workspaceID.
-	// We will use the workspace ID associated with the chat session.
-	// For now, we can get it from the daemon context or pass it explicitly.
-
-	// Note: For chat retry progress events, the workspace ID is needed to route the WebSocket event.
-	// We will need to look up the chat session from our local tracking.
-
-	// For now, we will not broadcast retry progress via WebSocket.
-	// Instead, daemon will just log the retry and continue.
-	taskLog.Info("rate_limit_retry", "task_id", shortID(taskID), "attempt", attempt, "wait_seconds", waitSeconds, "max_retries", maxRetries)
+// broadcastRetryProgress logs retry progress and notifies the server for chat tasks (WebSocket fan-out).
+func (d *Daemon) broadcastRetryProgress(
+	ctx context.Context,
+	taskLog *slog.Logger,
+	workspaceID, chatSessionID, taskID string,
+	attempt, maxRetries, waitSeconds int,
+) {
+	if taskLog != nil {
+		taskLog.Info("rate_limit_retry",
+			"task_id", shortID(taskID),
+			"attempt", attempt,
+			"wait_seconds", waitSeconds,
+			"max_retries", maxRetries,
+		)
+	}
+	if d.client == nil || workspaceID == "" || chatSessionID == "" || taskID == "" {
+		return
+	}
+	if err := d.client.ReportChatRetryProgress(ctx, workspaceID, chatSessionID, taskID, attempt, maxRetries, waitSeconds); err != nil && taskLog != nil {
+		taskLog.Debug("report chat retry progress failed", "error", err)
+	}
 }
 
-// executeWithRetry wraps agent.Execute with rate limit retry logic.
+// executeWithRetry wraps executeAndDrain with rate limit retry logic.
 // Returns: agent.Result, tools, error
 func (d *Daemon) executeWithRetry(
 	ctx context.Context,
@@ -1377,45 +1390,53 @@ func (d *Daemon) executeWithRetry(
 	opts agent.ExecOptions,
 	taskLog *slog.Logger,
 	taskID string,
+	workspaceID string,
+	chatSessionID string,
 ) (agent.Result, int32, error) {
+	if backend == nil {
+		return agent.Result{Status: "failed", Error: "nil backend"}, 0, errors.New("nil backend")
+	}
+	if taskLog == nil {
+		taskLog = d.logger
+	}
 	cfg := d.cfg.RateLimitConfig
 
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
-		// First attempt: no delay
 		if attempt > 0 {
-			// Exponential backoff: waitTime = initialDelay * 2^(attempt-1)
 			waitTime := time.Duration(float64(cfg.InitialDelay) * math.Pow(cfg.BackoffFactor, float64(attempt-1)))
-
-			taskLog.Info("rate_limit_retry_wait", "task_id", shortID(taskID), "attempt", attempt, "wait_seconds", int(waitTime.Seconds()), "max_retries", cfg.MaxRetries)
-
-			// Broadcast retry progress
-			d.broadcastRetryProgress(ctx, taskID, attempt, cfg.MaxRetries, int(waitTime.Seconds()))
-
+			if taskLog != nil {
+				taskLog.Info("rate_limit_retry_wait",
+					"task_id", shortID(taskID),
+					"attempt", attempt,
+					"wait_seconds", int(waitTime.Seconds()),
+					"max_retries", cfg.MaxRetries,
+				)
+			}
+			d.broadcastRetryProgress(ctx, taskLog, workspaceID, chatSessionID, taskID, attempt, cfg.MaxRetries, int(waitTime.Seconds()))
 			select {
 			case <-time.After(waitTime):
-				// Continue to next attempt
 			case <-ctx.Done():
 				return agent.Result{Status: "failed", Error: "retry cancelled"}, 0, ctx.Err()
 			}
 		}
 
-		// Execute agent
-		result, tools, err := backend.Execute(ctx, prompt, opts)
-
-		// Check if this was a rate limit error
+		result, tools, err := d.executeAndDrain(ctx, backend, prompt, opts, taskLog, taskID)
 		if isRateLimitError(err) {
-			taskLog.Warn("rate_limit_detected", "task_id", shortID(taskID), "attempt", attempt, "error", err.Error())
-			continue // Retry with backoff
+			if taskLog != nil {
+				taskLog.Warn("rate_limit_detected", "task_id", shortID(taskID), "attempt", attempt, "error", err.Error())
+			}
+			continue
 		}
-
-		// Non-rate-limit error: return immediately
 		if err != nil {
-			taskLog.Error("agent_execution_failed", "task_id", shortID(taskID), "error", err.Error())
+			if taskLog != nil {
+				taskLog.Error("agent_execution_failed", "task_id", shortID(taskID), "error", err.Error())
+			}
 			return agent.Result{Status: "failed", Error: err.Error()}, 0, err
 		}
-
-		// Success: return result
-		taskLog.Info("agent_execution_success", "task_id", shortID(taskID), "attempt", attempt, "tools", tools)
+		if taskLog != nil {
+			taskLog.Info("agent_execution_success", "task_id", shortID(taskID), "attempt", attempt, "tools", tools)
+		}
 		return result, tools, nil
 	}
+	return agent.Result{Status: "failed", Error: "rate limit: max retries exceeded"}, 0, errors.New("rate limit: max retries exceeded")
 }
