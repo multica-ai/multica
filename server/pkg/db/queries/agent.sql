@@ -165,6 +165,8 @@ WHERE agent_id = $1 AND issue_id = $2
   AND status IN ('completed', 'failed')
   AND session_id IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+WHERE agent_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS NOT NULL AND work_dir IS NOT NULL
+ORDER BY completed_at DESC
 LIMIT 1;
 
 -- name: FailAgentTask :one
