@@ -138,6 +138,8 @@ type AgentTaskResponse struct {
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+	WorkspaceContext      string         `json:"workspace_context,omitempty"`       // workspace-level shared context/memory
+	MemoryIndex           []MemoryIndexEntry `json:"memory_index,omitempty"`        // workspace memory entries (id/name/description only)
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

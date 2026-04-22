@@ -39,6 +39,15 @@ type TaskContextForEnv struct {
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
 	ChatSessionID     string              // non-empty for chat tasks
+	WorkspaceContext  string              // workspace-level shared context/memory
+	MemoryIndex       []MemoryIndexEntry  // workspace memory index entries
+}
+
+// MemoryIndexEntry is a lightweight workspace memory record injected into CLAUDE.md.
+type MemoryIndexEntry struct {
+	ID          string
+	Name        string
+	Description string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

@@ -996,6 +996,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
+		WorkspaceContext:  task.WorkspaceContext,
+		MemoryIndex:       convertMemoryIndexForEnv(task.MemoryIndex),
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -1451,6 +1453,17 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+	}
+	return result
+}
+
+func convertMemoryIndexForEnv(entries []MemoryIndexEntry) []execenv.MemoryIndexEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	result := make([]execenv.MemoryIndexEntry, len(entries))
+	for i, e := range entries {
+		result[i] = execenv.MemoryIndexEntry{ID: e.ID, Name: e.Name, Description: e.Description}
 	}
 	return result
 }
