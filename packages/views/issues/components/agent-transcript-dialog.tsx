@@ -564,24 +564,21 @@ function TimelineBar({
         return (
           <div
             key={seg.startIdx}
-            className="h-full relative group flex overflow-hidden"
+            className="h-full relative group flex overflow-hidden rounded-sm"
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
             title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
           >
-            {items.slice(seg.startIdx, seg.endIdx + 1).map((item, i, arr) => (
+            {items.slice(seg.startIdx, seg.endIdx + 1).map((item) => (
               <button
                 key={item.seq}
                 className={cn(
-                  "h-full flex-shrink-0 transition-colors",
+                  "h-full flex-1 transition-colors min-w-0",
                   isSelected && selectedSeq === item.seq ? color.bgActive : color.bg,
-                  i < arr.length - 1 ? "border-r border-black/20 dark:border-white/10" : "",
                 )}
-                style={{ minWidth: "2px", width: `${(1 / arr.length) * 100}%` }}
                 onClick={() => onSegmentClick(item.seq)}
                 title={getEventLabel(item)}
               />
             ))}
-            {/* Tooltip on hover */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
               <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
                 {getEventLabel(items[seg.startIdx]!)}
