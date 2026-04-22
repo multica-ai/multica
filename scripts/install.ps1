@@ -50,7 +50,29 @@ function Install-CliBinary {
     }
 
     # Distinguish amd64 vs arm64 — Is64BitOperatingSystem is true for both.
-    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    # Use multiple detection methods for robustness
+    $osArch = $null
+    
+    # Method 1: RuntimeInformation (primary)
+    try {
+        $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    } catch {}
+    
+    # Method 2: PROCESSOR_ARCHITECTURE environment variable
+    if (-not $osArch) {
+        $envArch = $env:PROCESSOR_ARCHITECTURE
+        if ($envArch -eq "AMD64") { $osArch = 'X64' }
+        elseif ($envArch -eq "ARM64") { $osArch = 'Arm64' }
+    }
+    
+    # Method 3: PROCESSOR_ARCHITEW6432 (for 32-bit PowerShell on 64-bit Windows)
+    if (-not $osArch) {
+        $envArch = $env:PROCESSOR_ARCHITEW6432
+        if ($envArch -eq "AMD64") { $osArch = 'X64' }
+        elseif ($envArch -eq "ARM64") { $osArch = 'Arm64' }
+    }
+    
+    # Determine architecture
     switch ($osArch) {
         'X64'   { $arch = "amd64" }
         'Arm64' { $arch = "arm64" }
