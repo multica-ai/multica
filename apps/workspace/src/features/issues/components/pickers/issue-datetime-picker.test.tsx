@@ -13,10 +13,13 @@ vi.mock("@/components/ui/popover", () => ({
 }));
 
 vi.mock("@/components/ui/calendar", () => ({
-  Calendar: ({ onSelect }: { onSelect: (value?: Date) => void }) => (
-    <button type="button" onClick={() => onSelect(new Date("2026-04-15T00:00:00Z"))}>
-      Pick day
-    </button>
+  Calendar: ({ onSelect, selected }: { onSelect: (value?: Date) => void; selected?: Date }) => (
+    <div>
+      <button type="button" onClick={() => onSelect(new Date("2026-04-15T00:00:00Z"))}>
+        Pick day
+      </button>
+      <span data-testid="selected-day">{selected ? selected.toDateString() : "none"}</span>
+    </div>
   ),
 }));
 
@@ -55,6 +58,35 @@ describe("IssueDateTimePicker", () => {
     expect(onUpdate).toHaveBeenCalledWith({
       start_date: expectedDate.toISOString(),
     });
+  });
+
+  it("defaults empty values to today and applies quick shortcuts", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-22T12:00:00Z"));
+
+    const onUpdate = vi.fn();
+    const expectedDate = new Date();
+    expectedDate.setDate(expectedDate.getDate() + 1);
+    expectedDate.setHours(0, 0, 0, 0);
+
+    render(
+      <IssueDateTimePicker
+        field="start_date"
+        dateTimeValue={null}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    expect(screen.getByTestId("selected-day").textContent).not.toBe("none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tomorrow" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      start_date: expectedDate.toISOString(),
+    });
+
+    vi.useRealTimers();
   });
 
   it("clears end_date", () => {
