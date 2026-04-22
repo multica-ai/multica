@@ -118,6 +118,45 @@ func (s *scriptedRow) Scan(dest ...interface{}) error {
 	return nil
 }
 
+func scriptedUserValues(
+	userID pgtype.UUID,
+	name string,
+	email string,
+	avatar pgtype.Text,
+	now pgtype.Timestamptz,
+) []any {
+	return []any{
+		userID,
+		name,
+		email,
+		avatar,
+		now,
+		now,
+		pgtype.Timestamptz{},
+		[]byte(nil),
+		pgtype.Text{},
+		pgtype.Text{},
+		pgtype.Text{},
+	}
+}
+
+func scriptedOwnerLookupValues(
+	userID pgtype.UUID,
+	name string,
+	email string,
+	avatar pgtype.Text,
+	now pgtype.Timestamptz,
+) []any {
+	return []any{
+		userID,
+		name,
+		email,
+		avatar,
+		now,
+		now,
+	}
+}
+
 func TestFindOrCreateUserGating(t *testing.T) {
 	t.Run("new_user_blocked", func(t *testing.T) {
 		cfg := Config{AllowSignup: false}
@@ -174,7 +213,7 @@ func TestResolveTrustedBootstrapOwner_ResumesExistingSoleUser(t *testing.T) {
 	h.DB = &scriptedDB{
 		rows: []pgx.Row{
 			&scriptedRow{values: []any{1}},
-			&scriptedRow{values: []any{userID, "Existing Owner", "owner@example.com", avatar, now, now}},
+			&scriptedRow{values: scriptedOwnerLookupValues(userID, "Existing Owner", "owner@example.com", avatar, now)},
 		},
 	}
 	h.Queries = db.New(h.DB)
@@ -199,7 +238,7 @@ func TestResolveTrustedBootstrapOwner_CreatesOwnerWhenDatabaseIsEmpty(t *testing
 	h.DB = &scriptedDB{
 		rows: []pgx.Row{
 			&scriptedRow{values: []any{0}},
-			&scriptedRow{values: []any{userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now, now}},
+			&scriptedRow{values: scriptedUserValues(userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now)},
 		},
 	}
 	h.Queries = db.New(h.DB)
@@ -225,7 +264,7 @@ func TestResolveTrustedBootstrapOwner_ReusesOwnerAfterConcurrentCreateRace(t *te
 		rows: []pgx.Row{
 			&scriptedRow{values: []any{0}},
 			&scriptedRow{err: &pgconn.PgError{Code: "23505"}},
-			&scriptedRow{values: []any{userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now, now}},
+			&scriptedRow{values: scriptedUserValues(userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now)},
 		},
 	}
 	h.Queries = db.New(h.DB)
@@ -273,7 +312,7 @@ func TestFindOrCreateUser_TrustedBootstrapRejectsAdditionalUser(t *testing.T) {
 		rows: []pgx.Row{
 			&scriptedRow{err: pgx.ErrNoRows},
 			&scriptedRow{values: []any{1}},
-			&scriptedRow{values: []any{userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now, now}},
+			&scriptedRow{values: scriptedOwnerLookupValues(userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now)},
 		},
 	}
 	h.Queries = db.New(h.DB)
@@ -299,7 +338,7 @@ func TestFindOrCreateUser_TrustedBootstrapReturnsExistingOwnerWhenEmailMatches(t
 		rows: []pgx.Row{
 			&scriptedRow{err: pgx.ErrNoRows},
 			&scriptedRow{values: []any{1}},
-			&scriptedRow{values: []any{userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now, now}},
+			&scriptedRow{values: scriptedOwnerLookupValues(userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now)},
 		},
 	}
 	h.Queries = db.New(h.DB)
