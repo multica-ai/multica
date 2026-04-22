@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { loginAsDefault } from "./helpers";
 
 test.describe("Settings", () => {
   test("updating workspace name reflects in sidebar immediately", async ({
@@ -7,36 +7,32 @@ test.describe("Settings", () => {
   }) => {
     await loginAsDefault(page);
 
-    // Read the current workspace name from the sidebar
-    const sidebarName = page.locator("aside button").first();
-    const originalName = await sidebarName.innerText();
+    const workspaceButton = page.getByRole("button").first();
+    const originalName = (await workspaceButton.innerText()).trim();
 
-    // Navigate to settings
-    await openWorkspaceMenu(page);
-    await page.locator("text=Settings").click();
+    await page.getByRole("link", { name: "Settings" }).click();
     await page.waitForURL("**/settings");
+    await page.getByRole("tab", { name: "General" }).click();
 
-    // Change workspace name
-    const nameInput = page
-      .locator('input[type="text"]')
-      .first();
+    const nameInput = page.getByRole("textbox").first();
     await nameInput.clear();
     const newName = "Renamed WS " + Date.now();
     await nameInput.fill(newName);
 
-    // Save
-    await page.locator("button", { hasText: "Save" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Workspace settings saved")).toBeVisible({
+      timeout: 5000,
+    });
 
-    // Wait for "Saved!" confirmation
-    await expect(page.locator("text=Saved!")).toBeVisible({ timeout: 5000 });
+    await expect(
+      page.getByRole("button", { name: new RegExp(newName, "i") }),
+    ).toBeVisible();
 
-    // Sidebar should reflect the new name WITHOUT page refresh
-    await expect(sidebarName).toContainText(newName);
-
-    // Restore original name so other tests aren't affected
     await nameInput.clear();
-    await nameInput.fill(originalName.trim());
-    await page.locator("button", { hasText: "Save" }).click();
-    await expect(page.locator("text=Saved!")).toBeVisible({ timeout: 5000 });
+    await nameInput.fill(originalName);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Workspace settings saved")).toBeVisible({
+      timeout: 5000,
+    });
   });
 });

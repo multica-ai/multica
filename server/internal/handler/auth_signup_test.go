@@ -216,6 +216,32 @@ func TestResolveTrustedBootstrapOwner_CreatesOwnerWhenDatabaseIsEmpty(t *testing
 	}
 }
 
+func TestResolveTrustedBootstrapOwner_ReusesOwnerAfterConcurrentCreateRace(t *testing.T) {
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	userID := parseUUID("abababab-abab-abab-abab-abababababab")
+	avatar := pgtype.Text{}
+	h := newTestHandler(Config{AllowSignup: false})
+	h.DB = &scriptedDB{
+		rows: []pgx.Row{
+			&scriptedRow{values: []any{0}},
+			&scriptedRow{err: &pgconn.PgError{Code: "23505"}},
+			&scriptedRow{values: []any{userID, trustedBootstrapOwnerName, trustedBootstrapOwnerEmail, avatar, now, now}},
+		},
+	}
+	h.Queries = db.New(h.DB)
+
+	owner, err := h.resolveTrustedBootstrapOwner(context.Background())
+	if err != nil {
+		t.Fatalf("resolveTrustedBootstrapOwner: %v", err)
+	}
+	if owner.ownerResolution != trustedBootstrapOwnerResolutionOld {
+		t.Fatalf("expected owner_resolution %q after race recovery, got %q", trustedBootstrapOwnerResolutionOld, owner.ownerResolution)
+	}
+	if owner.user.Email != trustedBootstrapOwnerEmail {
+		t.Fatalf("expected trusted owner email %q, got %q", trustedBootstrapOwnerEmail, owner.user.Email)
+	}
+}
+
 func TestResolveTrustedBootstrapOwner_FailsClosedForMultiUserDatabase(t *testing.T) {
 	h := newTestHandler(Config{AllowSignup: true})
 	h.DB = &scriptedDB{

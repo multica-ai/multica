@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { createTestApi, loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { createTestApi, loginAsDefault, openAccountMenu } from "./helpers";
+
+async function expectIssuesBoard(page: Parameters<typeof test>[0]["page"]) {
+  await expect(page.getByText("Backlog")).toBeVisible();
+  await expect(page.getByRole("button", { name: "All" })).toBeVisible();
+}
 
 test.describe("Authentication", () => {
   test("root path bootstraps directly into issues", async ({ page }) => {
@@ -11,7 +16,7 @@ test.describe("Authentication", () => {
 
     await page.goto("/");
     await page.waitForURL(`**/${workspace.slug}/issues`, { timeout: 10000 });
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expectIssuesBoard(page);
   });
 
   test("login route acts as a compatibility shell and redirects to issues", async ({
@@ -25,7 +30,7 @@ test.describe("Authentication", () => {
 
     await page.goto("/login");
     await page.waitForURL(`**/${workspace.slug}/issues`, { timeout: 10000 });
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expectIssuesBoard(page);
   });
 
   test("bootstrap enters the workspace without a manual login step", async ({
@@ -34,7 +39,7 @@ test.describe("Authentication", () => {
     await loginAsDefault(page);
 
     await expect(page).toHaveURL(/\/issues/);
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expectIssuesBoard(page);
   });
 
   test("workspace route bootstraps without redirecting to a manual login flow", async ({
@@ -49,7 +54,7 @@ test.describe("Authentication", () => {
     await page.goto(`/${workspace.slug}/issues`);
     await page.waitForURL(`**/${workspace.slug}/issues`, { timeout: 10000 });
     await expect(page).not.toHaveURL(/\/login/);
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expectIssuesBoard(page);
   });
 
   test("logout re-enters the app through bootstrap without staying on login", async ({
@@ -57,14 +62,12 @@ test.describe("Authentication", () => {
   }) => {
     await loginAsDefault(page);
 
-    // Open the workspace dropdown menu
-    await openWorkspaceMenu(page);
+    await openAccountMenu(page);
 
-    // Click Sign out
-    await page.locator("text=Sign out").click();
+    await page.getByText("Log out").click();
 
     await page.waitForURL("**/issues", { timeout: 10000 });
     await expect(page).not.toHaveURL(/\/login$/);
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expectIssuesBoard(page);
   });
 });

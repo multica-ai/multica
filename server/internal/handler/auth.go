@@ -144,6 +144,16 @@ func (h *Handler) resolveTrustedBootstrapOwner(ctx context.Context) (trustedBoot
 			Email: trustedBootstrapOwnerEmail,
 		})
 		if err != nil {
+			if isUniqueViolation(err) {
+				user, lookupErr := h.Queries.GetUserByEmail(ctx, trustedBootstrapOwnerEmail)
+				if lookupErr != nil {
+					return trustedBootstrapOwner{}, lookupErr
+				}
+				return trustedBootstrapOwner{
+					user:            user,
+					ownerResolution: trustedBootstrapOwnerResolutionOld,
+				}, nil
+			}
 			return trustedBootstrapOwner{}, err
 		}
 		return trustedBootstrapOwner{user: user, ownerResolution: trustedBootstrapOwnerResolutionNew}, nil
@@ -209,11 +219,10 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, err
 	}
 
-	if err := h.checkSignupAllowed(email, isNew); err != nil {
-		return db.User{}, false, err
-	}
-
 	if !isNew {
+		if err := h.checkSignupAllowed(email, false); err != nil {
+			return db.User{}, false, err
+		}
 		return user, false, nil
 	}
 
@@ -230,6 +239,10 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 			return db.User{}, false, bootstrapErr
 		}
 		return db.User{}, false, bootstrapErr
+	}
+
+	if err := h.checkSignupAllowed(email, true); err != nil {
+		return db.User{}, false, err
 	}
 
 	name := email
