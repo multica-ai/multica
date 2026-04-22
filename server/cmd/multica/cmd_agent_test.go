@@ -1,12 +1,29 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// freshAgentUpdateCmd returns a standalone cobra.Command with the three
+// --custom-env* flags registered identically to agentUpdateCmd, so tests
+// can mutate flag state without leaking across subtests (the package-level
+// agentUpdateCmd has no Reset).
+func freshAgentUpdateCmd() *cobra.Command {
+	c := &cobra.Command{Use: "update"}
+	c.Flags().String("custom-env", "", "")
+	c.Flags().Bool("custom-env-stdin", false, "")
+	c.Flags().String("custom-env-file", "", "")
+	return c
+}
 
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
 // the cross-workspace contamination bug (#1235). Inside a daemon-spawned
@@ -173,4 +190,164 @@ func TestAgentUpdateNoFieldsMentionsCustomEnv(t *testing.T) {
 	if agentCreateCmd.Flag("custom-env") == nil {
 		t.Fatal("agent create must expose --custom-env")
 	}
+}
+
+// TestParseCustomEnvErrorSanitization guards against future changes
+// re-introducing %w wrapping of json.Unmarshal errors. Those errors
+// can surface short fragments of the input, which — for a flag that
+// carries secret material — must not appear in user-visible error
+// messages.
+func TestParseCustomEnvErrorSanitization(t *testing.T) {
+	// Pick a string that, if echoed, would be obvious. The key is
+	// that the error must not contain any substring of the raw input.
+	secretish := `{"SECRET_TOKEN":verySensitiveValue}` // invalid JSON, unquoted value
+	_, err := parseCustomEnv(secretish)
+	if err == nil {
+		t.Fatal("expected parse error for invalid JSON")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"SECRET_TOKEN", "verySensitiveValue"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("parseCustomEnv error leaked input fragment %q: %q", leak, msg)
+		}
+	}
+}
+
+// TestAgentCreateAndUpdateExposeSecretSafeFlags guarantees the
+// --custom-env-stdin and --custom-env-file alternatives stay wired
+// up on both commands. They exist specifically so callers can keep
+// secret material out of shell history / 'ps'; regressing either
+// surface reopens the foot-gun.
+func TestAgentCreateAndUpdateExposeSecretSafeFlags(t *testing.T) {
+	for _, flag := range []string{"custom-env-stdin", "custom-env-file"} {
+		if agentCreateCmd.Flag(flag) == nil {
+			t.Fatalf("agent create must expose --%s", flag)
+		}
+		if agentUpdateCmd.Flag(flag) == nil {
+			t.Fatalf("agent update must expose --%s", flag)
+		}
+	}
+	// The --custom-env help text must warn users that argv is visible
+	// to shell history / 'ps' — "never logged" alone is misleading.
+	for _, c := range []struct {
+		name  string
+		usage string
+	}{
+		{"agent create", agentCreateCmd.Flag("custom-env").Usage},
+		{"agent update", agentUpdateCmd.Flag("custom-env").Usage},
+	} {
+		low := strings.ToLower(c.usage)
+		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
+			t.Fatalf("%s --custom-env usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
+		}
+	}
+}
+
+// TestResolveCustomEnv exercises the input-channel resolver: inline
+// flag, stdin, file, mutual exclusion, and the "not supplied" path.
+func TestResolveCustomEnv(t *testing.T) {
+	t.Run("not supplied", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		got, ok, err := resolveCustomEnv(cmd)
+		if err != nil || ok || got != nil {
+			t.Fatalf("unset flags: got=%v ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("inline flag", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		if err := cmd.Flags().Set("custom-env", `{"A":"1"}`); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveCustomEnv(cmd)
+		if err != nil || !ok {
+			t.Fatalf("inline: ok=%v err=%v", ok, err)
+		}
+		if !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
+			t.Fatalf("inline: got %v", got)
+		}
+	})
+
+	t.Run("stdin", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		if err := cmd.Flags().Set("custom-env-stdin", "true"); err != nil {
+			t.Fatal(err)
+		}
+		cmd.SetIn(bytes.NewBufferString(`{"B":"2"}`))
+		got, ok, err := resolveCustomEnv(cmd)
+		if err != nil || !ok {
+			t.Fatalf("stdin: ok=%v err=%v", ok, err)
+		}
+		if !reflect.DeepEqual(got, map[string]string{"B": "2"}) {
+			t.Fatalf("stdin: got %v", got)
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "env.json")
+		if err := os.WriteFile(path, []byte(`{"C":"3"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentUpdateCmd()
+		if err := cmd.Flags().Set("custom-env-file", path); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveCustomEnv(cmd)
+		if err != nil || !ok {
+			t.Fatalf("file: ok=%v err=%v", ok, err)
+		}
+		if !reflect.DeepEqual(got, map[string]string{"C": "3"}) {
+			t.Fatalf("file: got %v", got)
+		}
+	})
+
+	t.Run("mutually exclusive: inline + stdin", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env", `{"A":"1"}`)
+		_ = cmd.Flags().Set("custom-env-stdin", "true")
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("mutually exclusive: inline + file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "env.json")
+		if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env", `{}`)
+		_ = cmd.Flags().Set("custom-env-file", path)
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("mutually exclusive: stdin + file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "env.json")
+		if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-stdin", "true")
+		_ = cmd.Flags().Set("custom-env-file", path)
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("file: missing path surfaces filesystem error", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-file", filepath.Join(t.TempDir(), "does-not-exist.json"))
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--custom-env-file") {
+			t.Fatalf("expected --custom-env-file error, got %v", err)
+		}
+	})
 }
