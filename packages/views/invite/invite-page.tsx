@@ -10,6 +10,7 @@ import {
 import { paths } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
+import { LocaleSwitcher, useI18n } from "../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -34,6 +35,7 @@ export interface InvitePageProps {
  * layered on by the desktop overlay; web just renders the page directly.
  */
 export function InvitePage({ invitationId, onBack }: InvitePageProps) {
+  const { t } = useI18n();
   const { push } = useNavigation();
   const qc = useQueryClient();
   const [accepting, setAccepting] = useState(false);
@@ -72,7 +74,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
         : fallbackDest;
       setTimeout(() => push(dest), 1000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to accept invitation");
+      setError(e instanceof Error ? e.message : t("invite.acceptFailed"));
     } finally {
       setAccepting(false);
     }
@@ -86,7 +88,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       setDone("declined");
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to decline invitation");
+      setError(e instanceof Error ? e.message : t("invite.declineFailed"));
     } finally {
       setDeclining(false);
     }
@@ -115,12 +117,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <X className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold">Invitation not found</h2>
+            <h2 className="text-lg font-semibold">{t("invite.fetchErrorTitle")}</h2>
             <p className="text-sm text-muted-foreground text-center">
-              This invitation may have expired, been revoked, or doesn&apos;t belong to your account.
+              {t("invite.fetchErrorDescription")}
             </p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
-              Go to dashboard
+              {t("invite.goToDashboard")}
             </Button>
           </CardContent>
         </Card>
@@ -136,8 +138,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Check className="h-6 w-6 text-primary" />
             </div>
-            <h2 className="text-lg font-semibold">You joined {invitation.workspace_name}!</h2>
-            <p className="text-sm text-muted-foreground">Redirecting to workspace...</p>
+            <h2 className="text-lg font-semibold">
+              {t("invite.acceptedTitle", { workspace: invitation.workspace_name ?? t("sidebar.workspaceFallback") })}
+            </h2>
+            <p className="text-sm text-muted-foreground">{t("invite.redirecting")}</p>
           </CardContent>
         </Card>
       </InviteShell>
@@ -149,10 +153,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
-            <h2 className="text-lg font-semibold">Invitation declined</h2>
-            <p className="text-sm text-muted-foreground">You won&apos;t be added to this workspace.</p>
+            <h2 className="text-lg font-semibold">{t("invite.declinedTitle")}</h2>
+            <p className="text-sm text-muted-foreground">{t("invite.declinedDescription")}</p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
-              Go to dashboard
+              {t("invite.goToDashboard")}
             </Button>
           </CardContent>
         </Card>
@@ -173,21 +177,23 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
 
           <div className="text-center space-y-2">
             <h2 className="text-xl font-semibold">
-              Join {invitation.workspace_name ?? "workspace"}
+              {t("invite.joinTitle", { workspace: invitation.workspace_name ?? t("sidebar.workspaceFallback") })}
             </h2>
             <p className="text-sm text-muted-foreground">
-              <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
-              invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
+              {t("invite.invitedByRole", {
+                inviter: invitation.inviter_name || invitation.inviter_email || "",
+                role: invitation.role === "admin" ? t("invite.role.admin") : t("invite.role.member"),
+              })}
             </p>
           </div>
 
           {isAlreadyHandled ? (
             <div className="text-sm text-muted-foreground">
-              This invitation has already been {invitation.status}.
+              {t("invite.alreadyHandled", { status: invitation.status ?? "" })}
             </div>
           ) : isExpired ? (
             <div className="text-sm text-muted-foreground">
-              This invitation has expired.
+              {t("invite.expired")}
             </div>
           ) : (
             <div className="flex gap-3 w-full">
@@ -197,14 +203,14 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
                 onClick={handleDecline}
                 disabled={accepting || declining}
               >
-                {declining ? "Declining..." : "Decline"}
+                {declining ? t("invite.declining") : t("invite.decline")}
               </Button>
               <Button
                 className="flex-1"
                 onClick={handleAccept}
                 disabled={accepting || declining}
               >
-                {accepting ? "Joining..." : "Accept & Join"}
+                {accepting ? t("invite.joining") : t("invite.acceptAndJoin")}
               </Button>
             </div>
           )}
@@ -230,6 +236,7 @@ function InviteShell({
   onBack?: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const logout = useLogout();
   return (
     <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-6 py-12">
@@ -241,18 +248,21 @@ function InviteShell({
           onClick={onBack}
         >
           <ArrowLeft />
-          Back
+          {t("invite.back")}
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="absolute top-12 right-12 text-muted-foreground hover:text-destructive"
-        onClick={logout}
-      >
-        <LogOut />
-        Log out
-      </Button>
+      <div className="absolute top-12 right-12 flex items-center gap-2">
+        <LocaleSwitcher />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={logout}
+        >
+          <LogOut />
+          {t("invite.logOut")}
+        </Button>
+      </div>
       {children}
     </div>
   );

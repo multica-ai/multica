@@ -40,9 +40,7 @@ import {
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   ALL_STATUSES,
-  STATUS_CONFIG,
   PRIORITY_ORDER,
-  PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
@@ -62,10 +60,7 @@ import {
 } from "@multica/core/issues/stores/issues-scope-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
-
-// ---------------------------------------------------------------------------
-// HoverCheck — shadcn official pattern (PR #6862)
-// ---------------------------------------------------------------------------
+import { useI18n } from "../../i18n";
 
 const FILTER_ITEM_CLASS =
   "group/fitem pr-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
@@ -80,10 +75,6 @@ function HoverCheck({ checked }: { checked: boolean }) {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function getActiveFilterCount(state: {
   statusFilters: string[];
@@ -138,19 +129,14 @@ function useIssueCounts(allIssues: Issue[]) {
   }, [allIssues]);
 }
 
-// ---------------------------------------------------------------------------
-// Scope config
-// ---------------------------------------------------------------------------
-
-const SCOPES: { value: IssuesScope; label: string; description: string }[] = [
-  { value: "all", label: "All", description: "All issues in this workspace" },
-  { value: "members", label: "Members", description: "Issues assigned to team members" },
-  { value: "agents", label: "Agents", description: "Issues assigned to AI agents" },
-];
-
-// ---------------------------------------------------------------------------
-// Actor sub-menu content (shared between Assignee and Creator)
-// ---------------------------------------------------------------------------
+function formatIssueCount(
+  t: ReturnType<typeof useI18n>["t"],
+  locale: ReturnType<typeof useI18n>["locale"],
+  count: number,
+) {
+  if (locale === "zh") return `${count} 个 Issue`;
+  return `${count} ${t(count === 1 ? "issues.count.singular" : "issues.count.plural")}`;
+}
 
 function ActorSubContent({
   counts,
@@ -169,6 +155,7 @@ function ActorSubContent({
   onToggleNoAssignee?: () => void;
   noAssigneeCount?: number;
 }) {
+  const { t } = useI18n();
   const [search, setSearch] = useState("");
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -191,7 +178,7 @@ function ActorSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter..."
+          placeholder={t("issues.filter.searchPlaceholder")}
           className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
           autoFocus
         />
@@ -199,7 +186,7 @@ function ActorSubContent({
 
       <div className="max-h-64 overflow-y-auto p-1">
         {showNoAssignee &&
-          (!query || "no assignee".includes(query) || "unassigned".includes(query)) && (
+          (!query || t("issues.filter.noAssignee").toLowerCase().includes(query)) && (
             <DropdownMenuCheckboxItem
               checked={includeNoAssignee ?? false}
               onCheckedChange={() => onToggleNoAssignee?.()}
@@ -207,7 +194,7 @@ function ActorSubContent({
             >
               <HoverCheck checked={includeNoAssignee ?? false} />
               <UserMinus className="size-3.5 text-muted-foreground" />
-              No assignee
+              {t("issues.filter.noAssignee")}
               {(noAssigneeCount ?? 0) > 0 && (
                 <span className="ml-auto text-xs text-muted-foreground">
                   {noAssigneeCount}
@@ -218,7 +205,7 @@ function ActorSubContent({
 
         {filteredMembers.length > 0 && (
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Members</DropdownMenuLabel>
+            <DropdownMenuLabel>{t("issues.filter.members")}</DropdownMenuLabel>
             {filteredMembers.map((m) => {
               const checked = isSelected("member", m.user_id);
               const count = counts.get(`member:${m.user_id}`) ?? 0;
@@ -247,7 +234,7 @@ function ActorSubContent({
 
         {filteredAgents.length > 0 && (
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Agents</DropdownMenuLabel>
+            <DropdownMenuLabel>{t("issues.filter.agents")}</DropdownMenuLabel>
             {filteredAgents.map((a) => {
               const checked = isSelected("agent", a.id);
               const count = counts.get(`agent:${a.id}`) ?? 0;
@@ -276,17 +263,13 @@ function ActorSubContent({
 
         {filteredMembers.length === 0 && filteredAgents.length === 0 && search && (
           <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-            No results
+            {t("issues.filter.noResults")}
           </div>
         )}
       </div>
     </>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Project sub-menu content
-// ---------------------------------------------------------------------------
 
 function ProjectSubContent({
   counts,
@@ -303,6 +286,7 @@ function ProjectSubContent({
   onToggleNoProject: () => void;
   noProjectCount: number;
 }) {
+  const { t } = useI18n();
   const [search, setSearch] = useState("");
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
@@ -318,14 +302,14 @@ function ProjectSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter..."
+          placeholder={t("issues.filter.searchPlaceholder")}
           className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
           autoFocus
         />
       </div>
 
       <div className="max-h-64 overflow-y-auto p-1">
-        {(!query || "no project".includes(query) || "unassigned".includes(query)) && (
+        {(!query || t("issues.filter.noProject").toLowerCase().includes(query)) && (
           <DropdownMenuCheckboxItem
             checked={includeNoProject}
             onCheckedChange={() => onToggleNoProject()}
@@ -333,7 +317,7 @@ function ProjectSubContent({
           >
             <HoverCheck checked={includeNoProject} />
             <FolderMinus className="size-3.5 text-muted-foreground" />
-            No project
+            {t("issues.filter.noProject")}
             {noProjectCount > 0 && (
               <span className="ml-auto text-xs text-muted-foreground">
                 {noProjectCount}
@@ -368,7 +352,7 @@ function ProjectSubContent({
 
         {filtered.length === 0 && search && (
           <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-            No results
+            {t("issues.filter.noResults")}
           </div>
         )}
       </div>
@@ -376,11 +360,8 @@ function ProjectSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
-// IssuesHeader
-// ---------------------------------------------------------------------------
-
 export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
+  const { locale, t } = useI18n();
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
 
@@ -410,14 +391,18 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
       includeNoProject,
     }) > 0;
 
-  const sortLabel =
-    SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Manual";
+  const scopes: { value: IssuesScope; label: string; description: string }[] = [
+    { value: "all", label: t("issues.scope.all.label"), description: t("issues.scope.all.description") },
+    { value: "members", label: t("issues.scope.members.label"), description: t("issues.scope.members.description") },
+    { value: "agents", label: t("issues.scope.agents.label"), description: t("issues.scope.agents.description") },
+  ];
+
+  const sortLabel = t(`issues.sort.${sortBy}`);
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons */}
       <div className="flex items-center gap-1">
-        {SCOPES.map((s) => (
+        {scopes.map((s) => (
           <Tooltip key={s.value}>
             <TooltipTrigger
               render={
@@ -440,9 +425,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
         ))}
       </div>
 
-      {/* Right: filter + display + view toggle */}
       <div className="flex items-center gap-1">
-        {/* Filter */}
         <DropdownMenu>
           <Tooltip>
             <DropdownMenuTrigger
@@ -459,14 +442,13 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                 />
               }
             />
-            <TooltipContent side="bottom">Filter</TooltipContent>
+            <TooltipContent side="bottom">{t("issues.filter")}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
-            {/* Status */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <CircleDot className="size-3.5" />
-                <span className="flex-1">Status</span>
+                <span className="flex-1">{t("issues.filter.status")}</span>
                 {statusFilters.length > 0 && (
                   <span className="text-xs text-primary font-medium">
                     {statusFilters.length}
@@ -486,10 +468,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                     >
                       <HoverCheck checked={checked} />
                       <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {STATUS_CONFIG[s].label}
+                      {t(`issues.status.${s}`)}
                       {count > 0 && (
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {count} {count === 1 ? "issue" : "issues"}
+                          {formatIssueCount(t, locale, count)}
                         </span>
                       )}
                     </DropdownMenuCheckboxItem>
@@ -498,11 +480,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Priority */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <SignalHigh className="size-3.5" />
-                <span className="flex-1">Priority</span>
+                <span className="flex-1">{t("issues.filter.priority")}</span>
                 {priorityFilters.length > 0 && (
                   <span className="text-xs text-primary font-medium">
                     {priorityFilters.length}
@@ -522,10 +503,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                     >
                       <HoverCheck checked={checked} />
                       <PriorityIcon priority={p} />
-                      {PRIORITY_CONFIG[p].label}
+                      {t(`issues.priority.${p}`)}
                       {count > 0 && (
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {count} {count === 1 ? "issue" : "issues"}
+                          {formatIssueCount(t, locale, count)}
                         </span>
                       )}
                     </DropdownMenuCheckboxItem>
@@ -534,18 +515,17 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Assignee */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <User className="size-3.5" />
-                <span className="flex-1">Assignee</span>
+                <span className="flex-1">{t("issues.filter.assignee")}</span>
                 {(assigneeFilters.length > 0 || includeNoAssignee) && (
                   <span className="text-xs text-primary font-medium">
                     {assigneeFilters.length + (includeNoAssignee ? 1 : 0)}
                   </span>
                 )}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+              <DropdownMenuSubContent className="w-64 p-0">
                 <ActorSubContent
                   counts={counts.assignee}
                   selected={assigneeFilters}
@@ -558,18 +538,17 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Creator */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <UserPen className="size-3.5" />
-                <span className="flex-1">Creator</span>
+                <span className="flex-1">{t("issues.filter.creator")}</span>
                 {creatorFilters.length > 0 && (
                   <span className="text-xs text-primary font-medium">
                     {creatorFilters.length}
                   </span>
                 )}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+              <DropdownMenuSubContent className="w-64 p-0">
                 <ActorSubContent
                   counts={counts.creator}
                   selected={creatorFilters}
@@ -578,18 +557,17 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Project */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <FolderKanban className="size-3.5" />
-                <span className="flex-1">Project</span>
+                <span className="flex-1">{t("issues.filter.project")}</span>
                 {(projectFilters.length > 0 || includeNoProject) && (
                   <span className="text-xs text-primary font-medium">
                     {projectFilters.length + (includeNoProject ? 1 : 0)}
                   </span>
                 )}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+              <DropdownMenuSubContent className="w-64 p-0">
                 <ProjectSubContent
                   counts={counts.project}
                   selected={projectFilters}
@@ -601,19 +579,17 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Reset */}
             {hasActiveFilters && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={act.clearFilters}>
-                  Reset all filters
+                  {t("issues.filter.resetAll")}
                 </DropdownMenuItem>
               </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Display settings */}
         <Popover>
           <Tooltip>
             <PopoverTrigger
@@ -627,12 +603,12 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                 />
               }
             />
-            <TooltipContent side="bottom">Display settings</TooltipContent>
+            <TooltipContent side="bottom">{t("issues.displaySettings")}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
-                Ordering
+                {t("issues.ordering")}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
                 <DropdownMenu>
@@ -654,7 +630,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                         key={opt.value}
                         onClick={() => act.setSortBy(opt.value)}
                       >
-                        {opt.label}
+                        {t(`issues.sort.${opt.value}`)}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
@@ -663,9 +639,11 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                   variant="outline"
                   size="icon-sm"
                   onClick={() =>
-                    act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+                    act.setSortDirection(
+                      sortDirection === "asc" ? "desc" : "asc",
+                    )
                   }
-                  title={sortDirection === "asc" ? "Ascending" : "Descending"}
+                  title={sortDirection === "asc" ? t("issues.sort.ascending") : t("issues.sort.descending")}
                 >
                   {sortDirection === "asc" ? (
                     <ArrowUp className="size-3.5" />
@@ -678,7 +656,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
 
             <div className="px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
-                Card properties
+                {t("issues.cardProperties")}
               </span>
               <div className="mt-2 space-y-2">
                 {CARD_PROPERTY_OPTIONS.map((opt) => (
@@ -686,7 +664,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                     key={opt.key}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="text-sm">{opt.label}</span>
+                    <span className="text-sm">{t(`issues.card.${opt.key}`)}</span>
                     <Switch
                       size="sm"
                       checked={cardProperties[opt.key]}
@@ -699,7 +677,6 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
           </PopoverContent>
         </Popover>
 
-        {/* View toggle */}
         <DropdownMenu>
           <Tooltip>
             <DropdownMenuTrigger
@@ -718,19 +695,19 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               }
             />
             <TooltipContent side="bottom">
-              {viewMode === "board" ? "Board view" : "List view"}
+              {viewMode === "board" ? t("issues.view.boardTooltip") : t("issues.view.listTooltip")}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
             <DropdownMenuGroup>
-              <DropdownMenuLabel>View</DropdownMenuLabel>
+              <DropdownMenuLabel>{t("issues.view.group")}</DropdownMenuLabel>
               <DropdownMenuItem onClick={() => act.setViewMode("board")}>
                 <Columns3 />
-                Board
+                {t("issues.view.board")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => act.setViewMode("list")}>
                 <List />
-                List
+                {t("issues.view.list")}
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>

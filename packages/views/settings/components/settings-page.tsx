@@ -10,6 +10,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { useI18n } from "../../i18n";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -36,22 +37,23 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
+  const { t } = useI18n();
   const workspaceName = useCurrentWorkspace()?.name;
 
   return (
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
       {/* Left nav */}
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
-        <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
+        <h1 className="text-sm font-semibold mb-4 px-2">{t("settings.page.title")}</h1>
         <TabsList variant="line" className="flex-col items-stretch">
           {/* My Account group */}
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
-            My Account
+            {t("settings.group.account")}
           </span>
           {accountTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               <tab.icon className="h-4 w-4" />
-              {tab.label}
+              {t(`settings.tab.${tab.value}`)}
             </TabsTrigger>
           ))}
           {extraAccountTabs?.map((tab) => (
@@ -63,12 +65,12 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
           {/* Workspace group */}
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
-            {workspaceName ?? "Workspace"}
+            {workspaceName ?? t("settings.group.workspaceFallback")}
           </span>
           {workspaceTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               <tab.icon className="h-4 w-4" />
-              {tab.label}
+              {t(`settings.tab.${tab.value}`)}
             </TabsTrigger>
           ))}
         </TabsList>

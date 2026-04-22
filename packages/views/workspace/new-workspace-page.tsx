@@ -4,6 +4,7 @@ import { ArrowLeft, LogOut } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Workspace } from "@multica/core/types";
 import { useLogout } from "../auth";
+import { LocaleSwitcher, useI18n } from "../i18n";
 import { CreateWorkspaceForm } from "./create-workspace-form";
 
 /**
@@ -26,6 +27,7 @@ export function NewWorkspacePage({
   onSuccess: (workspace: Workspace) => void;
   onBack?: () => void;
 }) {
+  const { t } = useI18n();
   const logout = useLogout();
 
   return (
@@ -38,27 +40,30 @@ export function NewWorkspacePage({
           onClick={onBack}
         >
           <ArrowLeft />
-          Back
+          {t("workspace.back")}
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="absolute top-12 right-12 text-muted-foreground hover:text-destructive"
-        onClick={logout}
-      >
-        <LogOut />
-        Log out
-      </Button>
+      <div className="absolute top-12 right-12 flex items-center gap-2">
+        <LocaleSwitcher />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={logout}
+        >
+          <LogOut />
+          {t("workspace.logOut")}
+        </Button>
+      </div>
 
       <div className="flex flex-1 flex-col items-center justify-center">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-3xl font-semibold tracking-tight">
-              Welcome to Multica
+              {t("workspace.new.title")}
             </h1>
             <p className="mt-2 text-muted-foreground">
-              Create your workspace to get started.
+              {t("workspace.new.description")}
             </p>
           </div>
           <CreateWorkspaceForm onSuccess={onSuccess} />

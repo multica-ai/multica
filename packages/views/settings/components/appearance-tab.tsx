@@ -2,6 +2,7 @@
 
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
+import { useI18n } from "../../i18n";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
@@ -85,21 +86,23 @@ const themeOptions = [
 ];
 
 export function AppearanceTab() {
+  const { t } = useI18n();
   const { theme, setTheme } = useTheme();
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Theme</h2>
-        <div className="flex gap-6" role="radiogroup" aria-label="Theme">
+        <h2 className="text-sm font-semibold">{t("settings.appearance.title")}</h2>
+        <div className="flex gap-6" role="radiogroup" aria-label={t("settings.appearance.groupLabel")}>
           {themeOptions.map((opt) => {
             const active = theme === opt.value;
+            const label = t(`settings.appearance.option.${opt.value}`);
             return (
               <button
                 key={opt.value}
                 role="radio"
                 aria-checked={active}
-                aria-label={`Select ${opt.label} theme`}
+                aria-label={t("settings.appearance.selectTheme", { theme: label })}
                 onClick={() => setTheme(opt.value)}
                 className="group flex flex-col items-center gap-2"
               >
@@ -134,7 +137,7 @@ export function AppearanceTab() {
                       : "text-muted-foreground"
                   )}
                 >
-                  {opt.label}
+                  {label}
                 </span>
               </button>
             );

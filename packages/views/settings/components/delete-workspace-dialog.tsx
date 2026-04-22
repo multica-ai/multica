@@ -12,6 +12,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
+import { useI18n } from "../../i18n";
 
 /**
  * Typed-confirmation dialog for workspace deletion — GitHub's repo-delete
@@ -42,6 +43,7 @@ export function DeleteWorkspaceDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   const [typed, setTyped] = useState("");
   const matched = typed === workspaceName;
 
@@ -62,20 +64,15 @@ export function DeleteWorkspaceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete workspace</DialogTitle>
+          <DialogTitle>{t("settings.deleteDialog.title")}</DialogTitle>
           <DialogDescription>
-            This cannot be undone. All issues, agents, and data will be
-            permanently removed.
+            {t("settings.deleteDialog.description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
           <Label htmlFor="delete-workspace-confirm" className="text-xs">
-            To confirm, type{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-              {workspaceName}
-            </code>{" "}
-            below.
+            {t("settings.deleteDialog.label", { workspace: workspaceName })}
           </Label>
           <Input
             id="delete-workspace-confirm"
@@ -104,7 +101,7 @@ export function DeleteWorkspaceDialog({
             onClick={() => onOpenChange(false)}
             disabled={loading}
           >
-            Cancel
+            {t("settings.deleteDialog.cancel")}
           </Button>
           <Button
             type="button"
@@ -112,7 +109,7 @@ export function DeleteWorkspaceDialog({
             onClick={submit}
             disabled={!matched || loading}
           >
-            {loading ? "Deleting..." : "Delete workspace"}
+            {loading ? t("settings.deleteDialog.confirmDeleting") : t("settings.deleteDialog.confirmDelete")}
           </Button>
         </DialogFooter>
       </DialogContent>
