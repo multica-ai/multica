@@ -543,6 +543,52 @@ func TestLogoutClearsAuthCookies(t *testing.T) {
 	}
 }
 
+func TestLogoutThenBootstrapResumesTrustedOwner(t *testing.T) {
+	logoutResp, err := http.Post(testServer.URL+"/auth/logout", "application/json", nil)
+	if err != nil {
+		t.Fatalf("logout failed: %v", err)
+	}
+	if logoutResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(logoutResp.Body)
+		logoutResp.Body.Close()
+		t.Fatalf("logout: expected 200, got %d: %s", logoutResp.StatusCode, body)
+	}
+	logoutResp.Body.Close()
+
+	bootstrapResp, err := http.Post(testServer.URL+"/auth/bootstrap", "application/json", nil)
+	if err != nil {
+		t.Fatalf("bootstrap after logout failed: %v", err)
+	}
+	if bootstrapResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(bootstrapResp.Body)
+		bootstrapResp.Body.Close()
+		t.Fatalf("bootstrap after logout: expected 200, got %d: %s", bootstrapResp.StatusCode, body)
+	}
+
+	var payload struct {
+		Mode            string `json:"mode"`
+		OwnerResolution string `json:"owner_resolution"`
+		BootstrapState  string `json:"bootstrap_state"`
+		User            struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	readJSON(t, bootstrapResp, &payload)
+
+	if payload.Mode != "trusted_single_user" {
+		t.Fatalf("expected trusted_single_user mode, got %q", payload.Mode)
+	}
+	if payload.OwnerResolution != "resumed" {
+		t.Fatalf("expected owner_resolution resumed, got %q", payload.OwnerResolution)
+	}
+	if payload.BootstrapState != "ready" {
+		t.Fatalf("expected bootstrap_state ready, got %q", payload.BootstrapState)
+	}
+	if payload.User.Email != integrationTestEmail {
+		t.Fatalf("expected bootstrap user %q, got %q", integrationTestEmail, payload.User.Email)
+	}
+}
+
 func TestProtectedRoutesRequireAuth(t *testing.T) {
 	paths := []string{"/api/me", "/api/issues", "/api/agents", "/api/inbox", "/api/workspaces"}
 
