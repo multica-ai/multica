@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Server } from "lucide-react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { RuntimeList } from "./runtime-list";
@@ -35,6 +36,7 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
 
   const ownerParam = filter === "mine" ? "me" as const : undefined;
   const { data: runtimes = [], isLoading: fetching } = useQuery(runtimeListOptions(wsId, ownerParam));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_runtimes_layout",
@@ -53,6 +55,18 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
     ? selectedId
     : runtimes[0]?.id ?? "";
   const selected = runtimes.find((r) => r.id === effectiveSelectedId) ?? null;
+  const agentsByRuntimeId = useMemo(() => {
+    const next = new Map<string, typeof agents>();
+    for (const agent of agents) {
+      if (agent.archived_at) {
+        continue;
+      }
+      const items = next.get(agent.runtime_id) ?? [];
+      items.push(agent);
+      next.set(agent.runtime_id, items);
+    }
+    return next;
+  }, [agents]);
 
   if (isLoading || fetching) {
     return (
@@ -115,6 +129,7 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
             ownerFilter={ownerFilter}
             onOwnerFilterChange={setOwnerFilter}
             updatableIds={updatableIds}
+            agentsByRuntimeId={agentsByRuntimeId}
           />
         </ResizablePanel>
 
@@ -122,7 +137,11 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
 
         <ResizablePanel id="detail" minSize="50%">
           {selected ? (
-            <RuntimeDetail key={selected.id} runtime={selected} />
+            <RuntimeDetail
+              key={selected.id}
+              runtime={selected}
+              boundAgents={agentsByRuntimeId.get(selected.id) ?? []}
+            />
           ) : (
             <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
               <Server className="h-10 w-10 text-muted-foreground/30" />

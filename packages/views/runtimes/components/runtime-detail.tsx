@@ -4,11 +4,12 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   AlertDialog,
@@ -50,7 +51,13 @@ function getLaunchedBy(metadata: Record<string, unknown>): string | null {
   return null;
 }
 
-export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
+export function RuntimeDetail({
+  runtime,
+  boundAgents,
+}: {
+  runtime: AgentRuntime;
+  boundAgents: Agent[];
+}) {
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
   const launchedBy =
@@ -163,6 +170,25 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             />
           </div>
         )}
+
+        <div>
+          <h3 className="mb-3 text-xs font-medium text-muted-foreground">
+            Bound Agents
+          </h3>
+          {boundAgents.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {boundAgents.map((agent) => (
+                <Badge key={agent.id} variant="secondary" className="gap-1.5">
+                  {agent.name}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+              No active agents are attached to this runtime.
+            </div>
+          )}
+        </div>
 
         {/* Connection Test */}
         <div>
