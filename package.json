@@ -13,7 +13,7 @@
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add"
   },
-  "packageManager": "pnpm@10.28.2",
+  "packageManager": "pnpm@10.33.1",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",

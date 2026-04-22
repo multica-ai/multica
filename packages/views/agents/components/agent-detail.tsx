@@ -13,6 +13,8 @@ import {
   Settings,
   KeyRound,
   Terminal,
+  ChevronRight,
+  User,
 } from "lucide-react";
 import type { Agent, RuntimeDevice, MemberWithUser } from "@multica/core/types";
 import {
@@ -32,6 +34,8 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { statusConfig } from "../config";
+import { api } from "@multica/core/api";
+import { useQuery } from "@tanstack/react-query";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { TasksTab } from "./tabs/tasks-tab";
@@ -58,6 +62,7 @@ export function AgentDetail({
   agent,
   runtimes,
   members,
+  agents,
   currentUserId,
   onUpdate,
   onArchive,
@@ -66,6 +71,7 @@ export function AgentDetail({
   agent: Agent;
   runtimes: RuntimeDevice[];
   members: MemberWithUser[];
+  agents: Agent[];
   currentUserId: string | null;
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
@@ -76,6 +82,14 @@ export function AgentDetail({
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
   const isArchived = !!agent.archived_at;
+
+  const { data: chainData } = useQuery({
+    queryKey: ["agents", agent.id, "chain"],
+    queryFn: () => api.getAgentChain(agent.id),
+    enabled: !!agent.id && !agent.chain_of_command,
+  });
+
+  const chainOfCommand = agent.chain_of_command ?? chainData ?? [];
 
   return (
     <div className="flex h-full flex-col">
@@ -115,6 +129,20 @@ export function AgentDetail({
               {runtimeDevice?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")}
             </span>
           </div>
+          {chainOfCommand.length > 0 && (
+            <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+              <User className="h-2.5 w-2.5 shrink-0" />
+              <span className="shrink-0">Chain of command:</span>
+              {chainOfCommand.map((entry, idx) => (
+                <span key={entry.id} className="flex items-center gap-1">
+                  <span className="truncate">{entry.name}</span>
+                  {idx < chainOfCommand.length - 1 && (
+                    <ChevronRight className="h-2.5 w-2.5 shrink-0 text-muted-foreground/60" />
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         {!isArchived && (
           <DropdownMenu>
@@ -187,6 +215,7 @@ export function AgentDetail({
             agent={agent}
             runtimes={runtimes}
             members={members}
+            agents={agents}
             currentUserId={currentUserId}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />

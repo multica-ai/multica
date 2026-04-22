@@ -105,6 +105,12 @@ func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
+func ptrToUUID(s *string) pgtype.UUID               {
+	if s == nil || *s == "" {
+		return pgtype.UUID{}
+	}
+	return parseUUID(*s)
+}
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {

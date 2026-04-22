@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,8 @@ type AgentResponse struct {
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
 	OwnerID            *string           `json:"owner_id"`
+	ReportsTo          *string           `json:"reports_to"`
+	ChainOfCommand     []AgentChainItem  `json:"chain_of_command,omitempty"`
 	Skills             []SkillResponse   `json:"skills"`
 	CreatedAt          string            `json:"created_at"`
 	UpdatedAt          string            `json:"updated_at"`
@@ -97,6 +100,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
+		ReportsTo:          uuidToPtr(a.ReportsTo),
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
@@ -244,6 +248,25 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Build chain of command.
+	var chain []AgentChainItem
+	visited := make(map[string]bool)
+	cursor := uuidToString(agent.ReportsTo)
+	for cursor != "" && !visited[cursor] && len(chain) < 50 {
+		visited[cursor] = true
+		mgr, err := h.Queries.GetAgent(r.Context(), parseUUID(cursor))
+		if err != nil {
+			break
+		}
+		chain = append(chain, AgentChainItem{
+			ID:   uuidToString(mgr.ID),
+			Name: mgr.Name,
+			Role: "",
+		})
+		cursor = uuidToString(mgr.ReportsTo)
+	}
+	resp.ChainOfCommand = chain
+
 	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
 	userID := requestUserID(r)
 	if member, ok := ctxMember(r.Context()); ok {
@@ -269,6 +292,7 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	ReportsTo          *string           `json:"reports_to"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -351,6 +375,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
+	if req.ReportsTo != nil && *req.ReportsTo != "" {
+		if err := h.assertManagerExists(r.Context(), workspaceID, *req.ReportsTo); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid reports_to: manager not found in workspace")
+			return
+		}
+	}
+
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
@@ -367,6 +398,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ReportsTo:          ptrToUUID(req.ReportsTo),
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -407,11 +439,48 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+	ReportsTo          *string            `json:"reports_to"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
 // agent's custom environment variables. Only the agent owner or workspace
 // owner/admin may view them; for everyone else the field is redacted.
+// assertManagerExists verifies that the given agent ID exists in the same workspace.
+func (h *Handler) assertManagerExists(ctx context.Context, workspaceID, managerID string) error {
+	if managerID == "" {
+		return nil
+	}
+	_, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          parseUUID(managerID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	return err
+}
+
+// assertNoCycle checks that setting reportsTo on agentID does not create a cycle.
+func (h *Handler) assertNoCycle(ctx context.Context, agentID, reportsTo string) error {
+	if reportsTo == "" || reportsTo == agentID {
+		return errors.New("agent cannot report to itself")
+	}
+	visited := make(map[string]bool)
+	cursor := reportsTo
+	for cursor != "" && len(visited) < 50 {
+		if cursor == agentID {
+			return errors.New("reporting relationship would create cycle")
+		}
+		if visited[cursor] {
+			break
+		}
+		visited[cursor] = true
+		mgr, err := h.Queries.GetAgent(ctx, parseUUID(cursor))
+		if err != nil {
+			return errors.New("manager not found")
+		}
+		cursor = uuidToString(mgr.ReportsTo)
+	}
+	return nil
+}
+
 func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
 	if roleAllowed(memberRole, "owner", "admin") {
 		return true
@@ -532,6 +601,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
+	rawReportsTo, hasReportsTo := rawFields["reports_to"]
+	shouldClearReportsTo := hasReportsTo && bytes.Equal(bytes.TrimSpace(rawReportsTo), []byte("null"))
+	if hasReportsTo && !shouldClearReportsTo && req.ReportsTo != nil && *req.ReportsTo != "" {
+		if err := h.assertManagerExists(r.Context(), uuidToString(agent.WorkspaceID), *req.ReportsTo); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid reports_to: manager not found in workspace")
+			return
+		}
+		if err := h.assertNoCycle(r.Context(), id, *req.ReportsTo); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		params.ReportsTo = ptrToUUID(req.ReportsTo)
+	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
@@ -547,6 +629,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
+			return
+		}
+	}
+
+	// reports_to: null in the request means explicitly clear the field.
+	if shouldClearReportsTo {
+		agent, err = h.Queries.ClearAgentReportsTo(r.Context(), parseUUID(id))
+		if err != nil {
+			slog.Warn("clear agent reports_to failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear reports_to: "+err.Error())
 			return
 		}
 	}
@@ -645,4 +737,85 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+type AgentTreeNode struct {
+	AgentResponse
+	Role    string          `json:"role"`
+	Reports []AgentTreeNode `json:"reports"`
+}
+
+func (h *Handler) GetAgentTree(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	agents, err := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+
+	byManager := make(map[string][]db.Agent)
+	for _, a := range agents {
+		key := uuidToString(a.ReportsTo)
+		if key == "" {
+			key = "root"
+		}
+		byManager[key] = append(byManager[key], a)
+	}
+
+	var build func(managerID string) []AgentTreeNode
+	build = func(managerID string) []AgentTreeNode {
+		members := byManager[managerID]
+		if len(members) == 0 {
+			return nil
+		}
+		result := make([]AgentTreeNode, len(members))
+		for i, m := range members {
+			resp := agentToResponse(m)
+			result[i] = AgentTreeNode{
+				AgentResponse: resp,
+				Role:          "",
+				Reports:       build(uuidToString(m.ID)),
+			}
+		}
+		return result
+	}
+
+	writeJSON(w, http.StatusOK, build("root"))
+}
+
+type AgentChainItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+func (h *Handler) GetAgentChain(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	var chain []AgentChainItem
+	visited := make(map[string]bool)
+	cursor := uuidToString(agent.ReportsTo)
+	for cursor != "" && !visited[cursor] && len(chain) < 50 {
+		visited[cursor] = true
+		mgr, err := h.Queries.GetAgent(r.Context(), parseUUID(cursor))
+		if err != nil {
+			break
+		}
+		chain = append(chain, AgentChainItem{
+			ID:   uuidToString(mgr.ID),
+			Name: mgr.Name,
+			Role: "",
+		})
+		cursor = uuidToString(mgr.ReportsTo)
+	}
+
+	writeJSON(w, http.StatusOK, chain)
 }

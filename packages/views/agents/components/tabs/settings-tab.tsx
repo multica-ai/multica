@@ -24,6 +24,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { ProviderLogo } from "../../../runtimes/components/provider-logo";
 import { ModelDropdown } from "../model-dropdown";
+import { ReportsToPicker } from "../reports-to-picker";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -32,20 +33,24 @@ export function SettingsTab({
   runtimes,
   members,
   currentUserId,
+  agents,
   onSave,
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
   members: MemberWithUser[];
   currentUserId: string | null;
+  agents: Agent[];
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
+  const [title, setTitle] = useState(agent.title ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
   const [model, setModel] = useState(agent.model ?? "");
+  const [reportsTo, setReportsTo] = useState<string | null>(agent.reports_to);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
   const [saving, setSaving] = useState(false);
@@ -90,10 +95,12 @@ export function SettingsTab({
   const dirty =
     name !== agent.name ||
     description !== (agent.description ?? "") ||
+    title !== (agent.title ?? "") ||
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
     selectedRuntimeId !== agent.runtime_id ||
-    model !== (agent.model ?? "");
+    model !== (agent.model ?? "") ||
+    reportsTo !== agent.reports_to;
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -106,10 +113,12 @@ export function SettingsTab({
       await onSave({
         name: name.trim(),
         description,
+        title: title.trim() || null,
         visibility,
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
         model,
+        reports_to: reportsTo,
       });
       toast.success("Settings saved");
     } catch {
@@ -169,6 +178,28 @@ export function SettingsTab({
           placeholder="What does this agent do?"
           className="mt-1"
         />
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Title</Label>
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="e.g. Senior Frontend Engineer"
+          className="mt-1"
+        />
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Reports To</Label>
+        <div className="mt-1">
+          <ReportsToPicker
+            agents={agents}
+            value={reportsTo}
+            onChange={setReportsTo}
+            excludeAgentIds={[agent.id]}
+          />
+        </div>
       </div>
 
       <div>

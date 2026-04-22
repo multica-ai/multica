@@ -61,6 +61,9 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  reports_to: string | null;
+  title: string | null;
+  chain_of_command: Array<{ id: string; name: string; role: string }> | null;
 }
 
 export interface CreateAgentRequest {
@@ -75,6 +78,8 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  reports_to?: string | null;
+  title?: string | null;
 }
 
 export interface UpdateAgentRequest {
@@ -90,9 +95,23 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  reports_to?: string | null;
+  title?: string | null;
 }
 
-// Skills
+export interface OrgNode {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  reports: OrgNode[];
+}
+
+export interface AgentHierarchyEntry {
+  id: string;
+  name: string;
+  role: string;
+}
 
 export interface Skill {
   id: string;

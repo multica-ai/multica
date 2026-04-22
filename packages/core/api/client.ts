@@ -64,6 +64,7 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  OrgNode,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -601,6 +602,14 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
     });
+  }
+
+  async getAgentOrg(workspaceId: string): Promise<OrgNode[]> {
+    return this.fetch(`/api/agents/tree?workspace_id=${encodeURIComponent(workspaceId)}`);
+  }
+
+  async getAgentChain(agentId: string): Promise<Array<{ id: string; name: string; role: string }>> {
+    return this.fetch(`/api/agents/${encodeURIComponent(agentId)}/chain`);
   }
 
   // Inbox
