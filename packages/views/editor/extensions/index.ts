@@ -48,6 +48,13 @@ import { BlockMathExtension, InlineMathExtension } from "./math";
 
 const lowlight = createLowlight(common);
 
+// Nested ordered-list items need ≥3 spaces of indent to survive CommonMark
+// parsing (matching the "1. " marker width). The default of 2 makes
+// react-markdown/remark-gfm in ReadonlyContent flatten them to a single level.
+export const MarkdownExtension = Markdown.configure({
+  indentation: { style: "space", size: 3 },
+});
+
 const LinkEditable = Link.extend({ inclusive: false }).configure({
   openOnClick: false,
   autolink: true,
@@ -119,7 +126,7 @@ export function createEditorExtensions(
     TableCell,
     BlockMathExtension,
     InlineMathExtension,
-    Markdown,
+    MarkdownExtension,
     FileCardExtension,
     BaseMentionExtension.configure({
       HTMLAttributes: { class: "mention" },
