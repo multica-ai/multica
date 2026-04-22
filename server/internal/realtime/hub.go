@@ -31,10 +31,12 @@ type PATResolver interface {
 	ResolveToken(ctx context.Context, token string) (userID string, ok bool)
 }
 
-var allowedWSOrigins atomic.Value // holds []string
+var allowedWSOrigins atomic.Value // holds []string, synced from router HTTP CORS config
+var wsExtraOrigins   atomic.Value // holds []string, WS-only patterns (never overridden by router)
 
 func init() {
 	allowedWSOrigins.Store(loadAllowedOrigins())
+	wsExtraOrigins.Store(loadWSExtraOrigins())
 }
 
 func loadAllowedOrigins() []string {
@@ -64,9 +66,40 @@ func loadAllowedOrigins() []string {
 	return origins
 }
 
+// loadWSExtraOrigins reads WS_ALLOWED_ORIGINS, supporting wildcards (*, *.domain.com).
+// These patterns are never overridden by the router's HTTP CORS config.
+func loadWSExtraOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("WS_ALLOWED_ORIGINS"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if o := strings.TrimSpace(part); o != "" {
+			origins = append(origins, o)
+		}
+	}
+	return origins
+}
+
 // SetAllowedOrigins overrides the WebSocket origin whitelist (called from router setup).
 func SetAllowedOrigins(origins []string) {
 	allowedWSOrigins.Store(origins)
+}
+
+// matchesOriginPattern checks origin against a list of patterns.
+// Supports exact match, "*" (allow all), and "*.domain.com" (subdomain wildcard).
+func matchesOriginPattern(origin string, patterns []string) bool {
+	for _, p := range patterns {
+		if p == "*" || origin == p {
+			return true
+		}
+		if strings.HasPrefix(p, "*.") && strings.HasSuffix(origin, p[1:]) {
+			return true
+		}
+	}
+	return false
 }
 
 func checkOrigin(r *http.Request) bool {
@@ -74,11 +107,11 @@ func checkOrigin(r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
-	origins := allowedWSOrigins.Load().([]string)
-	for _, allowed := range origins {
-		if origin == allowed {
-			return true
-		}
+	if matchesOriginPattern(origin, allowedWSOrigins.Load().([]string)) {
+		return true
+	}
+	if matchesOriginPattern(origin, wsExtraOrigins.Load().([]string)) {
+		return true
 	}
 	slog.Warn("ws: rejected origin", "origin", origin)
 	return false
