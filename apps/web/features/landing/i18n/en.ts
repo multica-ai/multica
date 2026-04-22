@@ -282,6 +282,55 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "Gemini 3, Multi-Arch Release Builds & Download Fallback",
+        changes: [],
+        features: [
+          "Gemini 3 and new CLI aliases now selectable in the Gemini runtime model list",
+          "`/download` page falls back to the previous release within a 1h freshness window, so new visitors never hit a half-published release",
+        ],
+        improvements: [
+          "Docker release images are now built natively per-arch and stitched into a single multi-arch manifest — smaller, faster, no QEMU",
+          "Tightened `.vercelignore` to keep web deploys lean",
+        ],
+        fixes: [
+          "Chat focus button is disabled on pages without an anchor instead of silently doing nothing",
+          "Added `.vercelignore` so irrelevant packages stop shipping with the web deploy",
+        ],
+      },
+      {
+        version: "0.2.14",
+        date: "2026-04-22",
+        title: "Local Skills, LaTeX, Focus Mode & Orphan-Task Recovery",
+        changes: [],
+        features: [
+          "Import runtime local Skills into the workspace — a local Skill is now a first-class workspace artifact with a real file count",
+          "Orphan-task recovery — abandoned agent runs auto-retry, and you can manually rerun a task when recovery isn't enough",
+          "LaTeX rendering in markdown — equations display correctly in issues, comments and chat",
+          "Chat Focus mode — share the page you are currently on as context for the conversation",
+          "Unified Autopilot create/edit dialog, now matching the issue-modal layout",
+          "Dedicated `/download` landing page, plus Desktop promotion across the landing, login and onboarding flows",
+          "Release notes surfaced from the sidebar menu with an in-app \"What's new\" entry",
+          "Multi-select tool filter on the agent execution transcript dialog",
+          "Clients identified via `X-Client-Platform` / `-Version` / `-OS` headers for better telemetry and platform-specific handling",
+          "Public GHCR deployment flow for self-hosters — `docker compose pull` instead of building locally",
+          "Onboarding-funnel analytics and Desktop `$pageview` events with a `client_type` super-property",
+          "`make help` renders awk-style categorised help",
+        ],
+        improvements: [
+          "Sub-issue `status_changed` events no longer spam parent-issue subscribers — only meaningful transitions bubble up",
+          "Reserved-slug list expanded (including `homepage`) so new slugs can't collide with product routes",
+          "Pin sidebar derives fields client-side — fewer round-trips, snappier reorders",
+        ],
+        fixes: [
+          "Add-Skill UX unified; every local Skill is now surfaced with its real file count",
+          "Onboarding pin sync, welcome layout and runtime bootstrap state issues fixed",
+          "`install.ps1` OS architecture detection hardened for a wider range of Windows setups",
+          "`db-reset` make target now carries a help description",
+        ],
+      },
+      {
         version: "0.2.11",
         date: "2026-04-21",
         title: "Desktop Cross-Platform Packaging, CLI Self-Update & Board Pagination",

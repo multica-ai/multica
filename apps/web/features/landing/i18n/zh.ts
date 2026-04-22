@@ -282,6 +282,55 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "Gemini 3、多架构镜像原生构建与下载回退",
+        changes: [],
+        features: [
+          "Gemini Runtime 的模型列表新增 Gemini 3 及若干 CLI 别名",
+          "`/download` 页面在 1 小时新鲜度窗口内可回退到上一版本，避免访问者撞上半发布状态",
+        ],
+        improvements: [
+          "Docker 发布镜像改为按架构原生构建，再合并为多架构 manifest——更小、更快、免 QEMU",
+          "收紧 `.vercelignore`，让 web 部署包更精简",
+        ],
+        fixes: [
+          "没有锚点的页面上,Chat focus 按钮改为禁用,不再点击无响应",
+          "为 web 部署新增 `.vercelignore`,避免无关包被一起发布",
+        ],
+      },
+      {
+        version: "0.2.14",
+        date: "2026-04-22",
+        title: "本地 Skills 导入、LaTeX、Focus 模式与孤儿任务自恢复",
+        changes: [],
+        features: [
+          "支持将 Runtime 本地 Skills 导入工作区——本地 Skill 成为一等工作区资产,列表会显示真实文件数",
+          "孤儿任务自动恢复——意外中断的 Agent 执行会自动重试,必要时也可手动重跑",
+          "Markdown 支持 LaTeX 渲染——Issue、评论和 Chat 中的公式都能正确显示",
+          "Chat Focus 模式——可将当前所在页面作为上下文分享给对话",
+          "Autopilot 创建/编辑统一为同一个对话框,沿用 Issue modal 的布局",
+          "新增 `/download` 独立着陆页,并在首页、登录与 Onboarding 中增加桌面端推广入口",
+          "侧边栏菜单暴露更新日志入口,并在应用内提供「What's new」",
+          "Agent 执行 Transcript 对话框新增工具多选过滤",
+          "通过 `X-Client-Platform` / `-Version` / `-OS` 请求头识别客户端,便于分端埋点与差异化处理",
+          "自部署新增公开 GHCR 部署流——`docker compose pull` 即可,不再需要本地构建",
+          "新增 Onboarding 漏斗埋点,桌面端 `$pageview` 事件带上 `client_type` 超级属性",
+          "`make help` 改为 awk 风格的分组帮助输出",
+        ],
+        improvements: [
+          "子 Issue 的 `status_changed` 事件不再向父 Issue 的订阅者刷屏,仅有意义的状态变化才会冒泡",
+          "扩充保留 slug 列表(包含 `homepage`),新工作区 slug 不会再和产品路由冲突",
+          "侧边栏 Pin 字段改为在客户端派生——减少往返,排序更跟手",
+        ],
+        fixes: [
+          "统一 Add Skill 的 UX,所有本地 Skill 都会按真实文件数正确展示",
+          "修复 Onboarding 中 Pin 同步、欢迎页布局以及 Runtime bootstrap 状态等问题",
+          "`install.ps1` 的系统架构探测更稳健,覆盖更多 Windows 环境",
+          "`db-reset` make target 现在带有帮助说明",
+        ],
+      },
+      {
         version: "0.2.11",
         date: "2026-04-21",
         title: "桌面应用跨平台打包、CLI 自更新与看板分页",
