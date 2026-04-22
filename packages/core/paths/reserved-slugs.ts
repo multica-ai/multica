@@ -31,6 +31,9 @@ export const RESERVED_SLUGS = new Set([
   "multica", // brand name — prevent impersonation workspaces
   "www",     // hostname confusable; never a legitimate workspace slug
   "new",     // ambiguous verb-as-slug; reserved for future global create routes
+  "home",     // likely-future marketing/landing entry
+  "homepage", // existing /homepage landing variant in apps/web
+  "dashboard", // standard SaaS entry; likely-future global route
   "help",
   "about",
   "pricing",
@@ -48,6 +51,14 @@ export const RESERVED_SLUGS = new Set([
   "press",
   "download",
 
+  // Account / billing (likely-future global routes in the avatar menu).
+  "profile",
+  "account",
+  "billing",
+  "notifications",
+  "search",
+  "members",
+
   // Dashboard / workspace route segments. Reserving the segment name
   // prevents `/{slug}/{view}` from being visually ambiguous (e.g. a
   // workspace named "issues" makes `/issues/abc` mean two things).
@@ -62,6 +73,25 @@ export const RESERVED_SLUGS = new Set([
   "settings",
   "workspaces", // global `/workspaces/new` workspace creation page
   "teams",      // reserved for future team management routes
+
+  // API / integration prefixes. `api` above already covers /api/*; these
+  // guard against future top-level API alias routes (e.g. /v1, /graphql)
+  // and against accidental workspace slugs that read like API identifiers.
+  "v1",
+  "v2",
+  "graphql",
+  "webhooks",
+  "sdk",
+  "tokens",
+  "cli",
+
+  // Backend ops / observability. `/health` and `/ws` exist on the backend
+  // host; reserving them on the workspace slug space prevents naming
+  // confusion if/when these paths are ever proxied through the web origin.
+  "health",
+  "ws",
+  "metrics",
+  "ping",
 
   // RFC 2142 — privileged email mailboxes. Allowing user workspaces with
   // these slugs would let attackers spoof system messaging.
@@ -82,7 +112,12 @@ export const RESERVED_SLUGS = new Set([
   "files",
   "uploads",
 
-  // Next.js / web standards (framework-mandated)
+  // Next.js / web standards. These entries contain characters (dots,
+  // underscores) that today's slug regex `^[a-z0-9]+(?:-[a-z0-9]+)*$`
+  // already rejects at the format-validation step — so `isReservedSlug`
+  // never actually matches them. They are kept as defense-in-depth so
+  // that if the slug regex is ever relaxed (e.g. to support dotted
+  // corporate slugs like `acme.io`), these system paths stay protected.
   "_next",
   "favicon.ico",
   "robots.txt",

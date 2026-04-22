@@ -23,9 +23,16 @@ type RuntimeFilter = "mine" | "all";
 interface RuntimesPageProps {
   /** Desktop-only slot rendered above the runtime list (e.g. local daemon card) */
   topSlot?: React.ReactNode;
+  /**
+   * Desktop-only signal: the bundled daemon is still booting / hasn't
+   * registered with the server yet. Forwarded to RuntimeList so its
+   * empty state shows a "starting" indicator instead of the static
+   * "register a runtime" hint during the boot window. Web omits this.
+   */
+  bootstrapping?: boolean;
 }
 
-export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
+export default function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -115,6 +122,7 @@ export default function RuntimesPage({ topSlot }: RuntimesPageProps = {}) {
             ownerFilter={ownerFilter}
             onOwnerFilterChange={setOwnerFilter}
             updatableIds={updatableIds}
+            bootstrapping={bootstrapping}
           />
         </ResizablePanel>
 

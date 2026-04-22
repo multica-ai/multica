@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
+    "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",

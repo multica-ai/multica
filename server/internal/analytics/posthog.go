@@ -166,6 +166,9 @@ func (c *PostHogClient) send(batch []Event) {
 		if len(e.SetOnce) > 0 {
 			props["$set_once"] = e.SetOnce
 		}
+		if len(e.Set) > 0 {
+			props["$set"] = e.Set
+		}
 		items = append(items, captureItem{
 			Event:      e.Name,
 			DistinctID: e.DistinctID,

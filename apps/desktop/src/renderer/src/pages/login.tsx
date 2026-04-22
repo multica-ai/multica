@@ -1,4 +1,5 @@
 import { ArrowUpRight, LifeBuoy } from "lucide-react";
+import { DragStrip } from "@multica/views/platform";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -20,11 +21,7 @@ export function DesktopLoginPage() {
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      {/* Traffic light inset */}
-      <div
-        className="h-[38px] shrink-0"
-        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-      />
+      <DragStrip />
       <div className="flex flex-1 items-center justify-center px-6 pb-10">
         <Card className="w-full max-w-md">
           <CardHeader className="items-center text-center">

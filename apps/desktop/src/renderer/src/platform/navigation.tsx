@@ -62,6 +62,13 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
     }
     return true;
   }
+  if (path === "/onboarding") {
+    overlay.open({ type: "onboarding" });
+    if (router && router.state.location.pathname !== "/") {
+      router.navigate("/", { replace: true });
+    }
+    return true;
+  }
   if (path.startsWith("/invite/")) {
     let id = "";
     try {

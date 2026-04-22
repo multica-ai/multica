@@ -24,6 +24,7 @@ export interface AuthState {
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
   setUser: (user: User) => void;
+  refreshMe: () => Promise<void>;
 }
 
 export function createAuthStore(options: AuthStoreOptions) {
@@ -144,6 +145,11 @@ export function createAuthStore(options: AuthStoreOptions) {
     },
 
     setUser: (user: User) => {
+      set({ user });
+    },
+
+    refreshMe: async () => {
+      const user = await api.getMe();
       set({ user });
     },
   }));

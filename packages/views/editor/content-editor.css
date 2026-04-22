@@ -1,3 +1,5 @@
+@import "katex/dist/katex.min.css";
+
 /*
  * ContentEditor typography — ProseMirror styles using shadcn design tokens.
  *
@@ -121,6 +123,31 @@
 
 .rich-text-editor li > p + p {
   margin-top: 0.25rem;
+}
+
+.rich-text-editor .math-node {
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.rich-text-editor .math-node.inline {
+  align-items: center;
+}
+
+.rich-text-editor .math-node.block {
+  display: block;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.rich-text-editor .math-node.block .katex-display {
+  margin: 0;
+}
+
+.rich-text-editor .math-node .katex {
+  max-width: 100%;
 }
 
 /* Nested lists — bullet style progression and tighter spacing */
@@ -504,5 +531,4 @@
   max-width: min(360px, calc(100vw - 2rem));
   white-space: nowrap;
 }
-
 

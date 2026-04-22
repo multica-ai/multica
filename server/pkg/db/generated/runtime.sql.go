@@ -78,32 +78,51 @@ func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds f
 
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'runtime went offline'
+SET status = 'failed', completed_at = now(), error = 'runtime went offline',
+    failure_reason = 'runtime_offline'
 WHERE status IN ('dispatched', 'running')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING id, agent_id, issue_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at
 `
-
-type FailTasksForOfflineRuntimesRow struct {
-	ID      pgtype.UUID `json:"id"`
-	AgentID pgtype.UUID `json:"agent_id"`
-	IssueID pgtype.UUID `json:"issue_id"`
-}
 
 // Marks dispatched/running tasks as failed when their runtime is offline.
 // This cleans up orphaned tasks after a daemon crash or network partition.
-func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]FailTasksForOfflineRuntimesRow, error) {
+func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []FailTasksForOfflineRuntimesRow{}
+	items := []AgentTaskQueue{}
 	for rows.Next() {
-		var i FailTasksForOfflineRuntimesRow
-		if err := rows.Scan(&i.ID, &i.AgentID, &i.IssueID); err != nil {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.LastHeartbeatAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

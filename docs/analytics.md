@@ -74,6 +74,13 @@ handler → analytics.Client.Capture(Event)   ← non-blocking, returns immediat
   email. Full email is stored once in person properties via `$set_once` so
   it's available for individual debugging but not broadcast with every
   event.
+- **Person properties (`$set`)** — use for mutable cohort signals
+  (role, use_case, team_size, platform_preference) that a user can
+  legitimately change during onboarding. `Event.Set` on the backend
+  maps to `$set`; the frontend helper is
+  `setPersonProperties()` in `@multica/core/analytics`. Use
+  `$set_once` only for values that must never be overwritten (email,
+  initial attribution, first-completion timestamp).
 
 ## Event contract
 
@@ -181,6 +188,103 @@ accepted and the member row is inserted in the same transaction.
 `distinct_id` is the invitee's user id — this is the event that closes the
 expansion funnel.
 
+### `onboarding_questionnaire_submitted`
+
+Fires on the first PatchOnboarding that transitions the user's
+questionnaire JSONB from "at least one slot empty" to "all three
+filled" (team_size, role, use_case). Revisions past that point don't
+re-emit — the funnel counts users, not edits.
+
+| Property | Type | Description |
+|---|---|---|
+| `team_size` | string | `solo` / `team` / `other`. |
+| `role` | string | `developer` / `product_lead` / `writer` / `founder` / `other`. |
+| `use_case` | string | `coding` / `planning` / `writing_research` / `explore` / `other`. |
+| `team_size_has_other` | bool | `true` when the user filled the Q1 free-text escape. |
+| `role_has_other` | bool | Ditto Q2. |
+| `use_case_has_other` | bool | Ditto Q3. |
+
+Person properties set with `$set` (not once — users can go back and
+change answers before submitting again):
+
+| Property | Type | Description |
+|---|---|---|
+| `team_size` | string | Mirrors the event property for cohort queries. |
+| `role` | string | Same. |
+| `use_case` | string | Same. |
+
+`distinct_id` is the user's id. No workspace_id — the questionnaire is
+per-user, not per-workspace.
+
+### `agent_created`
+
+Fires on every successful `POST /api/workspaces/:id/agents`. Not
+onboarding-specific — the `is_first_agent_in_workspace` property
+isolates the Step 4 signal from later agent additions.
+
+| Property | Type | Description |
+|---|---|---|
+| `agent_id` | string (UUID) | |
+| `provider` | string | Runtime provider the agent is bound to (`claude`, `codex`, etc). |
+| `template` | string | Template slug used to seed the agent (`coding` / `planning` / `writing` / `assistant`). Empty when the caller didn't come from a template picker. |
+| `is_first_agent_in_workspace` | bool | `true` when the workspace had zero agents before this insert. |
+
+`distinct_id` is the authenticated owner's user id.
+
+### `onboarding_completed`
+
+Fires from CompleteOnboarding on the first call that actually flips
+`user.onboarded_at` from NULL. Retries are idempotent server-side but
+deliberately do NOT re-emit, so the funnel counts first-completions
+only. The client sends `completion_path` in the POST body to label
+which exit the user took.
+
+| Property | Type | Description |
+|---|---|---|
+| `completion_path` | string | One of `full` / `runtime_skipped` / `cloud_waitlist` / `skip_existing` / `unknown`. See below. |
+| `joined_cloud_waitlist` | bool | Derived from `user.cloud_waitlist_email`. Orthogonal to `completion_path` — a user may submit the waitlist form and still pick CLI. |
+
+Person properties set with `$set_once`:
+
+| Property | Type | Description |
+|---|---|---|
+| `onboarded_at` | string (RFC3339) | Timestamp the first completion landed. Enables cohort queries like "users onboarded before X" directly from person_properties. |
+
+`completion_path` values:
+
+- `full` — Reached Step 5 (first_issue) with a runtime connected.
+- `runtime_skipped` — Completed without connecting a runtime (user hit Skip in Step 3).
+- `cloud_waitlist` — Submitted the cloud waitlist form and skipped Step 3.
+- `skip_existing` — "I've done this before" from Welcome. The user already had a workspace.
+- `unknown` — Legacy fallback when the client didn't send a path. Should stay near zero after rollout.
+
+### `cloud_waitlist_joined`
+
+Fires from JoinCloudWaitlist whenever a user submits the Step 3 cloud
+waitlist form. Not a completion signal — it's orthogonal to the main
+funnel and used to size hosted-runtime interest.
+
+| Property | Type | Description |
+|---|---|---|
+| `has_reason` | bool | Presence flag for the free-text reason field. The free text stays in the DB; we don't broadcast it. |
+
+`distinct_id` is the user's id.
+
+### `starter_content_decided`
+
+Fires on the atomic NULL → terminal state transition in both
+ImportStarterContent and DismissStarterContent. The `branch` property
+mirrors what ImportStarterContent would emit for the same workspace,
+so import-vs-dismiss rates split cleanly by branch.
+
+| Property | Type | Description |
+|---|---|---|
+| `decision` | string | `imported` or `dismissed`. |
+| `branch` | string | `agent_guided` (workspace had ≥1 agent at decision time) or `self_serve` (no agents). |
+
+`distinct_id` is the user's id; `workspace_id` is attached from the
+request payload.
+
 ### Frontend-only events
 
 - `$pageview` — fired by `apps/web/components/pageview-tracker.tsx` on
@@ -188,6 +292,57 @@ expansion funnel.
   mounts once under `WebProviders` and drives the acquisition funnel's
   `/ → signup` step. posthog-js's automatic pageview capture is
   disabled in `initAnalytics` so we own the event shape.
+- `onboarding_runtime_path_selected` — fired from
+  `packages/views/onboarding/steps/step-platform-fork.tsx` when the web
+  user clicks one of the three Step 3 fork cards (before any server
+  call happens, so it's frontend-only). Properties: `path`
+  (`download_desktop` / `cli` / `cloud_waitlist`), `source` (`step3`;
+  literal today but reserved for future surfaces reusing this event),
+  `is_mac`. Also writes `platform_preference` (`web` / `desktop`) to
+  person properties so every subsequent event on the user can be
+  broken down by chosen platform. **Note**: semantic "download
+  intent" is now better served by `download_intent_expressed` below —
+  `path: "download_desktop"` signals Step 3 path choice specifically,
+  not actual download start.
+
+- `download_intent_expressed` — fired whenever a user clicks a CTA
+  that points at the `/download` page. Surfaces five sources across
+  the funnel, letting the top-of-funnel entry be split cleanly.
+  Wrapper lives in `packages/core/analytics/download.ts`
+  (`captureDownloadIntent`). Properties:
+  - `source`: `landing_hero` / `landing_footer` / `login` / `welcome`
+    / `step3`
+  Also writes `platform_preference: "desktop"` to person properties.
+
+- `download_page_viewed` — fired once per `/download` mount after OS
+  detect resolves (`apps/web/app/(landing)/download/download-client.tsx`).
+  Properties:
+  - `detected_os`: `mac` / `windows` / `linux` / `unknown`
+  - `detected_arch`: `arm64` / `x64` / `unknown`
+  - `detect_confident`: `true` when detect used
+    `userAgentData.getHighEntropyValues` (Chromium); `false` when it
+    fell back to the UA string (Safari on Mac always lands here —
+    lets us isolate the arm64-default-for-Intel risk cohort).
+  - `version_available`: `false` when the GitHub API fetch failed
+    and the page is in the "Version unavailable" degraded state.
+  Also writes `first_detected_os` / `first_detected_arch` via
+  `$set_once` so every downstream event gains a platform dimension
+  without re-emitting.
+
+- `download_initiated` — fired when the user clicks a specific
+  installer link on `/download`. Both the hero CTA and the All
+  Platforms matrix rows emit this; split by `primary_cta`.
+  Properties:
+  - `platform`: `mac` / `windows` / `linux`
+  - `arch`: `arm64` / `x64`
+  - `format`: `dmg` / `zip` / `exe` / `appimage` / `deb` / `rpm`
+  - `version`: release tag (e.g. `v0.2.13`) — correlates adoption
+    with release cadence.
+  - `primary_cta`: `true` for the hero-recommended installer, `false`
+    for a manual pick from the All Platforms matrix.
+  - `matched_detect`: `true` when the chosen platform+arch matches
+    what the page detected. `false` lets us quantify detect misses
+    from the single event (no cross-join needed).
 - Attribution is NOT a separate event; UTM + referrer origin are written
   to the `multica_signup_source` cookie on the first anonymous pageview
   and read by the backend's `signup` emission. The cookie carries a JSON

@@ -149,7 +149,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				closeStdin()
 				sessionID = msg.SessionID

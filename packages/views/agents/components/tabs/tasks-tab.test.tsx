@@ -169,4 +169,37 @@ describe("TasksTab", () => {
 
     expect(link?.getAttribute("href")).toBe("/test/issues/12345678-fallback");
   });
+
+  it("renders tasks with empty issue_id as inert rows and does not fetch issue detail", async () => {
+    // Tasks persisted with NULL issue_id — autopilot run_only runs and
+    // chat-spawned tasks — arrive here with issue_id === "". The tab used
+    // to feed that empty id into `/api/issues/`, which crashed the whole
+    // page after the list-cache paginate refactor (#1422). It must now:
+    //   - skip the detail fetch entirely,
+    //   - render a neutral label instead of an "Issue ..." stub, and
+    //   - NOT wrap the row in an anchor.
+    renderTasksTab(
+      [
+        {
+          id: "task-no-issue",
+          agent_id: "agent-1",
+          runtime_id: "runtime-1",
+          issue_id: "",
+          status: "completed",
+          priority: 1,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: "2026-04-16T01:00:00Z",
+          result: null,
+          error: null,
+          created_at: "2026-04-16T00:00:00Z",
+        },
+      ],
+      [],
+    );
+
+    const label = await screen.findByText("Task without linked issue");
+    expect(label.closest("a")).toBeNull();
+    expect(mockGetIssue).not.toHaveBeenCalled();
+  });
 });

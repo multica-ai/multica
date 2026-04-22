@@ -17,7 +17,7 @@ import {
 } from "./slug";
 
 export interface CreateWorkspaceFormProps {
-  onSuccess: (workspace: Workspace) => void;
+  onSuccess: (workspace: Workspace) => void | Promise<void>;
 }
 
 export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {

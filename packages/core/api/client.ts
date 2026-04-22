@@ -38,6 +38,9 @@ import type {
   RuntimePing,
   RuntimeUpdate,
   RuntimeModelListRequest,
+  RuntimeLocalSkillListRequest,
+  CreateRuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillImportRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -67,13 +70,29 @@ import type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "../types";
+import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 
+/** Identifies the calling client to the server.
+ *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
+ *  X-Client-OS so the backend can log, gate, or split metrics by client.
+ *  See server/internal/middleware/client.go for the receiving end. */
+export interface ApiClientIdentity {
+  /** Logical client kind. Server expects: "web" | "desktop" | "cli" | "daemon". */
+  platform?: string;
+  /** Client/app version string (e.g. "0.1.0", git tag, commit). */
+  version?: string;
+  /** Operating system the client is running on: "macos" | "windows" | "linux". */
+  os?: string;
+}
+
 export interface ApiClientOptions {
   logger?: Logger;
   onUnauthorized?: () => void;
+  /** Identifies the client to the server. Sent as X-Client-* headers. */
+  identity?: ApiClientIdentity;
 }
 
 export interface LoginResponse {
@@ -81,13 +100,50 @@ export interface LoginResponse {
   user: User;
 }
 
-export interface BootstrapResponse {
-  mode: string;
-  owner_resolution: string;
-  bootstrap_state: string;
-  token?: string;
+// --- Starter content (post-onboarding import) -----------------------------
+// Shape mirrors the Go request/response in handler/onboarding.go.
+//
+// The client sends both branches of sub-issues and an unbound welcome
+// issue template (title + description, no `agent_id`). The SERVER picks
+// the branch by inspecting the workspace's agent list inside the
+// import transaction. This removes the client as a trusted decider —
+// even if the client has a stale agent cache or lies, the server uses
+// the DB as source of truth.
+
+export interface ImportStarterIssuePayload {
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  /** Server uses `user_id` (per app-wide AssigneePicker convention)
+   *  as assignee when true. No member_id is threaded through. */
+  assign_to_self: boolean;
+}
+
+export interface ImportStarterWelcomeIssueTemplate {
+  title: string;
+  description: string;
+  /** Defaults to "high" on server when empty. */
+  priority: string;
+}
+
+export interface ImportStarterContentPayload {
+  workspace_id: string;
+  project: { title: string; description: string; icon: string };
+  /** Always sent. Server creates it only when an agent exists in the
+   *  workspace; ignored otherwise. Agent id is picked by the server. */
+  welcome_issue_template: ImportStarterWelcomeIssueTemplate;
+  /** Used when the workspace has at least one agent. */
+  agent_guided_sub_issues: ImportStarterIssuePayload[];
+  /** Used when the workspace has zero agents. */
+  self_serve_sub_issues: ImportStarterIssuePayload[];
+}
+
+export interface ImportStarterContentResponse {
   user: User;
-  workspaces: Workspace[];
+  project_id: string;
+  /** Non-null when server took the agent-guided branch. */
+  welcome_issue_id: string | null;
 }
 
 export class ApiError extends Error {
@@ -137,6 +193,10 @@ export class ApiClient {
     if (slug) headers["X-Workspace-Slug"] = slug;
     const csrf = this.readCsrfToken();
     if (csrf) headers["X-CSRF-Token"] = csrf;
+    const id = this.options.identity;
+    if (id?.platform) headers["X-Client-Platform"] = id.platform;
+    if (id?.version) headers["X-Client-Version"] = id.version;
+    if (id?.os) headers["X-Client-OS"] = id.os;
     return headers;
   }
 
@@ -237,6 +297,62 @@ export class ApiClient {
 
   async getMe(): Promise<User> {
     return this.fetch("/api/me");
+  }
+
+  async markOnboardingComplete(payload?: {
+    completion_path?: OnboardingCompletionPath;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding/complete", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+  }
+
+  async joinCloudWaitlist(payload: {
+    email: string;
+    reason?: string;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding/cloud-waitlist", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async patchOnboarding(payload: {
+    questionnaire?: Record<string, unknown>;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /**
+   * Imports the Getting Started project + optional welcome issue + sub-issues
+   * in a single server-side transaction. Gated by an atomic
+   * starter_content_state: NULL → 'imported' claim — a second call returns
+   * 409 (already decided) and creates nothing new.
+   *
+   * The content templates live in TypeScript (see
+   * @multica/views/onboarding/utils/starter-content-templates) and are
+   * rendered from the user's questionnaire answers before being sent.
+   */
+  async importStarterContent(
+    payload: ImportStarterContentPayload,
+  ): Promise<ImportStarterContentResponse> {
+    return this.fetch("/api/me/starter-content/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async dismissStarterContent(payload?: {
+    workspace_id?: string;
+  }): Promise<User> {
+    return this.fetch("/api/me/starter-content/dismiss", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
   }
 
   async updateMe(data: UpdateMeRequest): Promise<User> {
@@ -502,6 +618,38 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/models/${requestId}`);
   }
 
+  async initiateListLocalSkills(
+    runtimeId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
+      method: "POST",
+    });
+  }
+
+  async getListLocalSkillsResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
+  }
+
+  async initiateImportLocalSkill(
+    runtimeId: string,
+    data: CreateRuntimeLocalSkillImportRequest,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getImportLocalSkillResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
+  }
+
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/agents/${agentId}/tasks`);
   }
@@ -564,6 +712,8 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    allow_signup: boolean;
+    google_client_id?: string;
     posthog_key?: string;
     posthog_host?: string;
   }> {
