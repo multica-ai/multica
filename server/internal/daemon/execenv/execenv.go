@@ -114,10 +114,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if len(params.Task.AgentSkills) > 0 {
-			if err := writeSkillFiles(filepath.Join(codexHome, "skills"), params.Task.AgentSkills); err != nil {
-				return nil, fmt.Errorf("execenv: write codex skills: %w", err)
-			}
+		if err := syncCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: sync codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
 	}
@@ -155,6 +153,8 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 		codexHome := filepath.Join(env.RootDir, "codex-home")
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: codexVersion}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
+		} else if err := syncCodexSkills(codexHome, task.AgentSkills, logger); err != nil {
+			logger.Warn("execenv: refresh codex skills failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
 		}
