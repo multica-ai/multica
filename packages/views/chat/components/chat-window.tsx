@@ -1,8 +1,29 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Minus, Maximize2, Minimize2, ChevronDown, Bot, Plus, Check } from "lucide-react";
+import { toast } from "sonner";
+import {
+  Minus,
+  Maximize2,
+  Minimize2,
+  ChevronDown,
+  Bot,
+  Plus,
+  Check,
+  MoreHorizontal,
+  History,
+  Trash2,
+  AlertCircle,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -27,11 +48,16 @@ import {
   pendingChatTaskOptions,
   chatKeys,
 } from "@multica/core/chat/queries";
-import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat/mutations";
+import {
+  useCreateChatSession,
+  useMarkChatSessionRead,
+  useArchiveChatSession,
+} from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
+import { ChatSessionHistory } from "./chat-session-history";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatSession } from "@multica/core/types";
@@ -81,6 +107,34 @@ export function ChatWindow() {
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
+  const archiveSession = useArchiveChatSession();
+  const showHistory = useChatStore((s) => s.showHistory);
+  const setShowHistory = useChatStore((s) => s.setShowHistory);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+
+  const handleShowHistory = useCallback(() => {
+    uiLogger.info("showHistory", { activeSessionId });
+    setShowHistory(true);
+  }, [activeSessionId, setShowHistory]);
+
+  const handleArchive = useCallback(async () => {
+    if (!activeSessionId) return;
+    const sessionId = activeSessionId;
+    uiLogger.info("archiveSession", { sessionId });
+    setConfirmArchive(false);
+    // Reset UI state before the mutation so the archived session disappears
+    // from the dropdown immediately (optimistic cache already handles the list).
+    setActiveSession(null);
+    try {
+      await archiveSession.mutateAsync(sessionId);
+      toast.success("Chat archived");
+    } catch (err) {
+      apiLogger.error("archiveSession.error", { sessionId, err });
+      toast.error(err instanceof Error ? err.message : "Failed to archive chat");
+      // Rollback active session on failure
+      setActiveSession(sessionId);
+    }
+  }, [activeSessionId, archiveSession, setActiveSession]);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -350,6 +404,46 @@ export function ChatWindow() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  onClick={handleShowHistory}
+                />
+              }
+            >
+              <History />
+            </TooltipTrigger>
+            <TooltipContent side="top">Chat history</TooltipContent>
+          </Tooltip>
+          {activeSessionId && !isSessionArchived && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    aria-label="Chat actions"
+                  />
+                }
+              >
+                <MoreHorizontal />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto">
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => setConfirmArchive(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Archive chat
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
                   onClick={toggleExpand}
                 />
               }
@@ -378,38 +472,92 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* Messages / skeleton / empty state */}
-      {showSkeleton ? (
-        <ChatMessageSkeleton />
-      ) : hasMessages ? (
-        <ChatMessageList
-          messages={messages}
-          pendingTaskId={pendingTaskId}
-          isWaiting={!!pendingTaskId}
-        />
+      {showHistory ? (
+        <ChatSessionHistory />
       ) : (
-        <EmptyState
-          agentName={activeAgent?.name}
-          onPickPrompt={(text) => handleSend(text)}
-        />
+        <>
+          {/* Archived banner — mirrors the agent-detail archive banner */}
+          {isSessionArchived && (
+            <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1">
+                This chat is archived. You can still view it, but cannot send
+                new messages.
+              </span>
+            </div>
+          )}
+          {/* Messages / skeleton / empty state */}
+          {showSkeleton ? (
+            <ChatMessageSkeleton />
+          ) : hasMessages ? (
+            <ChatMessageList
+              messages={messages}
+              pendingTaskId={pendingTaskId}
+              isWaiting={!!pendingTaskId}
+            />
+          ) : (
+            <EmptyState
+              agentName={activeAgent?.name}
+              onPickPrompt={(text) => handleSend(text)}
+            />
+          )}
+
+          {/* Input — disabled for archived sessions */}
+          <ChatInput
+            onSend={handleSend}
+            onStop={handleStop}
+            isRunning={!!pendingTaskId}
+            disabled={isSessionArchived}
+            agentName={activeAgent?.name}
+            leftAdornment={
+              <AgentDropdown
+                agents={availableAgents}
+                activeAgent={activeAgent}
+                userId={user?.id}
+                onSelect={handleSelectAgent}
+              />
+            }
+          />
+        </>
       )}
 
-      {/* Input — disabled for archived sessions */}
-      <ChatInput
-        onSend={handleSend}
-        onStop={handleStop}
-        isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
-        agentName={activeAgent?.name}
-        leftAdornment={
-          <AgentDropdown
-            agents={availableAgents}
-            activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
-          />
-        }
-      />
+      {/* Archive confirmation — mirrors the agent archive confirm dialog */}
+      {confirmArchive && (
+        <Dialog
+          open
+          onOpenChange={(v) => {
+            if (!v) setConfirmArchive(false);
+          }}
+        >
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+              </div>
+              <DialogHeader className="flex-1 gap-1">
+                <DialogTitle className="text-sm font-semibold">
+                  Archive chat?
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  This chat will be removed from the active list. History is
+                  preserved and remains viewable from Chat history.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmArchive(false)}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleArchive}>
+                Archive
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

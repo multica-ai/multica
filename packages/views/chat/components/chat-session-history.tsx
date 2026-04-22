@@ -118,6 +118,11 @@ function SessionItem({
           <span className="truncate text-sm font-medium">
             {session.title || "Untitled"}
           </span>
+          {session.status === "archived" && (
+            <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0">
+              Archived
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
           {agent && (
