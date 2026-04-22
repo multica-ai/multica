@@ -62,8 +62,12 @@ import { I18nProvider } from "../i18n";
 // ---------------------------------------------------------------------------
 
 function getOTPInput() {
-  // input-otp renders a single hidden <input> that holds the OTP value
-  return screen.getByRole("textbox", { hidden: true });
+  // input-otp renders a single hidden <input> with data-input-otp="true".
+  // The page now also includes a language Select, which renders its own
+  // hidden input, so querying by generic textbox role is no longer unique.
+  const input = document.querySelector<HTMLInputElement>('input[data-input-otp="true"]');
+  expect(input).not.toBeNull();
+  return input!;
 }
 
 // ---------------------------------------------------------------------------
