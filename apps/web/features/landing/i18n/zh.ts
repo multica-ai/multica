@@ -801,10 +801,4 @@ export const zh: LandingDict = {
     },
   },
 
-  auth: {
-    login: {
-      extraDownloadPrompt: "想用桌面应用？",
-      extraDownloadCta: "下载",
-    },
-  },
 };

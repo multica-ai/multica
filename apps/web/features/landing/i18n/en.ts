@@ -804,10 +804,4 @@ export const en: LandingDict = {
     },
   },
 
-  auth: {
-    login: {
-      extraDownloadPrompt: "Prefer the desktop app?",
-      extraDownloadCta: "Download",
-    },
-  },
 };

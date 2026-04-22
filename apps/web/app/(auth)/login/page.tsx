@@ -22,6 +22,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
+import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -172,6 +173,21 @@ function LoginPageContent() {
           : undefined
       }
       onTokenObtained={setLoggedInCookie}
+      extra={
+        // Web-only nudge toward the desktop app. Copy is hardcoded EN
+        // for now because the login route sits outside the landing
+        // group's LocaleProvider — if this page ever becomes
+        // locale-aware, the strings live in positioning doc §3.3.
+        <span className="text-xs text-muted-foreground">
+          Prefer the desktop app?{" "}
+          <Link
+            href="/download"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+          >
+            Download
+          </Link>
+        </span>
+      }
     />
   );
 }

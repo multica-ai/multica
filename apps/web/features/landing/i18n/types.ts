@@ -160,10 +160,4 @@ export type LandingDict = {
       versionUnavailable: string;
     };
   };
-  auth: {
-    login: {
-      extraDownloadPrompt: string;
-      extraDownloadCta: string;
-    };
-  };
 };
