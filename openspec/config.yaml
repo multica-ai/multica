@@ -1,13 +1,17 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Product: Multica is an AI-native task management platform where humans and coding agents work as teammates.
+  Domain model: issue is the canonical persisted work item; inbox_item is for notifications; agents and runtimes are first-class concepts.
+  Repository: monorepo with server/ (Go backend + CLI + daemon), apps/workspace/ (primary product app), apps/web/ (marketing/public app), e2e/, and openspec/.
+  Frontend stack: TypeScript strict, React, Vite in apps/workspace, Next.js 16 App Router in apps/web, Zustand, Tailwind CSS, shadcn-style UI primitives, TipTap, Vitest, Playwright.
+  Backend stack: Go 1.26.1, Chi, gorilla/websocket, sqlc, pgx, PostgreSQL 17 with pgvector, Cobra, JWT auth.
+  Multi-tenancy: workspace-scoped; preserve workspace_id filtering and X-Workspace-ID routing assumptions.
+  Frontend conventions: feature-based structure, @/ aliases, one Zustand store per feature domain, avoid React Context for shared app data, keep route shells thin.
+  Code style: TypeScript uses 2-space indentation, double quotes, semicolons; Go follows standard gofmt conventions; comments in code must be English only.
+  Engineering rules: do not hand-edit generated sqlc files; prefer additive changes over compatibility shims; preserve agent assignment and execution visibility in product changes.
+  UI rules: follow DESIGN.md, prefer shadcn components and design tokens, avoid hardcoded colors, and keep shared behavior mirrored across web/workspace when relevant.
+  Verification: prefer make check for full verification; use pnpm typecheck, pnpm test, make test, and Playwright for targeted checks.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
