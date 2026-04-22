@@ -455,6 +455,40 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigHermes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:           "test-issue-id",
+		AgentName:         "Hermes Agent",
+		AgentInstructions: "Communication style: /caveman full.",
+		AgentSkills:       []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"Multica Agent Runtime",
+		"Hermes Agent",
+		"Communication style: /caveman full.",
+		"Coding",
+		".agent_context/skills/",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AGENTS.md missing %q", want)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -25,7 +25,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi":
+	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "hermes":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
