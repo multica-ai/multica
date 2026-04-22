@@ -21,12 +21,12 @@ builds:
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
 
 archives:
-  - id: default
+  # Legacy archive name kept so already-released CLIs (whose `multica update`
+  # looks for `multica_{os}_{arch}.{ext}`) can keep self-updating. Remove
+  # once those versions are no longer in use.
+  - id: legacy
     formats:
       - tar.gz
     format_overrides:
@@ -34,6 +34,16 @@ archives:
         formats:
           - zip
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+  # Versioned archive name used by current CLI / install scripts /
+  # desktop bootstrap going forward.
+  - id: versioned
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}-cli-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
@@ -48,6 +58,8 @@ changelog:
 
 brews:
   - name: multica
+    ids:
+      - versioned
     repository:
       owner: multica-ai
       name: homebrew-tap

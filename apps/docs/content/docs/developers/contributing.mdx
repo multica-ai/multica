@@ -169,6 +169,16 @@ Stop PostgreSQL and keep local databases:
 make db-down
 ```
 
+Reset only the current checkout's database (drops `POSTGRES_DB`, recreates it, re-runs all migrations). Other worktree databases are untouched.
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+> `make db-reset` refuses to run if `DATABASE_URL` points at a remote host.
+
 Wipe all local PostgreSQL data:
 
 ```bash

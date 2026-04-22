@@ -124,3 +124,13 @@ WHERE workspace_id = $1
 GROUP BY parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+
+-- name: MarkIssueFirstExecuted :one
+-- Flips first_executed_at from NULL to now() atomically. Returns the row if
+-- this was the first time the issue was executed; no rows otherwise. The
+-- analytics issue_executed event fires exactly when this returns a row —
+-- retries and re-assignments hit the WHERE clause and no-op.
+UPDATE issue
+SET first_executed_at = now()
+WHERE id = $1 AND first_executed_at IS NULL
+RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;

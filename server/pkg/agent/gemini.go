@@ -35,7 +35,7 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	args := buildGeminiArgs(prompt, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

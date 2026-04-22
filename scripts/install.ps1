@@ -48,14 +48,22 @@ function Install-CliBinary {
     if (-not [Environment]::Is64BitOperatingSystem) {
         Write-Fail "Multica requires a 64-bit Windows installation."
     }
-    $arch = "amd64"
+
+    # Distinguish amd64 vs arm64 — Is64BitOperatingSystem is true for both.
+    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    switch ($osArch) {
+        'X64'   { $arch = "amd64" }
+        'Arm64' { $arch = "arm64" }
+        default { Write-Fail "Unsupported Windows architecture: $osArch (only X64 and Arm64 are supported)." }
+    }
 
     $latest = Get-LatestVersion
     if (-not $latest) {
         Write-Fail "Could not determine latest release. Check your network connection."
     }
 
-    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica_windows_$arch.zip"
+    $version = $latest.TrimStart('v')
+    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica-cli-$version-windows-$arch.zip"
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install"
 
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
@@ -75,7 +83,7 @@ function Install-CliBinary {
         $checksums = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -ErrorAction Stop
         $zipFile = Join-Path $tmpDir "multica.zip"
         $actualHash = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
-        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica_windows_$arch\.zip" } | Select-Object -First 1
+        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica-cli-$version-windows-$arch\.zip" } | Select-Object -First 1
         if ($expectedLine) {
             $expectedHash = ($expectedLine -split "\s+")[0].ToLower()
             if ($actualHash -ne $expectedHash) {

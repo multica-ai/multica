@@ -28,6 +28,9 @@ catalog:
   # Icons
   lucide-react: "^1.0.1"
 
+  # Product analytics
+  posthog-js: "^1.176.1"
+
   # Testing
   vitest: "^4.1.0"
   jsdom: "^29.0.1"

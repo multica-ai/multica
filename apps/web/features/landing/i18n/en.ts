@@ -283,6 +283,24 @@ export const en: LandingDict = {
     },
     entries: [
       {
+        version: "0.2.11",
+        date: "2026-04-21",
+        title: "Desktop Cross-Platform Packaging, CLI Self-Update & Board Pagination",
+        changes: [],
+        features: [
+          "Desktop app cross-platform packaging — macOS, Windows, and Linux artifacts from a single release pipeline",
+          "`multica update` self-update command — upgrade the CLI and local daemon without reinstalling",
+          "Issue board paginates every status column, not only Done — large backlogs stay responsive",
+        ],
+        fixes: [
+          "Workspace isolation enforced end-to-end for agent execution on the local daemon (security)",
+          "Windows daemon stays alive after the terminal closes, so background agents keep running",
+          "Board cards render their description preview again — list queries no longer strip the description field",
+          "OpenClaw agent runtime now reads the real model from agent metadata instead of falling back to a default",
+          "Comment Markdown preserved end-to-end — the HTML sanitizer that was stripping formatting has been removed",
+        ],
+      },
+      {
         version: "0.2.8",
         date: "2026-04-20",
         title: "Per-Agent Models, Kimi Runtime & Self-Host Auth",

@@ -5,7 +5,11 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { paths } from "@multica/core/paths";
+import {
+  paths,
+  resolvePostAuthDestination,
+  useHasOnboarded,
+} from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import {
@@ -42,9 +46,10 @@ function LoginPageContent() {
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
+  const hasOnboarded = useHasOnboarded();
 
   // Already authenticated — honor ?next= or fall back to first workspace
-  // (or /workspaces/new if the user has none). Skip this entire path when
+  // (or /onboarding if the user has none). Skip this entire path when
   // the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading || !user || cliCallbackRaw) return;
@@ -65,29 +70,33 @@ function LoginPageContent() {
         });
       return;
     }
+    if (!hasOnboarded) {
+      router.replace(paths.onboarding());
+      return;
+    }
     if (nextUrl) {
       router.replace(nextUrl);
       return;
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    const [first] = list;
-    router.replace(
-      first ? paths.workspace(first.slug).issues() : paths.newWorkspace(),
-    );
-  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, qc]);
+    router.replace(resolvePostAuthDestination(list, hasOnboarded));
+  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
 
   const handleSuccess = () => {
+    // Read the latest user snapshot directly — the closure's `hasOnboarded`
+    // was captured before login completed and would be stale here.
+    const currentUser = useAuthStore.getState().user;
+    const onboarded = currentUser?.onboarded_at != null;
+    if (!onboarded) {
+      router.push(paths.onboarding());
+      return;
+    }
     if (nextUrl) {
       router.push(nextUrl);
       return;
     }
-    // The LoginPage view populates the workspace list cache before calling
-    // onSuccess, so it's safe to read here.
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    const [first] = list;
-    router.push(
-      first ? paths.workspace(first.slug).issues() : paths.newWorkspace(),
-    );
+    router.push(resolvePostAuthDestination(list, onboarded));
   };
 
   // Build Google OAuth state: encode platform + next URL so the callback

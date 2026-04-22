@@ -55,6 +55,7 @@
     "./realtime": "./realtime/index.ts",
     "./navigation": "./navigation/index.ts",
     "./modals": "./modals/index.ts",
+    "./onboarding": "./onboarding/index.ts",
     "./paths": "./paths/index.ts",
     "./hooks": "./hooks.tsx",
     "./hooks/*": "./hooks/*.ts",
@@ -63,11 +64,13 @@
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
-    "./platform": "./platform/index.ts"
+    "./platform": "./platform/index.ts",
+    "./analytics": "./analytics/index.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-query-devtools": "^5.96.2",
+    "posthog-js": "catalog:",
     "zustand": "catalog:"
   },
   "peerDependencies": {

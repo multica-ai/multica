@@ -125,6 +125,10 @@ type AgentTaskResponse struct {
 	CompletedAt           *string        `json:"completed_at"`
 	Result                any            `json:"result"`
 	Error                 *string        `json:"error"`
+	FailureReason         string         `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt               int32          `json:"attempt"`
+	MaxAttempts           int32          `json:"max_attempts"`
+	ParentTaskID          *string        `json:"parent_task_id,omitempty"`
 	Agent                 *TaskAgentData `json:"agent,omitempty"`
 	Repos                 []RepoData     `json:"repos,omitempty"`
 	CreatedAt             string         `json:"created_at"`
@@ -154,6 +158,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
+	failureReason := ""
+	if t.FailureReason.Valid {
+		failureReason = t.FailureReason.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -166,6 +174,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
+		FailureReason:    failureReason,
+		Attempt:          t.Attempt,
+		MaxAttempts:      t.MaxAttempts,
+		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 	}

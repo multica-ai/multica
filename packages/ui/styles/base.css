@@ -25,6 +25,46 @@
   animation: entrance-spin 0.6s ease-out forwards;
 }
 
+/* Onboarding: step / phase entry — 400ms fade + 4px rise.
+ * Matches the design prototype's .fade-in. Applied on mount so every new
+ * step (and intra-step phase switch, via key=phase remount) plays once.
+ * `both` fill-mode commits the `from` styles pre-animation to avoid a
+ * single-frame flash at natural state before the animation grabs. */
+@keyframes onboarding-enter {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+.animate-onboarding-enter {
+  animation: onboarding-enter 0.4s ease both;
+}
+
+/* Onboarding completion: success badge spring-pop.
+ * Lands with a subtle overshoot (scale 1.12 → 1) so the circle feels
+ * physical rather than linearly interpolated. Paired with the drawn
+ * checkmark below which kicks in after the badge has settled. */
+@keyframes completion-badge {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-completion-badge {
+  animation: completion-badge 500ms cubic-bezier(0.5, 1.5, 0.4, 1) both;
+}
+
+/* Onboarding completion: SVG checkmark drawn by animating
+ * stroke-dashoffset from 1 → 0. Requires the target <path> to declare
+ * `pathLength={1}` and `strokeDasharray={1}` so the stroke length is
+ * normalized and the animation is geometry-agnostic. */
+@keyframes completion-check {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+.animate-completion-check {
+  animation: completion-check 400ms ease-out 350ms both;
+}
+
 /* Chat FAB: gentle color + border tint while a chat task is running.
  * Keeps the ring at the same thickness — only hue shifts towards brand
  * at half-cycle, no outer glow. */

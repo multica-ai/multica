@@ -283,6 +283,24 @@ export const zh: LandingDict = {
     },
     entries: [
       {
+        version: "0.2.11",
+        date: "2026-04-21",
+        title: "桌面应用跨平台打包、CLI 自更新与看板分页",
+        changes: [],
+        features: [
+          "桌面应用跨平台打包——同一条发布流水线产出 macOS、Windows 和 Linux 安装包",
+          "新增 `multica update` 自更新命令——无需重装即可升级 CLI 和本地 Daemon",
+          "Issue 看板所有状态列都支持分页（不再只是 Done 列），大积压下依然流畅",
+        ],
+        fixes: [
+          "本地 Daemon 对 Agent 执行强制端到端工作区隔离（安全）",
+          "Windows 下 Daemon 终端关闭后继续常驻，后台 Agent 不再被意外终止",
+          "看板卡片重新显示描述预览——列表查询不再丢掉 description 字段",
+          "OpenClaw Agent 改为从 Agent 元数据读取真实模型，不再回退到默认值",
+          "评论 Markdown 全链路保留——移除会误伤格式的 HTML sanitizer",
+        ],
+      },
+      {
         version: "0.2.8",
         date: "2026-04-20",
         title: "Agent 模型选择、Kimi Runtime 与自部署登录",

@@ -223,3 +223,58 @@ export interface RuntimeModelsResult {
   models: RuntimeModel[];
   supported: boolean;
 }
+
+export type RuntimeLocalSkillStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timeout";
+
+export interface RuntimeLocalSkillSummary {
+  key: string;
+  name: string;
+  description?: string;
+  source_path: string;
+  provider: string;
+  file_count: number;
+}
+
+export interface RuntimeLocalSkillListRequest {
+  id: string;
+  runtime_id: string;
+  status: RuntimeLocalSkillStatus;
+  skills?: RuntimeLocalSkillSummary[];
+  supported: boolean;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRuntimeLocalSkillImportRequest {
+  skill_key: string;
+  name?: string;
+  description?: string;
+}
+
+export interface RuntimeLocalSkillImportRequest {
+  id: string;
+  runtime_id: string;
+  skill_key: string;
+  name?: string;
+  description?: string;
+  status: RuntimeLocalSkillStatus;
+  skill?: Skill;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RuntimeLocalSkillsResult {
+  skills: RuntimeLocalSkillSummary[];
+  supported: boolean;
+}
+
+export interface RuntimeLocalSkillImportResult {
+  skill: Skill;
+}

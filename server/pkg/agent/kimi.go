@@ -51,7 +51,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// "approve_for_session" to every session/request_permission request.
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", kimiArgs)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kimiArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

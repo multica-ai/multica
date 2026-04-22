@@ -22,14 +22,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   memberListOptions,
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import { paths } from "@multica/core/paths";
+import {
+  resolvePostAuthDestination,
+  useCurrentWorkspace,
+  useHasOnboarded,
+} from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
@@ -44,6 +47,7 @@ export function WorkspaceTab() {
   const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
   const navigation = useNavigation();
+  const hasOnboarded = useHasOnboarded();
 
   /**
    * Send the user to a safe URL BEFORE the leave/delete mutation fires.
@@ -69,7 +73,6 @@ export function WorkspaceTab() {
     const cachedList =
       qc.getQueryData<Workspace[]>(workspaceListOptions().queryKey) ?? [];
     const remaining = cachedList.filter((w) => w.id !== workspace?.id);
-    const next = remaining[0];
     // Clear the workspace-context singleton BEFORE navigating and BEFORE
     // the mutation fires. Three downstream consumers read it:
     //  1. Realtime `workspace:deleted` handler's "current === deleted"
@@ -87,9 +90,7 @@ export function WorkspaceTab() {
     // takes over immediately, or the new-workspace overlay takes over
     // (which has no workspace context, so null is correct).
     setCurrentWorkspace(null, null);
-    navigation.push(
-      next ? paths.workspace(next.slug).issues() : paths.newWorkspace(),
-    );
+    navigation.push(resolvePostAuthDestination(remaining, hasOnboarded));
   };
 
   const [name, setName] = useState(workspace?.name ?? "");

@@ -38,6 +38,7 @@
     "./chat": "./chat/index.ts",
     "./settings": "./settings/index.ts",
     "./invite": "./invite/index.ts",
+    "./onboarding": "./onboarding/index.ts",
     "./platform": "./platform/index.ts"
   },
   "dependencies": {

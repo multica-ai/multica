@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down selfhost selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -145,6 +145,26 @@ db-up: ## Start the shared PostgreSQL container used by main and worktrees
 
 db-down: ## Stop the shared PostgreSQL container without removing its Docker volume
 	@$(COMPOSE) down
+
+# Drop + recreate the current env's database, then run all migrations.
+# Use for a clean slate in local dev. Only affects the DB named in
+# ENV_FILE (POSTGRES_DB); the shared postgres container and other
+# worktree DBs are untouched. Refuses to run against a remote host.
+db-reset:
+	$(REQUIRE_ENV)
+	@case "$(DATABASE_URL)" in \
+		""|*@localhost:*|*@localhost/*|*@127.0.0.1:*|*@127.0.0.1/*|*@\[::1\]:*|*@\[::1\]/*) ;; \
+		*) echo "Refusing to reset: DATABASE_URL points at a remote host."; exit 1 ;; \
+	esac
+	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@echo "==> Dropping and recreating database '$(POSTGRES_DB)'..."
+	@$(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d postgres -v ON_ERROR_STOP=1 \
+		-c "DROP DATABASE IF EXISTS \"$(POSTGRES_DB)\" WITH (FORCE);" \
+		-c "CREATE DATABASE \"$(POSTGRES_DB)\";"
+	@echo "==> Running migrations..."
+	cd server && go run ./cmd/migrate up
+	@echo ""
+	@echo "✓ Database '$(POSTGRES_DB)' reset. Run 'make start' to launch the app."
 
 worktree-env: ## Generate .env.worktree with a unique DB name and app ports for this worktree
 	@bash scripts/init-worktree-env.sh .env.worktree

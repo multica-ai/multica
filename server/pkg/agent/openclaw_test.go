@@ -1079,6 +1079,81 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 }
 
+func TestOpenclawProcessOutputExtractsModelFromAgentMeta(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Mirrors a real openclaw `--json` blob captured locally: agentMeta
+	// carries the actual LLM identifier under `model`, alongside the
+	// session id, provider, and usage. The dashboard previously bucketed
+	// usage under `unknown` because this field wasn't read; we now want
+	// it surfaced as the runtime's reported model string.
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "ok"}},
+		Meta: openclawMeta{
+			DurationMs: 9501,
+			AgentMeta: map[string]any{
+				"sessionId": "multica-1776752018613706000",
+				"provider":  "deepseek",
+				"model":     "deepseek-chat",
+				"usage": map[string]any{
+					"input":      float64(414),
+					"output":     float64(163),
+					"cacheRead":  float64(33280),
+					"cacheWrite": float64(0),
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(result)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.model != "deepseek-chat" {
+		t.Errorf("model: got %q, want %q", res.model, "deepseek-chat")
+	}
+	if res.sessionID != "multica-1776752018613706000" {
+		t.Errorf("sessionID: got %q", res.sessionID)
+	}
+	if res.usage.InputTokens != 414 {
+		t.Errorf("input tokens: got %d, want 414", res.usage.InputTokens)
+	}
+}
+
+func TestOpenclawProcessOutputModelEmptyWhenAgentMetaOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	// Older openclaw versions / partial outputs may not include `model`
+	// in agentMeta. processOutput must surface "" so the Execute loop
+	// can fall back to opts.Model (the agent name) and ultimately the
+	// daemon's "unknown" placeholder, preserving prior behavior for
+	// runtimes that haven't been upgraded.
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "ok"}},
+		Meta: openclawMeta{
+			AgentMeta: map[string]any{
+				"sessionId": "ses_xyz",
+				"usage": map[string]any{
+					"input":  float64(10),
+					"output": float64(5),
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(result)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.model != "" {
+		t.Errorf("model: got %q, want empty", res.model)
+	}
+}
+
 func countOccurrences(args []string, s string) int {
 	n := 0
 	for _, a := range args {

@@ -52,7 +52,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -108,12 +108,19 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
-		// Build usage map. OpenClaw doesn't report model per-step, so we
-		// attribute all usage to the configured model (or "unknown").
+		// Build usage map. Prefer the model openclaw reported in
+		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`).
+		// Fall back to opts.Model — which for openclaw is the agent name
+		// passed via `--agent`, not a real model identifier — only when
+		// the runtime didn't surface its own model. Last resort is the
+		// daemon's `unknown` placeholder.
 		var usage map[string]TokenUsage
 		u := scanResult.usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
+			model := scanResult.model
+			if model == "" {
+				model = opts.Model
+			}
 			if model == "" {
 				model = "unknown"
 			}
@@ -186,6 +193,12 @@ type openclawEventResult struct {
 	output    string
 	sessionID string
 	usage     TokenUsage
+	// model is the LLM identifier reported by openclaw in its result blob
+	// (`meta.agentMeta.model`). Empty when the run did not emit it (older
+	// openclaw versions, partial outputs). Distinct from `opts.Model`,
+	// which for the openclaw backend is the openclaw *agent* name passed
+	// via `--agent`, not the underlying model.
+	model string
 }
 
 // processOutput reads the JSON output from openclaw --json stderr and returns
@@ -204,6 +217,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 
 	var output strings.Builder
 	var sessionID string
+	var model string
 	var usage TokenUsage
 	finalStatus := "completed"
 	var finalError string
@@ -282,6 +296,9 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			if res.sessionID != "" {
 				sessionID = res.sessionID
 			}
+			if res.model != "" {
+				model = res.model
+			}
 			// Prefer usage from the final result if no streaming events reported it.
 			u := res.usage
 			if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
@@ -331,6 +348,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		output:    output.String(),
 		sessionID: sessionID,
 		usage:     usage,
+		model:     model,
 	}
 }
 
@@ -379,10 +397,18 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 	}
 
 	var sessionID string
+	var model string
 	var usage TokenUsage
 	if result.Meta.AgentMeta != nil {
 		if sid, ok := result.Meta.AgentMeta["sessionId"].(string); ok {
 			sessionID = sid
+		}
+		// `meta.agentMeta.model` is openclaw's true LLM identifier
+		// (e.g. "deepseek-chat", "claude-sonnet-4"). Take it as-is — the
+		// dashboard expects whatever string the runtime reports, mirroring
+		// claude/pi/codex which read model directly off their stream.
+		if m, ok := result.Meta.AgentMeta["model"].(string); ok {
+			model = strings.TrimSpace(m)
 		}
 		if u, ok := result.Meta.AgentMeta["usage"].(map[string]any); ok {
 			usage = parseOpenclawUsage(u)
@@ -394,6 +420,7 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 		output:    output.String(),
 		sessionID: sessionID,
 		usage:     usage,
+		model:     model,
 	}
 }
 
