@@ -67,6 +67,44 @@ func resolveAppURL(cmd *cobra.Command) string {
 	return "" // unreachable
 }
 
+// localPrivateIP returns the first non-loopback private IPv4 address exposed by
+// the current machine.
+//
+// This is only a best-effort hint for the browser callback URL. Interface
+// enumeration order is platform-dependent, so callers must be ready to fall
+// back if the chosen address is not reachable from the browser device.
+func localPrivateIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil && ip4.IsPrivate() {
+				return ip4.String()
+			}
+		}
+	}
+	return ""
+}
+
 func openBrowser(url string) error {
 	var cmd string
 	var args []string
@@ -98,18 +136,23 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	serverURL := resolveServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
-	// Determine the callback host from the configured app URL.
-	// For self-hosted setups where the browser is on a different machine
-	// (e.g. Multica running on a LAN server), use the server's private IP
-	// so the browser can reach the CLI's local HTTP server.
-	// For production (public hostnames like multica.ai), keep localhost —
-	// the browser and CLI are on the same machine.
 	callbackHost := "localhost"
 	bindAddr := "127.0.0.1"
 	if parsed, err := url.Parse(appURL); err == nil {
 		h := parsed.Hostname()
 		if ip := net.ParseIP(h); ip != nil && ip.IsPrivate() {
-			callbackHost = h
+			// A private app URL usually means self-hosted / LAN usage, so the
+			// browser might be running on a different machine than the CLI.
+			// Bind on all interfaces and advertise the CLI machine's private IP
+			// rather than the app server's IP because the callback terminates on
+			// this local HTTP listener, not on Multica itself.
+			if localIP := localPrivateIP(); localIP != "" {
+				callbackHost = localIP
+			} else {
+				// If we cannot discover a better address, keep the configured host
+				// so the browser still gets a LAN-reachable callback target.
+				callbackHost = h
+			}
 			bindAddr = "0.0.0.0"
 		}
 	}
