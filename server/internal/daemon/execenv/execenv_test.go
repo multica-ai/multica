@@ -1226,6 +1226,52 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesKiloCodeNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "kilocode-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "kilocode", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".kilo", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .kilo/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".kilo", "skills", "go-conventions", "templates", "example.go"))
+	if err != nil {
+		t.Fatalf("failed to read supporting file: %v", err)
+	}
+	if string(supportFile) != "package main" {
+		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for KiloCode provider")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
+		t.Error("expected .agent_context/issue_context.md to exist")
+	}
+}
+
 func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1292,10 +1338,14 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 // TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
 // advertises native skill discovery (rather than the .agent_context fallback)
 // — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
 func TestInjectRuntimeConfigAntigravity(t *testing.T) {
+=======
+func TestInjectRuntimeConfigKiloCode(t *testing.T) {
+>>>>>>> 32ba2b4b3 (Add Kilo Code adapter)
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1304,7 +1354,11 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
+<<<<<<< HEAD
 	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
+=======
+	if err := InjectRuntimeConfig(dir, "kilocode", ctx); err != nil {
+>>>>>>> 32ba2b4b3 (Add Kilo Code adapter)
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -1321,6 +1375,7 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
+<<<<<<< HEAD
 		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
 	}
 	if strings.Contains(s, ".agent_context/skills/") {
@@ -1357,6 +1412,13 @@ func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
 	// .agents/skills/, not .agent_context/skills/.
 	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
 		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
+=======
+		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("expected CLAUDE.md to NOT exist for KiloCode provider")
+>>>>>>> 32ba2b4b3 (Add Kilo Code adapter)
 	}
 }
 

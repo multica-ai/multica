@@ -51,7 +51,7 @@ func gitEnv() []string {
 	)
 }
 
-var agentGitExcludePatterns = []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".opencode"}
+var agentGitExcludePatterns = []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".opencode", ".config/opencode", ".kilo"}
 
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
