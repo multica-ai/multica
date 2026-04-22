@@ -27,6 +27,7 @@ import {
   DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
+  DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { api } from "@multica/core/api";
@@ -171,7 +172,7 @@ export function AgentTranscriptDialog({
   agentName,
   isLive = false,
 }: AgentTranscriptDialogProps) {
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
@@ -183,9 +184,14 @@ export function AgentTranscriptDialog({
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
   //   text → filter value = "text", display = "Agent"
-  //   thinking / error → value/display = type itself
+  //   thinking / error → title case
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
+    const displayMap: Record<string, string> = {
+      text: "Agent",
+      thinking: "Thinking",
+      error: "Error",
+    };
     for (const item of items) {
       if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
         const key = `tool:${item.tool}`;
@@ -193,7 +199,7 @@ export function AgentTranscriptDialog({
       } else {
         const value = item.type;
         if (!options.has(value)) {
-          options.set(value, value === "text" ? "Agent" : value);
+          options.set(value, displayMap[value] ?? value);
         }
       }
     }
@@ -246,13 +252,9 @@ export function AgentTranscriptDialog({
     return () => clearInterval(interval);
   }, [isLive, task.started_at, task.dispatched_at]);
 
-  // Click a timeline segment → scroll to event
-  const handleSegmentClick = useCallback((idx: number) => {
-    setSelectedIdx(idx);
-    const el = eventRefs.current.get(idx);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+  const handleSegmentClick = useCallback((seq: number) => {
+    setSelectedSeq(seq);
+    eventRefs.current.get(seq)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
   // Copy all events as text (uses filtered items)
@@ -292,7 +294,7 @@ export function AgentTranscriptDialog({
         ? elapsed
         : null;
 
-  const toolCount = filteredItems.filter((i) => i.type === "tool_use").length;
+  const toolCount = items.filter((i) => i.type === "tool_use").length;
 
   // Status display
   const statusBadge = isLive ? (
@@ -373,12 +375,9 @@ export function AgentTranscriptDialog({
                     {selectedTools.size > 0 && (
                       <>
                         <DropdownMenuSeparator />
-                        <button
-                          onClick={clearFilters}
-                          className="w-full px-2 py-1.5 text-left text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm transition-colors"
-                        >
+                        <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
                           Clear filters
-                        </button>
+                        </DropdownMenuItem>
                       </>
                     )}
                   </DropdownMenuContent>
@@ -389,7 +388,7 @@ export function AgentTranscriptDialog({
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? "Copied" : "Copy all"}
+                {copied ? "Copied" : selectedTools.size > 0 ? "Copy filtered" : "Copy all"}
               </button>
               <button
                 onClick={() => onOpenChange(false)}
@@ -460,7 +459,7 @@ export function AgentTranscriptDialog({
           <div className="border-b px-4 py-2.5 shrink-0">
             <TimelineBar
               items={filteredItems}
-              selectedIdx={selectedIdx}
+              selectedSeq={selectedSeq}
               onSegmentClick={handleSegmentClick}
             />
           </div>
@@ -484,17 +483,16 @@ export function AgentTranscriptDialog({
             </div>
           ) : (
             <div className="divide-y">
-              {filteredItems.map((item, idx) => (
+              {filteredItems.map((item) => (
                 <TranscriptEventRow
-                  key={`${item.seq}-${idx}`}
+                  key={item.seq}
                   ref={(el) => {
-                    if (el) eventRefs.current.set(idx, el);
-                    else eventRefs.current.delete(idx);
+                    if (el) eventRefs.current.set(item.seq, el);
+                    else eventRefs.current.delete(item.seq);
                   }}
                   item={item}
-                  index={idx}
-                  isSelected={selectedIdx === idx}
-                  onClick={() => setSelectedIdx(idx === selectedIdx ? null : idx)}
+                  isSelected={selectedSeq === item.seq}
+                  onClick={() => setSelectedSeq(item.seq === selectedSeq ? null : item.seq)}
                 />
               ))}
             </div>
@@ -530,12 +528,12 @@ function formatProvider(provider: string): string {
 
 function TimelineBar({
   items,
-  selectedIdx,
+  selectedSeq,
   onSegmentClick,
 }: {
   items: TimelineItem[];
-  selectedIdx: number | null;
-  onSegmentClick: (idx: number) => void;
+  selectedSeq: number | null;
+  onSegmentClick: (seq: number) => void;
 }) {
   const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
   let currentColor: EventColor | null = null;
@@ -558,21 +556,21 @@ function TimelineBar({
 
   return (
     <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
-      {segments.map((seg, segIdx) => {
-        const isSelected = selectedIdx !== null && selectedIdx >= seg.startIdx && selectedIdx <= seg.endIdx;
+      {segments.map((seg) => {
+        const isSelected = selectedSeq !== null && selectedSeq >= items[seg.startIdx]!.seq && selectedSeq <= items[seg.endIdx]!.seq;
         const color = colorClasses[seg.color];
         const widthPercent = (seg.count / items.length) * 100;
 
         return (
           <button
-            key={segIdx}
+            key={seg.startIdx}
             className={cn(
               "h-full transition-all duration-150 hover:opacity-80 relative group",
               isSelected ? color.bgActive : color.bg,
               "min-w-[4px]",
             )}
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
-            onClick={() => onSegmentClick(seg.startIdx)}
+            onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
             title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
           >
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
@@ -592,7 +590,6 @@ function TimelineBar({
 
 interface TranscriptEventRowProps {
   item: TimelineItem;
-  index: number;
   isSelected: boolean;
   onClick: () => void;
 }
@@ -600,9 +597,8 @@ interface TranscriptEventRowProps {
 const TranscriptEventRow = ({
   ref,
   item,
-  index: _index,
   isSelected,
-  onClick: _onClick,
+  onClick,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
   const [expanded, setExpanded] = useState(false);
   const color = getEventColor(item);
