@@ -28,6 +28,16 @@ export type {
   IssueUsageSummary,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
+export type {
+  NotificationChannel,
+  NotificationEventType,
+  ExternalAccountBindingStatus,
+  ExternalAccountBinding,
+  NotificationChannelPreference,
+  ListNotificationBindingsResponse,
+  ListNotificationPreferencesResponse,
+  UpdateNotificationPreferenceRequest,
+} from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";

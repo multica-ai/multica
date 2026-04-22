@@ -55,6 +55,10 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  ListNotificationBindingsResponse,
+  ListNotificationPreferencesResponse,
+  NotificationChannelPreference,
+  UpdateNotificationPreferenceRequest,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -317,6 +321,29 @@ export class ApiClient {
 
   async updateMe(data: UpdateMeRequest): Promise<User> {
     return this.fetch("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listNotificationBindings(): Promise<ListNotificationBindingsResponse> {
+    return this.fetch("/api/me/notification-bindings");
+  }
+
+  async deleteNotificationBinding(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-bindings/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listNotificationPreferences(): Promise<ListNotificationPreferencesResponse> {
+    return this.fetch("/api/me/notification-preferences");
+  }
+
+  async updateNotificationPreference(
+    data: UpdateNotificationPreferenceRequest,
+  ): Promise<NotificationChannelPreference> {
+    return this.fetch("/api/me/notification-preferences", {
       method: "PATCH",
       body: JSON.stringify(data),
     });
