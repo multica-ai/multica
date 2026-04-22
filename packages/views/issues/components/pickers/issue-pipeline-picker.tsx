@@ -32,7 +32,6 @@ export function IssuePipelinePicker({
       open={open}
       onOpenChange={setOpen}
       width="w-52"
-      align="start"
       trigger={trigger ?? defaultTrigger}
     >
       <PickerItem

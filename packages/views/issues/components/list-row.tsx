@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Workflow } from "lucide-react";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -10,6 +11,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { usePipelines } from "@multica/core/pipeline";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 
@@ -43,7 +45,13 @@ export const ListRow = memo(function ListRow({
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
 
+  const { data: pipelines = [] } = usePipelines(wsId);
+  const activePipeline = storeProperties.pipeline && issue.pipeline_id
+    ? pipelines.find((p) => p.id === issue.pipeline_id)
+    : undefined;
+
   const showProject = storeProperties.project && project;
+  const showPipeline = storeProperties.pipeline && activePipeline;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
@@ -90,6 +98,12 @@ export const ListRow = memo(function ListRow({
           <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
             <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
             <span className="truncate">{project!.title}</span>
+          </span>
+        )}
+        {showPipeline && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
+            <Workflow className="h-3 w-3 shrink-0" />
+            <span className="truncate">{activePipeline!.name}</span>
           </span>
         )}
         {showDueDate && (
