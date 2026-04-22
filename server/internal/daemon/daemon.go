@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1120,7 +1122,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		execOpts.SystemPrompt = instructions
 	}
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	result, tools, err := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID, task.WorkspaceID, task.ChatSessionID)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -1132,7 +1134,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID, task.WorkspaceID, task.ChatSessionID)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -1480,4 +1482,121 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// http429StatusRE matches HTTP 429 as a status (not a substring of e.g. 4290).
+var http429StatusRE = regexp.MustCompile(`(?:^|[^0-9])429(?:[^0-9]|$)`)
+
+// isRateLimitError checks if an error indicates a rate limit response from Agents service.
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	if http429StatusRE.MatchString(errStr) {
+		return true
+	}
+
+	// Check for various rate limit indicators.
+	rateLimitIndicators := []string{
+		"rate limit",
+		"rate-limit",
+		"ratelimit",
+		"too many requests",
+		"quota exceeded",
+		"quota-exceeded",
+	}
+
+	for _, indicator := range rateLimitIndicators {
+		if strings.Contains(errStr, indicator) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// broadcastRetryProgress logs retry progress and notifies the server for chat tasks (WebSocket fan-out).
+func (d *Daemon) broadcastRetryProgress(
+	ctx context.Context,
+	taskLog *slog.Logger,
+	workspaceID, chatSessionID, taskID string,
+	attempt, maxRetries, waitSeconds int,
+) {
+	if taskLog != nil {
+		taskLog.Info("rate_limit_retry",
+			"task_id", shortID(taskID),
+			"attempt", attempt,
+			"wait_seconds", waitSeconds,
+			"max_retries", maxRetries,
+		)
+	}
+	if d.client == nil || workspaceID == "" || chatSessionID == "" || taskID == "" {
+		return
+	}
+	if err := d.client.ReportChatRetryProgress(ctx, workspaceID, chatSessionID, taskID, attempt, maxRetries, waitSeconds); err != nil && taskLog != nil {
+		taskLog.Debug("report chat retry progress failed", "error", err)
+	}
+}
+
+// executeWithRetry wraps executeAndDrain with rate limit retry logic.
+// Returns: agent.Result, tools, error
+func (d *Daemon) executeWithRetry(
+	ctx context.Context,
+	backend agent.Backend,
+	prompt string,
+	opts agent.ExecOptions,
+	taskLog *slog.Logger,
+	taskID string,
+	workspaceID string,
+	chatSessionID string,
+) (agent.Result, int32, error) {
+	if backend == nil {
+		return agent.Result{Status: "failed", Error: "nil backend"}, 0, errors.New("nil backend")
+	}
+	if taskLog == nil {
+		taskLog = d.logger
+	}
+	cfg := d.cfg.RateLimitConfig
+
+	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+		if attempt > 0 {
+			waitTime := time.Duration(float64(cfg.InitialDelay) * math.Pow(cfg.BackoffFactor, float64(attempt-1)))
+			if taskLog != nil {
+				taskLog.Info("rate_limit_retry_wait",
+					"task_id", shortID(taskID),
+					"attempt", attempt,
+					"wait_seconds", int(waitTime.Seconds()),
+					"max_retries", cfg.MaxRetries,
+				)
+			}
+			d.broadcastRetryProgress(ctx, taskLog, workspaceID, chatSessionID, taskID, attempt, cfg.MaxRetries, int(waitTime.Seconds()))
+			select {
+			case <-time.After(waitTime):
+			case <-ctx.Done():
+				return agent.Result{Status: "failed", Error: "retry cancelled"}, 0, ctx.Err()
+			}
+		}
+
+		result, tools, err := d.executeAndDrain(ctx, backend, prompt, opts, taskLog, taskID)
+		if isRateLimitError(err) {
+			if taskLog != nil {
+				taskLog.Warn("rate_limit_detected", "task_id", shortID(taskID), "attempt", attempt, "error", err.Error())
+			}
+			continue
+		}
+		if err != nil {
+			if taskLog != nil {
+				taskLog.Error("agent_execution_failed", "task_id", shortID(taskID), "error", err.Error())
+			}
+			return agent.Result{Status: "failed", Error: err.Error()}, 0, err
+		}
+		if taskLog != nil {
+			taskLog.Info("agent_execution_success", "task_id", shortID(taskID), "attempt", attempt, "tools", tools)
+		}
+		return result, tools, nil
+	}
+	return agent.Result{Status: "failed", Error: "rate limit: max retries exceeded"}, 0, errors.New("rate limit: max retries exceeded")
 }

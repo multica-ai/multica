@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -389,6 +389,16 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     timeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+
+  const commentById = useMemo(() => {
+    const m = new Map<string, TimelineEntry>();
+    for (const e of timeline) {
+      if (e.type === "comment") m.set(e.id, e);
+    }
+    return m;
+  }, [timeline]);
+
+  const isWorkspaceAdmin = currentMemberRole === "owner" || currentMemberRole === "admin";
 
   const {
     reactions: issueReactions,
@@ -1341,6 +1351,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                           issueId={id}
                           entry={entry}
                           allReplies={repliesByParent}
+                          commentById={commentById}
+                          agents={agents}
+                          isWorkspaceAdmin={isWorkspaceAdmin}
+                          issueOpen={
+                            !!issue && issue.status !== "done" && issue.status !== "cancelled"
+                          }
                           currentUserId={user?.id}
                           onReply={submitReply}
                           onEdit={editComment}

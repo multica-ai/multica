@@ -147,7 +147,11 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat / task events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:session_read",
+      "chat:message",
+      "chat:message_deleted",
+      "chat:retry_progress",
+      "chat:done",
+      "chat:session_read",
       "task:message", "task:completed", "task:failed",
     ]);
 
@@ -396,6 +400,23 @@ export function useRealtimeSync(
       invalidatePendingAggregate();
     });
 
+    const unsubChatMessageDeleted = ws.on("chat:message_deleted", (p) => {
+      const payload = p as { chat_session_id: string; message_id: string };
+      if (!payload.chat_session_id) return;
+      chatWsLogger.info("chat:message_deleted (global)", {
+        chat_session_id: payload.chat_session_id,
+        message_id: payload.message_id,
+      });
+      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      invalidatePendingAggregate();
+    });
+
+    const unsubChatRetryProgress = ws.on("chat:retry_progress", (p) => {
+      const payload = p as { chat_session_id?: string };
+      chatWsLogger.debug("chat:retry_progress (global)", payload);
+    });
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -470,6 +491,8 @@ export function useRealtimeSync(
       unsubInvitationRevoked();
       unsubTaskMessage();
       unsubChatMessage();
+      unsubChatMessageDeleted();
+      unsubChatRetryProgress();
       unsubChatDone();
       unsubTaskCompleted();
       unsubTaskFailed();

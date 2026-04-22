@@ -149,6 +149,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
+
+		// Chat retry progress endpoint
+		r.Post("/api/daemon/chats/{chatSessionId}/tasks/{taskId}/retry-progress", h.ReportChatRetryProgress)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
@@ -298,6 +301,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
+				r.Post("/retry-agent", h.RetryAgentComment)
 				r.Post("/reactions", h.AddReaction)
 				r.Delete("/reactions", h.RemoveReaction)
 			})
@@ -368,6 +372,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
+					r.Route("/messages/{messageId}", func(r chi.Router) {
+						r.Delete("/", h.DeleteChatMessage)
+						r.Post("/retry", h.RetryChatMessage)
+					})
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)

@@ -999,6 +999,47 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 
+// ChatRetryProgressRequest represents a chat retry progress event from daemon.
+type ChatRetryProgressRequest struct {
+	WorkspaceID   string `json:"workspace_id"`
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id"`
+	RetryAttempt  int    `json:"retry_attempt"`
+	MaxRetries    int    `json:"max_retries"`
+	WaitSeconds   int    `json:"wait_seconds"`
+}
+
+// ReportChatRetryProgress broadcasts chat retry progress to WebSocket clients.
+func (h *Handler) ReportChatRetryProgress(w http.ResponseWriter, r *http.Request) {
+	var req ChatRetryProgressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// Verify daemon has access to this workspace.
+	daemonWsID := middleware.DaemonWorkspaceIDFromContext(r.Context())
+	if daemonWsID == "" {
+		writeError(w, http.StatusUnauthorized, "daemon auth required")
+		return
+	}
+
+	if daemonWsID != req.WorkspaceID {
+		writeError(w, http.StatusForbidden, "workspace mismatch")
+		return
+	}
+
+	// Broadcast retry progress event.
+	h.publish(protocol.EventChatRetryProgress, req.WorkspaceID, "system", "", protocol.ChatRetryProgressPayload{
+		ChatSessionID: req.ChatSessionID,
+		TaskID:        req.TaskID,
+		RetryAttempt:  req.RetryAttempt,
+		MaxRetries:    req.MaxRetries,
+		WaitSeconds:   req.WaitSeconds,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // ---------------------------------------------------------------------------
 // Task Messages (live agent output)
 // ---------------------------------------------------------------------------

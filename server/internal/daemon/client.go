@@ -193,6 +193,18 @@ func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
 }
 
+// ReportChatRetryProgress sends chat retry progress to server for WebSocket broadcasting.
+func (c *Client) ReportChatRetryProgress(ctx context.Context, workspaceID, chatSessionID, taskID string, retryAttempt, maxRetries, waitSeconds int) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/chats/%s/tasks/%s/retry-progress", chatSessionID, taskID), map[string]any{
+		"workspace_id":    workspaceID,
+		"chat_session_id": chatSessionID,
+		"task_id":         taskID,
+		"retry_attempt":   retryAttempt,
+		"max_retries":     maxRetries,
+		"wait_seconds":    waitSeconds,
+	}, nil)
+}
+
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
