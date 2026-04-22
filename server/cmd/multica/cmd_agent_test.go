@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -81,4 +82,95 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 			t.Fatalf("requireWorkspaceID() error = %q, want it to mention agent execution context", err.Error())
 		}
 	})
+}
+
+// TestParseCustomEnv covers the --custom-env flag parser used by both
+// `agent create` and `agent update`. The flag accepts a JSON object of
+// string keys and values; both "" and "{}" mean "clear the map"
+// (server treats a non-nil empty map on update as a clear), and any
+// other input must be a valid JSON object.
+func TestParseCustomEnv(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name: "single pair",
+			raw:  `{"SECOND_BRAIN_TOKEN":"abc123"}`,
+			want: map[string]string{"SECOND_BRAIN_TOKEN": "abc123"},
+		},
+		{
+			name: "multiple pairs",
+			raw:  `{"A":"1","B":"2"}`,
+			want: map[string]string{"A": "1", "B": "2"},
+		},
+		{
+			name: "empty object clears",
+			raw:  `{}`,
+			want: map[string]string{},
+		},
+		{
+			name: "empty string clears",
+			raw:  ``,
+			want: map[string]string{},
+		},
+		{
+			name: "whitespace only clears",
+			raw:  `   `,
+			want: map[string]string{},
+		},
+		{
+			name:    "not JSON",
+			raw:     `KEY=value`,
+			wantErr: true,
+		},
+		{
+			name:    "JSON array not object",
+			raw:     `["A","B"]`,
+			wantErr: true,
+		},
+		{
+			name:    "non-string value",
+			raw:     `{"A":1}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCustomEnv(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseCustomEnv(%q): expected error, got nil (result=%v)", tc.raw, got)
+				}
+				if !strings.Contains(err.Error(), "--custom-env") {
+					t.Fatalf("parseCustomEnv(%q): error should mention --custom-env, got %v", tc.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseCustomEnv(%q): unexpected error: %v", tc.raw, err)
+			}
+			if got == nil {
+				t.Fatalf("parseCustomEnv(%q): result must be non-nil (empty map, not nil) so the server treats it as clear", tc.raw)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("parseCustomEnv(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAgentUpdateNoFieldsMentionsCustomEnv makes sure the "no fields"
+// usage hint lists --custom-env so discoverability does not silently
+// regress the next time someone touches this error message.
+func TestAgentUpdateNoFieldsMentionsCustomEnv(t *testing.T) {
+	if !strings.Contains(agentUpdateCmd.Flag("custom-env").Usage, "secret") {
+		t.Fatalf("custom-env usage must flag it as secret material; got: %q", agentUpdateCmd.Flag("custom-env").Usage)
+	}
+	if agentCreateCmd.Flag("custom-env") == nil {
+		t.Fatal("agent create must expose --custom-env")
+	}
 }

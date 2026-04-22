@@ -116,6 +116,7 @@ func init() {
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged. Pass '{}' to set an empty map.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -128,6 +129,7 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentUpdateCmd.Flags().String("custom-env", "", "New custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged. Pass '{}' to clear the map; omit the flag to leave it unchanged.")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -368,6 +370,14 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["custom_args"] = ca
 	}
+	if cmd.Flags().Changed("custom-env") {
+		v, _ := cmd.Flags().GetString("custom-env")
+		ce, err := parseCustomEnv(v)
+		if err != nil {
+			return err
+		}
+		body["custom_env"] = ce
+	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
 		body["model"] = v
@@ -437,6 +447,14 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["custom_args"] = ca
 	}
+	if cmd.Flags().Changed("custom-env") {
+		v, _ := cmd.Flags().GetString("custom-env")
+		ce, err := parseCustomEnv(v)
+		if err != nil {
+			return err
+		}
+		body["custom_env"] = ce
+	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
 		body["model"] = v
@@ -455,7 +473,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env, --visibility, --status, or --max-concurrent-tasks")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -635,6 +653,27 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// parseCustomEnv parses the --custom-env flag value (a JSON object literal)
+// into a string map suitable for the request body. An empty map is preserved
+// so callers can clear the server-side value; the server treats a non-nil
+// empty map on update as "clear all entries".
+func parseCustomEnv(raw string) (map[string]string, error) {
+	// Both "" and "{}" mean "clear the map"; any other value must be a JSON
+	// object of string keys and string values. The server treats a non-nil
+	// empty map on update as "clear all entries" (see UpdateAgentRequest).
+	if strings.TrimSpace(raw) == "" {
+		return map[string]string{}, nil
+	}
+	var ce map[string]string
+	if err := json.Unmarshal([]byte(raw), &ce); err != nil {
+		return nil, fmt.Errorf("--custom-env must be a valid JSON object of string keys and string values: %w", err)
+	}
+	if ce == nil {
+		ce = map[string]string{}
+	}
+	return ce, nil
+}
 
 func strVal(m map[string]any, key string) string {
 	v, ok := m[key]
