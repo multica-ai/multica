@@ -116,8 +116,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &piBackend{cfg: cfg}, nil
 	case "cursor":
 		return &cursorBackend{cfg: cfg}, nil
+	case "kimi":
+		return &kimiBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi)", agentType)
 	}
 }
 
@@ -139,6 +141,7 @@ var launchHeaders = map[string]string{
 	"cursor":   "cursor-agent (stream-json)",
 	"gemini":   "gemini (stream-json)",
 	"hermes":   "hermes acp",
+	"kimi":     "kimi (stream-json)",
 	"openclaw": "openclaw agent (json)",
 	"opencode": "opencode run (json)",
 	"pi":       "pi (json mode)",
