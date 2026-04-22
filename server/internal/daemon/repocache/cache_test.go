@@ -56,11 +56,11 @@ func TestBareDirName(t *testing.T) {
 		{"git@github.com:org/my-repo.git", "github.com+org+my-repo.git"},
 		{"git@github.com:org/my-repo", "github.com+org+my-repo.git"},
 		{"https://github.com/org/repo/", "github.com+org+repo.git"},
-		{"ssh://git@gitlab.example.com:22/group/sub/repo.git", "gitlab.example.com-22+group+sub+repo.git"},
+		{"ssh://git@gitlab.example.com:22/group/sub/repo.git", "gitlab.example.com%3A22+group+sub+repo.git"},
 		// Basename collision: two repos sharing the basename must produce
 		// distinct dirs (the original bug).
-		{"ssh://git@gitlab.example.com:22/relisty/app.git", "gitlab.example.com-22+relisty+app.git"},
-		{"ssh://git@gitlab.example.com:22/listbridge/app.git", "gitlab.example.com-22+listbridge+app.git"},
+		{"ssh://git@gitlab.example.com:22/relisty/app.git", "gitlab.example.com%3A22+relisty+app.git"},
+		{"ssh://git@gitlab.example.com:22/listbridge/app.git", "gitlab.example.com%3A22+listbridge+app.git"},
 		{"my-repo", "my-repo.git"},
 		{"", "repo.git"},
 	}
@@ -105,6 +105,29 @@ func TestBareDirNameDistinctsSameRepoNameAcrossHosts(t *testing.T) {
 		a, b := bareDirName(p[0]), bareDirName(p[1])
 		if a == b {
 			t.Errorf("bareDirName collision across hosts: %q and %q both → %q", p[0], p[1], a)
+		}
+	}
+}
+
+// TestBareDirNameDistinctsHostPortFromDashedHostname covers the lossy-port
+// encoding regression: a naive ':' -> '-' rewrite would collapse
+// `host:port` onto a hostname that literally contains the same dash pattern,
+// silently reintroducing the wrong-remote bug. We URL-encode ':' to '%3A'
+// so host+port is lossless — and '%' is forbidden in valid hostnames so the
+// marker can never come from a legal literal hostname.
+func TestBareDirNameDistinctsHostPortFromDashedHostname(t *testing.T) {
+	t.Parallel()
+	pairs := [][2]string{
+		// Host-with-port vs a literal hostname that looks like `host-port`.
+		{"ssh://git@gitlab.example.com:22/org/repo.git", "git@gitlab.example.com-22:org/repo.git"},
+		// Same again but across the URL and scp-style forms, explicit ports
+		// swapped to ensure we don't rely on order.
+		{"ssh://git@host.example.com:443/a/b.git", "git@host.example.com-443:a/b.git"},
+	}
+	for _, p := range pairs {
+		a, b := bareDirName(p[0]), bareDirName(p[1])
+		if a == b {
+			t.Errorf("bareDirName collision between host:port and host-port: %q and %q both → %q", p[0], p[1], a)
 		}
 	}
 }

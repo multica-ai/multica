@@ -140,16 +140,21 @@ func (c *Cache) Fetch(barePath string) error {
 //	git@github.com:foo-bar/baz.git               -> github.com+foo-bar+baz.git
 //	git@github.com:org/repo.git                  -> github.com+org+repo.git
 //	git@gitlab.example.com:org/repo.git          -> gitlab.example.com+org+repo.git
-//	ssh://git@gitlab.example.com:22/g/s/r.git    -> gitlab.example.com-22+g+s+r.git
+//	ssh://git@gitlab.example.com:22/g/s/r.git    -> gitlab.example.com%3A22+g+s+r.git
+//	git@gitlab.example.com-22:org/repo.git       -> gitlab.example.com-22+org+repo.git
 //	my-repo                                      -> my-repo.git (bare name fallback)
 func bareDirName(rawURL string) string {
 	rawURL = strings.TrimRight(rawURL, "/")
 
 	host, path := splitHostAndPath(rawURL)
 	host = strings.ToLower(strings.TrimSpace(host))
-	// ':' is valid on POSIX but reserved on Windows and confusing in paths;
-	// replace it so `host:port` stays readable without creating a path quirk.
-	host = strings.ReplaceAll(host, ":", "-")
+	// Encode ':' as '%3A' so host:port is lossless. A naive ':'->'-' rewrite
+	// would collapse `gitlab.example.com:22` onto a literal hostname
+	// `gitlab.example.com-22`, reintroducing the silent wrong-remote class
+	// this function exists to prevent. '%' is forbidden in valid hostnames
+	// (RFC 952 / RFC 1123), and in GitHub/GitLab path segments, so the
+	// encoded marker can never come from a legal input.
+	host = strings.ReplaceAll(host, ":", "%3A")
 
 	var parts []string
 	if host != "" {
