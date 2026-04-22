@@ -27,6 +27,7 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  BatchImportSkillsResponse,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -654,6 +655,13 @@ export class ApiClient {
 
   async importSkill(data: { url: string }): Promise<Skill> {
     return this.fetch("/api/skills/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async batchImportSkills(data: { skills: CreateSkillRequest[] }): Promise<BatchImportSkillsResponse> {
+    return this.fetch("/api/skills/batch-import", {
       method: "POST",
       body: JSON.stringify(data),
     });

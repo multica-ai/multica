@@ -132,6 +132,11 @@ export interface SetAgentSkillsRequest {
   skill_ids: string[];
 }
 
+export interface BatchImportSkillsResponse {
+  created: Skill[];
+  skipped: string[];
+}
+
 export type RuntimePingStatus = "pending" | "running" | "completed" | "failed" | "timeout";
 
 export interface RuntimePing {

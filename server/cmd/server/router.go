@@ -314,6 +314,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
 				r.Post("/import", h.ImportSkill)
+				r.Post("/batch-import", h.BatchImportSkills)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSkill)
 					r.Put("/", h.UpdateSkill)

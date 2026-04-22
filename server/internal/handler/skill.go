@@ -902,6 +902,121 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// --- Batch import ---
+
+type BatchImportSkillsRequest struct {
+	Skills []CreateSkillRequest `json:"skills"`
+}
+
+type BatchImportSkillsResponse struct {
+	Created []SkillWithFilesResponse `json:"created"`
+	Skipped []string                 `json:"skipped"`
+}
+
+func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+
+	creatorID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req BatchImportSkillsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.Skills) == 0 {
+		writeError(w, http.StatusBadRequest, "no skills provided")
+		return
+	}
+
+	if len(req.Skills) > 100 {
+		writeError(w, http.StatusBadRequest, "maximum 100 skills per batch")
+		return
+	}
+
+	var created []SkillWithFilesResponse
+	var skipped []string
+
+	for _, s := range req.Skills {
+		if s.Name == "" {
+			skipped = append(skipped, "(unnamed)")
+			continue
+		}
+
+		for _, f := range s.Files {
+			if !validateFilePath(f.Path) {
+				writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
+				return
+			}
+		}
+
+		config, _ := json.Marshal(s.Config)
+		if s.Config == nil {
+			config = []byte("{}")
+		}
+
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+
+		qtx := h.Queries.WithTx(tx)
+
+		skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
+			WorkspaceID: parseUUID(workspaceID),
+			Name:        s.Name,
+			Description: s.Description,
+			Content:     s.Content,
+			Config:      config,
+			CreatedBy:   parseUUID(creatorID),
+		})
+		if err != nil {
+			tx.Rollback(r.Context())
+			if isUniqueViolation(err) {
+				skipped = append(skipped, s.Name)
+				continue
+			}
+			writeError(w, http.StatusInternalServerError, "failed to create skill "+s.Name+": "+err.Error())
+			return
+		}
+
+		fileResps := make([]SkillFileResponse, 0, len(s.Files))
+		for _, f := range s.Files {
+			sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+				SkillID: skill.ID,
+				Path:    f.Path,
+				Content: f.Content,
+			})
+			if err != nil {
+				continue
+			}
+			fileResps = append(fileResps, skillFileToResponse(sf))
+		}
+
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit")
+			return
+		}
+
+		resp := SkillWithFilesResponse{
+			SkillResponse: skillToResponse(skill),
+			Files:         fileResps,
+		}
+		created = append(created, resp)
+		actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+		h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+	}
+
+	writeJSON(w, http.StatusCreated, BatchImportSkillsResponse{
+		Created: created,
+		Skipped: skipped,
+	})
+}
+
 // --- Skill File endpoints ---
 
 func (h *Handler) ListSkillFiles(w http.ResponseWriter, r *http.Request) {

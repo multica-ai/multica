@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   Sparkles,
@@ -9,8 +9,9 @@ import {
   Save,
   AlertCircle,
   Download,
+  FolderOpen,
 } from "lucide-react";
-import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
+import type { Skill, CreateSkillRequest, UpdateSkillRequest, BatchImportSkillsResponse } from "@multica/core/types";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,7 @@ import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries
 import { PageHeader } from "../../layout/page-header";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
+import { parseSkillDirectory } from "../lib/parse-skill-directory";
 
 // ---------------------------------------------------------------------------
 // Create Skill Dialog
@@ -50,17 +52,22 @@ function CreateSkillDialog({
   onClose,
   onCreate,
   onImport,
+  onBatchImport,
 }: {
   onClose: () => void;
   onCreate: (data: CreateSkillRequest) => Promise<void>;
   onImport: (url: string) => Promise<void>;
+  onBatchImport: (skills: CreateSkillRequest[]) => Promise<BatchImportSkillsResponse>;
 }) {
-  const [tab, setTab] = useState<"create" | "import">("create");
+  const [tab, setTab] = useState<"create" | "import" | "local">("create");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [importUrl, setImportUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [importError, setImportError] = useState("");
+  const [parsedSkills, setParsedSkills] = useState<CreateSkillRequest[]>([]);
+  const [batchResult, setBatchResult] = useState<BatchImportSkillsResponse | null>(null);
+  const dirInputRef = useRef<HTMLInputElement>(null);
 
   const detectedSource = (() => {
     const url = importUrl.trim().toLowerCase();
@@ -93,17 +100,52 @@ function CreateSkillDialog({
     }
   };
 
+  const handleDirectorySelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    setImportError("");
+    setBatchResult(null);
+    try {
+      const skills = await parseSkillDirectory(fileList);
+      if (skills.length === 0) {
+        setImportError("No skill files found in the selected directory. Supported: .claude/commands/*.md, AGENTS.md, SKILL.md directories.");
+        return;
+      }
+      setParsedSkills(skills);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Failed to parse directory");
+    }
+  };
+
+  const handleBatchImport = async () => {
+    if (parsedSkills.length === 0) return;
+    setLoading(true);
+    setImportError("");
+    try {
+      const result = await onBatchImport(parsedSkills);
+      setBatchResult(result);
+      if (result.created.length === parsedSkills.length) {
+        onClose();
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Batch import failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Add Workspace Skill</DialogTitle>
           <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh. Workspace skills are shared with your team and automatically injected into agent runs.
+            Create a new skill or import from external sources. Workspace skills are shared with your team and automatically injected into agent runs.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "create" | "import")}>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "create" | "import" | "local")} className="flex-1 min-h-0 overflow-y-auto">
           <TabsList className="w-full">
             <TabsTrigger value="create" className="flex-1">
               <Plus className="mr-1.5 h-3 w-3" />
@@ -112,6 +154,10 @@ function CreateSkillDialog({
             <TabsTrigger value="import" className="flex-1">
               <Download className="mr-1.5 h-3 w-3" />
               Import
+            </TabsTrigger>
+            <TabsTrigger value="local" className="flex-1">
+              <FolderOpen className="mr-1.5 h-3 w-3" />
+              Local
             </TabsTrigger>
           </TabsList>
 
@@ -181,7 +227,80 @@ function CreateSkillDialog({
               </div>
             </div>
 
-            {importError && (
+            {importError && tab === "import" && (
+              <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                {importError}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="local" className="space-y-4 mt-4">
+            <input
+              ref={dirInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleDirectorySelect}
+              // @ts-expect-error webkitdirectory is not in React types
+              webkitdirectory=""
+              directory=""
+            />
+            {!batchResult && parsedSkills.length === 0 && (
+              <div className="flex flex-col items-center justify-center gap-3 py-6">
+                <Button
+                  variant="outline"
+                  onClick={() => dirInputRef.current?.click()}
+                >
+                  <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                  Select Directory
+                </Button>
+                <p className="text-xs text-muted-foreground text-center max-w-[280px]">
+                  Supports Claude Code (.claude/commands), Codex (AGENTS.md), and SKILL.md directories.
+                </p>
+              </div>
+            )}
+
+            {parsedSkills.length > 0 && !batchResult && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {parsedSkills.length} skill{parsedSkills.length !== 1 ? "s" : ""} detected:
+                </p>
+                <div className="max-h-48 overflow-y-auto space-y-1.5">
+                  {parsedSkills.map((s, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                      <Sparkles className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium truncate">{s.name}</div>
+                        {s.description && (
+                          <div className="text-[11px] text-muted-foreground truncate">{s.description}</div>
+                        )}
+                      </div>
+                      {(s.files?.length ?? 0) > 0 && (
+                        <Badge variant="secondary" className="text-[10px] shrink-0">
+                          {s.files!.length} file{s.files!.length !== 1 ? "s" : ""}
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {batchResult && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {batchResult.created.length} skill{batchResult.created.length !== 1 ? "s" : ""} imported
+                  {batchResult.skipped.length > 0 && `, ${batchResult.skipped.length} skipped (duplicates)`}.
+                </p>
+                {batchResult.skipped.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    Skipped: {batchResult.skipped.join(", ")}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {importError && tab === "local" && (
               <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 {importError}
@@ -190,13 +309,13 @@ function CreateSkillDialog({
           </TabsContent>
         </Tabs>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           {tab === "create" ? (
             <Button onClick={handleCreate} disabled={loading || !name.trim()}>
               {loading ? "Creating..." : "Create"}
             </Button>
-          ) : (
+          ) : tab === "import" ? (
             <Button onClick={handleImport} disabled={loading || !importUrl.trim()}>
               {loading ? (
                 detectedSource === "clawhub"
@@ -210,6 +329,12 @@ function CreateSkillDialog({
                   Import
                 </>
               )}
+            </Button>
+          ) : batchResult ? (
+            <Button onClick={onClose}>Done</Button>
+          ) : (
+            <Button onClick={handleBatchImport} disabled={loading || parsedSkills.length === 0}>
+              {loading ? "Importing..." : `Import ${parsedSkills.length} Skill${parsedSkills.length !== 1 ? "s" : ""}`}
             </Button>
           )}
         </DialogFooter>
@@ -644,6 +769,16 @@ export default function SkillsPage() {
     toast.success("Skill imported");
   };
 
+  const handleBatchImport = async (batchSkills: CreateSkillRequest[]) => {
+    const result = await api.batchImportSkills({ skills: batchSkills });
+    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    if (result.created.length > 0) {
+      setSelectedId(result.created[0]!.id);
+    }
+    toast.success(`${result.created.length} skill${result.created.length !== 1 ? "s" : ""} imported`);
+    return result;
+  };
+
   const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
     try {
       await api.updateSkill(id, data);
@@ -810,6 +945,7 @@ export default function SkillsPage() {
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
           onImport={handleImport}
+          onBatchImport={handleBatchImport}
         />
       )}
     </ResizablePanelGroup>
