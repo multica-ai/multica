@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -113,7 +114,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Path:  resolved,
 			Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
 		}
-	} else if appData := os.Getenv("APPDATA"); appData != "" {
+	} else if runtime.GOOS == "windows" {
 		// Windows fallback: check the managed wrapper at %APPDATA%\Multica\bin\hermes.cmd.
 		// Hermes is a Python agent typically installed inside WSL on Windows.
 		// The daemon process (spawned by the Desktop app or background start)
@@ -122,11 +123,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		// Windows binary named "hermes" on PATH.
 		// A lightweight .cmd wrapper placed at this well-known location
 		// delegates to the WSL-resident Hermes binary transparently.
-		fallback := filepath.Join(appData, "Multica", "bin", "hermes.cmd")
-		if _, statErr := os.Stat(fallback); statErr == nil {
-			agents["hermes"] = AgentEntry{
-				Path:  fallback,
-				Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			fallback := filepath.Join(appData, "Multica", "bin", "hermes.cmd")
+			if _, statErr := os.Stat(fallback); statErr == nil {
+				agents["hermes"] = AgentEntry{
+					Path:         fallback,
+					Model:        strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+					NeedsWSLPath: true, // discovered via WSL bridge — translate Windows paths to /mnt/...
+				}
 			}
 		}
 	}

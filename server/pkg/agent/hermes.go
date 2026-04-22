@@ -9,26 +9,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// windowsToWSLPath translates a Windows-style path (e.g. C:\Users\...)
-// into a WSL mount path (e.g. /mnt/c/Users/...). This allows the
-// daemon running on Windows to pass working directories to a Hermes
-// binary installed inside WSL via a .cmd wrapper.
+// windowsToWSLPath converts a Windows drive-letter path (e.g. C:\Users\...)
+// to the corresponding WSL mount path (/mnt/c/Users/...). Paths that are not
+// drive-letter paths (UNC, empty, already POSIX) are returned unchanged.
+// This is a pure function — the caller decides whether to call it based on
+// the NeedsWSLPath flag, not runtime.GOOS.
 func windowsToWSLPath(windowsPath string) string {
-	if runtime.GOOS != "windows" {
-		return windowsPath
-	}
 	vol := filepath.VolumeName(windowsPath)
 	if vol == "" {
 		return windowsPath
 	}
-	driveLetter := strings.ToLower(strings.TrimSuffix(vol, ":"))
+	// Only translate drive-letter paths (e.g. "C:"). UNC paths like
+	// \\host\share have a VolumeName without a colon — don't attempt
+	// to translate those.
+	if len(vol) != 2 || vol[1] != ':' {
+		return windowsPath // not a drive-letter path; return as-is
+	}
+	driveLetter := strings.ToLower(string(vol[0]))
 	rest := strings.TrimPrefix(windowsPath, vol)
 	rest = filepath.ToSlash(rest)
 	return fmt.Sprintf("/mnt/%s%s", driveLetter, rest)
@@ -184,7 +187,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cwd := opts.Cwd
 		if cwd == "" {
 			cwd = "."
-		} else {
+		} else if b.cfg.NeedsWSLPath {
 			cwd = windowsToWSLPath(cwd)
 		}
 

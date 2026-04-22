@@ -4,8 +4,9 @@ import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path         string // path to CLI binary
+	Model        string // model override (optional)
+	NeedsWSLPath bool   // true when discovered via a WSL bridge wrapper (e.g. hermes.cmd); signals that Windows paths must be translated to /mnt/... before passing to the agent
 }
 
 // Runtime represents a registered daemon runtime.
