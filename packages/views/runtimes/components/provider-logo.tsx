@@ -111,6 +111,19 @@ function CursorLogo({ className }: { className: string }) {
   );
 }
 
+// Kiro (AWS) — brand mark in teal/dark theme
+function KiroLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0D1B2A" />
+      <path
+        d="M7.5 6h2.2v4.6l3.8-4.6h2.7l-4 4.7L16.5 18h-2.7l-2.9-4.8-1.2 1.4V18H7.5V6z"
+        fill="#2DD4BF"
+      />
+    </svg>
+  );
+}
+
 // Kimi (Moonshot AI) — wordmark "K" mark in Moonshot brand purple, simple
 // rounded-square logotype suitable for small icon sizes.
 function KimiLogo({ className }: { className: string }) {
@@ -151,6 +164,8 @@ export function ProviderLogo({
       return <CursorLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
+    case "kiro":
+      return <KiroLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

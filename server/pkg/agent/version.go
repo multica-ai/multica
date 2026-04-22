@@ -12,6 +12,7 @@ var MinVersions = map[string]string{
 	"claude":  "2.0.0",
 	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
+	"kiro":    "1.25.0",  // ACP subcommand (kiro-cli acp) added in 1.25.0
 }
 
 // semver holds a parsed semantic version (major.minor.patch).
