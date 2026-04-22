@@ -25,14 +25,42 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica uses email-based magic link authentication via [Resend](https://resend.com).
+Multica supports three email providers. Set `EMAIL_PROVIDER` to choose one (default: `resend`).
+
+> **Note:** For local/development deployments without email configured, leave credentials empty — all providers fall back to printing codes to stdout, and the master verification code `888888` works.
+
+#### Resend (default)
 
 | Variable | Description |
 |----------|-------------|
-| `RESEND_API_KEY` | Your Resend API key |
+| `EMAIL_PROVIDER` | Leave empty or set to `resend` |
+| `RESEND_API_KEY` | Your [Resend](https://resend.com) API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
 > **Note:** The dev master verification code `888888` is gated by `APP_ENV != "production"`. The Docker self-host stack defaults to `APP_ENV=production` (so `888888` is disabled), which protects publicly reachable instances. For local development without email configured, set `APP_ENV=development` in your `.env` to enable `888888` — never do this on a public instance.
+
+#### AWS SES
+
+| Variable | Description |
+|----------|-------------|
+| `EMAIL_PROVIDER` | `ses` |
+| `SES_REGION` | AWS region for SES (defaults to `AWS_DEFAULT_REGION`, then `us-east-1`) |
+| `SES_FROM_EMAIL` | Sender email address (falls back to `RESEND_FROM_EMAIL`, then `noreply@multica.ai`) |
+
+SES uses the default AWS credentials chain — IAM role on EC2/ECS, environment variables (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), or `~/.aws/credentials`. The sender address must be verified in your SES account (or you must be out of the SES sandbox).
+
+#### SMTP
+
+| Variable | Description |
+|----------|-------------|
+| `EMAIL_PROVIDER` | `smtp` |
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP server port (default: `587`) |
+| `SMTP_USERNAME` | SMTP auth username (optional if your relay allows unauthenticated sending) |
+| `SMTP_PASSWORD` | SMTP auth password |
+| `SMTP_FROM_EMAIL` | Sender email address (falls back to `RESEND_FROM_EMAIL`, then `noreply@multica.ai`) |
+
+The SMTP provider connects via plain TCP and upgrades to TLS with STARTTLS when the server supports it. This works with most mail relays including Postfix, Amazon SES SMTP interface, Mailgun, and SendGrid.
 
 ### Google OAuth (Optional)
 
