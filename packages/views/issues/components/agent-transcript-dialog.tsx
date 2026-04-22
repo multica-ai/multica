@@ -562,30 +562,24 @@ function TimelineBar({
         const widthPercent = (seg.count / items.length) * 100;
 
         return (
-          <div
+          <button
             key={seg.startIdx}
-            className="h-full relative group flex overflow-hidden rounded-sm"
+            className={cn(
+              "h-full transition-all duration-150 hover:opacity-80 relative group",
+              isSelected ? color.bgActive : color.bg,
+              "min-w-[4px]",
+            )}
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
+            onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
             title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
           >
-            {items.slice(seg.startIdx, seg.endIdx + 1).map((item) => (
-              <button
-                key={item.seq}
-                className={cn(
-                  "h-full flex-1 transition-colors min-w-0",
-                  isSelected && selectedSeq === item.seq ? color.bgActive : color.bg,
-                )}
-                onClick={() => onSegmentClick(item.seq)}
-                title={getEventLabel(item)}
-              />
-            ))}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
               <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
                 {getEventLabel(items[seg.startIdx]!)}
                 {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
               </div>
             </div>
-          </div>
+          </button>
         );
       })}
     </div>
