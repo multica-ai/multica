@@ -183,15 +183,9 @@ export function AgentTranscriptDialog({
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
-  //   text → filter value = "text", display = "Agent"
-  //   thinking / error → title case
+  //   other types → display from getEventLabel
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
-    const displayMap: Record<string, string> = {
-      text: "Agent",
-      thinking: "Thinking",
-      error: "Error",
-    };
     for (const item of items) {
       if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
         const key = `tool:${item.tool}`;
@@ -199,20 +193,15 @@ export function AgentTranscriptDialog({
       } else {
         const value = item.type;
         if (!options.has(value)) {
-          options.set(value, displayMap[value] ?? value);
+          options.set(value, getEventLabel(item));
         }
       }
     }
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [items]);
 
-  // Resolve filter key for each item
-  const itemFilterKey = (item: TimelineItem) => {
-    if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
-      return `tool:${item.tool}`;
-    }
-    return item.type;
-  };
+  // Resolve filter key for each item — matches filterOptions derivation
+  const itemFilterKey = (item: TimelineItem) => item.tool ? `tool:${item.tool}` : item.type;
 
   // Strict filter
   const filteredItems = useMemo(() => {
