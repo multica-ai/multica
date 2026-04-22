@@ -326,6 +326,8 @@ interface IssueDetailProps {
 export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
+  const deepLinkedCommentId = router.searchParams?.get("comment") ?? undefined;
+  const targetCommentId = highlightCommentId ?? deepLinkedCommentId;
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const workspace = useCurrentWorkspace();
@@ -434,19 +436,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
-    if (!highlightCommentId || timeline.length === 0) return;
-    if (didHighlightRef.current === highlightCommentId) return;
-    const el = document.getElementById(`comment-${highlightCommentId}`);
+    if (!targetCommentId || timeline.length === 0) return;
+    if (didHighlightRef.current === targetCommentId) return;
+    const el = document.getElementById(`comment-${targetCommentId}`);
     if (el) {
-      didHighlightRef.current = highlightCommentId;
+      didHighlightRef.current = targetCommentId;
       requestAnimationFrame(() => {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
-        setHighlightedId(highlightCommentId);
+        setHighlightedId(targetCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
       });
     }
-  }, [highlightCommentId, timeline.length]);
+  }, [targetCommentId, timeline.length]);
 
   // Issue field updates via TQ mutation (optimistic update + rollback in mutation hook)
   const updateIssueMutation = useUpdateIssue();

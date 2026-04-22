@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -17,7 +20,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -64,6 +66,101 @@ func parseMentions(content string) []mention {
 		result[i] = mention{Type: m.Type, ID: m.ID}
 	}
 	return result
+}
+
+func buildNotificationLink(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID string) string {
+	if workspaceID == "" || issueID == "" {
+		return ""
+	}
+
+	workspace, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil {
+		slog.Error("failed to resolve workspace for notification link",
+			"workspace_id", workspaceID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"error", err,
+		)
+		return ""
+	}
+
+	baseURL := notifyutil.AppURL()
+	if commentID != "" {
+		return notifyutil.CommentURL(baseURL, workspace.Slug, issueID, commentID)
+	}
+	return notifyutil.IssueURL(baseURL, workspace.Slug, issueID)
+}
+
+func recordMentionNotification(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	recipientID string,
+	issueID string,
+	commentID string,
+	title string,
+	body string,
+	link string,
+	details []byte,
+) {
+	if len(details) == 0 {
+		details = emptyDetails
+	}
+
+	event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
+		WorkspaceID:     parseUUID(e.WorkspaceID),
+		RecipientUserID: parseUUID(recipientID),
+		Type:            "mentioned",
+		Severity:        "info",
+		IssueID:         parseUUID(issueID),
+		CommentID:       parseUUID(commentID),
+		ActorType:       util.StrToText(e.ActorType),
+		ActorID:         parseUUID(e.ActorID),
+		Title:           title,
+		Body:            util.StrToText(body),
+		Link:            util.StrToText(link),
+		Details:         details,
+	})
+	if err != nil {
+		slog.Error("failed to create canonical mention notification",
+			"recipient_id", recipientID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"error", err,
+		)
+		return
+	}
+
+	payloadSnapshot, err := json.Marshal(map[string]any{
+		"type":       "mentioned",
+		"severity":   "info",
+		"title":      title,
+		"body":       body,
+		"link":       link,
+		"issue_id":   issueID,
+		"comment_id": commentID,
+		"details":    json.RawMessage(details),
+	})
+	if err != nil {
+		payloadSnapshot = emptyDetails
+	}
+
+	_, err = queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "inbox",
+		Status:              "sent",
+		AttemptCount:        1,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     payloadSnapshot,
+		SentAt:              pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+	if err != nil {
+		slog.Error("failed to create inbox delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
 }
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
@@ -262,12 +359,15 @@ func notifyMentionedMembers(
 	e events.Event,
 	mentions []mention,
 	issueID string,
-	issueTitle string,
 	issueStatus string,
 	title string,
+	body string,
+	commentID string,
 	skip map[string]bool,
 	details []byte,
 ) {
+	ctx := context.Background()
+
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
 
@@ -284,7 +384,7 @@ func notifyMentionedMembers(
 
 	// If @all is present, expand to all workspace members.
 	if hasAll {
-		members, err := queries.ListMembers(context.Background(), parseUUID(e.WorkspaceID))
+		members, err := queries.ListMembers(ctx, parseUUID(e.WorkspaceID))
 		if err != nil {
 			slog.Error("failed to list members for @all mention", "workspace_id", e.WorkspaceID, "error", err)
 		} else {
@@ -294,11 +394,17 @@ func notifyMentionedMembers(
 		}
 	}
 
+	if len(recipientIDs) == 0 {
+		return
+	}
+
+	notificationLink := buildNotificationLink(ctx, queries, e.WorkspaceID, issueID, commentID)
+
 	for id := range recipientIDs {
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),
@@ -306,6 +412,7 @@ func notifyMentionedMembers(
 			Severity:      "info",
 			IssueID:       parseUUID(issueID),
 			Title:         title,
+			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       parseUUID(e.ActorID),
 			Details:       details,
@@ -323,6 +430,8 @@ func notifyMentionedMembers(
 			ActorID:     e.ActorID,
 			Payload:     map[string]any{"item": resp},
 		})
+
+		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationLink, details)
 	}
 }
 
@@ -366,8 +475,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// Notify @mentions in description
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
-			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
-				issue.Title, skip, emptyDetails)
+			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Status,
+				issue.Title, *issue.Description, "", skip, emptyDetails)
 		}
 	})
 
@@ -504,8 +613,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 				skip := map[string]bool{e.ActorID: true}
-				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Status,
+					issue.Title, *issue.Description, "", skip, emptyDetails)
 			}
 		}
 	})
@@ -553,8 +662,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		mentions := parseMentions(commentContent)
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
-			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
-				issueTitle, skip, commentDetails)
+			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueStatus,
+				issueTitle, commentContent, commentID, skip, commentDetails)
 		}
 	})
 

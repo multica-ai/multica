@@ -85,7 +85,12 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues/issue-1", getShareableUrl: undefined }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    pathname: "/issues/issue-1",
+    searchParams: new URLSearchParams(),
+    getShareableUrl: undefined,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -338,6 +343,39 @@ import { IssueDetail } from "./issue-detail";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+if (typeof window !== "undefined" && !window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }),
+  });
+}
+
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  class ResizeObserverMock {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    value: ResizeObserverMock,
+  });
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    writable: true,
+    value: ResizeObserverMock,
+  });
+}
 
 function createTestQueryClient() {
   return new QueryClient({

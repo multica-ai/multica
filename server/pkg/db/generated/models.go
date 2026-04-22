@@ -216,6 +216,21 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ExternalAccountBinding struct {
+	ID                    pgtype.UUID        `json:"id"`
+	UserID                pgtype.UUID        `json:"user_id"`
+	Provider              string             `json:"provider"`
+	ExternalUserID        string             `json:"external_user_id"`
+	DisplayName           pgtype.Text        `json:"display_name"`
+	AccessTokenEncrypted  pgtype.Text        `json:"access_token_encrypted"`
+	RefreshTokenEncrypted pgtype.Text        `json:"refresh_token_encrypted"`
+	TokenExpiresAt        pgtype.Timestamptz `json:"token_expires_at"`
+	Status                string             `json:"status"`
+	Metadata              []byte             `json:"metadata"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -302,6 +317,47 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type NotificationChannelPreference struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Channel   string             `json:"channel"`
+	EventType string             `json:"event_type"`
+	Enabled   bool               `json:"enabled"`
+	BindingID pgtype.UUID        `json:"binding_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationDelivery struct {
+	ID                  pgtype.UUID        `json:"id"`
+	NotificationEventID pgtype.UUID        `json:"notification_event_id"`
+	Channel             string             `json:"channel"`
+	Status              string             `json:"status"`
+	AttemptCount        int32              `json:"attempt_count"`
+	LastError           pgtype.Text        `json:"last_error"`
+	PayloadSnapshot     []byte             `json:"payload_snapshot"`
+	SentAt              pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationEvent struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RecipientUserID pgtype.UUID        `json:"recipient_user_id"`
+	Type            string             `json:"type"`
+	Severity        string             `json:"severity"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	CommentID       pgtype.UUID        `json:"comment_id"`
+	ActorType       pgtype.Text        `json:"actor_type"`
+	ActorID         pgtype.UUID        `json:"actor_id"`
+	Title           string             `json:"title"`
+	Body            pgtype.Text        `json:"body"`
+	Link            pgtype.Text        `json:"link"`
+	Details         []byte             `json:"details"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type PersonalAccessToken struct {
