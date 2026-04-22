@@ -58,11 +58,11 @@ export function CloudWaitlistExpand({
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border bg-muted/40 p-5">
-      <p className="text-[13.5px] leading-[1.55] text-foreground/85">
+    <div className="flex flex-col gap-4 rounded-lg border border-[#0a0d12]/10 bg-[#f7f7f5] p-5">
+      <p className="text-[13.5px] leading-[1.55] text-[#0a0d12]/85">
         Cloud runtimes aren&apos;t live yet. Leave your email and we&apos;ll
         reach out when they are.{" "}
-        <span className="text-foreground/70">
+        <span className="text-[#0a0d12]/70">
           Heads-up: agents can&apos;t execute tasks without a runtime — if
           you hit Skip now, your workspace is read-only until you come back
           and install one.
@@ -72,7 +72,7 @@ export function CloudWaitlistExpand({
       <div className="flex flex-col gap-1.5">
         <Label
           htmlFor="waitlist-email"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-xs font-medium text-[#0a0d12]/60"
         >
           Email
         </Label>
@@ -96,10 +96,10 @@ export function CloudWaitlistExpand({
       <div className="flex flex-col gap-1.5">
         <Label
           htmlFor="waitlist-reason"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-xs font-medium text-[#0a0d12]/60"
         >
           Why cloud?
-          <span className="ml-2 font-normal text-muted-foreground/70">
+          <span className="ml-2 font-normal text-[#0a0d12]/50">
             Optional
           </span>
         </Label>
