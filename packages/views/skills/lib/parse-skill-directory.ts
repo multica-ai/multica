@@ -112,13 +112,12 @@ function parseCodexFormat(files: ParsedFile[]): CreateSkillRequest | null {
 }
 
 function parseSkillMdFormat(files: ParsedFile[]): CreateSkillRequest[] {
-  // Find all directories that contain a SKILL.md
+  // Find all directories that contain a SKILL.md (including root "")
   const skillDirs = new Set<string>();
   for (const f of files) {
+    if (!f.relativePath.endsWith("SKILL.md")) continue;
     const dir = getDirectory(f.relativePath);
-    if (f.relativePath === `${dir}/SKILL.md` && dir !== "") {
-      skillDirs.add(dir);
-    }
+    skillDirs.add(dir);
   }
 
   if (skillDirs.size === 0) return [];
@@ -126,23 +125,32 @@ function parseSkillMdFormat(files: ParsedFile[]): CreateSkillRequest[] {
   const skills: CreateSkillRequest[] = [];
 
   for (const dir of skillDirs) {
-    // Collect ALL files under this directory, including subdirectories
-    const skillMd = files.find((f) => f.relativePath === `${dir}/SKILL.md`);
+    const skillMdPath = dir ? `${dir}/SKILL.md` : "SKILL.md";
+    const skillMd = files.find((f) => f.relativePath === skillMdPath);
     if (!skillMd) continue;
 
     const { name, description } = parseFrontmatter(skillMd.content);
-    const prefix = dir + "/";
+    const prefix = dir ? dir + "/" : "";
     const supportingFiles = files.filter(
-      (f) => f.relativePath.startsWith(prefix) && f.relativePath !== `${dir}/SKILL.md`,
+      (f) => f.relativePath !== skillMdPath && (prefix === "" || f.relativePath.startsWith(prefix)),
     );
-    const dirName = dir.includes("/") ? dir.split("/").pop()! : dir;
+
+    // For root-level SKILL.md, only include files not claimed by other skill dirs
+    const filteredFiles = prefix === ""
+      ? supportingFiles.filter((f) => {
+          const fDir = getDirectory(f.relativePath);
+          return !skillDirs.has(fDir);
+        })
+      : supportingFiles;
+
+    const dirName = dir ? (dir.includes("/") ? dir.split("/").pop()! : dir) : "";
 
     skills.push({
       name: name || dirName,
       description: description || "",
       content: skillMd.content,
-      files: supportingFiles.map((f) => ({
-        path: f.relativePath.slice(prefix.length),
+      files: filteredFiles.map((f) => ({
+        path: prefix ? f.relativePath.slice(prefix.length) : f.relativePath,
         content: f.content,
       })),
     });
