@@ -848,6 +848,139 @@ func TestListIssuesViewSemanticsAndCompatibility(t *testing.T) {
 	}
 }
 
+func TestListIssuesSearchAndDateFilters(t *testing.T) {
+	ctx := context.Background()
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	tomorrow := today.Add(24 * time.Hour)
+	twoDaysLater := today.Add(48 * time.Hour)
+
+	nextNumber := int32(26000)
+	insertIssue := func(title, description string, dueDate, startDate, endDate *string) (string, int32) {
+		nextNumber++
+		var issueID string
+		err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, description, status, priority, creator_type, creator_id,
+				number, position, due_date, start_date, end_date
+			)
+			VALUES ($1, $2, $3, 'todo', 'none', 'member', $4, $5, $6, $7, $8, $9)
+			RETURNING id
+		`, testWorkspaceID, title, description, testUserID, nextNumber, float64(nextNumber), dueDate, startDate, endDate).Scan(&issueID)
+		if err != nil {
+			t.Fatalf("failed to insert issue %q: %v", title, err)
+		}
+		return issueID, nextNumber
+	}
+
+	searchTitleID, searchTitleNumber := insertIssue(
+		"search-title-token",
+		"plain body",
+		nil,
+		nil,
+		nil,
+	)
+	searchDescriptionID, _ := insertIssue(
+		"search-description-title",
+		"search-description-token",
+		nil,
+		nil,
+		nil,
+	)
+	dueDate := today.Add(12 * time.Hour).Format(time.RFC3339)
+	startDate := tomorrow.Format(time.RFC3339)
+	endDate := twoDaysLater.Format(time.RFC3339)
+	dateIssueID, _ := insertIssue(
+		"search-date-token",
+		"date body",
+		&dueDate,
+		&startDate,
+		&endDate,
+	)
+
+	t.Cleanup(func() {
+		for _, issueID := range []string{searchTitleID, searchDescriptionID, dateIssueID} {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	})
+
+	type issueListResponse struct {
+		Issues []IssueResponse `json:"issues"`
+		Total  int             `json:"total"`
+	}
+
+	decodeList := func(t *testing.T, recorder *httptest.ResponseRecorder) issueListResponse {
+		t.Helper()
+		var resp issueListResponse
+		if err := json.NewDecoder(recorder.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode issue list response: %v", err)
+		}
+		return resp
+	}
+
+	assertSingleTitle := func(t *testing.T, resp issueListResponse, title string) {
+		t.Helper()
+		if resp.Total != 1 {
+			t.Fatalf("expected total=1, got %d", resp.Total)
+		}
+		if len(resp.Issues) != 1 || resp.Issues[0].Title != title {
+			t.Fatalf("expected single issue %q, got %+v", title, resp.Issues)
+		}
+	}
+
+	prefix := testHandler.getIssuePrefix(ctx, parseUUID(testWorkspaceID))
+	identifier := fmt.Sprintf("%s-%d", prefix, searchTitleNumber)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&search=search-title-token", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("title search: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertSingleTitle(t, decodeList(t, w), "search-title-token")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&search=search-description-token", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("description search: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertSingleTitle(t, decodeList(t, w), "search-description-title")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&search="+identifier, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("identifier search: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertSingleTitle(t, decodeList(t, w), "search-title-token")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&due_from="+today.Format(time.DateOnly)+"&due_to="+today.Format(time.DateOnly), nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("due date search: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertSingleTitle(t, decodeList(t, w), "search-date-token")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&start_from="+tomorrow.Format(time.DateOnly)+"&start_to="+tomorrow.Format(time.DateOnly), nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("start date search: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertSingleTitle(t, decodeList(t, w), "search-date-token")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&due_from=2026-99-99", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid due_from: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "due_from") {
+		t.Fatalf("invalid due_from: unexpected body %s", w.Body.String())
+	}
+}
+
 func TestIssueUpdatePublishesScheduleDateMetadata(t *testing.T) {
 	createStartDate := "2026-04-10T00:00:00Z"
 	createEndDate := "2026-04-15T00:00:00Z"

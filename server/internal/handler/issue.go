@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -62,6 +63,39 @@ func parseIssueListView(value string) (pgtype.Text, error) {
 	default:
 		return pgtype.Text{}, fmt.Errorf("invalid view, expected one of: backlog, today, upcoming")
 	}
+}
+
+func parseIssueListSearch(value string) (pgtype.Text, pgtype.UUID, pgtype.Int4) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return pgtype.Text{}, pgtype.UUID{}, pgtype.Int4{}
+	}
+
+	searchText := pgtype.Text{String: trimmed, Valid: true}
+	searchUUID := parseUUID(trimmed)
+	searchNumber := pgtype.Int4{}
+
+	if number, err := strconv.Atoi(trimmed); err == nil {
+		searchNumber = pgtype.Int4{Int32: int32(number), Valid: true}
+	} else if parts := splitIdentifier(trimmed); parts != nil {
+		searchNumber = pgtype.Int4{Int32: parts.number, Valid: true}
+	}
+
+	return searchText, searchUUID, searchNumber
+}
+
+func parseIssueListDate(value string, fieldName string) (pgtype.Date, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return pgtype.Date{}, nil
+	}
+
+	parsed, err := time.Parse(time.DateOnly, trimmed)
+	if err != nil {
+		return pgtype.Date{}, fmt.Errorf("invalid %s format, expected YYYY-MM-DD", fieldName)
+	}
+
+	return pgtype.Date{Time: parsed, Valid: true}, nil
 }
 
 type agentTriggerSnapshot struct {
@@ -224,6 +258,37 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if creatorType := r.URL.Query().Get("creator_type"); creatorType != "" {
 		creatorTypeFilter = pgtype.Text{String: creatorType, Valid: true}
 	}
+	searchText, searchUUID, searchNumber := parseIssueListSearch(r.URL.Query().Get("search"))
+	dueFrom, err := parseIssueListDate(r.URL.Query().Get("due_from"), "due_from")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dueTo, err := parseIssueListDate(r.URL.Query().Get("due_to"), "due_to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	startFrom, err := parseIssueListDate(r.URL.Query().Get("start_from"), "start_from")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	startTo, err := parseIssueListDate(r.URL.Query().Get("start_to"), "start_to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	endFrom, err := parseIssueListDate(r.URL.Query().Get("end_from"), "end_from")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	endTo, err := parseIssueListDate(r.URL.Query().Get("end_to"), "end_to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	viewFilter, err := parseIssueListView(r.URL.Query().Get("view"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -241,10 +306,44 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		CreatorID:    creatorFilter,
 		ProjectID:    projectFilter,
 		CreatorType:  creatorTypeFilter,
+		SearchText:   searchText,
+		SearchUuid:   searchUUID,
+		SearchNumber: searchNumber,
+		DueFrom:      dueFrom,
+		DueTo:        dueTo,
+		StartFrom:    startFrom,
+		StartTo:      startTo,
+		EndFrom:      endFrom,
+		EndTo:        endTo,
 		View:         viewFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
+		return
+	}
+
+	total, err := h.Queries.CountListedIssues(ctx, db.CountListedIssuesParams{
+		WorkspaceID:  parseUUID(workspaceID),
+		Status:       statusFilter,
+		Priority:     priorityFilter,
+		AssigneeID:   assigneeFilter,
+		AssigneeType: assigneeTypeFilter,
+		CreatorID:    creatorFilter,
+		ProjectID:    projectFilter,
+		CreatorType:  creatorTypeFilter,
+		SearchText:   searchText,
+		SearchUuid:   searchUUID,
+		SearchNumber: searchNumber,
+		DueFrom:      dueFrom,
+		DueTo:        dueTo,
+		StartFrom:    startFrom,
+		StartTo:      startTo,
+		EndFrom:      endFrom,
+		EndTo:        endTo,
+		View:         viewFilter,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count issues")
 		return
 	}
 
@@ -256,7 +355,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
-		"total":  len(resp),
+		"total":  total,
 	})
 }
 

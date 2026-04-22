@@ -93,6 +93,124 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 	return count, err
 }
 
+const countListedIssues = `-- name: CountListedIssues :one
+SELECT count(*) FROM issue
+WHERE workspace_id = $1
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR priority = $3)
+  AND ($4::uuid IS NULL OR assignee_id = $4)
+  AND ($5::text IS NULL OR assignee_type = $5)
+  AND ($6::uuid IS NULL OR creator_id = $6)
+  AND ($7::uuid IS NULL OR project_id = $7)
+  AND ($8::text IS NULL OR creator_type = $8)
+  AND (
+      (
+          $9::text IS NULL
+          AND $10::uuid IS NULL
+          AND $11::int IS NULL
+      )
+      OR title ILIKE '%' || $9 || '%'
+      OR COALESCE(description, '') ILIKE '%' || $9 || '%'
+      OR ($10::uuid IS NOT NULL AND id = $10)
+      OR ($11::int IS NOT NULL AND number = $11)
+  )
+  AND ($12::date IS NULL OR timezone('UTC', due_date)::date >= $12::date)
+  AND ($13::date IS NULL OR timezone('UTC', due_date)::date <= $13::date)
+  AND ($14::date IS NULL OR timezone('UTC', start_date)::date >= $14::date)
+  AND ($15::date IS NULL OR timezone('UTC', start_date)::date <= $15::date)
+  AND ($16::date IS NULL OR timezone('UTC', end_date)::date >= $16::date)
+  AND ($17::date IS NULL OR timezone('UTC', end_date)::date <= $17::date)
+  AND (
+      $18::text IS NULL
+      OR (
+          $18::text = 'backlog'
+          AND status = 'backlog'
+      )
+      OR (
+          $18::text = 'today'
+          AND status NOT IN ('done', 'cancelled')
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+      )
+      OR (
+          $18::text = 'upcoming'
+          AND status NOT IN ('done', 'cancelled')
+          AND NOT (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date > timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date > timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date > timezone('UTC', now())::date)
+          )
+      )
+  )
+`
+
+type CountListedIssuesParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Status       pgtype.Text `json:"status"`
+	Priority     pgtype.Text `json:"priority"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	CreatorID    pgtype.UUID `json:"creator_id"`
+	ProjectID    pgtype.UUID `json:"project_id"`
+	CreatorType  pgtype.Text `json:"creator_type"`
+	SearchText   pgtype.Text `json:"search_text"`
+	SearchUuid   pgtype.UUID `json:"search_uuid"`
+	SearchNumber pgtype.Int4 `json:"search_number"`
+	DueFrom      pgtype.Date `json:"due_from"`
+	DueTo        pgtype.Date `json:"due_to"`
+	StartFrom    pgtype.Date `json:"start_from"`
+	StartTo      pgtype.Date `json:"start_to"`
+	EndFrom      pgtype.Date `json:"end_from"`
+	EndTo        pgtype.Date `json:"end_to"`
+	View         pgtype.Text `json:"view"`
+}
+
+func (q *Queries) CountListedIssues(ctx context.Context, arg CountListedIssuesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countListedIssues,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.Priority,
+		arg.AssigneeID,
+		arg.AssigneeType,
+		arg.CreatorID,
+		arg.ProjectID,
+		arg.CreatorType,
+		arg.SearchText,
+		arg.SearchUuid,
+		arg.SearchNumber,
+		arg.DueFrom,
+		arg.DueTo,
+		arg.StartFrom,
+		arg.StartTo,
+		arg.EndFrom,
+		arg.EndTo,
+		arg.View,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createIssue = `-- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
@@ -343,52 +461,69 @@ WHERE workspace_id = $1
   AND ($4::text IS NULL OR status = $4)
   AND ($5::text IS NULL OR priority = $5)
   AND ($6::uuid IS NULL OR assignee_id = $6)
-    AND ($7::text IS NULL OR assignee_type = $7)
-    AND ($8::uuid IS NULL OR creator_id = $8)
-    AND ($9::uuid IS NULL OR project_id = $9)
-    AND ($10::text IS NULL OR creator_type = $10)
-    AND (
-        $11::text IS NULL
-        OR (
-            $11::text = 'backlog'
-            AND status = 'backlog'
-        )
-        OR (
-            $11::text = 'today'
-            AND status NOT IN ('done', 'cancelled')
-            AND (
-                (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
-                OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
-                OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
-                OR (
-                    start_date IS NOT NULL
-                    AND end_date IS NOT NULL
-                    AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
-                    AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
-                )
-            )
-        )
-        OR (
-            $11::text = 'upcoming'
-            AND status NOT IN ('done', 'cancelled')
-            AND NOT (
-                (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
-                OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
-                OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
-                OR (
-                    start_date IS NOT NULL
-                    AND end_date IS NOT NULL
-                    AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
-                    AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
-                )
-            )
-            AND (
-                (due_date IS NOT NULL AND timezone('UTC', due_date)::date > timezone('UTC', now())::date)
-                OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date > timezone('UTC', now())::date)
-                OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date > timezone('UTC', now())::date)
-            )
-        )
-    )
+  AND ($7::text IS NULL OR assignee_type = $7)
+  AND ($8::uuid IS NULL OR creator_id = $8)
+  AND ($9::uuid IS NULL OR project_id = $9)
+  AND ($10::text IS NULL OR creator_type = $10)
+  AND (
+      (
+          $11::text IS NULL
+          AND $12::uuid IS NULL
+          AND $13::int IS NULL
+      )
+      OR title ILIKE '%' || $11 || '%'
+      OR COALESCE(description, '') ILIKE '%' || $11 || '%'
+      OR ($12::uuid IS NOT NULL AND id = $12)
+      OR ($13::int IS NOT NULL AND number = $13)
+  )
+  AND ($14::date IS NULL OR timezone('UTC', due_date)::date >= $14::date)
+  AND ($15::date IS NULL OR timezone('UTC', due_date)::date <= $15::date)
+  AND ($16::date IS NULL OR timezone('UTC', start_date)::date >= $16::date)
+  AND ($17::date IS NULL OR timezone('UTC', start_date)::date <= $17::date)
+  AND ($18::date IS NULL OR timezone('UTC', end_date)::date >= $18::date)
+  AND ($19::date IS NULL OR timezone('UTC', end_date)::date <= $19::date)
+  AND (
+      $20::text IS NULL
+      OR (
+          $20::text = 'backlog'
+          AND status = 'backlog'
+      )
+      OR (
+          $20::text = 'today'
+          AND status NOT IN ('done', 'cancelled')
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+      )
+      OR (
+          $20::text = 'upcoming'
+          AND status NOT IN ('done', 'cancelled')
+          AND NOT (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date > timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date > timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date > timezone('UTC', now())::date)
+          )
+      )
+  )
 ORDER BY position ASC, created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -404,6 +539,15 @@ type ListIssuesParams struct {
 	CreatorID    pgtype.UUID `json:"creator_id"`
 	ProjectID    pgtype.UUID `json:"project_id"`
 	CreatorType  pgtype.Text `json:"creator_type"`
+	SearchText   pgtype.Text `json:"search_text"`
+	SearchUuid   pgtype.UUID `json:"search_uuid"`
+	SearchNumber pgtype.Int4 `json:"search_number"`
+	DueFrom      pgtype.Date `json:"due_from"`
+	DueTo        pgtype.Date `json:"due_to"`
+	StartFrom    pgtype.Date `json:"start_from"`
+	StartTo      pgtype.Date `json:"start_to"`
+	EndFrom      pgtype.Date `json:"end_from"`
+	EndTo        pgtype.Date `json:"end_to"`
 	View         pgtype.Text `json:"view"`
 }
 
@@ -419,6 +563,15 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]Issue
 		arg.CreatorID,
 		arg.ProjectID,
 		arg.CreatorType,
+		arg.SearchText,
+		arg.SearchUuid,
+		arg.SearchNumber,
+		arg.DueFrom,
+		arg.DueTo,
+		arg.StartFrom,
+		arg.StartTo,
+		arg.EndFrom,
+		arg.EndTo,
 		arg.View,
 	)
 	if err != nil {

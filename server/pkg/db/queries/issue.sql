@@ -4,54 +4,141 @@ WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
-    AND (sqlc.narg('assignee_type')::text IS NULL OR assignee_type = sqlc.narg('assignee_type'))
-    AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
-    AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-    AND (sqlc.narg('creator_type')::text IS NULL OR creator_type = sqlc.narg('creator_type'))
-    AND (
-        sqlc.narg('view')::text IS NULL
-        OR (
-            sqlc.narg('view')::text = 'backlog'
-            AND status = 'backlog'
-        )
-        OR (
-            sqlc.narg('view')::text = 'today'
-            AND status NOT IN ('done', 'cancelled')
-            AND (
-                (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
-                OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
-                OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
-                OR (
-                    start_date IS NOT NULL
-                    AND end_date IS NOT NULL
-                    AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
-                    AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
-                )
-            )
-        )
-        OR (
-            sqlc.narg('view')::text = 'upcoming'
-            AND status NOT IN ('done', 'cancelled')
-            AND NOT (
-                (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
-                OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
-                OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
-                OR (
-                    start_date IS NOT NULL
-                    AND end_date IS NOT NULL
-                    AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
-                    AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
-                )
-            )
-            AND (
-                (due_date IS NOT NULL AND timezone('UTC', due_date)::date > timezone('UTC', now())::date)
-                OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date > timezone('UTC', now())::date)
-                OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date > timezone('UTC', now())::date)
-            )
-        )
-    )
+  AND (sqlc.narg('assignee_type')::text IS NULL OR assignee_type = sqlc.narg('assignee_type'))
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('creator_type')::text IS NULL OR creator_type = sqlc.narg('creator_type'))
+  AND (
+      (
+          sqlc.narg('search_text')::text IS NULL
+          AND sqlc.narg('search_uuid')::uuid IS NULL
+          AND sqlc.narg('search_number')::int IS NULL
+      )
+      OR title ILIKE '%' || sqlc.narg('search_text') || '%'
+      OR COALESCE(description, '') ILIKE '%' || sqlc.narg('search_text') || '%'
+      OR (sqlc.narg('search_uuid')::uuid IS NOT NULL AND id = sqlc.narg('search_uuid'))
+      OR (sqlc.narg('search_number')::int IS NOT NULL AND number = sqlc.narg('search_number'))
+  )
+  AND (sqlc.narg('due_from')::date IS NULL OR timezone('UTC', due_date)::date >= sqlc.narg('due_from')::date)
+  AND (sqlc.narg('due_to')::date IS NULL OR timezone('UTC', due_date)::date <= sqlc.narg('due_to')::date)
+  AND (sqlc.narg('start_from')::date IS NULL OR timezone('UTC', start_date)::date >= sqlc.narg('start_from')::date)
+  AND (sqlc.narg('start_to')::date IS NULL OR timezone('UTC', start_date)::date <= sqlc.narg('start_to')::date)
+  AND (sqlc.narg('end_from')::date IS NULL OR timezone('UTC', end_date)::date >= sqlc.narg('end_from')::date)
+  AND (sqlc.narg('end_to')::date IS NULL OR timezone('UTC', end_date)::date <= sqlc.narg('end_to')::date)
+  AND (
+      sqlc.narg('view')::text IS NULL
+      OR (
+          sqlc.narg('view')::text = 'backlog'
+          AND status = 'backlog'
+      )
+      OR (
+          sqlc.narg('view')::text = 'today'
+          AND status NOT IN ('done', 'cancelled')
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+      )
+      OR (
+          sqlc.narg('view')::text = 'upcoming'
+          AND status NOT IN ('done', 'cancelled')
+          AND NOT (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date > timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date > timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date > timezone('UTC', now())::date)
+          )
+      )
+  )
 ORDER BY position ASC, created_at DESC
 LIMIT $2 OFFSET $3;
+
+-- name: CountListedIssues :one
+SELECT count(*) FROM issue
+WHERE workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_type')::text IS NULL OR assignee_type = sqlc.narg('assignee_type'))
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('creator_type')::text IS NULL OR creator_type = sqlc.narg('creator_type'))
+  AND (
+      (
+          sqlc.narg('search_text')::text IS NULL
+          AND sqlc.narg('search_uuid')::uuid IS NULL
+          AND sqlc.narg('search_number')::int IS NULL
+      )
+      OR title ILIKE '%' || sqlc.narg('search_text') || '%'
+      OR COALESCE(description, '') ILIKE '%' || sqlc.narg('search_text') || '%'
+      OR (sqlc.narg('search_uuid')::uuid IS NOT NULL AND id = sqlc.narg('search_uuid'))
+      OR (sqlc.narg('search_number')::int IS NOT NULL AND number = sqlc.narg('search_number'))
+  )
+  AND (sqlc.narg('due_from')::date IS NULL OR timezone('UTC', due_date)::date >= sqlc.narg('due_from')::date)
+  AND (sqlc.narg('due_to')::date IS NULL OR timezone('UTC', due_date)::date <= sqlc.narg('due_to')::date)
+  AND (sqlc.narg('start_from')::date IS NULL OR timezone('UTC', start_date)::date >= sqlc.narg('start_from')::date)
+  AND (sqlc.narg('start_to')::date IS NULL OR timezone('UTC', start_date)::date <= sqlc.narg('start_to')::date)
+  AND (sqlc.narg('end_from')::date IS NULL OR timezone('UTC', end_date)::date >= sqlc.narg('end_from')::date)
+  AND (sqlc.narg('end_to')::date IS NULL OR timezone('UTC', end_date)::date <= sqlc.narg('end_to')::date)
+  AND (
+      sqlc.narg('view')::text IS NULL
+      OR (
+          sqlc.narg('view')::text = 'backlog'
+          AND status = 'backlog'
+      )
+      OR (
+          sqlc.narg('view')::text = 'today'
+          AND status NOT IN ('done', 'cancelled')
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+      )
+      OR (
+          sqlc.narg('view')::text = 'upcoming'
+          AND status NOT IN ('done', 'cancelled')
+          AND NOT (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date = timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date = timezone('UTC', now())::date)
+              OR (
+                  start_date IS NOT NULL
+                  AND end_date IS NOT NULL
+                  AND timezone('UTC', start_date)::date <= timezone('UTC', now())::date
+                  AND timezone('UTC', end_date)::date >= timezone('UTC', now())::date
+              )
+          )
+          AND (
+              (due_date IS NOT NULL AND timezone('UTC', due_date)::date > timezone('UTC', now())::date)
+              OR (start_date IS NOT NULL AND timezone('UTC', start_date)::date > timezone('UTC', now())::date)
+              OR (end_date IS NOT NULL AND timezone('UTC', end_date)::date > timezone('UTC', now())::date)
+          )
+      )
+  );
 
 -- name: GetIssue :one
 SELECT * FROM issue
