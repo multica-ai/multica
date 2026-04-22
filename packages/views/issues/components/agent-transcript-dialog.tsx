@@ -200,8 +200,11 @@ export function AgentTranscriptDialog({
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [items]);
 
-  // Resolve filter key for each item — matches filterOptions derivation
-  const itemFilterKey = (item: TimelineItem) => item.tool ? `tool:${item.tool}` : item.type;
+  // Resolve filter key for each item — mirrors filterOptions derivation exactly
+  const itemFilterKey = (item: TimelineItem) =>
+    item.tool && (item.type === "tool_use" || item.type === "tool_result")
+      ? `tool:${item.tool}`
+      : item.type;
 
   // Strict filter
   const filteredItems = useMemo(() => {
@@ -481,7 +484,6 @@ export function AgentTranscriptDialog({
                   }}
                   item={item}
                   isSelected={selectedSeq === item.seq}
-                  onClick={() => setSelectedSeq(item.seq === selectedSeq ? null : item.seq)}
                 />
               ))}
             </div>
@@ -546,7 +548,7 @@ function TimelineBar({
   return (
     <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
       {segments.map((seg) => {
-        const isSelected = selectedSeq !== null && selectedSeq >= items[seg.startIdx]!.seq && selectedSeq <= items[seg.endIdx]!.seq;
+        const isSelected = selectedSeq !== null && items.slice(seg.startIdx, seg.endIdx + 1).some((i) => i.seq === selectedSeq);
         const color = colorClasses[seg.color];
         const widthPercent = (seg.count / items.length) * 100;
 
@@ -580,14 +582,12 @@ function TimelineBar({
 interface TranscriptEventRowProps {
   item: TimelineItem;
   isSelected: boolean;
-  onClick: () => void;
 }
 
 const TranscriptEventRow = ({
   ref,
   item,
   isSelected,
-  onClick,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
   const [expanded, setExpanded] = useState(false);
   const color = getEventColor(item);
