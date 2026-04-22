@@ -68,9 +68,8 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
 		echo ""; \
 		echo "Official images for tag '$${MULTICA_IMAGE_TAG:-latest}' are not published yet."; \
-		echo "If this is before the first GHCR release, either:"; \
-		echo "  - build from the current checkout: make selfhost-build"; \
-		echo "  - or follow main explicitly: set MULTICA_IMAGE_TAG=edge in .env"; \
+		echo "If this is before the first GHCR release, build from the current checkout:"; \
+		echo "  make selfhost-build"; \
 		exit 1; \
 	fi
 	@echo "==> Starting Multica via Docker Compose..."

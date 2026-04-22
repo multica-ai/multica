@@ -290,5 +290,5 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Set `MULTICA_IMAGE_TAG=edge` in `.env` to follow the `main` channel, or pin to an exact release like `v0.2.4`. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
-If the selected GHCR tag has not been published yet, fall back to `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build` or temporarily set `MULTICA_IMAGE_TAG=edge`.
+Pin `MULTICA_IMAGE_TAG` in `.env` to an exact release like `v0.2.4` if you want to stay on a specific version. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
+If the selected GHCR tag has not been published yet, fall back to `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.

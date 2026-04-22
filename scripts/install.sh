@@ -184,9 +184,8 @@ pull_official_selfhost_images() {
   echo ""
   warn "Official images for the selected self-host channel are not published yet."
   echo "This can happen before the first GHCR release is available."
-  echo "From $INSTALL_DIR, you can either:"
+  echo "From $INSTALL_DIR, build from source instead:"
   echo "  docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build"
-  echo "  # or set MULTICA_IMAGE_TAG=edge in .env and rerun docker compose"
   exit 1
 }
 

@@ -86,7 +86,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 > ```
 >
 > This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
-> If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout or set `MULTICA_IMAGE_TAG=edge`.
+> If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout.
 
 ---
 

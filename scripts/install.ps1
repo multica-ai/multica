@@ -83,9 +83,8 @@ function Pull-OfficialSelfHostImages {
     Write-Host ""
     Write-Warn "Official images for the selected self-host channel are not published yet."
     Write-Host "This can happen before the first GHCR release is available."
-    Write-Host "From $InstallDir, you can either:"
+    Write-Host "From $InstallDir, build from source instead:"
     Write-Host "  docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build"
-    Write-Host "  # or set MULTICA_IMAGE_TAG=edge in .env and rerun docker compose"
     exit 1
 }
 

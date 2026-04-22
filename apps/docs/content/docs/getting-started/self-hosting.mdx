@@ -54,7 +54,7 @@ make selfhost
 `make selfhost` automatically creates `.env`, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
 
 By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
-If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build` or set `MULTICA_IMAGE_TAG=edge`.
+If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
 `make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
 
 Once ready:
@@ -164,7 +164,7 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Set `MULTICA_IMAGE_TAG=edge` in `.env` if you want to follow the `main` channel, or pin to an exact version like `v0.2.4`. Migrations run automatically on backend startup.
+Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 ---
