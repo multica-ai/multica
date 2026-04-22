@@ -7,12 +7,32 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// windowsToWSLPath translates a Windows-style path (e.g. C:\Users\...)
+// into a WSL mount path (e.g. /mnt/c/Users/...). This allows the
+// daemon running on Windows to pass working directories to a Hermes
+// binary installed inside WSL via a .cmd wrapper.
+func windowsToWSLPath(windowsPath string) string {
+	if runtime.GOOS != "windows" {
+		return windowsPath
+	}
+	vol := filepath.VolumeName(windowsPath)
+	if vol == "" {
+		return windowsPath
+	}
+	driveLetter := strings.ToLower(strings.TrimSuffix(vol, ":"))
+	rest := strings.TrimPrefix(windowsPath, vol)
+	rest = filepath.ToSlash(rest)
+	return fmt.Sprintf("/mnt/%s%s", driveLetter, rest)
+}
 
 // hermesBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol
@@ -164,6 +184,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cwd := opts.Cwd
 		if cwd == "" {
 			cwd = "."
+		} else {
+			cwd = windowsToWSLPath(cwd)
 		}
 
 		if opts.ResumeSessionID != "" {
