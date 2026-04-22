@@ -369,6 +369,66 @@ describe("LoginPage", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Feishu OAuth
+  // -------------------------------------------------------------------------
+
+  it("renders Feishu OAuth button when feishu prop provided", () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        feishu={{ appId: "cli_abc", redirectUri: "http://localhost/fcb" }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides Feishu OAuth button when feishu prop omitted", () => {
+    render(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.queryByRole("button", { name: /continue with feishu/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("builds Feishu authorize URL with required scopes on click", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const originalLocation = window.location;
+    // jsdom blocks assigning through window.location, but we can replace it
+    // with a writable stub for the duration of the test.
+    // @ts-expect-error — deliberately narrow
+    delete window.location;
+    // @ts-expect-error — minimal stub
+    window.location = { href: "", origin: "http://localhost" };
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        feishu={{
+          appId: "cli_abc",
+          redirectUri: "http://localhost/fcb",
+          state: "platform:desktop",
+        }}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /continue with feishu/i }),
+    );
+
+    expect(window.location.href).toContain(
+      "accounts.feishu.cn/open-apis/authen/v1/authorize",
+    );
+    expect(window.location.href).toContain("app_id=cli_abc");
+    expect(window.location.href).toContain(
+      "scope=contact%3Auser.base%3Areadonly+contact%3Auser.email%3Areadonly",
+    );
+    expect(window.location.href).toContain("state=platform%3Adesktop");
+
+    // @ts-expect-error — restore
+    window.location = originalLocation;
+  });
+
+  // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------
 
