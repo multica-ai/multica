@@ -20,6 +20,7 @@ import { DesktopNavigationProvider } from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
+import { PageviewTracker } from "./pageview-tracker";
 
 function SidebarTopBar() {
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
@@ -109,6 +110,7 @@ export function DesktopShell() {
 
   return (
     <DesktopNavigationProvider>
+      <PageviewTracker />
       {/* WorkspaceSlugProvider accepts null — components that need slug
           use useWorkspaceSlug() (nullable) or useRequiredWorkspaceSlug()
           (throws). TabContent MUST always render so the tab router can
