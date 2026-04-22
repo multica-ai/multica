@@ -886,21 +886,11 @@ func TestSendCodeRateLimit(t *testing.T) {
 }
 
 func TestVerifyCode(t *testing.T) {
-	const email = "verify-test@multica.ai"
+	const email = handlerTestEmail
 	ctx := context.Background()
 
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		user, err := testHandler.Queries.GetUserByEmail(ctx, email)
-		if err == nil {
-			workspaces, listErr := testHandler.Queries.ListWorkspaces(ctx, user.ID)
-			if listErr == nil {
-				for _, workspace := range workspaces {
-					_ = testHandler.Queries.DeleteWorkspace(ctx, workspace.ID)
-				}
-			}
-		}
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
 	})
 
 	// Send code first
@@ -1019,7 +1009,7 @@ func TestVerifyCodeBruteForceProtection(t *testing.T) {
 	}
 }
 
-func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
+func TestVerifyCodeRejectsAdditionalUserInTrustedBootstrapMode(t *testing.T) {
 	const email = "workspace-verify-test@multica.ai"
 	ctx := context.Background()
 
@@ -1049,22 +1039,16 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 	req = httptest.NewRequest("POST", "/auth/verify-code", &buf)
 	req.Header.Set("Content-Type", "application/json")
 	testHandler.VerifyCode(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("VerifyCode: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("VerifyCode: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	user, err := testHandler.Queries.GetUserByEmail(ctx, email)
-	if err != nil {
-		t.Fatalf("GetUserByEmail: %v", err)
+	var userCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM "user"`).Scan(&userCount); err != nil {
+		t.Fatalf("count users: %v", err)
 	}
-
-	// New users should have no workspaces (/workspaces/new creates one)
-	workspaces, err := testHandler.Queries.ListWorkspaces(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("ListWorkspaces: %v", err)
-	}
-	if len(workspaces) != 0 {
-		t.Fatalf("ListWorkspaces: expected 0 workspaces for new user, got %d", len(workspaces))
+	if userCount != 1 {
+		t.Fatalf("expected only the seeded trusted owner to remain, got %d users", userCount)
 	}
 }
 

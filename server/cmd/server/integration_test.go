@@ -225,28 +225,11 @@ func TestHealth(t *testing.T) {
 // ---- Auth ----
 
 func TestSendCodeAndVerify(t *testing.T) {
-	const email = "integration-sendcode@multica.ai"
+	const email = integrationTestEmail
 	ctx := context.Background()
 
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		var userID string
-		err := testPool.QueryRow(ctx, `SELECT id FROM "user" WHERE email = $1`, email).Scan(&userID)
-		if err == nil {
-			rows, queryErr := testPool.Query(ctx, `
-				SELECT w.id FROM workspace w JOIN member m ON m.workspace_id = w.id WHERE m.user_id = $1
-			`, userID)
-			if queryErr == nil {
-				defer rows.Close()
-				for rows.Next() {
-					var wsID string
-					if rows.Scan(&wsID) == nil {
-						testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsID)
-					}
-				}
-			}
-		}
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
 	})
 
 	// Step 1: Send code
@@ -307,7 +290,7 @@ func TestSendCodeAndVerify(t *testing.T) {
 	meResp.Body.Close()
 }
 
-func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
+func TestVerifyCodeRejectsAdditionalUserInTrustedBootstrapMode(t *testing.T) {
 	const email = "new-integration-verify@multica.ai"
 	ctx := context.Background()
 
@@ -339,36 +322,270 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify-code failed: %v", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("verify-code: expected 200, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("verify-code: expected 403, got %d", resp.StatusCode)
 	}
 
-	var loginResp struct {
-		Token string `json:"token"`
+	var userCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM "user"`).Scan(&userCount); err != nil {
+		t.Fatalf("count users failed: %v", err)
 	}
-	readJSON(t, resp, &loginResp)
+	if userCount != 1 {
+		t.Fatalf("expected only the seeded trusted owner to remain, got %d users", userCount)
+	}
+}
 
-	// New users should have no workspaces (/workspaces/new creates one)
-	req, _ := http.NewRequest("GET", testServer.URL+"/api/workspaces", nil)
-	req.Header.Set("Authorization", "Bearer "+loginResp.Token)
-	workspacesResp, err := http.DefaultClient.Do(req)
+func TestBootstrapResumesTrustedOwnerAndSetsCookies(t *testing.T) {
+	resp, err := http.Post(testServer.URL+"/auth/bootstrap", "application/json", nil)
 	if err != nil {
-		t.Fatalf("listWorkspaces failed: %v", err)
-	}
-	defer workspacesResp.Body.Close()
-
-	if workspacesResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", workspacesResp.StatusCode)
+		t.Fatalf("bootstrap failed: %v", err)
 	}
 
-	var workspaces []struct {
-		Name string `json:"name"`
-		Slug string `json:"slug"`
+	var bootstrapResp struct {
+		Mode            string `json:"mode"`
+		OwnerResolution string `json:"owner_resolution"`
+		BootstrapState  string `json:"bootstrap_state"`
+		User            struct {
+			Email string `json:"email"`
+		} `json:"user"`
+		Workspaces []struct {
+			Slug string `json:"slug"`
+		} `json:"workspaces"`
 	}
-	readJSON(t, workspacesResp, &workspaces)
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("bootstrap: expected 200, got %d: %s", resp.StatusCode, respBody)
+	}
+	readJSON(t, resp, &bootstrapResp)
 
-	if len(workspaces) != 0 {
-		t.Fatalf("expected 0 workspaces for new user, got %d", len(workspaces))
+	if bootstrapResp.Mode != "trusted_single_user" {
+		t.Fatalf("expected trusted_single_user mode, got %q", bootstrapResp.Mode)
+	}
+	if bootstrapResp.OwnerResolution != "resumed" {
+		t.Fatalf("expected owner_resolution resumed, got %q", bootstrapResp.OwnerResolution)
+	}
+	if bootstrapResp.BootstrapState != "ready" {
+		t.Fatalf("expected bootstrap_state ready, got %q", bootstrapResp.BootstrapState)
+	}
+	if bootstrapResp.User.Email != integrationTestEmail {
+		t.Fatalf("expected bootstrap user %q, got %q", integrationTestEmail, bootstrapResp.User.Email)
+	}
+	if len(bootstrapResp.Workspaces) != 1 || bootstrapResp.Workspaces[0].Slug != integrationTestWorkspaceSlug {
+		t.Fatalf("expected workspace %q, got %+v", integrationTestWorkspaceSlug, bootstrapResp.Workspaces)
+	}
+
+	setCookies := resp.Header.Values("Set-Cookie")
+	hasAuthCookie := false
+	hasCSRFCookie := false
+	for _, header := range setCookies {
+		if strings.Contains(header, auth.AuthCookieName+"=") {
+			hasAuthCookie = true
+		}
+		if strings.Contains(header, auth.CSRFCookieName+"=") {
+			hasCSRFCookie = true
+		}
+	}
+	if !hasAuthCookie || !hasCSRFCookie {
+		t.Fatalf("expected bootstrap to set auth and csrf cookies, got %v", setCookies)
+	}
+}
+
+func TestBootstrapTokenReturnsBearerForTrustedOwner(t *testing.T) {
+	resp, err := http.Post(testServer.URL+"/auth/bootstrap/token", "application/json", nil)
+	if err != nil {
+		t.Fatalf("bootstrap token failed: %v", err)
+	}
+
+	var bootstrapResp struct {
+		Mode            string `json:"mode"`
+		OwnerResolution string `json:"owner_resolution"`
+		BootstrapState  string `json:"bootstrap_state"`
+		Token           string `json:"token"`
+		User            struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("bootstrap token: expected 200, got %d: %s", resp.StatusCode, respBody)
+	}
+	readJSON(t, resp, &bootstrapResp)
+
+	if bootstrapResp.Token == "" {
+		t.Fatal("expected non-empty bootstrap bearer token")
+	}
+	if bootstrapResp.OwnerResolution != "resumed" {
+		t.Fatalf("expected owner_resolution resumed, got %q", bootstrapResp.OwnerResolution)
+	}
+	if bootstrapResp.User.Email != integrationTestEmail {
+		t.Fatalf("expected bootstrap token user %q, got %q", integrationTestEmail, bootstrapResp.User.Email)
+	}
+
+	setCookies := resp.Header.Values("Set-Cookie")
+	for _, header := range setCookies {
+		if strings.Contains(header, auth.AuthCookieName+"=") || strings.Contains(header, auth.CSRFCookieName+"=") {
+			t.Fatalf("bootstrap token should not set browser auth cookies, got %v", setCookies)
+		}
+	}
+}
+
+func TestBootstrapFailsClosedForMultiUserDatabase(t *testing.T) {
+	const extraEmail = "integration-bootstrap-extra@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, extraEmail)
+	})
+
+	if _, err := testPool.Exec(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2)`, "Extra User", extraEmail); err != nil {
+		t.Fatalf("insert extra user: %v", err)
+	}
+
+	resp, err := http.Post(testServer.URL+"/auth/bootstrap", "application/json", nil)
+	if err != nil {
+		t.Fatalf("bootstrap failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bootstrap: expected 409, got %d: %s", resp.StatusCode, body)
+	}
+
+	var conflictResp struct {
+		Mode           string `json:"mode"`
+		BootstrapState string `json:"bootstrap_state"`
+		Error          string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&conflictResp); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if conflictResp.Mode != "trusted_single_user" {
+		t.Fatalf("expected trusted_single_user mode, got %q", conflictResp.Mode)
+	}
+	if conflictResp.BootstrapState != "multi_user_conflict" {
+		t.Fatalf("expected bootstrap_state multi_user_conflict, got %q", conflictResp.BootstrapState)
+	}
+	if conflictResp.Error == "" {
+		t.Fatal("expected non-empty conflict error")
+	}
+}
+
+func TestBootstrapTokenFailsClosedForMultiUserDatabase(t *testing.T) {
+	const extraEmail = "integration-bootstrap-token-extra@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, extraEmail)
+	})
+
+	if _, err := testPool.Exec(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2)`, "Extra Token User", extraEmail); err != nil {
+		t.Fatalf("insert extra user: %v", err)
+	}
+
+	resp, err := http.Post(testServer.URL+"/auth/bootstrap/token", "application/json", nil)
+	if err != nil {
+		t.Fatalf("bootstrap token failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bootstrap token: expected 409, got %d: %s", resp.StatusCode, body)
+	}
+
+	var conflictResp struct {
+		Mode           string `json:"mode"`
+		BootstrapState string `json:"bootstrap_state"`
+		Error          string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&conflictResp); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if conflictResp.Mode != "trusted_single_user" {
+		t.Fatalf("expected trusted_single_user mode, got %q", conflictResp.Mode)
+	}
+	if conflictResp.BootstrapState != "multi_user_conflict" {
+		t.Fatalf("expected bootstrap_state multi_user_conflict, got %q", conflictResp.BootstrapState)
+	}
+	if conflictResp.Error == "" {
+		t.Fatal("expected non-empty conflict error")
+	}
+}
+
+func TestLogoutClearsAuthCookies(t *testing.T) {
+	resp, err := http.Post(testServer.URL+"/auth/logout", "application/json", nil)
+	if err != nil {
+		t.Fatalf("logout failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("logout: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	setCookies := resp.Header.Values("Set-Cookie")
+	hasClearedAuth := false
+	hasClearedCSRF := false
+	for _, header := range setCookies {
+		if strings.Contains(header, auth.AuthCookieName+"=") && strings.Contains(header, "Max-Age=0") {
+			hasClearedAuth = true
+		}
+		if strings.Contains(header, auth.CSRFCookieName+"=") && strings.Contains(header, "Max-Age=0") {
+			hasClearedCSRF = true
+		}
+	}
+	if !hasClearedAuth || !hasClearedCSRF {
+		t.Fatalf("expected logout to clear auth and csrf cookies, got %v", setCookies)
+	}
+}
+
+func TestLogoutThenBootstrapResumesTrustedOwner(t *testing.T) {
+	logoutResp, err := http.Post(testServer.URL+"/auth/logout", "application/json", nil)
+	if err != nil {
+		t.Fatalf("logout failed: %v", err)
+	}
+	if logoutResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(logoutResp.Body)
+		logoutResp.Body.Close()
+		t.Fatalf("logout: expected 200, got %d: %s", logoutResp.StatusCode, body)
+	}
+	logoutResp.Body.Close()
+
+	bootstrapResp, err := http.Post(testServer.URL+"/auth/bootstrap", "application/json", nil)
+	if err != nil {
+		t.Fatalf("bootstrap after logout failed: %v", err)
+	}
+	if bootstrapResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(bootstrapResp.Body)
+		bootstrapResp.Body.Close()
+		t.Fatalf("bootstrap after logout: expected 200, got %d: %s", bootstrapResp.StatusCode, body)
+	}
+
+	var payload struct {
+		Mode            string `json:"mode"`
+		OwnerResolution string `json:"owner_resolution"`
+		BootstrapState  string `json:"bootstrap_state"`
+		User            struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	readJSON(t, bootstrapResp, &payload)
+
+	if payload.Mode != "trusted_single_user" {
+		t.Fatalf("expected trusted_single_user mode, got %q", payload.Mode)
+	}
+	if payload.OwnerResolution != "resumed" {
+		t.Fatalf("expected owner_resolution resumed, got %q", payload.OwnerResolution)
+	}
+	if payload.BootstrapState != "ready" {
+		t.Fatalf("expected bootstrap_state ready, got %q", payload.BootstrapState)
+	}
+	if payload.User.Email != integrationTestEmail {
+		t.Fatalf("expected bootstrap user %q, got %q", integrationTestEmail, payload.User.Email)
 	}
 }
 
