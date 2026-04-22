@@ -69,8 +69,9 @@ const (
 	EventProjectDeleted = "project:deleted"
 
 	// Pin events
-	EventPinCreated = "pin:created"
-	EventPinDeleted = "pin:deleted"
+	EventPinCreated   = "pin:created"
+	EventPinDeleted   = "pin:deleted"
+	EventPinReordered = "pin:reordered"
 
 	// Invitation events
 	EventInvitationCreated  = "invitation:created"

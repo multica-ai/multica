@@ -193,6 +193,16 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
+    // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
+    // preload can attach the values to `desktopAPI.appInfo` before any renderer
+    // code reads them, ensuring the very first HTTP request from the renderer
+    // already carries X-Client-Version and X-Client-OS.
+    ipcMain.on("app:get-info", (event) => {
+      const p = process.platform;
+      const os = p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
+      event.returnValue = { version: app.getVersion(), os };
+    });
+
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
     // modals (e.g. create-workspace) can place UI in the top-left corner
     // without fighting the native window controls' hit-test.

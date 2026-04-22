@@ -56,6 +56,11 @@ interface LoginPageProps {
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Slot rendered at the bottom of the sign-in card, below the
+   *  Google button. The web shell uses it for a "Prefer the desktop
+   *  app?" prompt; desktop omits it (a download prompt inside the app
+   *  would be absurd). */
+  extra?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +104,7 @@ export function LoginPage({
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  extra,
 }: LoginPageProps) {
   const { t } = useI18n();
   const qc = useQueryClient();
@@ -470,6 +476,7 @@ export function LoginPage({
               </Button>
             </>
           )}
+          {extra && <div className="w-full pt-1 text-center">{extra}</div>}
         </CardFooter>
       </Card>
     </AuthShell>

@@ -9,6 +9,11 @@ export const mockUser: User = {
   name: "Test User",
   email: "test@multica.ai",
   avatar_url: null,
+  onboarded_at: "2026-01-01T00:00:00Z",
+  onboarding_questionnaire: {},
+  // Matches real server behavior for anyone who onboarded before this
+  // field shipped — migration 054 backfills 'skipped_legacy'.
+  starter_content_state: "skipped_legacy",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -59,6 +64,7 @@ export const mockAgents: Agent[] = [
     custom_env_redacted: false,
     visibility: "workspace",
     max_concurrent_tasks: 3,
+    model: "",
     owner_id: null,
     skills: [],
     created_at: "2026-01-01T00:00:00Z",

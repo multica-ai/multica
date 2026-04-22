@@ -1,5 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, OpenCode, OpenClaw, Hermes, Pi). It mirrors the happy-cli AgentBackend
+// coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
+// Gemini, Pi, Cursor, Kimi). It mirrors the happy-cli AgentBackend
 // pattern, translated to idiomatic Go.
 package agent
 
@@ -55,14 +56,15 @@ const (
 
 // Message is a unified event emitted by an agent during execution.
 type Message struct {
-	Type    MessageType
-	Content string         // text content (Text, Error, Log)
-	Tool    string         // tool name (ToolUse, ToolResult)
-	CallID  string         // tool call ID (ToolUse, ToolResult)
-	Input   map[string]any // tool input (ToolUse)
-	Output  string         // tool output (ToolResult)
-	Status  string         // agent status string (Status)
-	Level   string         // log level (Log)
+	Type      MessageType
+	Content   string         // text content (Text, Error, Log)
+	Tool      string         // tool name (ToolUse, ToolResult)
+	CallID    string         // tool call ID (ToolUse, ToolResult)
+	Input     map[string]any // tool input (ToolUse)
+	Output    string         // tool output (ToolResult)
+	Status    string         // agent status string (Status)
+	Level     string         // log level (Log)
+	SessionID string         // backend session id (Status), for early resume-pointer pinning
 }
 
 // TokenUsage tracks token consumption for a single model.
@@ -85,13 +87,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, or pi)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -116,8 +118,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &piBackend{cfg: cfg}, nil
 	case "cursor":
 		return &cursorBackend{cfg: cfg}, nil
+	case "kimi":
+		return &kimiBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi)", agentType)
 	}
 }
 
@@ -142,6 +146,7 @@ var launchHeaders = map[string]string{
 	"openclaw": "openclaw agent (json)",
 	"opencode": "opencode run (json)",
 	"pi":       "pi (json mode)",
+	"kimi":     "kimi acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

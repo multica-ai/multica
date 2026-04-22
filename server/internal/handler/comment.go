@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
-	"github.com/multica-ai/multica/server/internal/sanitize"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -216,11 +215,37 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
+	// Defense against resumed-session drift: when an agent posts from inside a
+	// comment-triggered task AND the comment is being posted on that same
+	// issue, the parent_id must exactly match the task's trigger comment.
+	// Resumed Claude sessions otherwise carry forward a previous turn's
+	// --parent UUID and silently misplace the reply.
+	//
+	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
+	// request, so an agent legitimately commenting on a different issue must
+	// not be blocked by its current task's trigger. Assignment-triggered
+	// tasks (no TriggerCommentID) are also unaffected.
+	if authorType == "agent" {
+		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
+			task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskIDHeader))
+			if err == nil && task.TriggerCommentID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+				if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
+					writeError(w, http.StatusConflict,
+						"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+					return
+				}
+			}
+		}
+	}
+
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
-	// Sanitize HTML to prevent stored XSS.
-	req.Content = sanitize.HTML(req.Content)
+	// NOTE: Comment content is stored as Markdown source. XSS is handled at the
+	// rendering layer (rehype-sanitize) and at the editor layer
+	// (@tiptap/markdown with html:false). Running an HTML sanitizer here would
+	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
+	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
@@ -473,8 +498,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize HTML to prevent stored XSS.
-	req.Content = sanitize.HTML(req.Content)
+	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      parseUUID(commentId),

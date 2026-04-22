@@ -1,7 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
-export const zh: LandingDict = {
+export function createZhDict(allowSignup: boolean): LandingDict {
+  return {
   header: {
     github: "GitHub",
     login: "\u767b\u5f55",
@@ -120,9 +121,10 @@ export const zh: LandingDict = {
     headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
     steps: [
       {
-        title: "\u6ce8\u518c\u5e76\u521b\u5efa\u5de5\u4f5c\u533a",
-        description:
-          "\u8f93\u5165\u90ae\u7bb1\uff0c\u9a8c\u8bc1\u7801\u786e\u8ba4\uff0c\u5373\u53ef\u8fdb\u5165\u3002\u5de5\u4f5c\u533a\u81ea\u52a8\u521b\u5efa\u2014\u2014\u65e0\u9700\u8bbe\u7f6e\u5411\u5bfc\uff0c\u65e0\u9700\u914d\u7f6e\u8868\u5355\u3002",
+        title: allowSignup ? "注册并创建您的工作空间" : "登录到您的工作空间",
+        description: allowSignup
+          ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
+          : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
       },
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
@@ -224,7 +226,7 @@ export const zh: LandingDict = {
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
           { label: "更新日志", href: "/changelog" },
-          { label: "桌面端", href: "https://github.com/multica-ai/multica/releases/latest" },
+          { label: "下载", href: "/download" },
         ],
       },
       resources: {
@@ -279,6 +281,57 @@ export const zh: LandingDict = {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.2.11",
+        date: "2026-04-21",
+        title: "桌面应用跨平台打包、CLI 自更新与看板分页",
+        changes: [],
+        features: [
+          "桌面应用跨平台打包——同一条发布流水线产出 macOS、Windows 和 Linux 安装包",
+          "新增 `multica update` 自更新命令——无需重装即可升级 CLI 和本地 Daemon",
+          "Issue 看板所有状态列都支持分页（不再只是 Done 列），大积压下依然流畅",
+        ],
+        fixes: [
+          "本地 Daemon 对 Agent 执行强制端到端工作区隔离（安全）",
+          "Windows 下 Daemon 终端关闭后继续常驻，后台 Agent 不再被意外终止",
+          "看板卡片重新显示描述预览——列表查询不再丢掉 description 字段",
+          "OpenClaw Agent 改为从 Agent 元数据读取真实模型，不再回退到默认值",
+          "评论 Markdown 全链路保留——移除会误伤格式的 HTML sanitizer",
+        ],
+      },
+      {
+        version: "0.2.8",
+        date: "2026-04-20",
+        title: "Agent 模型选择、Kimi Runtime 与自部署登录",
+        changes: [],
+        features: [
+          "Agent 新增 `model` 字段及按 Provider 聚合的模型下拉框——可在界面或通过 `multica agent create/update --model` 为每个 Agent 选择 LLM 模型，并从各 Runtime CLI 实时发现可用模型",
+          "新增 Kimi CLI Agent Runtime（Moonshot AI 的 `kimi-cli`，基于 ACP），支持模型选择、自动授权工具权限以及流式工具调用渲染",
+          "评论和回复编辑器新增放大按钮，便于撰写长文本",
+        ],
+        fixes: [
+          "Agent 工作流将“发布结果评论”提升为独立的显式步骤，确保最终回复送达 Issue 而不是只留在终端输出",
+          "通过 Cmd+K 切换 Issue 时不再出现其他 Issue 的 Agent 实时状态残留",
+          "自部署会话 Cookie 的 Secure 标志改由 `FRONTEND_ORIGIN` 协议决定——HTTP 部署不再因浏览器丢弃 Cookie 导致登录失败；`COOKIE_DOMAIN=<ip>` 会自动回退到 host-only 并输出警告",
+        ],
+      },
+      {
+        version: "0.2.7",
+        date: "2026-04-18",
+        title: "编辑器创建子 Issue、自部署门禁与 MCP",
+        changes: [],
+        features: [
+          "直接从编辑器气泡菜单将选中文本创建为子 Issue",
+          "自部署实例账户门禁——`ALLOW_SIGNUP` 和 `ALLOWED_EMAIL_*` 环境变量限制注册",
+          "Agent 新增 `mcp_config` 字段恢复 MCP 支持",
+          "桌面应用每小时检查更新，设置中新增手动检查按钮",
+        ],
+        fixes: [
+          "网页已登录时将会话交接给桌面应用",
+          "修复 `?next=` 开放重定向漏洞",
+          "OpenClaw 停止传递不支持的参数，正确传递 AgentInstructions",
+        ],
+      },
       {
         version: "0.2.5",
         date: "2026-04-17",
@@ -672,4 +725,78 @@ export const zh: LandingDict = {
       },
     ],
   },
-};
+  download: {
+    hero: {
+      macArm64: {
+        title: "Multica for macOS",
+        sub: "Apple Silicon · 内置 daemon，无需配置",
+        primary: "下载 (.dmg)",
+        altZip: "或下载 .zip",
+      },
+      macIntel: {
+        title: "Multica for macOS",
+        sub: "需要 Apple Silicon——暂不支持 Intel Mac。",
+        disabledCta: "需要 Apple Silicon",
+        intelHint: "在 Intel Mac 上？请使用下方 CLI——底层跑的是同一个 daemon。",
+      },
+      winX64: {
+        title: "Multica for Windows",
+        sub: "内置 daemon，无需配置",
+        primary: "下载 (.exe)",
+      },
+      winArm64: {
+        title: "Multica for Windows",
+        sub: "ARM · 内置 daemon，无需配置",
+        primary: "下载 (.exe)",
+      },
+      linux: {
+        title: "Multica for Linux",
+        sub: "内置 daemon，无需配置",
+        primary: "下载 AppImage",
+        altFormats: "或 .deb / .rpm",
+      },
+      unknown: {
+        title: "选择你的平台",
+        sub: "下方是所有支持的安装包。",
+      },
+      safariMacHint: "在 Intel Mac 上？请使用下方 CLI。",
+      archFallbackHint: "架构不对？下方是所有可选格式。",
+    },
+    allPlatforms: {
+      title: "所有平台",
+      macLabel: "macOS · Apple Silicon",
+      winX64Label: "Windows · x64",
+      winArm64Label: "Windows · ARM64",
+      linuxX64Label: "Linux · x64",
+      linuxArm64Label: "Linux · ARM64",
+      formatDmg: ".dmg",
+      formatZip: ".zip",
+      formatExe: ".exe",
+      formatAppImage: ".AppImage",
+      formatDeb: ".deb",
+      formatRpm: ".rpm",
+      intelNote: "仅支持 Apple Silicon——Intel Mac 目前暂不支持。",
+      unavailable: "暂不可用",
+    },
+    cli: {
+      title: "想用 CLI？",
+      sub: "适合服务器、远程开发机、无图形界面环境。底层 daemon 与 Desktop 相同，通过终端安装。",
+      installLabel: "安装",
+      startLabel: "启动 daemon",
+      sshNote: "已经在服务器上？通过 SSH 执行同样的命令即可。",
+      copyLabel: "复制",
+      copiedLabel: "已复制",
+    },
+    cloud: {
+      title: "Cloud runtime（等待名单）",
+      sub: "我们将为你托管 runtime，目前尚未上线——留下邮箱，上线后通知你。",
+    },
+    footer: {
+      releaseNotes: "v{version} 更新内容",
+      allReleases: "查看所有版本",
+      currentVersion: "当前版本：{version}",
+      versionUnavailable: "版本获取失败——请前往 GitHub 查看",
+    },
+  },
+  };
+}

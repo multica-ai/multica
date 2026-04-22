@@ -20,6 +20,17 @@ export type {
   RuntimePingStatus,
   RuntimeUpdate,
   RuntimeUpdateStatus,
+  RuntimeModel,
+  RuntimeModelListRequest,
+  RuntimeModelListStatus,
+  RuntimeModelsResult,
+  RuntimeLocalSkillStatus,
+  RuntimeLocalSkillSummary,
+  RuntimeLocalSkillListRequest,
+  CreateRuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillsResult,
+  RuntimeLocalSkillImportResult,
   IssueUsageSummary,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";

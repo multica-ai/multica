@@ -12,7 +12,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { issueListOptions, childIssueProgressOptions } from "@multica/core/issues/queries";
+import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -94,7 +94,15 @@ function PropRow({
 
 const projectViewStore = createIssueViewStore("project_issues_view");
 
-function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
+function ProjectIssuesContent({
+  projectIssues,
+  scope,
+  filter,
+}: {
+  projectIssues: Issue[];
+  scope: string;
+  filter: MyIssuesFilter;
+}) {
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
@@ -106,10 +114,6 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
   const issues = useMemo(
     () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
     [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
-  );
-  const doneColumnCount = useMemo(
-    () => projectIssues.filter((issue) => issue.status === "done").length,
-    [projectIssues],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -158,19 +162,20 @@ function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
       {viewMode === "board" ? (
         <BoardView
           issues={issues}
-          allIssues={projectIssues}
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
-          doneTotal={doneColumnCount}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
         />
       ) : (
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
           childProgressMap={childProgressMap}
-          doneTotal={doneColumnCount}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
         />
       )}
     </div>
@@ -189,7 +194,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+  const projectScope = `project:${projectId}`;
+  const projectFilter = useMemo<MyIssuesFilter>(
+    () => ({ project_id: projectId }),
+    [projectId],
+  );
+  const { data: projectIssues = [] } = useQuery(
+    myIssueListOptions(wsId, projectScope, projectFilter),
+  );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
@@ -231,11 +243,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery));
 
-  const projectIssues = useMemo(
-    () => allIssues.filter((i) => i.project_id === projectId),
-    [allIssues, projectId],
-  );
-
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
       if (!project) return;
@@ -269,7 +276,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     return <div className="flex items-center justify-center h-full text-muted-foreground">Project not found</div>;
   }
 
-  const issueMetrics = getProjectIssueMetrics(project, projectIssues);
+  const issueMetrics = getProjectIssueMetrics(project);
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
 
@@ -573,7 +580,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           <ViewStoreProvider store={projectViewStore}>
               <IssuesHeader scopedIssues={projectIssues} />
-              <ProjectIssuesContent projectIssues={projectIssues} />
+              <ProjectIssuesContent
+                projectIssues={projectIssues}
+                scope={projectScope}
+                filter={projectFilter}
+              />
               <BatchActionToolbar />
             </ViewStoreProvider>
           </div>

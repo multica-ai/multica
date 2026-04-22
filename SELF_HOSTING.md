@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 multica setup self-host
 ```
 
-This clones the repository, starts all services via Docker Compose, installs the `multica` CLI, then configures it for localhost.
+This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
 
 Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or set `APP_ENV=development` in `.env` to enable the dev master code **`888888`**. See [Step 2 — Log In](#step-2--log-in) for details.
 
@@ -54,6 +54,10 @@ make selfhost
 
 `make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
 
+By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
+If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
+`make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
+
 Once ready:
 
 - **Frontend:** http://localhost:3000
@@ -68,6 +72,8 @@ Open http://localhost:3000 in your browser. The Docker self-host stack defaults 
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Evaluation / private network:** set `APP_ENV=development` in `.env` and restart the backend. Verification code **`888888`** will then work for any email address.
 - **Without configuring either:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
+
+Changes to `ALLOW_SIGNUP` and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads both from `/api/config` at runtime, so no web rebuild is needed.
 
 > **Warning:** do **not** set `APP_ENV=development` on a publicly reachable instance — anyone who knows an email address can then log in with `888888`.
 
@@ -156,14 +162,15 @@ This reconfigures the CLI for multica.ai, re-authenticates, and restarts the dae
 
 > Your local Docker services are unaffected. Stop them separately if you no longer need them.
 
-## Rebuilding After Updates
+## Upgrading
 
 ```bash
-git pull
-make selfhost
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Migrations run automatically on backend startup.
+Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
+If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 ---
 
@@ -186,6 +193,7 @@ JWT_SECRET=$(openssl rand -hex 32)
 Then start everything:
 
 ```bash
+docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 

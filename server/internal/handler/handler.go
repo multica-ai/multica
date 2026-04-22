@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -31,41 +32,61 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-type Handler struct {
-	Queries          *db.Queries
-	DB               dbExecutor
-	TxStarter        txStarter
-	Hub              *realtime.Hub
-	Bus              *events.Bus
-	TaskService      *service.TaskService
-	AutopilotService *service.AutopilotService
-	EmailService     *service.EmailService
-	PingStore        *PingStore
-	UpdateStore      *UpdateStore
-	Storage          storage.Storage
-	CFSigner         *auth.CloudFrontSigner
+type Config struct {
+	AllowSignup         bool
+	AllowedEmails       []string
+	AllowedEmailDomains []string
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+type Handler struct {
+	Queries               *db.Queries
+	DB                    dbExecutor
+	TxStarter             txStarter
+	Hub                   *realtime.Hub
+	Bus                   *events.Bus
+	TaskService           *service.TaskService
+	AutopilotService      *service.AutopilotService
+	EmailService          *service.EmailService
+	PingStore             *PingStore
+	UpdateStore           *UpdateStore
+	ModelListStore        *ModelListStore
+	LocalSkillListStore   *RuntimeLocalSkillListStore
+	LocalSkillImportStore *RuntimeLocalSkillImportStore
+	Storage               storage.Storage
+	CFSigner              *auth.CloudFrontSigner
+	Analytics             analytics.Client
+	cfg                   Config
+}
+
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
 	}
 
-	taskSvc := service.NewTaskService(queries, hub, bus)
+	if analyticsClient == nil {
+		analyticsClient = analytics.NoopClient{}
+	}
+
+	taskSvc := service.NewTaskService(queries, txStarter, hub, bus)
 	return &Handler{
-		Queries:          queries,
-		DB:               executor,
-		TxStarter:        txStarter,
-		Hub:              hub,
-		Bus:              bus,
-		TaskService:      taskSvc,
-		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		EmailService:     emailService,
-		PingStore:        NewPingStore(),
-		UpdateStore:      NewUpdateStore(),
-		Storage:          store,
-		CFSigner:         cfSigner,
+		Queries:               queries,
+		DB:                    executor,
+		TxStarter:             txStarter,
+		Hub:                   hub,
+		Bus:                   bus,
+		TaskService:           taskSvc,
+		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		EmailService:          emailService,
+		PingStore:             NewPingStore(),
+		UpdateStore:           NewUpdateStore(),
+		ModelListStore:        NewModelListStore(),
+		LocalSkillListStore:   NewRuntimeLocalSkillListStore(),
+		LocalSkillImportStore: NewRuntimeLocalSkillImportStore(),
+		Storage:               store,
+		CFSigner:              cfSigner,
+		Analytics:             analyticsClient,
+		cfg:                   cfg,
 	}
 }
 

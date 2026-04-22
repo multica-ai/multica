@@ -419,6 +419,21 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_ack"}`))
 	}
 
+	// Capture client metadata from query params (browsers cannot set custom
+	// headers on WebSocket upgrades, so the WSClient passes them via the URL).
+	// Logged with every connect so the same observability dimensions exist
+	// for WS as for HTTP.
+	clientPlatform := r.URL.Query().Get("client_platform")
+	clientVersion := r.URL.Query().Get("client_version")
+	clientOS := r.URL.Query().Get("client_os")
+	slog.Info("websocket connected",
+		"user_id", userID,
+		"workspace_id", workspaceID,
+		"client_platform", clientPlatform,
+		"client_version", clientVersion,
+		"client_os", clientOS,
+	)
+
 	client := &Client{
 		hub:         hub,
 		conn:        conn,

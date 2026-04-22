@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -36,6 +37,7 @@ type AgentResponse struct {
 	Visibility         string            `json:"visibility"`
 	Status             string            `json:"status"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	Model              string            `json:"model"`
 	OwnerID            *string           `json:"owner_id"`
 	Skills             []SkillResponse   `json:"skills"`
 	CreatedAt          string            `json:"created_at"`
@@ -94,6 +96,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
+		Model:              a.Model.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -123,6 +126,10 @@ type AgentTaskResponse struct {
 	CompletedAt           *string        `json:"completed_at"`
 	Result                any            `json:"result"`
 	Error                 *string        `json:"error"`
+	FailureReason         string         `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt               int32          `json:"attempt"`
+	MaxAttempts           int32          `json:"max_attempts"`
+	ParentTaskID          *string        `json:"parent_task_id,omitempty"`
 	Agent                 *TaskAgentData `json:"agent,omitempty"`
 	Repos                 []RepoData     `json:"repos,omitempty"`
 	CreatedAt             string         `json:"created_at"`
@@ -144,12 +151,17 @@ type TaskAgentData struct {
 	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
+	Model        string                   `json:"model,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
+	}
+	failureReason := ""
+	if t.FailureReason.Valid {
+		failureReason = t.FailureReason.String
 	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
@@ -163,6 +175,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
+		FailureReason:    failureReason,
+		Attempt:          t.Attempt,
+		MaxAttempts:      t.MaxAttempts,
+		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 	}
@@ -265,6 +281,13 @@ type CreateAgentRequest struct {
 	McpConfig          json.RawMessage   `json:"mcp_config"`
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	Model              string            `json:"model"`
+	// Template records which template slug was used to seed this agent
+	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
+	// the caller didn't come from a template picker — the `agent_created`
+	// event still fires with `template=""`, which is the correct signal
+	// for "manually authored agent".
+	Template string `json:"template"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -327,6 +350,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Probe workspace agent count BEFORE the insert so the funnel has a
+	// clean "first agent ever in this workspace" signal — Step 4 of
+	// onboarding always lands in this branch. A non-fatal read: if the
+	// list fails we fall through with isFirstAgent=false rather than
+	// blocking creation, since the primary DB operation is the insert.
+	isFirstAgent := false
+	if existing, listErr := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID)); listErr == nil {
+		isFirstAgent = len(existing) == 0
+	}
+
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -362,6 +395,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomEnv:          ce,
 		CustomArgs:         ca,
 		McpConfig:          mc,
+		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -385,6 +419,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(agent)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+
+	h.Analytics.Capture(analytics.AgentCreated(
+		ownerID,
+		workspaceID,
+		uuidToString(agent.ID),
+		runtime.Provider,
+		req.Template,
+		isFirstAgent,
+	))
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -401,6 +445,7 @@ type UpdateAgentRequest struct {
 	Visibility         *string            `json:"visibility"`
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
+	Model              *string            `json:"model"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -522,6 +567,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MaxConcurrentTasks != nil {
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
+	}
+	if req.Model != nil {
+		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)

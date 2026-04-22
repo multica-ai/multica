@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Cloud, ChevronDown, Globe, Lock, Loader2 } from "lucide-react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ModelDropdown } from "./model-dropdown";
 import type {
   AgentVisibility,
   RuntimeDevice,
@@ -48,6 +49,7 @@ export function CreateAgentDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
+  const [model, setModel] = useState("");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
@@ -89,6 +91,7 @@ export function CreateAgentDialog({
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
+        model: model.trim() || undefined,
       });
       onClose();
     } catch (err) {
@@ -275,6 +278,14 @@ export function CreateAgentDialog({
               </PopoverContent>
             </Popover>
           </div>
+
+          <ModelDropdown
+            runtimeId={selectedRuntime?.id ?? null}
+            runtimeOnline={selectedRuntime?.status === "online"}
+            value={model}
+            onChange={setModel}
+            disabled={!selectedRuntime}
+          />
         </div>
 
         <DialogFooter>

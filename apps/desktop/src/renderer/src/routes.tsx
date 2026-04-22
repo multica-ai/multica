@@ -13,14 +13,14 @@ import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
-import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
+import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
-import { Server } from "lucide-react";
+import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
+import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 
 /**
@@ -113,7 +113,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "runtimes",
-            element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
+            element: <DesktopRuntimesPage />,
             handle: { title: "Runtimes" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
@@ -129,6 +129,12 @@ export const appRoutes: RouteObject[] = [
                     label: "Daemon",
                     icon: Server,
                     content: <DaemonSettingsTab />,
+                  },
+                  {
+                    value: "updates",
+                    label: "Updates",
+                    icon: Download,
+                    content: <UpdatesSettingsTab />,
                   },
                 ]}
               />

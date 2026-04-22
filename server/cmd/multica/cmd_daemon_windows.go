@@ -12,28 +12,23 @@ import (
 )
 
 const (
-	createNewProcessGroup = 0x00000200
-	ctrlBreakEvent        = 1
-	sigBreak              = syscall.Signal(0x15)
+	detachedProcess = 0x00000008
+	sigBreak        = syscall.Signal(0x15)
 )
 
+// daemonSysProcAttr returns the attributes used when spawning the background
+// daemon. DETACHED_PROCESS severs the inherited console so closing the parent
+// cmd/PowerShell window no longer propagates CTRL_CLOSE_EVENT to the daemon.
+// Because the detached daemon shares no console with the stop caller,
+// `daemon stop` talks to it via the HTTP /shutdown endpoint rather than
+// GenerateConsoleCtrlEvent. The daemon's stdout/stderr are already
+// redirected to the log file before Start() is called, so losing the
+// console is safe.
 func daemonSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: createNewProcessGroup,
+		CreationFlags: detachedProcess,
 	}
-}
-
-func stopDaemonProcess(process *os.Process) error {
-	// Try graceful shutdown via CTRL_BREAK_EVENT first.
-	// The daemon's process group ID matches its PID (CREATE_NEW_PROCESS_GROUP).
-	dll := syscall.NewLazyDLL("kernel32.dll")
-	generateCtrlEvent := dll.NewProc("GenerateConsoleCtrlEvent")
-	ret, _, _ := generateCtrlEvent.Call(uintptr(ctrlBreakEvent), uintptr(process.Pid))
-	if ret != 0 {
-		return nil
-	}
-	return process.Kill()
 }
 
 func notifyShutdownContext(parent context.Context) (context.Context, context.CancelFunc) {

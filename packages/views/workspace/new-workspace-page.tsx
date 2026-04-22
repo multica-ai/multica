@@ -5,6 +5,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import type { Workspace } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { LocaleSwitcher, useI18n } from "../i18n";
+import { DragStrip } from "../platform";
 import { CreateWorkspaceForm } from "./create-workspace-form";
 
 /**
@@ -31,12 +32,13 @@ export function NewWorkspacePage({
   const logout = useLogout();
 
   return (
-    <div className="relative flex min-h-svh flex-col bg-background px-6 py-12">
+    <div className="relative flex min-h-svh flex-col bg-background">
+      <DragStrip />
       {onBack && (
         <Button
           variant="ghost"
           size="sm"
-          className="absolute top-12 left-12 text-muted-foreground"
+          className="absolute top-16 left-12 text-muted-foreground"
           onClick={onBack}
         >
           <ArrowLeft />
@@ -56,7 +58,7 @@ export function NewWorkspacePage({
         </Button>
       </div>
 
-      <div className="flex flex-1 flex-col items-center justify-center">
+      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-3xl font-semibold tracking-tight">
@@ -67,6 +69,9 @@ export function NewWorkspacePage({
             </p>
           </div>
           <CreateWorkspaceForm onSuccess={onSuccess} />
+          <p className="text-center text-xs text-muted-foreground">
+            You can invite teammates once your workspace is ready.
+          </p>
         </div>
       </div>
     </div>

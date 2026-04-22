@@ -114,7 +114,8 @@ func init() {
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
-	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array (e.g. '[\"--model\", \"o3\"]')")
+	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
+	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -125,7 +126,8 @@ func init() {
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
-	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array (e.g. '[\"--model\", \"o3\"]')")
+	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
+	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -197,10 +199,26 @@ func normalizeAPIBaseURL(raw string) string {
 	return raw
 }
 
+// inAgentExecutionContext reports whether the CLI is being invoked from
+// inside a daemon-managed agent task (daemon sets MULTICA_AGENT_ID and
+// MULTICA_TASK_ID in the agent env). In that context the workspace must be
+// provided explicitly by the daemon — falling back to user-global
+// ~/.multica/config.json would let the agent act on whatever workspace the
+// user last configured, which is how cross-workspace contamination happens
+// when multiple workspaces share a host.
+func inAgentExecutionContext() bool {
+	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != ""
+}
+
 func resolveWorkspaceID(cmd *cobra.Command) string {
 	val := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
 	if val != "" {
 		return val
+	}
+	// Inside an agent task the daemon is the only authority on workspace
+	// identity. Never read the user-global CLI config here.
+	if inAgentExecutionContext() {
+		return ""
 	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
@@ -213,6 +231,9 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 func requireWorkspaceID(cmd *cobra.Command) (string, error) {
 	id := resolveWorkspaceID(cmd)
 	if id == "" {
+		if inAgentExecutionContext() {
+			return "", fmt.Errorf("workspace_id is required: MULTICA_WORKSPACE_ID must be set by the daemon in agent execution context (no fallback to user config)")
+		}
 		return "", fmt.Errorf("workspace_id is required: use --workspace-id flag, set MULTICA_WORKSPACE_ID env, or run 'multica config set workspace_id <id>'")
 	}
 	return id, nil
@@ -347,6 +368,10 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["custom_args"] = ca
 	}
+	if cmd.Flags().Changed("model") {
+		v, _ := cmd.Flags().GetString("model")
+		body["model"] = v
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -412,6 +437,10 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["custom_args"] = ca
 	}
+	if cmd.Flags().Changed("model") {
+		v, _ := cmd.Flags().GetString("model")
+		body["model"] = v
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -426,7 +455,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --custom-args, --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

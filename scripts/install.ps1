@@ -39,6 +39,55 @@ function Get-LatestVersion {
     }
 }
 
+function Get-SelfHostRef {
+    if ($env:MULTICA_SELFHOST_REF) {
+        return $env:MULTICA_SELFHOST_REF
+    }
+
+    $latest = Get-LatestVersion
+    if ($latest) {
+        return $latest
+    }
+
+    return "main"
+}
+
+function Checkout-ServerRef {
+    param([string]$Ref)
+
+    if ($Ref -eq "main") {
+        git fetch origin main --depth 1 2>$null
+        git checkout --force main 2>$null
+        git reset --hard origin/main 2>$null
+        return
+    }
+
+    git fetch origin --tags --force 2>$null
+    $tagRef = "refs/tags/$Ref"
+    git show-ref --verify --quiet $tagRef 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        git checkout --force $Ref 2>$null
+        return
+    }
+
+    git fetch origin $Ref --depth 1 2>$null
+    git checkout --force $Ref 2>$null
+}
+
+function Pull-OfficialSelfHostImages {
+    docker compose -f docker-compose.selfhost.yml pull
+    if ($LASTEXITCODE -eq 0) {
+        return
+    }
+
+    Write-Host ""
+    Write-Warn "Official images for the selected self-host channel are not published yet."
+    Write-Host "This can happen before the first GHCR release is available."
+    Write-Host "From $InstallDir, build from source instead:"
+    Write-Host "  docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build"
+    exit 1
+}
+
 # ---------------------------------------------------------------------------
 # CLI Installation
 # ---------------------------------------------------------------------------
@@ -48,14 +97,44 @@ function Install-CliBinary {
     if (-not [Environment]::Is64BitOperatingSystem) {
         Write-Fail "Multica requires a 64-bit Windows installation."
     }
-    $arch = "amd64"
+
+    # Distinguish amd64 vs arm64 — Is64BitOperatingSystem is true for both.
+    # Use multiple detection methods for robustness
+    $osArch = $null
+    
+    # Method 1: RuntimeInformation (primary)
+    try {
+        $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    } catch {}
+    
+    # Method 2: PROCESSOR_ARCHITECTURE environment variable
+    if (-not $osArch) {
+        $envArch = $env:PROCESSOR_ARCHITECTURE
+        if ($envArch -eq "AMD64") { $osArch = 'X64' }
+        elseif ($envArch -eq "ARM64") { $osArch = 'Arm64' }
+    }
+    
+    # Method 3: PROCESSOR_ARCHITEW6432 (for 32-bit PowerShell on 64-bit Windows)
+    if (-not $osArch) {
+        $envArch = $env:PROCESSOR_ARCHITEW6432
+        if ($envArch -eq "AMD64") { $osArch = 'X64' }
+        elseif ($envArch -eq "ARM64") { $osArch = 'Arm64' }
+    }
+    
+    # Determine architecture
+    switch ($osArch) {
+        'X64'   { $arch = "amd64" }
+        'Arm64' { $arch = "arm64" }
+        default { Write-Fail "Unsupported Windows architecture: $osArch (only X64 and Arm64 are supported)." }
+    }
 
     $latest = Get-LatestVersion
     if (-not $latest) {
         Write-Fail "Could not determine latest release. Check your network connection."
     }
 
-    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica_windows_$arch.zip"
+    $version = $latest.TrimStart('v')
+    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica-cli-$version-windows-$arch.zip"
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install"
 
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
@@ -75,7 +154,7 @@ function Install-CliBinary {
         $checksums = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -ErrorAction Stop
         $zipFile = Join-Path $tmpDir "multica.zip"
         $actualHash = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
-        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica_windows_$arch\.zip" } | Select-Object -First 1
+        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica-cli-$version-windows-$arch\.zip" } | Select-Object -First 1
         if ($expectedLine) {
             $expectedHash = ($expectedLine -split "\s+")[0].ToLower()
             if ($actualHash -ne $expectedHash) {
@@ -194,14 +273,12 @@ After installing Docker, re-run this script with `$env:MULTICA_MODE="local"`.
 # ---------------------------------------------------------------------------
 function Install-Server {
     Write-Info "Setting up Multica server..."
+    $serverRef = Get-SelfHostRef
+    Write-Info "Using self-host assets from $serverRef..."
 
     if (Test-Path (Join-Path $InstallDir ".git")) {
         Write-Info "Updating existing installation at $InstallDir..."
         Write-Warn "Any local changes in $InstallDir will be overwritten."
-        Push-Location $InstallDir
-        git fetch origin main --depth 1 2>$null
-        git reset --hard origin/main 2>$null
-        Pop-Location
     } else {
         Write-Info "Cloning Multica repository..."
         if (-not (Test-CommandExists "git")) {
@@ -218,9 +295,9 @@ function Install-Server {
         git clone --depth 1 $RepoUrl $InstallDir
     }
 
-    Write-Ok "Repository ready at $InstallDir"
-
     Push-Location $InstallDir
+    Checkout-ServerRef $serverRef
+    Write-Ok "Repository ready at $InstallDir ($serverRef)"
 
     if (-not (Test-Path ".env")) {
         Write-Info "Creating .env with random JWT_SECRET..."
@@ -232,8 +309,10 @@ function Install-Server {
         Write-Ok "Using existing .env"
     }
 
+    Write-Info "Pulling official Multica images..."
+    Pull-OfficialSelfHostImages
     Write-Info "Starting Multica services (this may take a few minutes on first run)..."
-    docker compose -f docker-compose.selfhost.yml up -d --build
+    docker compose -f docker-compose.selfhost.yml up -d
 
     Write-Info "Waiting for backend to be ready..."
     $ready = $false

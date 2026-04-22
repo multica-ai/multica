@@ -54,6 +54,7 @@ export interface Agent {
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
+  model: string;
   owner_id: string | null;
   skills: Skill[];
   created_at: string;
@@ -73,6 +74,10 @@ export interface CreateAgentRequest {
   custom_args?: string[];
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
+  model?: string;
+  /** Optional template slug used by the onboarding agent picker. Surfaced
+   *  as the `template` property on the `agent_created` PostHog event. */
+  template?: string;
 }
 
 export interface UpdateAgentRequest {
@@ -87,6 +92,7 @@ export interface UpdateAgentRequest {
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
+  model?: string;
 }
 
 // Skills
@@ -186,4 +192,92 @@ export interface RuntimeUpdate {
   error?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface RuntimeModel {
+  id: string;
+  label: string;
+  provider?: string;
+  default?: boolean;
+}
+
+export type RuntimeModelListStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timeout";
+
+export interface RuntimeModelListRequest {
+  id: string;
+  runtime_id: string;
+  status: RuntimeModelListStatus;
+  models?: RuntimeModel[];
+  supported: boolean;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Result shape returned by resolveRuntimeModels — includes the
+// "supported" bit so the UI can distinguish "no models discovered"
+// from "provider does not honour per-agent model selection".
+export interface RuntimeModelsResult {
+  models: RuntimeModel[];
+  supported: boolean;
+}
+
+export type RuntimeLocalSkillStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timeout";
+
+export interface RuntimeLocalSkillSummary {
+  key: string;
+  name: string;
+  description?: string;
+  source_path: string;
+  provider: string;
+  file_count: number;
+}
+
+export interface RuntimeLocalSkillListRequest {
+  id: string;
+  runtime_id: string;
+  status: RuntimeLocalSkillStatus;
+  skills?: RuntimeLocalSkillSummary[];
+  supported: boolean;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRuntimeLocalSkillImportRequest {
+  skill_key: string;
+  name?: string;
+  description?: string;
+}
+
+export interface RuntimeLocalSkillImportRequest {
+  id: string;
+  runtime_id: string;
+  skill_key: string;
+  name?: string;
+  description?: string;
+  status: RuntimeLocalSkillStatus;
+  skill?: Skill;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RuntimeLocalSkillsResult {
+  skills: RuntimeLocalSkillSummary[];
+  supported: boolean;
+}
+
+export interface RuntimeLocalSkillImportResult {
+  skill: Skill;
 }

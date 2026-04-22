@@ -75,6 +75,12 @@ interface ContentEditorProps {
   showBubbleMenu?: boolean;
   /** When true, bare Enter submits (chat-style). Mod-Enter always submits. */
   submitOnEnter?: boolean;
+  /**
+   * ID of the issue this editor belongs to. When set, the bubble menu exposes
+   * a "Create sub-issue from selection" action that parents the new issue
+   * under this ID and replaces the selection with a mention link.
+   */
+  currentIssueId?: string;
 }
 
 interface ContentEditorRef {
@@ -104,6 +110,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onUploadFile,
       showBubbleMenu = true,
       submitOnEnter = false,
+      currentIssueId,
     },
     ref,
   ) {
@@ -258,7 +265,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onMouseDown={handleContainerMouseDown}
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {editable && showBubbleMenu && <EditorBubbleMenu editor={editor} />}
+        {editable && showBubbleMenu && (
+          <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+        )}
         <LinkHoverCard {...hover} />
       </div>
     );

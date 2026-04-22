@@ -20,15 +20,15 @@ import (
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-	Config      any    `json:"config"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Content     string  `json:"content"`
+	Config      any     `json:"config"`
 	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 type SkillFileResponse struct {
@@ -209,27 +209,14 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	config, _ := json.Marshal(req.Config)
-	if req.Config == nil {
-		config = []byte("{}")
-	}
-
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-
-	qtx := h.Queries.WithTx(tx)
-
-	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+		WorkspaceID: workspaceID,
+		CreatorID:   creatorID,
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Config:      config,
-		CreatedBy:   parseUUID(creatorID),
+		Config:      req.Config,
+		Files:       req.Files,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -238,30 +225,6 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
-	}
-
-	fileResps := make([]SkillFileResponse, 0, len(req.Files))
-	for _, f := range req.Files {
-		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    f.Path,
-			Content: f.Content,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create skill file: "+err.Error())
-			return
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
@@ -463,6 +426,7 @@ type githubContentEntry struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
+	URL         string `json:"url"`
 	DownloadURL string `json:"download_url"`
 }
 
@@ -718,12 +682,15 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 
 	var entries []githubContentEntry
 	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
+		slog.Warn("skills.sh import: failed to decode top-level directory listing", "url", apiURL, "error", err)
 		return result, nil
 	}
 
 	// 3. Recursively collect files (excluding SKILL.md and LICENSE)
 	var allFiles []githubContentEntry
+	slog.Info("skills.sh import: collecting supporting files", "skill", skillName, "top_level_entries", len(entries))
 	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
+	slog.Info("skills.sh import: collected supporting files", "skill", skillName, "files", len(allFiles))
 
 	// 4. Download each file
 	basePath := skillDir + "/"
@@ -755,16 +722,35 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
 			// Fetch subdirectory contents
-			subURL := parentURL + "/" + url.PathEscape(entry.Name)
+			subURL := entry.URL
+			if subURL == "" {
+				parsed, err := url.Parse(parentURL)
+				if err != nil {
+					slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
+					continue
+				}
+				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
+				subURL = parsed.String()
+			}
 			subResp, err := httpClient.Get(subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
+				attrs := []any{"url", subURL}
 				if subResp != nil {
+					attrs = append(attrs, "status", subResp.StatusCode)
 					subResp.Body.Close()
 				}
+				if err != nil {
+					attrs = append(attrs, "error", err)
+				}
+				slog.Warn("skills.sh import: failed to list subdirectory", attrs...)
 				continue
 			}
 			var subEntries []githubContentEntry
-			json.NewDecoder(subResp.Body).Decode(&subEntries)
+			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
+				subResp.Body.Close()
+				slog.Warn("skills.sh import: failed to decode subdirectory listing", "url", subURL, "error", err)
+				continue
+			}
 			subResp.Body.Close()
 			collectGitHubFiles(httpClient, subEntries, out, subURL)
 		}
@@ -845,23 +831,25 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create skill in database
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
+	files := make([]CreateSkillFileRequest, 0, len(imported.files))
+	for _, f := range imported.files {
+		if !validateFilePath(f.path) {
+			continue
+		}
+		files = append(files, CreateSkillFileRequest{
+			Path:    f.path,
+			Content: f.content,
+		})
 	}
-	defer tx.Rollback(r.Context())
 
-	qtx := h.Queries.WithTx(tx)
-
-	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+		WorkspaceID: workspaceID,
+		CreatorID:   creatorID,
 		Name:        imported.name,
 		Description: imported.description,
 		Content:     imported.content,
-		Config:      []byte("{}"),
-		CreatedBy:   parseUUID(creatorID),
+		Config:      map[string]any{},
+		Files:       files,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -870,32 +858,6 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
-	}
-
-	fileResps := make([]SkillFileResponse, 0, len(imported.files))
-	for _, f := range imported.files {
-		if !validateFilePath(f.path) {
-			continue
-		}
-		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    f.path,
-			Content: f.content,
-		})
-		if err != nil {
-			continue
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})

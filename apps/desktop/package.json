@@ -2,17 +2,31 @@
   "name": "@multica/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Multica Desktop — native desktop client for the Multica platform.",
+  "homepage": "https://multica.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/multica-ai/multica.git",
+    "directory": "apps/desktop"
+  },
+  "author": {
+    "name": "Multica",
+    "email": "support@multica.ai"
+  },
+  "license": "UNLICENSED",
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
     "brand-dev-electron": "node scripts/brand-dev-electron.mjs",
     "dev": "pnpm run bundle-cli && pnpm run brand-dev-electron && electron-vite dev",
+    "dev:staging": "pnpm run bundle-cli && pnpm run brand-dev-electron && electron-vite dev --mode staging",
     "build": "pnpm run bundle-cli && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "preview": "electron-vite preview",
     "package": "node scripts/package.mjs",
+    "package:all": "node scripts/package.mjs --all-platforms --publish never",
     "lint": "eslint .",
     "test": "vitest run",
     "postinstall": "electron-builder install-app-deps"
@@ -25,6 +39,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.5",
+    "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

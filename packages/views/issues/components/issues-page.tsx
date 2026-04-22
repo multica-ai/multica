@@ -166,7 +166,6 @@ export function IssuesPage() {
             {viewMode === "board" ? (
               <BoardView
                 issues={issues}
-                allIssues={scopedIssues}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}

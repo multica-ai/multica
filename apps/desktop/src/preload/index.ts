@@ -1,7 +1,32 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 
+// Synchronously fetch app metadata from main at preload time so the renderer
+// can pass it into CoreProvider during the initial render — the alternative
+// (async ipc.invoke) would race the ApiClient construction in initCore and
+// the first few HTTP requests would go out without X-Client-Version/OS.
+function fetchAppInfo(): { version: string; os: "macos" | "windows" | "linux" | "unknown" } {
+  try {
+    const info = ipcRenderer.sendSync("app:get-info") as
+      | { version: string; os: "macos" | "windows" | "linux" | "unknown" }
+      | undefined;
+    if (info && typeof info.version === "string" && typeof info.os === "string") return info;
+  } catch {
+    // fall through
+  }
+  // Fallback: derive OS from process.platform; version unknown.
+  const p = process.platform;
+  const os: "macos" | "windows" | "linux" | "unknown" =
+    p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
+  return { version: "unknown", os };
+}
+
+const appInfo = fetchAppInfo();
+
 const desktopAPI = {
+  /** App version + normalized OS. Read once at preload time so the renderer
+   *  can use it synchronously when initializing the API client. */
+  appInfo,
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>
@@ -96,6 +121,10 @@ const updaterAPI = {
   },
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
   installUpdate: () => ipcRenderer.invoke("updater:install"),
+  checkForUpdates: (): Promise<
+    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
+    | { ok: false; error: string }
+  > => ipcRenderer.invoke("updater:check"),
 };
 
 if (process.contextIsolated) {
