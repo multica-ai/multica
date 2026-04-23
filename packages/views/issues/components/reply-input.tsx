@@ -103,7 +103,7 @@ function ReplyInput({
             currentIssueId={issueId}
           />
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1 text-muted-foreground transition-colors group-focus-within/editor:text-foreground">
+        <div className="absolute bottom-0 right-0 flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -113,7 +113,7 @@ function ReplyInput({
                     setIsExpanded((v) => !v);
                     editorRef.current?.focus();
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-sm opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                 >
                   {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
                 </button>
