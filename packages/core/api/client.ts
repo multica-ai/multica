@@ -269,8 +269,12 @@ export class ApiClient {
     });
   }
 
-  async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
-    return this.fetch("/auth/google", {
+  async oauthLogin(
+    providerId: string,
+    code: string,
+    redirectUri: string,
+  ): Promise<LoginResponse> {
+    return this.fetch(`/auth/oauth/${providerId}`, {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
@@ -705,7 +709,16 @@ export class ApiClient {
   async getConfig(): Promise<{
     cdn_domain: string;
     allow_signup: boolean;
-    google_client_id?: string;
+    oauth_providers?: Record<
+      string,
+      {
+        client_id: string;
+        authorize_url: string;
+        callback_path: string;
+        scope: string;
+        extra_auth_params?: Record<string, string>;
+      }
+    >;
     posthog_key?: string;
     posthog_host?: string;
   }> {

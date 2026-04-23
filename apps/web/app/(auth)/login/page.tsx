@@ -3,7 +3,12 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
+import {
+  buildDesktopDeepLink,
+  sanitizeNextUrl,
+  startOAuthRedirect,
+  useAuthStore,
+} from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
@@ -25,12 +30,16 @@ import { Loader2 } from "lucide-react";
 import { captureDownloadIntent } from "@multica/core/analytics";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
-import { LoginPage, validateCliCallback } from "@multica/views/auth";
+import {
+  LoginPage,
+  buildOAuthProviderButtons,
+  validateCliCallback,
+} from "@multica/views/auth";
 
 function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();
-  const googleClientId = useConfigStore((state) => state.googleClientId);
+  const oauthProviders = useConfigStore((state) => state.oauthProviders);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -63,7 +72,7 @@ function LoginPageContent() {
         .issueCliToken()
         .then(({ token }) => {
           setDesktopToken(token);
-          window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          window.location.href = buildDesktopDeepLink(token);
         })
         .catch((err) => {
           setDesktopError(
@@ -101,14 +110,15 @@ function LoginPageContent() {
     router.push(resolvePostAuthDestination(list, onboarded));
   };
 
-  // Build Google OAuth state: encode platform + next URL so the callback
-  // can redirect to the right place after login.
-  const googleState = [
-    platform === "desktop" ? "platform:desktop" : "",
-    nextUrl ? `next:${nextUrl}` : "",
-  ]
-    .filter(Boolean)
-    .join(",") || undefined;
+  const providers = buildOAuthProviderButtons(oauthProviders, async (id, cfg) => {
+    const url = await startOAuthRedirect({
+      providerId: id,
+      cfg,
+      platform: platform === "desktop" ? "desktop" : undefined,
+      next: nextUrl,
+    });
+    window.location.href = url;
+  });
 
   // While the desktop handoff is in progress (or has produced a token/error),
   // render a dedicated screen instead of flashing the login form or redirecting
@@ -142,7 +152,7 @@ function LoginPageContent() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                  window.location.href = buildDesktopDeepLink(desktopToken);
                 }}
               >
                 Open Multica Desktop
@@ -159,15 +169,7 @@ function LoginPageContent() {
   return (
     <LoginPage
       onSuccess={handleSuccess}
-      google={
-        googleClientId
-          ? {
-              clientId: googleClientId,
-              redirectUri: `${window.location.origin}/auth/callback`,
-              state: googleState,
-            }
-          : undefined
-      }
+      providers={providers}
       cliCallback={
         cliCallbackRaw && validateCliCallback(cliCallbackRaw)
           ? { url: cliCallbackRaw, state: cliState }

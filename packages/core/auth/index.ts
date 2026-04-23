@@ -1,6 +1,14 @@
 export { createAuthStore } from "./store";
 export type { AuthStoreOptions, AuthState } from "./store";
 export { sanitizeNextUrl } from "./utils";
+export {
+  encodeOAuthState,
+  decodeOAuthState,
+  buildDesktopDeepLink,
+  buildAuthorizeUrl,
+  startOAuthRedirect,
+} from "./oauth-state";
+export type { OAuthStateParts, StartOAuthOptions } from "./oauth-state";
 
 import type { createAuthStore as CreateAuthStoreFn } from "./store";
 

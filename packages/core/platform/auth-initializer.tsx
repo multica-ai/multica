@@ -50,9 +50,23 @@ export function AuthInitializer({
       .getConfig()
       .then((cfg) => {
         if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
+        const oauthProviders = cfg.oauth_providers
+          ? Object.fromEntries(
+              Object.entries(cfg.oauth_providers).map(([id, p]) => [
+                id,
+                {
+                  clientId: p.client_id,
+                  authorizeUrl: p.authorize_url,
+                  callbackPath: p.callback_path,
+                  scope: p.scope,
+                  extraAuthParams: p.extra_auth_params,
+                },
+              ]),
+            )
+          : {};
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
-          googleClientId: cfg.google_client_id,
+          oauthProviders,
         });
         if (cfg.posthog_key) {
           initAnalytics({

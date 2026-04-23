@@ -349,11 +349,18 @@ describe("LoginPage", () => {
   // Google OAuth
   // -------------------------------------------------------------------------
 
-  it("renders Google OAuth button when google prop provided", () => {
+  it("renders Google OAuth button when Google is in providers", () => {
     render(
       <LoginPage
         onSuccess={onSuccess}
-        google={{ clientId: "goog-123", redirectUri: "http://localhost/cb" }}
+        providers={[
+          {
+            id: "google",
+            label: "Continue with Google",
+            icon: null,
+            onLogin: vi.fn(),
+          },
+        ]}
       />,
     );
     expect(
@@ -361,7 +368,7 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides Google OAuth button when google prop omitted", () => {
+  it("hides Google OAuth button when providers is empty", () => {
     render(<LoginPage onSuccess={onSuccess} />);
     expect(
       screen.queryByRole("button", { name: /continue with google/i }),
@@ -659,6 +666,83 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
+});
+
+describe("LoginPage providers", () => {
+  const origLocation = window.location;
+  let capturedHref = "";
+
+  const githubProvider = {
+    id: "github",
+    label: "Continue with GitHub",
+    icon: <span data-testid="github-icon" />,
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
+    localStorage.clear();
+    capturedHref = "";
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        origin: "http://localhost",
+        get href() { return capturedHref; },
+        set href(v: string) { capturedHref = v; },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: origLocation,
+    });
+  });
+
+  it("renders one button per providers entry", () => {
+    render(
+      <LoginPage
+        onSuccess={() => {}}
+        providers={[{ ...githubProvider, onLogin: vi.fn() }]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /continue with github/i })).toBeDefined();
+  });
+
+  it("omits the button when providers is empty", () => {
+    render(<LoginPage onSuccess={() => {}} />);
+    expect(screen.queryByRole("button", { name: /continue with github/i })).toBeNull();
+  });
+
+  it("invokes provider.onLogin on click", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onLogin = vi.fn();
+    render(
+      <LoginPage
+        onSuccess={() => {}}
+        providers={[{ ...githubProvider, onLogin }]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /continue with github/i }));
+    expect(onLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders multiple providers in order", () => {
+    render(
+      <LoginPage
+        onSuccess={() => {}}
+        providers={[
+          { id: "google", label: "Continue with Google", icon: null, onLogin: vi.fn() },
+          { id: "github", label: "Continue with GitHub", icon: null, onLogin: vi.fn() },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /continue with google/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /continue with github/i })).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
