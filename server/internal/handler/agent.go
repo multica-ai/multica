@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -140,6 +141,7 @@ type AgentTaskResponse struct {
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
 	TargetRepoUrl         string         `json:"target_repo_url,omitempty"`         // planner-chosen target repo (empty = planner hasn't run or user hasn't confirmed)
 	RepoConfidence        float32        `json:"repo_confidence,omitempty"`         // planner's self-reported confidence, 0-1
+	AutopilotRunID        string         `json:"autopilot_run_id,omitempty"`        // non-empty for autopilot-spawned tasks
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -184,6 +186,11 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TargetRepoUrl:    t.TargetRepoUrl.String,
 		RepoConfidence:   t.RepoConfidence.Float32,
+		// Surface task source so the UI can distinguish issue-linked tasks
+		// from chat-spawned or autopilot-spawned ones; all three may arrive
+		// with issue_id = "" once a task has no linked issue.
+		ChatSessionID:  uuidToString(t.ChatSessionID),
+		AutopilotRunID: uuidToString(t.AutopilotRunID),
 	}
 }
 
@@ -285,6 +292,12 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	// Template records which template slug was used to seed this agent
+	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
+	// the caller didn't come from a template picker — the `agent_created`
+	// event still fires with `template=""`, which is the correct signal
+	// for "manually authored agent".
+	Template string `json:"template"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -347,6 +360,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Probe workspace agent count BEFORE the insert so the funnel has a
+	// clean "first agent ever in this workspace" signal — Step 4 of
+	// onboarding always lands in this branch. A non-fatal read: if the
+	// list fails we fall through with isFirstAgent=false rather than
+	// blocking creation, since the primary DB operation is the insert.
+	isFirstAgent := false
+	if existing, listErr := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID)); listErr == nil {
+		isFirstAgent = len(existing) == 0
+	}
+
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -406,6 +429,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(agent)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+
+	h.Analytics.Capture(analytics.AgentCreated(
+		ownerID,
+		workspaceID,
+		uuidToString(agent.ID),
+		runtime.Provider,
+		req.Template,
+		isFirstAgent,
+	))
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Download } from "lucide-react";
+import {
+  captureDownloadIntent,
+  captureEvent,
+  setPersonProperties,
+} from "@multica/core/analytics";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -46,25 +51,28 @@ import { CloudWaitlistExpand } from "../components/cloud-waitlist-expand";
 
 type DialogState = "cli" | "cloud" | null;
 
-// Kept in sync with the Landing page's "Download Desktop" CTA
-// (apps/web/features/landing/components/landing-hero.tsx). Both point
-// at the GitHub Releases latest page, which redirects to the current
-// tag and lists the platform-specific .dmg / .zip assets. There is no
-// multica.ai-hosted download page — do not invent one here.
-const DESKTOP_DOWNLOAD_URL =
-  "https://github.com/multica-ai/multica/releases/latest";
+// Single canonical download destination — the /download page owns
+// OS + arch detection, the All-Platforms matrix, release-note links,
+// and the CLI / Cloud alternates. Kept in sync with landing-hero.tsx
+// and landing footer nav, both of which target the same path.
+const DOWNLOAD_PAGE_URL = "/download";
 
 export function StepPlatformFork({
   wsId,
   onNext,
   onBack,
   cliInstructions,
+  onWaitlistSubmitted,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
   /** Platform-specific CLI install card, rendered inside the CLI dialog. */
   cliInstructions?: ReactNode;
+  /** Parent-level latch used to label the onboarding completion path
+   *  as `cloud_waitlist` when the user ends up skipping Step 3 after
+   *  submitting the waitlist form. */
+  onWaitlistSubmitted?: () => void;
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
@@ -73,23 +81,52 @@ export function StepPlatformFork({
   const [downloaded, setDownloaded] = useState(false);
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
-  // Desktop app currently ships macOS binaries only (see electron-builder
-  // config + release workflow). On non-mac platforms we keep the card
-  // visible but muted, and redirect users to the CLI path.
-  // Default true to match SSR; useEffect corrects post-hydration.
-  const [isMac, setIsMac] = useState(true);
-  useEffect(() => {
-    if (typeof navigator === "undefined") return;
-    const p = navigator.platform || "";
-    const ua = navigator.userAgent || "";
-    setIsMac(/Mac|iPhone|iPad|iPod/i.test(p) || /Mac OS X/i.test(ua));
-  }, []);
+  // Platform signal retained purely for PostHog dimensions — the UI
+  // no longer branches on it (Windows / Linux desktop installers now
+  // ship, so all three platforms get the same card). Computed
+  // lazily; SSR-safe because handlers only run client-side.
+  const isMac =
+    typeof navigator !== "undefined" &&
+    (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || "") ||
+      /Mac OS X/i.test(navigator.userAgent || ""));
 
   const picker = useRuntimePicker(wsId);
 
   const pickDesktop = () => {
-    window.open(DESKTOP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
+    window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
     setDownloaded(true);
+    // Step-3-scoped path selection event (kept for existing funnels);
+    // `source: "step3"` future-proofs if the event is reused from
+    // another surface later.
+    captureEvent("onboarding_runtime_path_selected", {
+      path: "download_desktop",
+      source: "step3",
+      is_mac: isMac,
+    });
+    // Cross-surface Desktop intent event — also fires from landing
+    // hero / footer / login / Welcome. Enables the top-of-funnel
+    // split without retrofitting `onboarding_runtime_path_selected`
+    // to non-onboarding contexts.
+    captureDownloadIntent("step3");
+  };
+
+  const handleOpenCli = () => {
+    setDialog("cli");
+    captureEvent("onboarding_runtime_path_selected", {
+      path: "cli",
+      source: "step3",
+      is_mac: isMac,
+    });
+    setPersonProperties({ platform_preference: "web" });
+  };
+
+  const handleOpenCloud = () => {
+    setDialog("cloud");
+    captureEvent("onboarding_runtime_path_selected", {
+      path: "cloud_waitlist",
+      source: "step3",
+      is_mac: isMac,
+    });
   };
 
   const handleCliConnect = () => {
@@ -103,10 +140,7 @@ export function StepPlatformFork({
       return "You're on the waitlist — pick Skip to keep exploring.";
     }
     if (downloaded) {
-      return "Downloading… finish setup in the desktop app, or pick another path.";
-    }
-    if (!isMac) {
-      return "Install the CLI to connect a runtime, or skip for now.";
+      return "Finish setup on the download page, then come back to this tab.";
     }
     return "Pick a path above — or skip and configure a runtime later.";
   })();
@@ -153,26 +187,22 @@ export function StepPlatformFork({
             </p>
 
             <div className="mt-10 flex max-w-[560px] flex-col gap-3.5">
-              <ForkPrimary
-                onClick={pickDesktop}
-                downloaded={downloaded}
-                isMac={isMac}
-              />
+              <ForkPrimary onClick={pickDesktop} downloaded={downloaded} />
 
               <ForkAlt
                 title="Install the CLI"
-                subtitle="Run the Multica daemon yourself — a couple of terminal commands."
+                subtitle="For servers, remote dev boxes, and headless setups. Terminal required."
                 actionLabel="Show steps"
-                onAction={() => setDialog("cli")}
+                onAction={handleOpenCli}
               />
 
               <ForkAlt
                 title="Cloud runtime"
-                subtitle="We host it for you. Not live yet — leave your email and we'll let you know."
+                subtitle="We host the runtime. Not live yet — join the waitlist."
                 actionLabel={
                   waitlistSubmitted ? "On the list" : "Join waitlist"
                 }
-                onAction={() => setDialog("cloud")}
+                onAction={handleOpenCloud}
               />
             </div>
           </div>
@@ -219,7 +249,10 @@ export function StepPlatformFork({
         open={dialog === "cloud"}
         onClose={() => setDialog(null)}
         submitted={waitlistSubmitted}
-        onSubmitted={() => setWaitlistSubmitted(true)}
+        onSubmitted={() => {
+          setWaitlistSubmitted(true);
+          onWaitlistSubmitted?.();
+        }}
       />
     </div>
   );
@@ -232,41 +265,10 @@ export function StepPlatformFork({
 function ForkPrimary({
   onClick,
   downloaded,
-  isMac,
 }: {
   onClick: () => void;
   downloaded: boolean;
-  isMac: boolean;
 }) {
-  // On non-mac platforms we can't deliver a binary yet. The card stays
-  // visible so users understand the desktop app exists, but it's muted
-  // and steers them down to the CLI path.
-  if (!isMac) {
-    return (
-      <div
-        aria-disabled="true"
-        className="flex cursor-not-allowed items-center justify-between gap-4 rounded-xl border bg-muted/40 px-6 py-5 text-left"
-      >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[17px] font-medium tracking-tight text-muted-foreground">
-            <Download className="h-4 w-4" aria-hidden />
-            Desktop app — macOS only for now
-          </div>
-          <div className="mt-1 text-[13px] text-muted-foreground/80">
-            Windows and Linux builds are on the way. In the meantime,
-            install the CLI below — it takes about two minutes.
-          </div>
-        </div>
-        <span
-          aria-hidden
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
-        >
-          <ArrowRight className="h-4 w-4" />
-        </span>
-      </div>
-    );
-  }
-
   return (
     <button
       type="button"
@@ -279,12 +281,12 @@ function ForkPrimary({
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-[17px] font-medium tracking-tight">
           <Download className="h-4 w-4" aria-hidden />
-          {downloaded ? "Downloading Multica…" : "Download the desktop app"}
+          {downloaded ? "Continuing on the download page…" : "Download the desktop app"}
         </div>
         <div className="mt-1 text-[13px] text-background/60">
           {downloaded
-            ? "Opened in a new tab. Finish setup inside the desktop app."
-            : "macOS · runtime bundled — detects your tools automatically, nothing to install."}
+            ? "Opened in a new tab. Pick your installer there, then finish setup on desktop."
+            : "Bundled daemon, zero setup. Pick your platform on the next page."}
         </div>
       </div>
       <span
@@ -378,8 +380,9 @@ function CliInstallDialog({
         <DialogHeader>
           <DialogTitle>Install the CLI</DialogTitle>
           <DialogDescription>
-            Runs the same daemon the desktop app bundles — you install
-            it yourself.
+            Same daemon as Desktop, installed via terminal. Use it when
+            Desktop doesn&apos;t fit — servers, remote dev boxes, or
+            headless setups.
           </DialogDescription>
         </DialogHeader>
 
@@ -551,12 +554,11 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         )}
         {stage === "stalled" && (
           <>
-            Nothing coming through yet. Close this dialog and try another
-            path on the previous screen —{" "}
-            <span className="font-medium text-foreground">Skip for now</span>{" "}
-            (in the footer) enters your workspace in read-only mode, or
-            the <span className="font-medium text-foreground">Cloud runtime</span>{" "}
-            card lets you join the waitlist.
+            Nothing coming through yet. If you&apos;re not comfortable
+            with the terminal,{" "}
+            <span className="font-medium text-foreground">Desktop</span>{" "}
+            is the smoother path — it bundles the daemon. Close this
+            dialog and pick Desktop, or hit Skip to continue.
           </>
         )}
       </p>

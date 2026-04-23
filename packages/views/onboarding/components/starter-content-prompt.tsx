@@ -106,7 +106,7 @@ export function StarterContentPrompt() {
     if (submitting) return;
     setSubmitting("dismiss");
     try {
-      await api.dismissStarterContent();
+      await api.dismissStarterContent({ workspace_id: workspace.id });
       await refreshMe();
     } catch (err) {
       toast.error(

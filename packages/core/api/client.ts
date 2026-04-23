@@ -68,6 +68,7 @@ import type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "../types";
+import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -288,8 +289,13 @@ export class ApiClient {
     return this.fetch("/api/me");
   }
 
-  async markOnboardingComplete(): Promise<User> {
-    return this.fetch("/api/me/onboarding/complete", { method: "POST" });
+  async markOnboardingComplete(payload?: {
+    completion_path?: OnboardingCompletionPath;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding/complete", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
   }
 
   async joinCloudWaitlist(payload: {
@@ -330,9 +336,12 @@ export class ApiClient {
     });
   }
 
-  async dismissStarterContent(): Promise<User> {
+  async dismissStarterContent(payload?: {
+    workspace_id?: string;
+  }): Promise<User> {
     return this.fetch("/api/me/starter-content/dismiss", {
       method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
   }
 
@@ -693,6 +702,8 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    allow_signup: boolean;
+    google_client_id?: string;
     posthog_key?: string;
     posthog_host?: string;
   }> {

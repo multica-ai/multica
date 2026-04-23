@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   paths,
@@ -21,14 +22,15 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { captureDownloadIntent } from "@multica/core/analytics";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
+import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
-
-const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();
+  const googleClientId = useConfigStore((state) => state.googleClientId);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -172,6 +174,22 @@ function LoginPageContent() {
           : undefined
       }
       onTokenObtained={setLoggedInCookie}
+      extra={
+        // Web-only nudge toward the desktop app. Copy is hardcoded EN
+        // for now because the login route sits outside the landing
+        // group's LocaleProvider — if this page ever becomes
+        // locale-aware, the strings live in positioning doc §3.3.
+        <span className="text-xs text-muted-foreground">
+          Prefer the desktop app?{" "}
+          <Link
+            href="/download"
+            onClick={() => captureDownloadIntent("login")}
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+          >
+            Download
+          </Link>
+        </span>
+      }
     />
   );
 }

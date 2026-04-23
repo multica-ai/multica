@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -52,7 +52,7 @@ makehelp: help ## Alias for `make help`
 # ---------- Self-hosting (Docker Compose) ----------
 ##@ Self-hosting
 
-selfhost: ## Create .env if needed, then build and start the local self-hosted stack
+selfhost: ## Create .env if needed, then pull and start the official self-hosted images
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
@@ -64,8 +64,58 @@ selfhost: ## Create .env if needed, then build and start the local self-hosted s
 		fi; \
 		echo "==> Generated random JWT_SECRET"; \
 	fi
+	@echo "==> Pulling official Multica images..."
+	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
+		echo ""; \
+		echo "Official images for tag '$${MULTICA_IMAGE_TAG:-latest}' are not published yet."; \
+		echo "If this is before the first GHCR release, build from the current checkout:"; \
+		echo "  make selfhost-build"; \
+		exit 1; \
+	fi
 	@echo "==> Starting Multica via Docker Compose..."
-	docker compose -f docker-compose.selfhost.yml up -d --build
+	docker compose -f docker-compose.selfhost.yml up -d
+	@echo "==> Waiting for backend to be ready..."
+	@for i in $$(seq 1 30); do \
+		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+			break; \
+		fi; \
+		sleep 2; \
+	done
+	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+		echo ""; \
+		echo "✓ Multica is running!"; \
+		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
+		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
+		echo ""; \
+		echo "Images: $${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:$${MULTICA_IMAGE_TAG:-latest}"; \
+		echo "        $${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:$${MULTICA_IMAGE_TAG:-latest}"; \
+		echo ""; \
+		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
+		echo "        or set APP_ENV=development in .env (private networks only) to enable code 888888."; \
+		echo ""; \
+		echo "Next — install the CLI and connect your machine:"; \
+		echo "  brew install multica-ai/tap/multica"; \
+		echo "  multica setup self-host"; \
+	else \
+		echo ""; \
+		echo "Services are still starting. Check logs:"; \
+		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
+	fi
+
+selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
+	@if [ ! -f .env ]; then \
+		echo "==> Creating .env from .env.example..."; \
+		cp .env.example .env; \
+		JWT=$$(openssl rand -hex 32); \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
+		else \
+			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
+		fi; \
+		echo "==> Generated random JWT_SECRET"; \
+	fi
+	@echo "==> Building Multica from the current checkout..."
+	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
@@ -81,6 +131,9 @@ selfhost: ## Create .env if needed, then build and start the local self-hosted s
 		echo ""; \
 		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
 		echo "        or set APP_ENV=development in .env (private networks only) to enable code 888888."; \
+		echo ""; \
+		echo "Built images locally via docker-compose.selfhost.build.yml."; \
+		echo "Local tags: multica-backend:dev and multica-web:dev."; \
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \

@@ -125,6 +125,7 @@ export function StepAgent({
         instructions: template.instructions,
         runtime_id: runtime.id,
         visibility: "workspace",
+        template: templateId,
       };
       const agent = await api.createAgent(req);
       await onCreated(agent);

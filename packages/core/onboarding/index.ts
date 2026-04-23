@@ -1,5 +1,6 @@
 export type {
   OnboardingStep,
+  OnboardingCompletionPath,
   QuestionnaireAnswers,
   TeamSize,
   Role,
