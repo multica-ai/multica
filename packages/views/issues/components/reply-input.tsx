@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -36,9 +36,7 @@ function ReplyInput({
   size = "default",
 }: ReplyInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
-  const measureRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
-  const [hasOverflowContent, setHasOverflowContent] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
@@ -46,17 +44,6 @@ function ReplyInput({
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
-
-  useEffect(() => {
-    const el = measureRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) setHasOverflowContent(entry.contentRect.height > 32);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
@@ -102,23 +89,20 @@ function ReplyInput({
           isExpanded
             ? "h-[60vh]"
             : size === "sm" ? "max-h-40" : "max-h-56",
-          (hasOverflowContent || isExpanded) && "pb-7",
         )}
       >
-        <div className="flex-1 min-h-0 overflow-y-auto pr-14">
-          <div ref={measureRef}>
-            <ContentEditor
-              ref={editorRef}
-              placeholder={placeholder}
-              onUpdate={(md) => setIsEmpty(!md.trim())}
-              onSubmit={handleSubmit}
-              onUploadFile={handleUpload}
-              debounceMs={100}
-              currentIssueId={issueId}
-            />
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <ContentEditor
+            ref={editorRef}
+            placeholder={placeholder}
+            onUpdate={(md) => setIsEmpty(!md.trim())}
+            onSubmit={handleSubmit}
+            onUploadFile={handleUpload}
+            debounceMs={100}
+            currentIssueId={issueId}
+          />
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1 text-muted-foreground transition-colors group-focus-within/editor:text-foreground">
+        <div className="flex items-center justify-end gap-1 text-muted-foreground transition-colors group-focus-within/editor:text-foreground">
           <Tooltip>
             <TooltipTrigger
               render={

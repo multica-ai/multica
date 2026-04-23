@@ -57,7 +57,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     <div
       {...dropZoneProps}
       className={cn(
-        "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border",
+        "relative flex flex-col rounded-lg bg-card ring-1 ring-border",
         isExpanded ? "h-[70vh]" : "max-h-56",
       )}
     >
@@ -72,7 +72,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           currentIssueId={issueId}
         />
       </div>
-      <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+      <div className="flex items-center justify-end gap-1 px-1.5 pb-1">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -82,9 +82,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
                   setIsExpanded((v) => !v);
                   editorRef.current?.focus();
                 }}
-                className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
               >
-                {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
               </button>
             }
           />
