@@ -592,6 +592,19 @@ If you want to stop PostgreSQL and keep your local databases:
 make db-down
 ```
 
+If you want a fresh database for the current checkout only (drops the
+database named in `POSTGRES_DB`, recreates it, and runs all migrations):
+
+```bash
+make stop        # stop backend/frontend first
+make db-reset
+make start
+```
+
+- only affects the current env's database; other worktree databases are untouched
+- refuses to run if `DATABASE_URL` points at a remote host
+- pass `ENV_FILE=.env.worktree` to target a specific worktree
+
 If you want to wipe all local PostgreSQL data for this repo:
 
 ```bash

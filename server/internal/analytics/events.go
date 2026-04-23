@@ -4,12 +4,35 @@ import "strings"
 
 // Event names. Keep in sync with docs/analytics.md.
 const (
-	EventSignup              = "signup"
-	EventWorkspaceCreated    = "workspace_created"
-	EventRuntimeRegistered   = "runtime_registered"
-	EventIssueExecuted       = "issue_executed"
-	EventTeamInviteSent      = "team_invite_sent"
-	EventTeamInviteAccepted  = "team_invite_accepted"
+	EventSignup                        = "signup"
+	EventWorkspaceCreated              = "workspace_created"
+	EventRuntimeRegistered             = "runtime_registered"
+	EventIssueExecuted                 = "issue_executed"
+	EventTeamInviteSent                = "team_invite_sent"
+	EventTeamInviteAccepted            = "team_invite_accepted"
+	EventOnboardingQuestionnaireSubmit = "onboarding_questionnaire_submitted"
+	EventAgentCreated                  = "agent_created"
+	EventOnboardingCompleted           = "onboarding_completed"
+	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
+	EventStarterContentDecided         = "starter_content_decided"
+	EventFeedbackSubmitted             = "feedback_submitted"
+)
+
+// Onboarding completion paths. Keep in sync with docs/analytics.md.
+const (
+	OnboardingPathFull           = "full"            // reached first_issue end of flow
+	OnboardingPathRuntimeSkipped = "runtime_skipped" // completed without connecting a runtime
+	OnboardingPathCloudWaitlist  = "cloud_waitlist"  // completed via cloud waitlist soft exit
+	OnboardingPathSkipExisting   = "skip_existing"   // "I've done this before" from welcome
+	OnboardingPathUnknown        = "unknown"         // fallback when the server can't derive the path
+)
+
+// Starter content branches. Matches the server-authoritative decision in
+// ImportStarterContent (hasAgent ? agent_guided : self_serve). DismissStarter
+// carries the same branch so acceptance rates split cleanly.
+const (
+	StarterContentBranchAgentGuided = "agent_guided"
+	StarterContentBranchSelfServe   = "self_serve"
 )
 
 // Platform is used as the "platform" event property so funnels can split by
@@ -129,6 +152,150 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 		Properties: map[string]any{
 			"days_since_invite": daysSinceInvite,
 		},
+	}
+}
+
+// OnboardingQuestionnaireSubmitted fires the first time a user's
+// `user.onboarding_questionnaire` transitions from empty (or partial) to
+// all three answers present. The handler drives this transition — we
+// emit from PatchOnboarding so the single emission site stays honest
+// even if the frontend retries.
+//
+// The three answers are also mirrored into person properties via $set
+// so cohorting by role / use_case / team_size works across every event
+// on the same user without re-joining back to the DB.
+//
+// teamSizeOther / roleOther / useCaseOther are presence booleans only —
+// the free-text content is kept in the DB for product research but not
+// broadcast via analytics (PII risk + low cardinality ask).
+func OnboardingQuestionnaireSubmitted(userID, teamSize, role, useCase string, teamSizeOther, roleOther, useCaseOther bool) Event {
+	return Event{
+		Name:       EventOnboardingQuestionnaireSubmit,
+		DistinctID: userID,
+		Properties: map[string]any{
+			"team_size":           teamSize,
+			"role":                role,
+			"use_case":            useCase,
+			"team_size_has_other": teamSizeOther,
+			"role_has_other":      roleOther,
+			"use_case_has_other":  useCaseOther,
+		},
+		Set: map[string]any{
+			"team_size": teamSize,
+			"role":      role,
+			"use_case":  useCase,
+		},
+	}
+}
+
+// AgentCreated fires whenever a new agent is added to a workspace — not
+// just inside onboarding. `isFirstAgentInWorkspace` lets the funnel
+// isolate the Step 4 signal from later agent additions.
+//
+// template is the template slug the frontend used to seed the agent
+// (e.g. "coding", "planning", "writing", "assistant") — empty when the
+// caller didn't come from a template picker.
+func AgentCreated(actorID, workspaceID, agentID, provider, template string, isFirstAgentInWorkspace bool) Event {
+	return Event{
+		Name:        EventAgentCreated,
+		DistinctID:  actorID,
+		WorkspaceID: workspaceID,
+		Properties: map[string]any{
+			"agent_id":                    agentID,
+			"provider":                    provider,
+			"template":                    template,
+			"is_first_agent_in_workspace": isFirstAgentInWorkspace,
+		},
+	}
+}
+
+// OnboardingCompleted fires from CompleteOnboarding. `completionPath`
+// is derived server-side from the state the user arrived in (see the
+// OnboardingPath* constants above). `joinedCloudWaitlist` is true when
+// the user submitted the waitlist form at any point during the flow —
+// it's orthogonal to `completion_path`; a user may submit the form and
+// still pick CLI, so we keep both signals.
+//
+// onboardedAt is an RFC3339 timestamp set $set_once on the person so
+// "onboarded before date X" cohorts are queryable directly from
+// person_properties without re-emitting per-event.
+func OnboardingCompleted(userID, completionPath, onboardedAt string, joinedCloudWaitlist bool) Event {
+	return Event{
+		Name:       EventOnboardingCompleted,
+		DistinctID: userID,
+		Properties: map[string]any{
+			"completion_path":       completionPath,
+			"joined_cloud_waitlist": joinedCloudWaitlist,
+		},
+		SetOnce: map[string]any{
+			"onboarded_at": onboardedAt,
+		},
+	}
+}
+
+// CloudWaitlistJoined fires when a user submits the Step 3 cloud
+// waitlist form. `hasReason` is a presence bool — the free-text reason
+// stays in the DB for product research.
+func CloudWaitlistJoined(userID string, hasReason bool) Event {
+	return Event{
+		Name:       EventCloudWaitlistJoined,
+		DistinctID: userID,
+		Properties: map[string]any{
+			"has_reason": hasReason,
+		},
+	}
+}
+
+// StarterContentDecided fires on the atomic NULL -> terminal state
+// transition in both ImportStarterContent and DismissStarterContent.
+// branch carries agent_guided / self_serve for BOTH decisions — the
+// dismiss handler resolves it from the current ListAgents state so
+// acceptance rates split cleanly by branch.
+func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
+	return Event{
+		Name:        EventStarterContentDecided,
+		DistinctID:  userID,
+		WorkspaceID: workspaceID,
+		Properties: map[string]any{
+			"decision": decision,
+			"branch":   branch,
+		},
+	}
+}
+
+// FeedbackSubmitted fires after a feedback row is successfully inserted.
+// The raw message is stored in the DB and never broadcast — we only emit a
+// coarse length bucket, an image-presence flag, and the client platform /
+// version so support can segment without leaking content.
+func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages bool, platform, appVersion string) Event {
+	props := map[string]any{
+		"message_length_bucket": feedbackLengthBucket(messageLen),
+		"has_images":            hasImages,
+	}
+	if platform != "" {
+		props["platform"] = platform
+	}
+	if appVersion != "" {
+		props["app_version"] = appVersion
+	}
+	return Event{
+		Name:        EventFeedbackSubmitted,
+		DistinctID:  userID,
+		WorkspaceID: workspaceID,
+		Properties:  props,
+	}
+}
+
+func feedbackLengthBucket(n int) string {
+	switch {
+	case n < 100:
+		return "0-100"
+	case n < 500:
+		return "100-500"
+	case n < 2000:
+		return "500-2000"
+	default:
+		return "2000+"
 	}
 }
 

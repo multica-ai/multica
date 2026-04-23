@@ -24,6 +24,9 @@ catalog:
   tailwind-merge: "^3.4.0"
   class-variance-authority: "^0.7.1"
   clsx: "^2.1.1"
+  katex: "^0.16.45"
+  rehype-katex: "^7.0.1"
+  remark-math: "^6.0.0"
 
   # Icons
   lucide-react: "^1.0.1"

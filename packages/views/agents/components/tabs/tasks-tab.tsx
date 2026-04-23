@@ -44,6 +44,12 @@ function formatTaskHeadline(task: AgentTask) {
   if (task.trigger_source === "message") {
     return task.trigger_excerpt?.trim() || "Responded to a message";
   }
+  if (task.autopilot_run_id) {
+    return "Autopilot-triggered execution";
+  }
+  if (!task.issue_id) {
+    return "Task without linked issue";
+  }
   return "Issue-triggered execution";
 }
 
@@ -54,6 +60,12 @@ function formatTaskSubline(task: AgentTask) {
   }
   if (task.issue_id) {
     return "Linked issue unavailable";
+  }
+  if (task.chat_session_id) {
+    return "Chat session";
+  }
+  if (task.autopilot_run_id) {
+    return "Autopilot run";
   }
   return "No linked issue";
 }

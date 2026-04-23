@@ -21,7 +21,9 @@ import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
 } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
@@ -37,6 +39,7 @@ import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
+import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +69,7 @@ const sanitizeSchema = {
     code: [
       ...(defaultSchema.attributes?.code ?? []),
       ["className", /^language-/],
+      ["className", /^math-/],
       ["className", /^hljs/],
     ],
     img: [
@@ -294,8 +298,8 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
   return (
     <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
-        remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+        remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}
       >

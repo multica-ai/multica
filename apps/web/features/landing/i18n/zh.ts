@@ -1,9 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
-export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
-
-export const zh: LandingDict = {
+export function createZhDict(allowSignup: boolean): LandingDict {
+  return {
   header: {
     github: "GitHub",
     login: "\u767b\u5f55",
@@ -122,8 +121,8 @@ export const zh: LandingDict = {
     headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
     steps: [
       {
-        title: ALLOW_SIGNUP ? "注册并创建您的工作空间" : "登录到您的工作空间",
-        description: ALLOW_SIGNUP
+        title: allowSignup ? "注册并创建您的工作空间" : "登录到您的工作空间",
+        description: allowSignup
           ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
           : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
       },
@@ -227,7 +226,7 @@ export const zh: LandingDict = {
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
           { label: "更新日志", href: "/changelog" },
-          { label: "桌面端", href: "https://github.com/multica-ai/multica/releases/latest" },
+          { label: "下载", href: "/download" },
         ],
       },
       resources: {
@@ -276,12 +275,38 @@ export const zh: LandingDict = {
   changelog: {
     title: "\u66f4\u65b0\u65e5\u5fd7",
     subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
+    toc: "\u5386\u53f2\u7248\u672c",
     categories: {
       features: "新功能",
       improvements: "改进",
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "本地 Skills、LaTeX、Focus 模式与孤儿任务自恢复",
+        changes: [],
+        features: [
+          "支持将 Runtime 本地 Skills 导入工作区,成为一等工作区资产",
+          "孤儿任务自动恢复——意外中断的 Agent 执行会自动重试,必要时可手动重跑",
+          "Issue、评论与 Chat 支持 LaTeX 渲染",
+          "Chat Focus 模式——将当前页面作为上下文分享给对话",
+        ],
+        improvements: [
+          "子 Issue 的 `status_changed` 事件不再向父 Issue 订阅者刷屏",
+          "Docker 发布镜像改为按架构原生构建,免 QEMU",
+          "侧边栏 Pin 字段在客户端派生,排序更跟手",
+          "扩充保留 slug 列表,新工作区 slug 不会再和产品路由冲突",
+        ],
+        fixes: [
+          "Gemini Runtime 模型列表补上 Gemini 3 及若干 CLI 别名",
+          "没有锚点的页面上 Chat focus 按钮改为禁用",
+          "修复 Onboarding 中 Pin 同步、欢迎页布局与 Runtime bootstrap 状态",
+          "`install.ps1` 的系统架构探测更稳健,覆盖更多 Windows 环境",
+          "`/download` 在 1 小时新鲜度窗口内可回退到上一版本,避免撞上半发布状态",
+        ],
+      },
       {
         version: "0.2.11",
         date: "2026-04-21",
@@ -726,4 +751,78 @@ export const zh: LandingDict = {
       },
     ],
   },
-};
+  download: {
+    hero: {
+      macArm64: {
+        title: "Multica for macOS",
+        sub: "Apple Silicon · 内置 daemon，无需配置",
+        primary: "下载 (.dmg)",
+        altZip: "或下载 .zip",
+      },
+      macIntel: {
+        title: "Multica for macOS",
+        sub: "需要 Apple Silicon——暂不支持 Intel Mac。",
+        disabledCta: "需要 Apple Silicon",
+        intelHint: "在 Intel Mac 上？请使用下方 CLI——底层跑的是同一个 daemon。",
+      },
+      winX64: {
+        title: "Multica for Windows",
+        sub: "内置 daemon，无需配置",
+        primary: "下载 (.exe)",
+      },
+      winArm64: {
+        title: "Multica for Windows",
+        sub: "ARM · 内置 daemon，无需配置",
+        primary: "下载 (.exe)",
+      },
+      linux: {
+        title: "Multica for Linux",
+        sub: "内置 daemon，无需配置",
+        primary: "下载 AppImage",
+        altFormats: "或 .deb / .rpm",
+      },
+      unknown: {
+        title: "选择你的平台",
+        sub: "下方是所有支持的安装包。",
+      },
+      safariMacHint: "在 Intel Mac 上？请使用下方 CLI。",
+      archFallbackHint: "架构不对？下方是所有可选格式。",
+    },
+    allPlatforms: {
+      title: "所有平台",
+      macLabel: "macOS · Apple Silicon",
+      winX64Label: "Windows · x64",
+      winArm64Label: "Windows · ARM64",
+      linuxX64Label: "Linux · x64",
+      linuxArm64Label: "Linux · ARM64",
+      formatDmg: ".dmg",
+      formatZip: ".zip",
+      formatExe: ".exe",
+      formatAppImage: ".AppImage",
+      formatDeb: ".deb",
+      formatRpm: ".rpm",
+      intelNote: "仅支持 Apple Silicon——Intel Mac 目前暂不支持。",
+      unavailable: "暂不可用",
+    },
+    cli: {
+      title: "想用 CLI？",
+      sub: "适合服务器、远程开发机、无图形界面环境。底层 daemon 与 Desktop 相同，通过终端安装。",
+      installLabel: "安装",
+      startLabel: "启动 daemon",
+      sshNote: "已经在服务器上？通过 SSH 执行同样的命令即可。",
+      copyLabel: "复制",
+      copiedLabel: "已复制",
+    },
+    cloud: {
+      title: "Cloud runtime（等待名单）",
+      sub: "我们将为你托管 runtime，目前尚未上线——留下邮箱，上线后通知你。",
+    },
+    footer: {
+      releaseNotes: "v{version} 更新内容",
+      allReleases: "查看所有版本",
+      currentVersion: "当前版本：{version}",
+      versionUnavailable: "版本获取失败——请前往 GitHub 查看",
+    },
+  },
+  };
+}

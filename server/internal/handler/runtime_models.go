@@ -15,8 +15,8 @@ import (
 // ---------------------------------------------------------------------------
 //
 // The server cannot call the daemon directly (the daemon is behind the user's
-// NAT and only polls the server). So "list models for this runtime" uses the
-// same pattern as PingStore: server creates a pending request, daemon pops it
+// NAT and only polls the server). So "list models for this runtime" uses a
+// pending-request pattern: server creates a pending request, daemon pops it
 // on the next heartbeat, executes locally, and reports the result back.
 
 // ModelListStatus represents the lifecycle of a model list request.

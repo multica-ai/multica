@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -126,6 +127,10 @@ type AgentTaskResponse struct {
 	CompletedAt           *string        `json:"completed_at"`
 	Result                any            `json:"result"`
 	Error                 *string        `json:"error"`
+	FailureReason         string         `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt               int32          `json:"attempt"`
+	MaxAttempts           int32          `json:"max_attempts"`
+	ParentTaskID          *string        `json:"parent_task_id,omitempty"`
 	Agent                 *TaskAgentData `json:"agent,omitempty"`
 	Repos                 []RepoData     `json:"repos,omitempty"`
 	CreatedAt             string         `json:"created_at"`
@@ -140,8 +145,9 @@ type AgentTaskResponse struct {
 	QueueBlockedReason    *string        `json:"queue_blocked_reason,omitempty"`
 	IssueIdentifier       *string        `json:"issue_identifier,omitempty"`
 	IssueTitle            *string        `json:"issue_title,omitempty"`
-	ChatSessionID         string         `json:"chat_session_id,omitempty"` // non-empty for chat tasks
-	ChatMessage           string         `json:"chat_message,omitempty"`    // user message for chat tasks
+	ChatSessionID         string         `json:"chat_session_id,omitempty"`  // non-empty for chat tasks
+	ChatMessage           string         `json:"chat_message,omitempty"`     // user message for chat tasks
+	AutopilotRunID        string         `json:"autopilot_run_id,omitempty"` // non-empty for autopilot-spawned tasks
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -162,6 +168,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
+	failureReason := ""
+	if t.FailureReason.Valid {
+		failureReason = t.FailureReason.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -174,9 +184,17 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
+		FailureReason:    failureReason,
+		Attempt:          t.Attempt,
+		MaxAttempts:      t.MaxAttempts,
+		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
-		ChatSessionID:    uuidToString(t.ChatSessionID),
+		// Surface task source so the UI can distinguish issue-linked tasks
+		// from chat-spawned or autopilot-spawned ones; all three may arrive
+		// with issue_id = "" once a task has no linked issue.
+		ChatSessionID:  uuidToString(t.ChatSessionID),
+		AutopilotRunID: uuidToString(t.AutopilotRunID),
 	}
 }
 
@@ -361,6 +379,12 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	// Template records which template slug was used to seed this agent
+	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
+	// the caller didn't come from a template picker — the `agent_created`
+	// event still fires with `template=""`, which is the correct signal
+	// for "manually authored agent".
+	Template string `json:"template"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -423,6 +447,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Probe workspace agent count BEFORE the insert so the funnel has a
+	// clean "first agent ever in this workspace" signal — Step 4 of
+	// onboarding always lands in this branch. A non-fatal read: if the
+	// list fails we fall through with isFirstAgent=false rather than
+	// blocking creation, since the primary DB operation is the insert.
+	isFirstAgent := false
+	if existing, listErr := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID)); listErr == nil {
+		isFirstAgent = len(existing) == 0
+	}
+
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -482,6 +516,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(agent)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+
+	h.Analytics.Capture(analytics.AgentCreated(
+		ownerID,
+		workspaceID,
+		uuidToString(agent.ID),
+		runtime.Provider,
+		req.Template,
+		isFirstAgent,
+	))
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

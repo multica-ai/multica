@@ -1,0 +1,9 @@
+.markdown-content .katex-display {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-content .katex-display > .katex {
+  white-space: nowrap;
+}

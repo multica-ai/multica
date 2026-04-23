@@ -38,6 +38,17 @@ func RequestLogger(next http.Handler) http.Handler {
 		if uid := r.Header.Get("X-User-ID"); uid != "" {
 			attrs = append(attrs, "user_id", uid)
 		}
+		if platform, version, os := ClientMetadataFromContext(r.Context()); platform != "" || version != "" || os != "" {
+			if platform != "" {
+				attrs = append(attrs, "client_platform", platform)
+			}
+			if version != "" {
+				attrs = append(attrs, "client_version", version)
+			}
+			if os != "" {
+				attrs = append(attrs, "client_os", os)
+			}
+		}
 
 		switch {
 		case status >= 500:
