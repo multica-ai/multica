@@ -42,6 +42,47 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
 
+### DingTalk Notifications (Optional)
+
+DingTalk enables two user-facing capabilities:
+
+- users can link a DingTalk account from **Settings -> Notifications**
+- `@mentioned` member notifications can fan out from Inbox to DingTalk when the user enables that channel
+
+At minimum, configure these backend variables:
+
+| Variable | Description |
+|----------|-------------|
+| `DINGTALK_CLIENT_ID` | DingTalk application client ID, used for OAuth account linking and app access tokens |
+| `DINGTALK_CLIENT_SECRET` | DingTalk application client secret |
+| `DINGTALK_ROBOT_CODE` | DingTalk robot code used by proactive one-to-one message delivery |
+| `DINGTALK_TOKEN_ENCRYPTION_KEY` | Optional key for encrypting DingTalk access/refresh tokens at rest. If unset, `JWT_SECRET` is used as the fallback key source. |
+
+Optional endpoint overrides are available for testing or DingTalk API migration:
+
+| Variable | Default |
+|----------|---------|
+| `DINGTALK_OAUTH_SCOPE` | `openid corpid Contact.User.Read` |
+| `DINGTALK_AUTH_URL` | `https://login.dingtalk.com/oauth2/auth` |
+| `DINGTALK_TOKEN_URL` | `https://api.dingtalk.com/v1.0/oauth2/userAccessToken` |
+| `DINGTALK_USERINFO_URL` | `https://api.dingtalk.com/v1.0/contact/users/me` |
+| `DINGTALK_APP_TOKEN_URL` | `https://api.dingtalk.com/v1.0/oauth2/{corpId}/token` |
+| `DINGTALK_MESSAGE_URL` | `https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend` |
+
+The DingTalk redirect URL configured in the DingTalk console must match your frontend callback URL:
+
+```text
+https://app.example.com/auth/callback
+```
+
+For local self-hosting, the default callback is:
+
+```text
+http://localhost:3000/auth/callback
+```
+
+If DingTalk variables are empty, the backend keeps the channel disabled: the Settings UI can still render, but starting DingTalk binding returns a service-unavailable response and pending DingTalk deliveries are not dispatched.
+
 ### File Storage (Optional)
 
 For file uploads and attachments, configure S3 and CloudFront:

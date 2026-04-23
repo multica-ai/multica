@@ -50,6 +50,16 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      DINGTALK_CLIENT_ID: ${DINGTALK_CLIENT_ID:-}
+      DINGTALK_CLIENT_SECRET: ${DINGTALK_CLIENT_SECRET:-}
+      DINGTALK_ROBOT_CODE: ${DINGTALK_ROBOT_CODE:-}
+      DINGTALK_OAUTH_SCOPE: ${DINGTALK_OAUTH_SCOPE:-openid corpid Contact.User.Read}
+      DINGTALK_AUTH_URL: ${DINGTALK_AUTH_URL:-https://login.dingtalk.com/oauth2/auth}
+      DINGTALK_TOKEN_URL: ${DINGTALK_TOKEN_URL:-https://api.dingtalk.com/v1.0/oauth2/userAccessToken}
+      DINGTALK_USERINFO_URL: ${DINGTALK_USERINFO_URL:-https://api.dingtalk.com/v1.0/contact/users/me}
+      DINGTALK_APP_TOKEN_URL: ${DINGTALK_APP_TOKEN_URL:-https://api.dingtalk.com/v1.0/oauth2/{corpId}/token}
+      DINGTALK_MESSAGE_URL: ${DINGTALK_MESSAGE_URL:-https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend}
+      DINGTALK_TOKEN_ENCRYPTION_KEY: ${DINGTALK_TOKEN_ENCRYPTION_KEY:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_REGION: ${S3_REGION:-us-west-2}
       CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}

@@ -183,6 +183,17 @@ Edit `.env` — at minimum, change `JWT_SECRET`:
 JWT_SECRET=$(openssl rand -hex 32)
 ```
 
+If you want DingTalk mention notifications, also set the DingTalk variables in `.env` before starting the backend:
+
+```bash
+DINGTALK_CLIENT_ID=your-dingtalk-client-id
+DINGTALK_CLIENT_SECRET=your-dingtalk-client-secret
+DINGTALK_ROBOT_CODE=your-dingtalk-robot-code
+DINGTALK_TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+```
+
+The DingTalk app redirect URL should be the same frontend callback URL used by Google OAuth, for example `http://localhost:3000/auth/callback` locally or `https://app.example.com/auth/callback` in production.
+
 Then start everything:
 
 ```bash
