@@ -16,8 +16,6 @@ export type {
   SetAgentSkillsRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,
-  RuntimePing,
-  RuntimePingStatus,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,

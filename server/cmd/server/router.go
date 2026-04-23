@@ -158,7 +158,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
-		r.Post("/runtimes/{runtimeId}/ping/{pingId}/result", h.ReportPingResult)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
@@ -369,8 +368,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Get("/usage", h.GetRuntimeUsage)
 					r.Get("/activity", h.GetRuntimeTaskActivity)
-					r.Post("/ping", h.InitiatePing)
-					r.Get("/ping/{pingId}", h.GetPing)
 					r.Post("/update", h.InitiateUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
 					r.Post("/models", h.InitiateListModels)

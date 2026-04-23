@@ -217,16 +217,10 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 // HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
 type HeartbeatResponse struct {
 	Status                  string                   `json:"status"`
-	PendingPing             *PendingPing             `json:"pending_ping,omitempty"`
 	PendingUpdate           *PendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *PendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *PendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *PendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
-}
-
-// PendingPing represents a ping test request from the server.
-type PendingPing struct {
-	ID string `json:"id"`
 }
 
 // PendingUpdate represents a CLI update request from the server.
@@ -259,10 +253,6 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 		return nil, err
 	}
 	return &resp, nil
-}
-
-func (c *Client) ReportPingResult(ctx context.Context, runtimeID, pingID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/ping/%s/result", runtimeID, pingID), result, nil)
 }
 
 // ReportUpdateResult sends the CLI update result back to the server.

@@ -498,14 +498,6 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 					continue
 				}
 
-				// Handle pending ping requests.
-				if resp.PendingPing != nil {
-					rt := d.findRuntime(rid)
-					if rt != nil {
-						go d.handlePing(ctx, *rt, resp.PendingPing.ID)
-					}
-				}
-
 				// Handle pending update requests.
 				if resp.PendingUpdate != nil {
 					go d.handleUpdate(ctx, rid, resp.PendingUpdate)
@@ -632,91 +624,6 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 		"status": "completed",
 		"skill":  skill,
 	})
-}
-
-func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
-	d.logger.Info("ping requested", "runtime_id", rt.ID, "ping_id", pingID, "provider", rt.Provider)
-
-	start := time.Now()
-
-	entry, ok := d.cfg.Agents[rt.Provider]
-	if !ok {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       fmt.Sprintf("no agent configured for provider %q", rt.Provider),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-
-	backend, err := agent.New(rt.Provider, agent.Config{
-		ExecutablePath: entry.Path,
-		Logger:         d.logger,
-	})
-	if err != nil {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       err.Error(),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-
-	pingCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(pingCtx, "Respond with exactly one word: pong", agent.ExecOptions{
-		MaxTurns: 1,
-		Timeout:  60 * time.Second,
-	})
-	if err != nil {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       err.Error(),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-
-	// Drain messages
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	var result agent.Result
-	select {
-	case result = <-session.Result:
-	case <-pingCtx.Done():
-		d.logger.Warn("ping timed out waiting for result", "runtime_id", rt.ID, "ping_id", pingID)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       "ping context cancelled while waiting for result",
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-	durationMs := time.Since(start).Milliseconds()
-
-	if result.Status == "completed" {
-		d.logger.Info("ping completed", "runtime_id", rt.ID, "ping_id", pingID, "duration_ms", durationMs)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "completed",
-			"output":      result.Output,
-			"duration_ms": durationMs,
-		})
-	} else {
-		errMsg := result.Error
-		if errMsg == "" {
-			errMsg = fmt.Sprintf("agent returned status: %s", result.Status)
-		}
-		d.logger.Warn("ping failed", "runtime_id", rt.ID, "ping_id", pingID, "error", errMsg)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       errMsg,
-			"duration_ms": durationMs,
-		})
-	}
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.

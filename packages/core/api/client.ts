@@ -33,7 +33,6 @@ import type {
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
-  RuntimePing,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -581,14 +580,6 @@ export class ApiClient {
 
   async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
     return this.fetch(`/api/runtimes/${runtimeId}/activity`);
-  }
-
-  async pingRuntime(runtimeId: string): Promise<RuntimePing> {
-    return this.fetch(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
-  }
-
-  async getPingResult(runtimeId: string, pingId: string): Promise<RuntimePing> {
-    return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
   }
 
   async initiateUpdate(
