@@ -48,6 +48,30 @@ func TestExtractACPSessionIDInvalidJSON(t *testing.T) {
 	}
 }
 
+// ── buildHermesSessionParams ──
+
+func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
+	t.Parallel()
+	params := buildHermesSessionParams("/tmp/work", "gpt-4o")
+	if params["cwd"] != "/tmp/work" {
+		t.Errorf("cwd: got %v, want /tmp/work", params["cwd"])
+	}
+	if _, ok := params["mcpServers"]; !ok {
+		t.Error("mcpServers missing")
+	}
+	if got, ok := params["model"].(string); !ok || got != "gpt-4o" {
+		t.Errorf("model: got %v, want gpt-4o", params["model"])
+	}
+}
+
+func TestBuildHermesSessionParamsOmitsEmptyModel(t *testing.T) {
+	t.Parallel()
+	params := buildHermesSessionParams("/tmp/work", "")
+	if _, present := params["model"]; present {
+		t.Error("expected model key to be omitted when model is empty")
+	}
+}
+
 // ── hermesToolNameFromTitle ──
 
 func TestHermesToolNameFromTitle(t *testing.T) {

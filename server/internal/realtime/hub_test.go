@@ -81,15 +81,11 @@ func connectWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	return conn
 }
 
-// totalClients counts all clients across all rooms.
+// totalClients counts all currently registered clients.
 func totalClients(hub *Hub) int {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()
-	count := 0
-	for _, clients := range hub.rooms {
-		count += len(clients)
-	}
-	return count
+	return len(hub.clients)
 }
 
 func TestHub_ClientRegistration(t *testing.T) {

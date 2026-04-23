@@ -780,6 +780,7 @@ func (s *TaskService) ReportProgress(ctx context.Context, taskID string, workspa
 		WorkspaceID: workspaceID,
 		ActorType:   "system",
 		ActorID:     "",
+		TaskID:      taskID,
 		Payload: protocol.TaskProgressPayload{
 			TaskID:  taskID,
 			Summary: summary,
@@ -947,10 +948,11 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		return
 	}
 	s.Bus.Publish(events.Event{
-		Type:        protocol.EventChatDone,
-		WorkspaceID: workspaceID,
-		ActorType:   "system",
-		ActorID:     "",
+		Type:          protocol.EventChatDone,
+		WorkspaceID:   workspaceID,
+		ActorType:     "system",
+		ActorID:       "",
+		ChatSessionID: util.UUIDToString(task.ChatSessionID),
 		Payload: protocol.ChatDonePayload{
 			ChatSessionID: util.UUIDToString(task.ChatSessionID),
 			TaskID:        util.UUIDToString(task.ID),

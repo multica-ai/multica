@@ -253,7 +253,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast the user message.
-	h.publish(protocol.EventChatMessage, workspaceID, "member", userID, protocol.ChatMessagePayload{
+	h.publishChat(protocol.EventChatMessage, workspaceID, "member", userID, sessionID, protocol.ChatMessagePayload{
 		ChatSessionID: sessionID,
 		MessageID:     uuidToString(msg.ID),
 		Role:          "user",
@@ -338,7 +338,7 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish(protocol.EventChatSessionRead, workspaceID, "member", userID, protocol.ChatSessionReadPayload{
+	h.publishChat(protocol.EventChatSessionRead, workspaceID, "member", userID, sessionID, protocol.ChatSessionReadPayload{
 		ChatSessionID: sessionID,
 	})
 
