@@ -7,6 +7,17 @@ on:
     paths-ignore:
       - 'gitops/**'
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+  packages: write
+  actions: read
+
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
