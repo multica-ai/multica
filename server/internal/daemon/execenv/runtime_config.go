@@ -146,6 +146,48 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 
+	// Inject pipeline column context so the agent knows active column rules and valid transitions.
+	if ctx.PipelineContext != nil {
+		pc := ctx.PipelineContext
+		b.WriteString("## Pipeline Context\n\n")
+		fmt.Fprintf(&b, "This issue belongs to a pipeline. It is currently in column **%s**.\n\n", pc.CurrentColumnLabel)
+		if pc.Instructions != "" {
+			b.WriteString("### Column Instructions\n\n")
+			b.WriteString(pc.Instructions)
+			b.WriteString("\n\n")
+		}
+		if len(pc.AllowedTransitions) > 0 {
+			b.WriteString("### Allowed Status Transitions\n\n")
+			b.WriteString("From the current column, you may move the issue to:\n\n")
+			for _, t := range pc.AllowedTransitions {
+				// Find the label for this transition
+				label := t
+				for _, col := range pc.Columns {
+					if col.StatusKey == t {
+						label = col.Label
+						break
+					}
+				}
+				fmt.Fprintf(&b, "- `%s` (%s)\n", t, label)
+			}
+			b.WriteString("\n")
+			b.WriteString("Use `multica issue status <id> <status_key>` to move the issue.\n\n")
+		}
+		if len(pc.Columns) > 0 {
+			b.WriteString("### All Pipeline Columns\n\n")
+			b.WriteString("| Status Key | Label | Terminal |\n")
+			b.WriteString("|-----------|-------|----------|\n")
+			for _, col := range pc.Columns {
+				terminal := ""
+				if col.IsTerminal {
+					terminal = "✓"
+				}
+				fmt.Fprintf(&b, "| `%s` | %s | %s |\n", col.StatusKey, col.Label, terminal)
+			}
+			b.WriteString("\n")
+		}
+	}
+
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Skills\n\n")
 		switch provider {

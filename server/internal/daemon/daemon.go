@@ -986,6 +986,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
+		PipelineContext:   convertPipelineContext(task.PipelineContext),
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -1465,6 +1466,28 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		}
 	}
 	return result
+}
+
+func convertPipelineContext(p *PipelineContextData) *execenv.PipelineContextForEnv {
+	if p == nil {
+		return nil
+	}
+	cols := make([]execenv.PipelineColumnForEnv, len(p.Columns))
+	for i, c := range p.Columns {
+		cols[i] = execenv.PipelineColumnForEnv{
+			StatusKey:    c.StatusKey,
+			Label:        c.Label,
+			Instructions: c.Instructions,
+			IsTerminal:   c.IsTerminal,
+		}
+	}
+	return &execenv.PipelineContextForEnv{
+		PipelineID:         p.PipelineID,
+		CurrentColumnLabel: p.CurrentColumnLabel,
+		Instructions:       p.Instructions,
+		AllowedTransitions: p.AllowedTransitions,
+		Columns:            cols,
+	}
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

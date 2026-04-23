@@ -29,6 +29,23 @@ type PrepareParams struct {
 	Task           TaskContextForEnv // context data for writing files
 }
 
+// PipelineColumnForEnv describes a single pipeline column for context injection.
+type PipelineColumnForEnv struct {
+	StatusKey    string
+	Label        string
+	Instructions string
+	IsTerminal   bool
+}
+
+// PipelineContextForEnv holds pipeline column context for the current issue.
+type PipelineContextForEnv struct {
+	PipelineID         string
+	CurrentColumnLabel string
+	Instructions       string
+	AllowedTransitions []string
+	Columns            []PipelineColumnForEnv
+}
+
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID           string
@@ -37,8 +54,9 @@ type TaskContextForEnv struct {
 	AgentName         string
 	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills       []SkillContextForEnv
-	Repos             []RepoContextForEnv // workspace repos available for checkout
-	ChatSessionID     string              // non-empty for chat tasks
+	Repos             []RepoContextForEnv    // workspace repos available for checkout
+	ChatSessionID     string                 // non-empty for chat tasks
+	PipelineContext   *PipelineContextForEnv // pipeline column context, nil when issue has no pipeline
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
