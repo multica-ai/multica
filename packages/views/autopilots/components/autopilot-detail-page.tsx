@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
@@ -11,7 +11,6 @@ import {
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
-import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -29,19 +28,14 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@multica/ui/components/ui/select";
-import {
   TriggerConfigSection,
   getDefaultTriggerConfig,
   toCronExpression,
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
-import type { AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import { ReadonlyContent } from "../../editor";
+import { AutopilotDialog } from "./autopilot-dialog";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleString(undefined, {
@@ -138,170 +132,6 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
   );
 }
 
-const PRIORITY_OPTIONS = [
-  { value: "urgent", label: "Urgent" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-  { value: "none", label: "None" },
-];
-
-const EXECUTION_MODE_OPTIONS = [
-  { value: "create_issue", label: "Create Issue" },
-  { value: "run_only", label: "Run Only" },
-];
-
-function EditAutopilotDialog({
-  open,
-  onOpenChange,
-  autopilot,
-  agents,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  autopilot: { id: string; title: string; description?: string | null; assignee_id: string; priority: string; execution_mode: string; issue_title_template?: string | null };
-  agents: { id: string; name: string; archived_at?: string | null }[];
-}) {
-  const updateAutopilot = useUpdateAutopilot();
-  const [title, setTitle] = useState(autopilot.title);
-  const [description, setDescription] = useState(autopilot.description ?? "");
-  const [assigneeId, setAssigneeId] = useState(autopilot.assignee_id);
-  const [priority, setPriority] = useState(autopilot.priority);
-  const [executionMode, setExecutionMode] = useState(autopilot.execution_mode);
-  const [submitting, setSubmitting] = useState(false);
-
-  const activeAgents = agents.filter((a) => !a.archived_at);
-
-  // Sync form when autopilot data changes (e.g. after optimistic update)
-  useEffect(() => {
-    setTitle(autopilot.title);
-    setDescription(autopilot.description ?? "");
-    setAssigneeId(autopilot.assignee_id);
-    setPriority(autopilot.priority);
-    setExecutionMode(autopilot.execution_mode);
-  }, [autopilot]);
-
-  const handleSubmit = async () => {
-    if (!title.trim() || !assigneeId || submitting) return;
-    setSubmitting(true);
-    try {
-      await updateAutopilot.mutateAsync({
-        id: autopilot.id,
-        title: title.trim(),
-        description: description.trim() || null,
-        assignee_id: assigneeId,
-        priority,
-        execution_mode: executionMode as "create_issue" | "run_only",
-      });
-      onOpenChange(false);
-      toast.success("Autopilot updated");
-    } catch {
-      toast.error("Failed to update autopilot");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogTitle>Edit Autopilot</DialogTitle>
-        <div className="space-y-4 pt-2">
-          {/* Name */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Name</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Daily code review"
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-              autoFocus
-            />
-          </div>
-
-          {/* Prompt */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Prompt</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Step-by-step instructions for the agent..."
-              rows={6}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring resize-y"
-            />
-          </div>
-
-          {/* Agent + Priority */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Agent</label>
-              <Select value={assigneeId} onValueChange={(v) => v && setAssigneeId(v)}>
-                <SelectTrigger className="mt-1 w-full">
-                  <SelectValue>
-                    {(value: string | null) => {
-                      if (!value) return "Select agent...";
-                      const agent = activeAgents.find((a) => a.id === value);
-                      return agent?.name ?? "Unknown Agent";
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {activeAgents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Priority</label>
-              <Select value={priority} onValueChange={(v) => v && setPriority(v)}>
-                <SelectTrigger className="mt-1 w-full">
-                  <SelectValue>
-                    {(value: string | null) => PRIORITY_OPTIONS.find((o) => o.value === value)?.label ?? "Medium"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITY_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Execution Mode */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Execution Mode</label>
-            <Select value={executionMode} onValueChange={(v) => v && setExecutionMode(v)}>
-              <SelectTrigger className="mt-1 w-full">
-                <SelectValue>
-                  {(value: string | null) => EXECUTION_MODE_OPTIONS.find((o) => o.value === value)?.label ?? "Create Issue"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_MODE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || !assigneeId || submitting}>
-              {submitting ? "Saving..." : "Save"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function AddTriggerDialog({
   open,
   onOpenChange,
@@ -375,7 +205,6 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const { data, isLoading } = useQuery(autopilotDetailOptions(wsId, autopilotId));
   const { data: runs = [], isLoading: runsLoading } = useQuery(autopilotRunsOptions(wsId, autopilotId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const updateAutopilot = useUpdateAutopilot();
   const deleteAutopilot = useDeleteAutopilot();
   const triggerAutopilot = useTriggerAutopilot();
@@ -521,7 +350,9 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               {autopilot.description && (
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground">Prompt</label>
-                  <div className="mt-1 whitespace-pre-wrap text-sm">{autopilot.description}</div>
+                  <div className="mt-1">
+                    <ReadonlyContent content={autopilot.description} />
+                  </div>
                 </div>
               )}
             </div>
@@ -587,12 +418,22 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         onOpenChange={setTriggerDialogOpen}
         autopilotId={autopilotId}
       />
-      <EditAutopilotDialog
-        open={editDialogOpen}
-        onOpenChange={setEditDialogOpen}
-        autopilot={autopilot}
-        agents={agents}
-      />
+      {editDialogOpen && (
+        <AutopilotDialog
+          mode="edit"
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          autopilotId={autopilot.id}
+          initial={{
+            title: autopilot.title,
+            description: autopilot.description ?? "",
+            assignee_id: autopilot.assignee_id,
+            priority: autopilot.priority,
+            execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+          }}
+          triggers={triggers}
+        />
+      )}
     </div>
   );
 }

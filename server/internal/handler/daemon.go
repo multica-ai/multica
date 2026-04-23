@@ -510,11 +510,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{"status": "ok"}
 
-	// Check for pending ping requests for this runtime.
-	if pending := h.PingStore.PopPending(req.RuntimeID); pending != nil {
-		resp["pending_ping"] = map[string]string{"id": pending.ID}
-	}
-
 	// Check for pending update requests for this runtime.
 	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
 		resp["pending_update"] = map[string]string{
@@ -526,6 +521,24 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	// Check for pending model-list requests for this runtime.
 	if pending := h.ModelListStore.PopPending(req.RuntimeID); pending != nil {
 		resp["pending_model_list"] = map[string]string{"id": pending.ID}
+	}
+
+	// Check for pending local-skill list requests for this runtime.
+	if pending, err := h.LocalSkillListStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("local skill list PopPending failed", "error", err, "runtime_id", req.RuntimeID)
+	} else if pending != nil {
+		resp["pending_local_skills"] = map[string]string{"id": pending.ID}
+	}
+
+	// Check for pending local-skill import requests for this runtime.
+	if pending, err := h.LocalSkillImportStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("local skill import PopPending failed", "error", err, "runtime_id", req.RuntimeID)
+	} else if pending != nil {
+		payload := map[string]string{
+			"id":        pending.ID,
+			"skill_key": pending.SkillKey,
+		}
+		resp["pending_local_skill_import"] = payload
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -556,9 +569,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	var (
-		outcome                    = "unauth"
-		authMs, claimMs, buildMs   int64
-		buildStart                 time.Time
+		outcome                  = "unauth"
+		authMs, claimMs, buildMs int64
+		buildStart               time.Time
 	)
 	defer func() {
 		// Emit at function exit so error / unauth paths also carry timing.
@@ -969,9 +982,10 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 // FailTask marks a running task as failed.
 type TaskFailRequest struct {
-	Error     string `json:"error"`
-	SessionID string `json:"session_id,omitempty"`
-	WorkDir   string `json:"work_dir,omitempty"`
+	Error         string `json:"error"`
+	SessionID     string `json:"session_id,omitempty"`
+	WorkDir       string `json:"work_dir,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -988,14 +1002,14 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
 	if err != nil {
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error)
+	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 
@@ -1069,7 +1083,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		})
 
 		if workspaceID != "" {
-			h.publish(protocol.EventTaskMessage, workspaceID, "system", "", protocol.TaskMessagePayload{
+			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
 				TaskID:  taskID,
 				IssueID: uuidToString(task.IssueID),
 				Seq:     msg.Seq,

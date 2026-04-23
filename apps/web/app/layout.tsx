@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Geist_Mono } from "next/font/google";
+import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -38,6 +38,23 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+});
+// Editorial serif used for onboarding headlines. Italic support for h1 em
+// accents (e.g. "...on one shared board."). Only loaded on routes that
+// render the font; layout-shift-prevention handled by next/font's synthetic
+// fallback metrics, same as Inter.
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  variable: "--font-serif",
+  fallback: [
+    "ui-serif",
+    "Iowan Old Style",
+    "Apple Garamond",
+    "Baskerville",
+    "Times New Roman",
+    "serif",
+  ],
 });
 
 export const viewport: Viewport = {
@@ -89,7 +106,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable)}
+      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
         <LocaleSync />

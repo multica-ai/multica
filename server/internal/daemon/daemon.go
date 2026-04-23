@@ -58,9 +58,13 @@ type Daemon struct {
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	client := NewClient(cfg.ServerBaseURL)
+	// Tag every daemon HTTP request with the daemon's CLI version so the
+	// server can split logs/metrics by client version (parallel to the CLI).
+	client.SetVersion(cfg.CLIVersion)
 	return &Daemon{
 		cfg:           cfg,
-		client:        NewClient(cfg.ServerBaseURL),
+		client:        client,
 		repoCache:     repocache.New(cacheRoot, logger),
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
@@ -443,6 +447,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			go d.syncWorkspaceRepos(id, resp.Repos)
 		}
 
+		// Tell the server about any tasks the previous daemon process was
+		// running on these runtimes. Without this, an issue can stay stuck
+		// at in_progress until the slow heartbeat sweeper or the in-flight
+		// task timeout (2.5h) kicks in.
+		for _, rid := range runtimeIDs {
+			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
+				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
+			}
+		}
+
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
@@ -484,14 +498,6 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 					continue
 				}
 
-				// Handle pending ping requests.
-				if resp.PendingPing != nil {
-					rt := d.findRuntime(rid)
-					if rt != nil {
-						go d.handlePing(ctx, *rt, resp.PendingPing.ID)
-					}
-				}
-
 				// Handle pending update requests.
 				if resp.PendingUpdate != nil {
 					go d.handleUpdate(ctx, rid, resp.PendingUpdate)
@@ -502,6 +508,22 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 					rt := d.findRuntime(rid)
 					if rt != nil {
 						go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+					}
+				}
+
+				// Handle pending runtime-local-skill inventory requests.
+				if resp.PendingLocalSkills != nil {
+					rt := d.findRuntime(rid)
+					if rt != nil {
+						go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
+					}
+				}
+
+				// Handle pending runtime-local-skill import requests.
+				if resp.PendingLocalSkillImport != nil {
+					rt := d.findRuntime(rid)
+					if rt != nil {
+						go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 					}
 				}
 			}
@@ -560,89 +582,48 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	})
 }
 
-func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
-	d.logger.Info("ping requested", "runtime_id", rt.ID, "ping_id", pingID, "provider", rt.Provider)
+func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {
+	d.logger.Info("runtime local skills requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
-	start := time.Now()
-
-	entry, ok := d.cfg.Agents[rt.Provider]
-	if !ok {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       fmt.Sprintf("no agent configured for provider %q", rt.Provider),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-
-	backend, err := agent.New(rt.Provider, agent.Config{
-		ExecutablePath: entry.Path,
-		Logger:         d.logger,
-	})
+	skills, supported, err := listRuntimeLocalSkills(rt.Provider)
 	if err != nil {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       err.Error(),
-			"duration_ms": time.Since(start).Milliseconds(),
+		d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
 		})
 		return
 	}
 
-	pingCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(pingCtx, "Respond with exactly one word: pong", agent.ExecOptions{
-		MaxTurns: 1,
-		Timeout:  60 * time.Second,
+	d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, map[string]any{
+		"status":    "completed",
+		"skills":    skills,
+		"supported": supported,
 	})
+}
+
+func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending PendingLocalSkillImport) {
+	d.logger.Info("runtime local skill import requested", "runtime_id", rt.ID, "request_id", pending.ID, "provider", rt.Provider, "skill_key", pending.SkillKey)
+
+	skill, supported, err := loadRuntimeLocalSkillBundle(rt.Provider, pending.SkillKey)
 	if err != nil {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       err.Error(),
-			"duration_ms": time.Since(start).Milliseconds(),
+		d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
+		return
+	}
+	if !supported {
+		d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+			"status": "failed",
+			"error":  fmt.Sprintf("provider %q does not expose runtime local skills", rt.Provider),
 		})
 		return
 	}
 
-	// Drain messages
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	var result agent.Result
-	select {
-	case result = <-session.Result:
-	case <-pingCtx.Done():
-		d.logger.Warn("ping timed out waiting for result", "runtime_id", rt.ID, "ping_id", pingID)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       "ping context cancelled while waiting for result",
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-	durationMs := time.Since(start).Milliseconds()
-
-	if result.Status == "completed" {
-		d.logger.Info("ping completed", "runtime_id", rt.ID, "ping_id", pingID, "duration_ms", durationMs)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "completed",
-			"output":      result.Output,
-			"duration_ms": durationMs,
-		})
-	} else {
-		errMsg := result.Error
-		if errMsg == "" {
-			errMsg = fmt.Sprintf("agent returned status: %s", result.Status)
-		}
-		d.logger.Warn("ping failed", "runtime_id", rt.ID, "ping_id", pingID, "error", errMsg)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       errMsg,
-			"duration_ms": durationMs,
-		})
-	}
+	d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+		"status": "completed",
+		"skill":  skill,
+	})
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -849,7 +830,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", ""); failErr != nil {
+		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
 			taskLog.Error("fail task after start error", "error", failErr)
 		}
 		return
@@ -896,7 +877,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", ""); failErr != nil {
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -925,14 +906,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// have built a real session before getting stuck (rate-limit, tool
 		// error, etc.) and we want the next chat turn to resume there
 		// rather than start over and "forget" the conversation.
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir); err != nil {
+		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, "agent_error"); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
 		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir); failErr != nil {
+			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
 		}
@@ -1304,6 +1285,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			}
 		}()
 
+		var sessionPinned atomic.Bool
 		for {
 			select {
 			case msg, ok := <-session.Messages:
@@ -1311,6 +1293,22 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					goto drainDone
 				}
 				switch msg.Type {
+				case agent.MessageStatus:
+					// Persist the session/work_dir as soon as the backend
+					// reveals them. Without this, a daemon crash mid-run
+					// loses the resume pointer and the auto-retry fires
+					// without context.
+					if msg.SessionID != "" && !sessionPinned.Swap(true) {
+						sid := msg.SessionID
+						wd := opts.Cwd
+						go func() {
+							pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							defer cancel()
+							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
+								taskLog.Debug("pin session failed", "error", err)
+							}
+						}()
+					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)
 					taskLog.Info(fmt.Sprintf("tool #%d: %s", n, msg.Tool))

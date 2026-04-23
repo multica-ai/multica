@@ -31,6 +31,12 @@ import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
+import {
+  ContextAnchorButton,
+  ContextAnchorCard,
+  buildAnchorMarkdown,
+  useRouteAnchorCandidate,
+} from "./context-anchor";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
@@ -154,12 +160,22 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
   }, [isOpen, activeSessionId, currentHasUnread]);
 
+  // Focus-mode anchor: derived from route each render. Prepended to the
+  // outgoing message when focus is on; the anchor persists across sends
+  // (focus mode tracks the user's page, not a per-message attachment).
+  const { candidate: anchorCandidate } = useRouteAnchorCandidate(wsId);
+
   const handleSend = useCallback(
     async (content: string) => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return;
       }
+
+      const focusOn = useChatStore.getState().focusMode;
+      const finalContent = focusOn && anchorCandidate
+        ? `${buildAnchorMarkdown(anchorCandidate)}\n\n${content}`
+        : content;
 
       let sessionId = activeSessionId;
       const isNewSession = !sessionId;
@@ -168,13 +184,14 @@ export function ChatWindow() {
         sessionId,
         isNewSession,
         agentId: activeAgent.id,
-        contentLength: content.length,
+        contentLength: finalContent.length,
+        hasAnchor: focusOn && !!anchorCandidate,
       });
 
       if (!sessionId) {
         const session = await createSession.mutateAsync({
           agent_id: activeAgent.id,
-          title: content.slice(0, 50),
+          title: finalContent.slice(0, 50),
         });
         sessionId = session.id;
         setActiveSession(sessionId);
@@ -185,7 +202,7 @@ export function ChatWindow() {
         id: `optimistic-${Date.now()}`,
         chat_session_id: sessionId,
         role: "user",
-        content,
+        content: finalContent,
         task_id: null,
         created_at: new Date().toISOString(),
       };
@@ -195,7 +212,7 @@ export function ChatWindow() {
       );
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
-      const result = await api.sendChatMessage(sessionId, content);
+      const result = await api.sendChatMessage(sessionId, finalContent);
       apiLogger.info("sendChatMessage.success", {
         sessionId,
         messageId: result.message_id,
@@ -212,6 +229,7 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
+      anchorCandidate,
       createSession,
       setActiveSession,
       qc,
@@ -401,6 +419,7 @@ export function ChatWindow() {
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
         agentName={activeAgent?.name}
+        topSlot={<ContextAnchorCard />}
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}
@@ -409,6 +428,7 @@ export function ChatWindow() {
             onSelect={handleSelectAgent}
           />
         }
+        rightAdornment={<ContextAnchorButton />}
       />
     </div>
   );

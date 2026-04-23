@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -41,13 +42,55 @@ type Client struct {
 	baseURL string
 	token   string
 	client  *http.Client
+
+	// Identity headers sent on every request as X-Client-*. Populated by
+	// SetIdentity(); empty values are simply omitted.
+	platform string
+	version  string
+	os       string
 }
 
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL:  baseURL,
+		client:   &http.Client{Timeout: 30 * time.Second},
+		platform: "daemon",
+		os:       normalizeGOOS(runtime.GOOS),
+	}
+}
+
+// normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
+// used by X-Client-OS / client_os ("macos" / "windows" / "linux").
+func normalizeGOOS(goos string) string {
+	switch goos {
+	case "darwin":
+		return "macos"
+	case "windows":
+		return "windows"
+	case "linux":
+		return "linux"
+	default:
+		return goos
+	}
+}
+
+// SetVersion records the daemon's CLI version, sent as X-Client-Version.
+// Called by Daemon.Run after config is loaded.
+func (c *Client) SetVersion(v string) {
+	c.version = v
+}
+
+// setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
+func (c *Client) setIdentityHeaders(req *http.Request) {
+	if c.platform != "" {
+		req.Header.Set("X-Client-Platform", c.platform)
+	}
+	if c.version != "" {
+		req.Header.Set("X-Client-Version", c.version)
+	}
+	if c.os != "" {
+		req.Header.Set("X-Client-OS", c.os)
 	}
 }
 
@@ -122,7 +165,7 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir string) error {
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
@@ -130,7 +173,33 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	if workDir != "" {
 		body["work_dir"] = workDir
 	}
+	if failureReason != "" {
+		body["failure_reason"] = failureReason
+	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil)
+}
+
+// PinTaskSession persists the agent's session_id and work_dir on the task
+// row mid-flight so a daemon crash doesn't lose the resume pointer.
+func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir string) error {
+	if sessionID == "" && workDir == "" {
+		return nil
+	}
+	body := map[string]any{}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
+}
+
+// RecoverOrphans tells the server to fail any dispatched/running tasks the
+// previous daemon process for this runtime left behind. The server will
+// auto-retry eligible tasks.
+func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{}, nil)
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
@@ -147,15 +216,11 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 
 // HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
 type HeartbeatResponse struct {
-	Status           string            `json:"status"`
-	PendingPing      *PendingPing      `json:"pending_ping,omitempty"`
-	PendingUpdate    *PendingUpdate    `json:"pending_update,omitempty"`
-	PendingModelList *PendingModelList `json:"pending_model_list,omitempty"`
-}
-
-// PendingPing represents a ping test request from the server.
-type PendingPing struct {
-	ID string `json:"id"`
+	Status                  string                   `json:"status"`
+	PendingUpdate           *PendingUpdate           `json:"pending_update,omitempty"`
+	PendingModelList        *PendingModelList        `json:"pending_model_list,omitempty"`
+	PendingLocalSkills      *PendingLocalSkills      `json:"pending_local_skills,omitempty"`
+	PendingLocalSkillImport *PendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 }
 
 // PendingUpdate represents a CLI update request from the server.
@@ -169,6 +234,17 @@ type PendingModelList struct {
 	ID string `json:"id"`
 }
 
+// PendingLocalSkills represents a request to enumerate runtime local skills.
+type PendingLocalSkills struct {
+	ID string `json:"id"`
+}
+
+// PendingLocalSkillImport represents a request to import a runtime local skill.
+type PendingLocalSkillImport struct {
+	ID       string `json:"id"`
+	SkillKey string `json:"skill_key"`
+}
+
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]string{
@@ -179,10 +255,6 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 	return &resp, nil
 }
 
-func (c *Client) ReportPingResult(ctx context.Context, runtimeID, pingID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/ping/%s/result", runtimeID, pingID), result, nil)
-}
-
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
@@ -191,6 +263,16 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.
+func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportLocalSkillImportResult sends a runtime-local-skill bundle back to the server.
+func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
@@ -276,6 +358,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	c.setIdentityHeaders(req)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -302,6 +385,7 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	c.setIdentityHeaders(req)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

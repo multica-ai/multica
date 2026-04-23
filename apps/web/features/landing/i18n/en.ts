@@ -1,9 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
-export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
-
-export const en: LandingDict = {
+export function createEnDict(allowSignup: boolean): LandingDict {
+  return {
   header: {
     github: "GitHub",
     login: "Log in",
@@ -122,8 +121,8 @@ export const en: LandingDict = {
     headlineFaded: "in the next hour.",
     steps: [
       {
-        title: ALLOW_SIGNUP ? "Sign up & create your workspace" : "Login to your workspace",
-        description: ALLOW_SIGNUP
+        title: allowSignup ? "Sign up & create your workspace" : "Login to your workspace",
+        description: allowSignup
           ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
           : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
       },
@@ -227,7 +226,7 @@ export const en: LandingDict = {
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
           { label: "Changelog", href: "/changelog" },
-          { label: "Desktop", href: "https://github.com/multica-ai/multica/releases/latest" },
+          { label: "Download", href: "/download" },
         ],
       },
       resources: {
@@ -276,12 +275,38 @@ export const en: LandingDict = {
   changelog: {
     title: "Changelog",
     subtitle: "New updates and improvements to Multica.",
+    toc: "All releases",
     categories: {
       features: "New Features",
       improvements: "Improvements",
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "Local Skills, LaTeX, Focus Mode & Orphan-Task Recovery",
+        changes: [],
+        features: [
+          "Import runtime local Skills into the workspace as first-class artifacts",
+          "Orphan-task recovery — abandoned agent runs auto-retry, with manual rerun as fallback",
+          "LaTeX rendering in issues, comments and chat",
+          "Chat Focus mode — share the page you're on as conversation context",
+        ],
+        improvements: [
+          "Sub-issue `status_changed` events no longer spam parent-issue subscribers",
+          "Multi-arch Docker release images built natively per-arch (no QEMU)",
+          "Pin sidebar derives fields client-side for snappier reorders",
+          "Expanded reserved-slug list so new slugs can't collide with product routes",
+        ],
+        fixes: [
+          "Gemini runtime model list now includes Gemini 3 and CLI aliases",
+          "Chat focus button disabled on pages without an anchor",
+          "Onboarding pin sync, welcome layout and runtime bootstrap state",
+          "`install.ps1` OS architecture detection hardened for more Windows setups",
+          "`/download` falls back to the previous release within a 1h freshness window",
+        ],
+      },
       {
         version: "0.2.11",
         date: "2026-04-21",
@@ -726,4 +751,80 @@ export const en: LandingDict = {
       },
     ],
   },
-};
+  download: {
+    hero: {
+      macArm64: {
+        title: "Multica for macOS",
+        sub: "Apple Silicon · bundled daemon, zero setup",
+        primary: "Download (.dmg)",
+        altZip: "or download .zip",
+      },
+      macIntel: {
+        title: "Multica for macOS",
+        sub: "Apple Silicon required — Intel Macs not yet supported.",
+        disabledCta: "Apple Silicon required",
+        intelHint:
+          "On an Intel Mac? Use the CLI below — it runs the same daemon.",
+      },
+      winX64: {
+        title: "Multica for Windows",
+        sub: "Bundled daemon, zero setup",
+        primary: "Download (.exe)",
+      },
+      winArm64: {
+        title: "Multica for Windows",
+        sub: "ARM · bundled daemon, zero setup",
+        primary: "Download (.exe)",
+      },
+      linux: {
+        title: "Multica for Linux",
+        sub: "Bundled daemon, zero setup",
+        primary: "Download AppImage",
+        altFormats: "or .deb / .rpm",
+      },
+      unknown: {
+        title: "Choose your platform",
+        sub: "All installers are listed below.",
+      },
+      safariMacHint: "On an Intel Mac? Use the CLI below.",
+      archFallbackHint: "Wrong architecture? See all formats below.",
+    },
+    allPlatforms: {
+      title: "All platforms",
+      macLabel: "macOS · Apple Silicon",
+      winX64Label: "Windows · x64",
+      winArm64Label: "Windows · ARM64",
+      linuxX64Label: "Linux · x64",
+      linuxArm64Label: "Linux · ARM64",
+      formatDmg: ".dmg",
+      formatZip: ".zip",
+      formatExe: ".exe",
+      formatAppImage: ".AppImage",
+      formatDeb: ".deb",
+      formatRpm: ".rpm",
+      intelNote:
+        "Apple Silicon only — Intel Macs not supported in this release.",
+      unavailable: "Not available",
+    },
+    cli: {
+      title: "Prefer the CLI?",
+      sub: "For servers, remote dev boxes, and headless setups. Same daemon as Desktop, installed via terminal.",
+      installLabel: "Install",
+      startLabel: "Start daemon",
+      sshNote: "Already on a server? Same commands work over SSH.",
+      copyLabel: "Copy",
+      copiedLabel: "Copied",
+    },
+    cloud: {
+      title: "Cloud runtime (waitlist)",
+      sub: "We’ll host the runtime for you. Not live yet — leave your email to be notified.",
+    },
+    footer: {
+      releaseNotes: "What’s new in {version}",
+      allReleases: "View all releases",
+      currentVersion: "Current version: {version}",
+      versionUnavailable: "Version unavailable — check GitHub",
+    },
+  },
+  };
+}

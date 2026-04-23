@@ -61,12 +61,13 @@ RETURNING id, workspace_id;
 -- Marks dispatched/running tasks as failed when their runtime is offline.
 -- This cleans up orphaned tasks after a daemon crash or network partition.
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'runtime went offline'
+SET status = 'failed', completed_at = now(), error = 'runtime went offline',
+    failure_reason = 'runtime_offline'
 WHERE status IN ('dispatched', 'running')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING id, agent_id, issue_id;
+RETURNING *;
 
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime

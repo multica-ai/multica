@@ -139,6 +139,57 @@ export function toCronExpression(cfg: TriggerConfig): string {
   }
 }
 
+export function parseCronExpression(cron: string, timezone: string): TriggerConfig {
+  const base: TriggerConfig = {
+    ...getDefaultTriggerConfig(),
+    timezone,
+    cronExpression: cron,
+  };
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return { ...base, frequency: "custom" };
+  const minStr = parts[0] ?? "";
+  const hourStr = parts[1] ?? "";
+  const dom = parts[2] ?? "";
+  const mon = parts[3] ?? "";
+  const dow = parts[4] ?? "";
+  if (dom !== "*" || mon !== "*") return { ...base, frequency: "custom" };
+  const min = parseInt(minStr, 10);
+  if (Number.isNaN(min) || min < 0 || min > 59) return { ...base, frequency: "custom" };
+
+  if (hourStr === "*" && dow === "*") {
+    const time = `00:${String(min).padStart(2, "0")}`;
+    return { ...base, frequency: "hourly", time };
+  }
+  const hour = parseInt(hourStr, 10);
+  if (Number.isNaN(hour) || hour < 0 || hour > 23) return { ...base, frequency: "custom" };
+  const time = `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+
+  if (dow === "*") return { ...base, frequency: "daily", time };
+  if (dow === "1-5") return { ...base, frequency: "weekdays", time, daysOfWeek: [1, 2, 3, 4, 5] };
+  if (/^[0-6](,[0-6])*$/.test(dow)) {
+    const days = dow.split(",").map((n) => parseInt(n, 10));
+    return { ...base, frequency: "weekly", time, daysOfWeek: days };
+  }
+  return { ...base, frequency: "custom" };
+}
+
+export function summarizeTrigger(cfg: TriggerConfig): string {
+  switch (cfg.frequency) {
+    case "hourly": {
+      const min = cfg.time.split(":")[1] ?? "00";
+      return `Hourly · :${min}`;
+    }
+    case "daily":
+      return `Daily ${cfg.time}`;
+    case "weekdays":
+      return `Weekdays ${cfg.time}`;
+    case "weekly":
+      return `${formatDayList(cfg.daysOfWeek)} ${cfg.time}`;
+    case "custom":
+      return "Custom cron";
+  }
+}
+
 export function describeTrigger(cfg: TriggerConfig): string {
   const offset = getTimezoneOffset(cfg.timezone);
   switch (cfg.frequency) {

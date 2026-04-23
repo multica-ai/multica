@@ -71,7 +71,7 @@ func TestMain(m *testing.M) {
 
 	bus := events.New()
 	registerListeners(bus, hub)
-	router := NewRouter(pool, hub, bus, analytics.NoopClient{})
+	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
 	testServer = httptest.NewServer(router)
 
 	// Generate a JWT token directly for the test user
@@ -220,6 +220,23 @@ func TestHealth(t *testing.T) {
 	if result["status"] != "ok" {
 		t.Fatalf("expected status ok, got %s", result["status"])
 	}
+}
+
+func TestConfigRouteIsPublic(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/api/config")
+	if err != nil {
+		t.Fatalf("config request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		CdnDomain string `json:"cdn_domain"`
+	}
+	readJSON(t, resp, &result)
 }
 
 // ---- Auth ----

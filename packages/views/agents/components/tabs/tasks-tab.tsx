@@ -31,8 +31,15 @@ export function TasksTab({ agent }: { agent: Agent }) {
   // issue may or may not be in the paginated issue-list cache, so going
   // through `issueDetailOptions` is the reliable lookup path (and it shares
   // the same cache as the issue detail page).
+  //
+  // Not every task has a linked issue — autopilot `run_only` runs and
+  // chat-spawned tasks both persist with NULL issue_id, which the server
+  // serializes as "". Filter those out before issuing detail queries so we
+  // don't hit `/api/issues/` with an empty id (which was crashing the
+  // whole tab). The UI treats the two cases the same here; a follow-up
+  // will surface the task source once the server exposes it.
   const issueIds = useMemo(
-    () => Array.from(new Set(tasks.map((t) => t.issue_id))),
+    () => Array.from(new Set(tasks.map((t) => t.issue_id).filter((id) => id !== ""))),
     [tasks],
   );
   const issueQueries = useQueries({
@@ -99,7 +106,18 @@ export function TasksTab({ agent }: { agent: Agent }) {
           {sortedTasks.map((task) => {
             const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
             const Icon = config.icon;
-            const issue = issueMap.get(task.issue_id);
+            // Tasks without a linked issue carry issue_id = "" — skip the
+            // detail lookup and render them as non-link rows. The source
+            // label is picked from chat_session_id / autopilot_run_id,
+            // which the server populates for chat- and autopilot-spawned
+            // tasks respectively.
+            const hasIssue = task.issue_id !== "";
+            const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
+            const sourcelessLabel = task.chat_session_id
+              ? "Chat session"
+              : task.autopilot_run_id
+                ? "Autopilot run"
+                : "Task without linked issue";
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
             const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
@@ -125,7 +143,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
+                      {issue?.title ?? (hasIssue ? `Issue ${task.issue_id.slice(0, 8)}...` : sourcelessLabel)}
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
@@ -145,6 +163,14 @@ export function TasksTab({ agent }: { agent: Agent }) {
                 </span>
               </>
             );
+
+            if (!hasIssue) {
+              return (
+                <div key={task.id} className={rowClassName}>
+                  {content}
+                </div>
+              );
+            }
 
             return (
               <AppLink

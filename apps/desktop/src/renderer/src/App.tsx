@@ -1,14 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
+import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
@@ -90,11 +92,28 @@ function AppContent() {
   // account switches (user A logout → user B login) should not trigger a
   // daemon restart here — daemon-manager already restarts on user change
   // via syncToken.
-  const { data: workspaces, isFetched: workspaceListFetched } = useQuery({
+  const { data: workspaces = [], isFetched: workspaceListFetched } = useQuery({
     ...workspaceListOptions(),
     enabled: !!user,
   });
-  const wsCount = workspaces?.length ?? 0;
+  const wsCount = workspaces.length;
+  const hasOnboarded = useHasOnboarded();
+
+  // Onboarding and zero-workspace both resolve to an overlay, but
+  // onboarding wins: a user who hasn't completed it gets the onboarding
+  // overlay regardless of how many workspaces already exist.
+  useEffect(() => {
+    if (!user || !workspaceListFetched) return;
+    const { overlay, open } = useWindowOverlayStore.getState();
+    if (overlay) return;
+    if (!hasOnboarded) {
+      open({ type: "onboarding" });
+      return;
+    }
+    if (wsCount === 0) {
+      open({ type: "new-workspace" });
+    }
+  }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded]);
 
   // Validate persisted tab state against the current user's workspace list,
   // and pick an active workspace if none is set. Runs in useLayoutEffect
@@ -104,32 +123,22 @@ function AppContent() {
   // warning because `switchWorkspace` is a Zustand setState that the
   // TabBar is subscribed to. useLayoutEffect flushes both renders before
   // the user sees anything, so there's no visible flicker.
+  //
+  // Gate on `workspaceListFetched`: useQuery defaults `data` to `[]` before
+  // the first fetch, so without this guard we'd run validation against an
+  // empty slug set, wipe the persisted `activeWorkspaceSlug`, then fall
+  // back to `workspaces[0]` once the real list arrives — losing the user's
+  // last-opened workspace on every app start.
   useLayoutEffect(() => {
-    if (!workspaces) return;
-    const validSlugs = new Set(workspaces.map((w) => w.slug));
-    const tabStore = useTabStore.getState();
-    tabStore.validateWorkspaceSlugs(validSlugs);
-    if (!tabStore.activeWorkspaceSlug && workspaces.length > 0) {
-      tabStore.switchWorkspace(workspaces[0].slug);
-    }
-  }, [workspaces]);
-
-  // Bidirectional new-workspace overlay: visible when there are no
-  // workspaces to enter, hidden as soon as one exists. Gated on
-  // `workspaceListFetched` so the initial render doesn't flash the
-  // overlay before the list arrives. The overlay's own `invite` type is
-  // not touched here — that's an in-flight task owned by the user.
-  useEffect(() => {
-    if (!user) return;
     if (!workspaceListFetched) return;
-    const { overlay, open, close } = useWindowOverlayStore.getState();
-    const isEmpty = wsCount === 0;
-    if (isEmpty) {
-      if (!overlay) open({ type: "new-workspace" });
-    } else if (overlay?.type === "new-workspace") {
-      close();
+    const validSlugs = new Set(workspaces.map((w) => w.slug));
+    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
+    if (!activeWorkspaceSlug && workspaces.length > 0) {
+      switchWorkspace(workspaces[0].slug);
     }
-  }, [user, workspaceListFetched, wsCount]);
+  }, [workspaces, workspaceListFetched]);
+
   // null = undecided (pre-login or list hasn't settled yet)
   // true  = session started with zero workspaces; next transition to >=1 triggers restart
   // false = session started with >=1 workspace, OR we've already restarted; skip
@@ -158,8 +167,15 @@ function AppContent() {
     );
   }
 
-  if (!user) return <DesktopLoginPage />;
-  return <DesktopShell />;
+  // Pageview tracker sits at the app root so it covers every visible
+  // surface (login, overlays, tab paths) — mounting it inside DesktopShell
+  // would miss the logged-out and overlay states.
+  return (
+    <>
+      <PageviewTracker />
+      {user ? <DesktopShell /> : <DesktopLoginPage />}
+    </>
+  );
 }
 
 // Backend the daemon should connect to — same URL the renderer talks to.
@@ -187,12 +203,20 @@ async function handleDaemonLogout() {
 }
 
 export default function App() {
+  const { version, os } = window.desktopAPI.appInfo;
+  // Stable identity reference so downstream effects (WS reconnect) don't
+  // tear down on every parent render.
+  const identity = useMemo(
+    () => ({ platform: "desktop", version, os }),
+    [version, os],
+  );
   return (
     <ThemeProvider>
       <CoreProvider
         apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
         wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
         onLogout={handleDaemonLogout}
+        identity={identity}
       >
         <AppContent />
       </CoreProvider>
