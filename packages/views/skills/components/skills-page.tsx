@@ -756,16 +756,11 @@ export default function SkillsPage() {
           <PageHeader className="justify-between">
             <h1 className="text-sm font-semibold">Skills</h1>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link href="skills/matrix">
-                    <Button variant="ghost" size="icon-sm">
-                      <Grid3X3 className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Matrix View</TooltipContent>
-              </Tooltip>
+              <Link href="skills/matrix">
+                <Button variant="ghost" size="icon-sm" title="Matrix View">
+                  <Grid3X3 className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </Link>
               <Tooltip>
                 <TooltipTrigger
                   render={
