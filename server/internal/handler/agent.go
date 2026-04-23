@@ -132,8 +132,27 @@ type AgentTaskResponse struct {
 	PriorWorkDir          string         `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
-	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+	ChatSessionID         string               `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
+	ChatMessage           string               `json:"chat_message,omitempty"`            // user message for chat tasks
+	PipelineContext       *PipelineContextData `json:"pipeline_context,omitempty"`        // pipeline column context for the issue
+}
+
+// PipelineContextData provides pipeline column metadata to the agent so it can
+// follow column-specific instructions and know which status transitions are valid.
+type PipelineContextData struct {
+	PipelineID           string               `json:"pipeline_id"`
+	CurrentColumnLabel   string               `json:"current_column_label"`
+	Instructions         string               `json:"instructions,omitempty"`
+	AllowedTransitions   []string             `json:"allowed_transitions,omitempty"`
+	Columns              []PipelineColumnInfo `json:"columns"`
+}
+
+// PipelineColumnInfo describes a single pipeline column.
+type PipelineColumnInfo struct {
+	StatusKey    string `json:"status_key"`
+	Label        string `json:"label"`
+	Instructions string `json:"instructions,omitempty"`
+	IsTerminal   bool   `json:"is_terminal"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

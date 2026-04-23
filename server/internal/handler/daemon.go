@@ -660,6 +660,34 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Inject pipeline column context so the agent knows active instructions and valid transitions.
+			if issue.PipelineID.Valid {
+				if cols, err := h.Queries.ListPipelineColumns(r.Context(), issue.PipelineID); err == nil && len(cols) > 0 {
+					colInfos := make([]PipelineColumnInfo, len(cols))
+					for i, c := range cols {
+						colInfos[i] = PipelineColumnInfo{
+							StatusKey:    c.StatusKey,
+							Label:        c.Label,
+							Instructions: c.Instructions,
+							IsTerminal:   c.IsTerminal,
+						}
+					}
+					pctx := &PipelineContextData{
+						PipelineID: uuidToString(issue.PipelineID),
+						Columns:    colInfos,
+					}
+					for _, c := range cols {
+						if c.StatusKey == issue.Status {
+							pctx.CurrentColumnLabel = c.Label
+							pctx.Instructions = c.Instructions
+							pctx.AllowedTransitions = c.AllowedTransitions
+							break
+						}
+					}
+					resp.PipelineContext = pctx
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
