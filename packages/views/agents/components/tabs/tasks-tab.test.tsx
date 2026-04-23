@@ -136,7 +136,7 @@ describe("TasksTab", () => {
     const title = await screen.findByText("Fix agent task routing");
     const link = title.closest("a");
 
-    expect(link?.getAttribute("href")).toBe("/test/issues/issue-1");
+    expect(link?.getAttribute("href")).toBe("/test/issues/MUL-1");
   });
 
   it("keeps task rows clickable when the issue is missing from the list query", async () => {

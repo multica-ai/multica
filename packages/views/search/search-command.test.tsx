@@ -239,6 +239,25 @@ describe("SearchCommand", () => {
     expect(screen.getByText("MUL-2")).toBeInTheDocument();
   });
 
+  it("navigates to issue detail pages by identifier from search results", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+      ],
+    });
+    render(<SearchCommand />);
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "demo");
+
+    const issueItem = await screen.findByText("Demo");
+    await user.click(issueItem);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-42");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
   it("shows New Issue / New Project under Commands and triggers the modal store", async () => {
     const user = userEvent.setup();
     render(<SearchCommand />);
