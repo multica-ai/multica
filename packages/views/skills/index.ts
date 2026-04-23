@@ -1,1 +1,1 @@
-export { SkillsPage } from "./components";
+export { SkillsPage, SkillMatrixPage } from "./components";
