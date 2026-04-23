@@ -29,6 +29,7 @@ export function StatusPicker({
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const cfg = getStatusConfig(status);
+  const displayLabel = pipelineColumns?.find((c) => c.status_key === status)?.label ?? cfg.label;
 
   const items = pipelineColumns
     ?? ALL_STATUSES.map((s) => ({ status_key: s, label: getStatusConfig(s).label }));
@@ -44,7 +45,7 @@ export function StatusPicker({
         customTrigger ?? (
           <>
             <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{cfg.label}</span>
+            <span className="truncate">{displayLabel}</span>
           </>
         )
       }
