@@ -1385,6 +1385,7 @@ func buildPipelineContextMD(pctx *PipelineContextData, cols []db.PipelineColumn)
 	}
 	if len(pctx.AllowedTransitions) > 0 {
 		b.WriteString("### Allowed Status Transitions\n\n")
+		b.WriteString("⚠️ **PIPELINE OVERRIDE**: This issue belongs to a pipeline. When updating status, you MUST use ONLY the pipeline status keys listed below. Do NOT use standard statuses (`done`, `in_review`, `in_progress`, `blocked`, `todo`) — they are invalid for this issue.\n\n")
 		b.WriteString("Use `multica issue status <id> <status_key>` to move the issue to:\n\n")
 		for _, t := range pctx.AllowedTransitions {
 			label := t
