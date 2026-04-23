@@ -43,7 +43,11 @@ export function ActorAvatar({
 
   return (
     <HoverCard>
-      <HoverCardTrigger render={<span />} className="inline-flex cursor-default">
+      <HoverCardTrigger
+        render={<span />}
+        tabIndex={0}
+        className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         {avatar}
       </HoverCardTrigger>
       <HoverCardContent align="start" className="w-72">
