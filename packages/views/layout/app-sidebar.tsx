@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../navigation";
-import { HelpLauncher } from "./help-launcher";
 import {
   DndContext,
   PointerSensor,
@@ -29,6 +28,7 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  Sparkles,
   X,
   Zap,
 } from "lucide-react";
@@ -60,6 +60,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
