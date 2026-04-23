@@ -27,7 +27,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -494,21 +494,15 @@ function SkillDetail({
               {saving ? "Saving..." : "Save"}
             </Button>
           )}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              }
-            />
-            <TooltipContent>Delete skill</TooltipContent>
-          </Tooltip>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setConfirmDelete(true)}
+            className="text-muted-foreground hover:text-destructive"
+            title="Delete skill"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
         </div>
       </div>
 
@@ -521,37 +515,25 @@ function SkillDetail({
               Files
             </span>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setShowAddFile(true)}
-                      className="text-muted-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Add file</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setShowAddFile(true)}
+                className="text-muted-foreground"
+                title="Add file"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
               {selectedPath !== SKILL_MD && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={handleDeleteFile}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Delete file</TooltipContent>
-                </Tooltip>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleDeleteFile}
+                  className="text-muted-foreground hover:text-destructive"
+                  title="Delete file"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               )}
             </div>
           </div>
@@ -761,20 +743,14 @@ export default function SkillsPage() {
                   <Grid3X3 className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </Link>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setShowCreate(true)}
-                    >
-                      <Plus className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">Add skill</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setShowCreate(true)}
+                title="Add skill"
+              >
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              </Button>
             </div>
           </PageHeader>
           {skills.length === 0 ? (
