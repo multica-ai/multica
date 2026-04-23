@@ -99,7 +99,7 @@ export function AssigneePicker({
       trigger={
         customTrigger ? customTrigger : assigneeType && assigneeId ? (
           <>
-            <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={18} />
+            <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={18} disableHoverCard />
             <span className="truncate">{triggerLabel}</span>
           </>
         ) : (
@@ -162,7 +162,7 @@ export function AssigneePicker({
                   setOpen(false);
                 }}
               >
-                <ActorAvatar actorType="agent" actorId={a.id} size={18} />
+                <ActorAvatar actorType="agent" actorId={a.id} size={18} disableHoverCard />
                 <span className={allowed ? "" : "text-muted-foreground"}>{a.name}</span>
                 {a.visibility === "private" && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
