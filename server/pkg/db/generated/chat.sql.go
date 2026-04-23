@@ -93,7 +93,7 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 const createChatTask = `-- name: CreateChatTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, target_repo_url, repo_confidence
 `
 
 type CreateChatTaskParams struct {
@@ -135,6 +135,8 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.ParentTaskID,
 		&i.FailureReason,
 		&i.LastHeartbeatAt,
+		&i.TargetRepoUrl,
+		&i.RepoConfidence,
 	)
 	return i, err
 }
@@ -211,6 +213,78 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 	return i, err
 }
 
+const getChatTaskByID = `-- name: GetChatTaskByID :one
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.target_repo_url, atq.repo_confidence, cs.workspace_id AS chat_workspace_id, cs.creator_id AS chat_creator_id
+FROM agent_task_queue atq
+JOIN chat_session cs ON cs.id = atq.chat_session_id
+WHERE atq.id = $1
+`
+
+type GetChatTaskByIDRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	Status           string             `json:"status"`
+	Priority         int32              `json:"priority"`
+	DispatchedAt     pgtype.Timestamptz `json:"dispatched_at"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	Result           []byte             `json:"result"`
+	Error            pgtype.Text        `json:"error"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	Context          []byte             `json:"context"`
+	RuntimeID        pgtype.UUID        `json:"runtime_id"`
+	SessionID        pgtype.Text        `json:"session_id"`
+	WorkDir          pgtype.Text        `json:"work_dir"`
+	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
+	Attempt          int32              `json:"attempt"`
+	MaxAttempts      int32              `json:"max_attempts"`
+	ParentTaskID     pgtype.UUID        `json:"parent_task_id"`
+	FailureReason    pgtype.Text        `json:"failure_reason"`
+	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
+	TargetRepoUrl    pgtype.Text        `json:"target_repo_url"`
+	RepoConfidence   pgtype.Float4      `json:"repo_confidence"`
+	ChatWorkspaceID  pgtype.UUID        `json:"chat_workspace_id"`
+	ChatCreatorID    pgtype.UUID        `json:"chat_creator_id"`
+}
+
+func (q *Queries) GetChatTaskByID(ctx context.Context, id pgtype.UUID) (GetChatTaskByIDRow, error) {
+	row := q.db.QueryRow(ctx, getChatTaskByID, id)
+	var i GetChatTaskByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.LastHeartbeatAt,
+		&i.TargetRepoUrl,
+		&i.RepoConfidence,
+		&i.ChatWorkspaceID,
+		&i.ChatCreatorID,
+	)
+	return i, err
+}
+
 const getLastChatTaskSession = `-- name: GetLastChatTaskSession :one
 SELECT session_id, work_dir FROM agent_task_queue
 WHERE chat_session_id = $1
@@ -239,7 +313,7 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 
 const getPendingChatTask = `-- name: GetPendingChatTask :one
 SELECT id, status FROM agent_task_queue
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'awaiting_user')
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -251,6 +325,8 @@ type GetPendingChatTaskRow struct {
 
 // Returns the most recent in-flight task for a chat session, if any.
 // Used by the frontend to recover pending state after refresh / reopen.
+// `awaiting_user` is included so the UI can keep showing the clarification
+// card and the FAB's unread indicator until the user responds.
 func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.UUID) (GetPendingChatTaskRow, error) {
 	row := q.db.QueryRow(ctx, getPendingChatTask, chatSessionID)
 	var i GetPendingChatTaskRow
@@ -422,7 +498,7 @@ FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.creator_id = $2
-  AND atq.status IN ('queued', 'dispatched', 'running')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'awaiting_user')
 ORDER BY atq.created_at DESC
 `
 
@@ -469,6 +545,105 @@ WHERE id = $1
 func (q *Queries) MarkChatSessionRead(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markChatSessionRead, id)
 	return err
+}
+
+const resolveChatTaskRepo = `-- name: ResolveChatTaskRepo :one
+UPDATE agent_task_queue
+SET target_repo_url = $2,
+    repo_confidence = 1.0,
+    status = 'queued'
+WHERE id = $1 AND status = 'awaiting_user'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, target_repo_url, repo_confidence
+`
+
+type ResolveChatTaskRepoParams struct {
+	ID            pgtype.UUID `json:"id"`
+	TargetRepoUrl pgtype.Text `json:"target_repo_url"`
+}
+
+// Atomically resolve a chat task's target repo once the user has picked one
+// from a repo_clarification card. The status guard prevents double-resolve
+// from racing clients.
+func (q *Queries) ResolveChatTaskRepo(ctx context.Context, arg ResolveChatTaskRepoParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, resolveChatTaskRepo, arg.ID, arg.TargetRepoUrl)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.LastHeartbeatAt,
+		&i.TargetRepoUrl,
+		&i.RepoConfidence,
+	)
+	return i, err
+}
+
+const setChatTaskAwaitingUser = `-- name: SetChatTaskAwaitingUser :one
+UPDATE agent_task_queue
+SET status = 'awaiting_user',
+    repo_confidence = $2::real
+WHERE id = $1 AND status IN ('queued', 'dispatched')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, target_repo_url, repo_confidence
+`
+
+type SetChatTaskAwaitingUserParams struct {
+	ID             pgtype.UUID `json:"id"`
+	RepoConfidence float32     `json:"repo_confidence"`
+}
+
+// Daemon-initiated: pause the task while the user picks a repo. The status
+// guard keeps this endpoint idempotent and prevents a late planner from
+// clobbering a completed/cancelled task.
+func (q *Queries) SetChatTaskAwaitingUser(ctx context.Context, arg SetChatTaskAwaitingUserParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, setChatTaskAwaitingUser, arg.ID, arg.RepoConfidence)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.LastHeartbeatAt,
+		&i.TargetRepoUrl,
+		&i.RepoConfidence,
+	)
+	return i, err
 }
 
 const setUnreadSinceIfNull = `-- name: SetUnreadSinceIfNull :exec

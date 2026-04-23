@@ -92,7 +92,7 @@ RETURNING *;
 -- name: CancelAgentTasksByIssue :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'awaiting_user');
 
 -- name: CancelAgentTasksByIssueAndAgent :many
 -- Cancels active tasks for a single (issue, agent) pair without touching
@@ -107,7 +107,7 @@ RETURNING *;
 -- name: CancelAgentTasksByAgent :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running');
+WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'awaiting_user');
 
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
@@ -224,7 +224,7 @@ RETURNING *;
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'awaiting_user')
 RETURNING *;
 
 -- name: CountRunningTasks :one

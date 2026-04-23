@@ -19,7 +19,9 @@ import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 /** A unified timeline entry: tool calls, thinking, text, and errors in chronological order. */
 interface TimelineItem {
   seq: number;
-  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  // Widened to match TaskMessagePayload; repo-plan types are chat-only and
+  // fall through the switch silently here.
+  type: TaskMessagePayload["type"];
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;
