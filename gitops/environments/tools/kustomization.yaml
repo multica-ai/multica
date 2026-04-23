@@ -26,5 +26,5 @@ images:
     newName: ghcr.io/g2crowd/agentfarm-backend-prod:bdc874a8
     newTag: "SET_BY_CI"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newName: ghcr.io/g2crowd/agentfarm-web-prod
+    newName: ghcr.io/g2crowd/agentfarm-web-prod:bdc874a8
     newTag: "SET_BY_CI"
