@@ -326,10 +326,27 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
 // Downloads are limited to 100 MB to match the upload size limit.
+//
+// The URL may be absolute (a signed CloudFront/S3 URL) or relative
+// (a server-relative path like "/uploads/...") depending on how the
+// server is configured. Relative URLs are resolved against the client's
+// BaseURL and sent with the standard auth headers; absolute URLs are
+// used as-is so that their query-string signatures are not disturbed.
 func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
+	isRelative := !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://")
+	if isRelative {
+		if c.BaseURL == "" {
+			return nil, fmt.Errorf("download URL %q is relative but client has no BaseURL", downloadURL)
+		}
+		downloadURL = c.BaseURL + downloadURL
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, err
+	}
+	if isRelative {
+		c.setHeaders(req)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
