@@ -1,14 +1,13 @@
 package agent
 
 import (
-	"log/slog"
 	"testing"
 )
 
 func TestBuildGeminiArgsBaseline(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("write a haiku", ExecOptions{}, slog.Default())
+	args := buildGeminiArgs("write a haiku", ExecOptions{})
 	expected := []string{
 		"-p", "write a haiku",
 		"--yolo",
@@ -28,7 +27,7 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 func TestBuildGeminiArgsWithModel(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-2.5-pro"}, slog.Default())
+	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-2.5-pro"})
 
 	var foundModel bool
 	for i, a := range args {
@@ -48,7 +47,7 @@ func TestBuildGeminiArgsWithModel(t *testing.T) {
 func TestBuildGeminiArgsWithResume(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{ResumeSessionID: "3"}, slog.Default())
+	args := buildGeminiArgs("hi", ExecOptions{ResumeSessionID: "3"})
 
 	var foundResume bool
 	for i, a := range args {
@@ -68,7 +67,7 @@ func TestBuildGeminiArgsWithResume(t *testing.T) {
 func TestBuildGeminiArgsOmitsModelWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{}, slog.Default())
+	args := buildGeminiArgs("hi", ExecOptions{})
 	for _, a := range args {
 		if a == "-m" {
 			t.Fatalf("expected no -m flag when Model is empty, got args=%v", args)
@@ -84,7 +83,7 @@ func TestBuildGeminiArgsPassesThroughCustomArgs(t *testing.T) {
 
 	args := buildGeminiArgs("hi", ExecOptions{
 		CustomArgs: []string{"--sandbox"},
-	}, slog.Default())
+	})
 
 	if args[len(args)-1] != "--sandbox" {
 		t.Fatalf("expected --sandbox at end of args, got %v", args)
@@ -96,7 +95,7 @@ func TestBuildGeminiArgsFiltersBlockedCustomArgs(t *testing.T) {
 
 	args := buildGeminiArgs("hi", ExecOptions{
 		CustomArgs: []string{"-o", "text", "--sandbox"},
-	}, slog.Default())
+	})
 
 	// -o text should be filtered, --sandbox should pass through
 	for i, a := range args {
