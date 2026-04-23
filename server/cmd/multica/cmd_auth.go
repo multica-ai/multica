@@ -98,21 +98,12 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	serverURL := resolveServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
-	// Determine the callback host from the configured app URL.
-	// For self-hosted setups where the browser is on a different machine
-	// (e.g. Multica running on a LAN server), use the server's private IP
-	// so the browser can reach the CLI's local HTTP server.
-	// For production (public hostnames like multica.ai), keep localhost —
-	// the browser and CLI are on the same machine.
+	// The callback always targets localhost because the browser is opened on
+	// the same machine as the CLI (via openBrowser).  Even when the Multica
+	// server is on a remote LAN host, the browser-side redirect must reach
+	// the CLI's local HTTP server, not the remote server.
 	callbackHost := "localhost"
 	bindAddr := "127.0.0.1"
-	if parsed, err := url.Parse(appURL); err == nil {
-		h := parsed.Hostname()
-		if ip := net.ParseIP(h); ip != nil && ip.IsPrivate() {
-			callbackHost = h
-			bindAddr = "0.0.0.0"
-		}
-	}
 
 	// Start a local HTTP server on a random port to receive the callback.
 	listener, err := net.Listen("tcp", bindAddr+":0")
