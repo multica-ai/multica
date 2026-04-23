@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { issueKeys } from "@multica/core/issues/queries";
+import { issueKeys, PAGINATED_STATUSES } from "@multica/core/issues/queries";
+import type { IssueStatus, ListIssuesCache } from "@multica/core/types";
 import type { QueryClient } from "@tanstack/react-query";
 
 // Mock the workspace id singleton — items() reads it imperatively.
@@ -28,10 +29,15 @@ function fakeQc(data: {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
-  map.set(JSON.stringify(issueKeys.list("ws-1")), {
-    issues: data.issues ?? [],
-    total: data.issues?.length ?? 0,
-  });
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  for (const status of PAGINATED_STATUSES) {
+    const bucket = (data.issues ?? []).filter((i) => i.status === status);
+    byStatus[status as IssueStatus] = { issues: bucket as never, total: bucket.length };
+  }
+  map.set(
+    JSON.stringify(issueKeys.list("ws-1")),
+    { byStatus } satisfies ListIssuesCache,
+  );
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
   } as unknown as QueryClient;

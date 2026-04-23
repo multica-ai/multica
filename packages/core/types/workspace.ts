@@ -31,6 +31,25 @@ export interface User {
   name: string;
   email: string;
   avatar_url: string | null;
+  onboarded_at: string | null;
+  /**
+   * JSONB payload from the server. Typed as `unknown` here so this module
+   * stays independent of the questionnaire shape — the onboarding views
+   * cast into `Partial<QuestionnaireAnswers>` when reading. Server always
+   * returns an object (defaults to `{}`), never null.
+   */
+  onboarding_questionnaire: Record<string, unknown>;
+  /**
+   * Terminal state for the post-onboarding "import starter content" prompt.
+   *   null             → new user, dialog will show on issues-list landing
+   *   'imported'       → accepted, starter project + issues were seeded
+   *   'dismissed'      → declined, never ask again
+   *   'skipped_legacy' → backfilled for users who finished onboarding
+   *                      before this feature shipped
+   * Kept as a generic `string | null` here so future states (e.g.
+   * 'retry_after_error') can be added without churning this type.
+   */
+  starter_content_state: string | null;
   created_at: string;
   updated_at: string;
 }

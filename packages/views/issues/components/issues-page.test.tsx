@@ -362,11 +362,10 @@ describe("IssuesPage (shared)", () => {
 
   it("renders issue titles after data loads", async () => {
     mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve(
-        params?.open_only
-          ? { issues: mockIssues, total: mockIssues.length }
-          : { issues: [], total: 0 },
-      ),
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
     );
 
     renderWithQuery(<IssuesPage />);
@@ -378,11 +377,10 @@ describe("IssuesPage (shared)", () => {
 
   it("renders board column headers", async () => {
     mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve(
-        params?.open_only
-          ? { issues: mockIssues, total: mockIssues.length }
-          : { issues: [], total: 0 },
-      ),
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
     );
 
     renderWithQuery(<IssuesPage />);
@@ -394,11 +392,10 @@ describe("IssuesPage (shared)", () => {
 
   it("shows workspace breadcrumb with 'Issues' label", async () => {
     mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve(
-        params?.open_only
-          ? { issues: mockIssues, total: mockIssues.length }
-          : { issues: [], total: 0 },
-      ),
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
     );
 
     renderWithQuery(<IssuesPage />);

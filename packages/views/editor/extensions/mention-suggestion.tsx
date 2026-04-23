@@ -12,10 +12,10 @@ import { ReactRenderer } from "@tiptap/react";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
-import { issueKeys } from "@multica/core/issues/queries";
+import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import type { Issue, ListIssuesResponse, MemberWithUser, Agent } from "@multica/core/types";
+import type { Issue, ListIssuesCache, MemberWithUser, Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -254,8 +254,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
-    const cachedIssues: Issue[] =
-      qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId))?.issues ?? [];
+    const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+    const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
     const q = query.toLowerCase();
 

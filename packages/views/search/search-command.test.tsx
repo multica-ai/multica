@@ -81,7 +81,9 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
-  issueListOptions: () => ({ queryKey: ["issues", "ws-test", "list"], enabled: false }),
+  issueDetailOptions: (_wsId: string, id: string) => ({
+    queryKey: ["issues", "ws-test", "detail", id],
+  }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -94,12 +96,24 @@ vi.mock("@multica/core/modals", () => ({
   }),
 }));
 
+function resolveIssue(key: readonly unknown[]) {
+  // issueDetailOptions key shape: ["issues", wsId, "detail", id]
+  if (key[0] === "issues" && key[2] === "detail") {
+    const id = key[3];
+    return mockAllIssues.current.find((i) => i.id === id);
+  }
+  return undefined;
+}
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (opts: { queryKey: readonly unknown[] }) => {
+  useQuery: (opts: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     const key = opts.queryKey;
     if (key[0] === "workspaces") return { data: mockWorkspaces.current };
-    return { data: mockAllIssues.current };
+    if (opts.enabled === false) return { data: undefined };
+    return { data: resolveIssue(key) };
   },
+  useQueries: (opts: { queries: Array<{ queryKey: readonly unknown[] }> }) =>
+    opts.queries.map((q) => ({ data: resolveIssue(q.queryKey) })),
 }));
 
 vi.mock("../navigation", () => ({
@@ -223,6 +237,25 @@ describe("SearchCommand", () => {
     expect(screen.getByText("MUL-1")).toBeInTheDocument();
     expect(screen.getByText("Second issue")).toBeInTheDocument();
     expect(screen.getByText("MUL-2")).toBeInTheDocument();
+  });
+
+  it("navigates to issue detail pages by identifier from search results", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+      ],
+    });
+    render(<SearchCommand />);
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "demo");
+
+    const issueItem = await screen.findByText("Demo");
+    await user.click(issueItem);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/MUL-42");
+    expect(useSearchStore.getState().open).toBe(false);
   });
 
   it("shows New Issue / New Project under Commands and triggers the modal store", async () => {

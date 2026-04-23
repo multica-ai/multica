@@ -21,7 +21,7 @@ import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
-import { useUpdateIssue, useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { MyIssuesHeader } from "./my-issues-header";
@@ -70,8 +70,6 @@ export function MyIssuesPage() {
   const { data: myIssues = [], isLoading: loading } = useQuery(
     myIssueListOptions(wsId, scope, filter),
   );
-
-  const { doneTotal } = useLoadMoreDoneIssues({ scope, filter });
 
   // Apply status/priority filters from view store
   const issues = useMemo(
@@ -190,12 +188,10 @@ export function MyIssuesPage() {
             {viewMode === "board" ? (
               <BoardView
                 issues={issues}
-                allIssues={myIssues}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
-                doneTotal={doneTotal}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
               />
@@ -204,7 +200,6 @@ export function MyIssuesPage() {
                 issues={issues}
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
-                doneTotal={doneTotal}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
               />

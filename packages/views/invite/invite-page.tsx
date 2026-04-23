@@ -7,9 +7,14 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import { paths } from "@multica/core/paths";
+import {
+  paths,
+  resolvePostAuthDestination,
+  useHasOnboarded,
+} from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
+import { DragStrip } from "../platform";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -49,8 +54,8 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   // Workspace list for the fallback "Go to dashboard" destinations. The invite
   // page is a pre-workspace global route so we can't rely on WorkspaceSlugProvider.
   const { data: wsList = [] } = useQuery(workspaceListOptions());
-  const fallbackDest =
-    wsList[0] ? paths.workspace(wsList[0].slug).issues() : paths.newWorkspace();
+  const hasOnboarded = useHasOnboarded();
+  const fallbackDest = resolvePostAuthDestination(wsList, hasOnboarded);
 
   const handleAccept = async () => {
     setAccepting(true);
@@ -232,12 +237,13 @@ function InviteShell({
 }) {
   const logout = useLogout();
   return (
-    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-6 py-12">
+    <div className="relative flex min-h-svh flex-col bg-background">
+      <DragStrip />
       {onBack && (
         <Button
           variant="ghost"
           size="sm"
-          className="absolute top-12 left-12 text-muted-foreground"
+          className="absolute top-16 left-12 text-muted-foreground"
           onClick={onBack}
         >
           <ArrowLeft />
@@ -247,13 +253,15 @@ function InviteShell({
       <Button
         variant="ghost"
         size="sm"
-        className="absolute top-12 right-12 text-muted-foreground hover:text-destructive"
+        className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
         onClick={logout}
       >
         <LogOut />
         Log out
       </Button>
-      {children}
+      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
+        {children}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { ListIssuesParams } from "../types";
+import type { IssueStatus, ListIssuesParams, ListIssuesCache } from "../types";
+import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
@@ -23,33 +24,55 @@ export const issueKeys = {
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
 };
 
-export type MyIssuesFilter = Pick<ListIssuesParams, "assignee_id" | "assignee_ids" | "creator_id">;
+export type MyIssuesFilter = Pick<
+  ListIssuesParams,
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
+>;
 
-export const CLOSED_PAGE_SIZE = 50;
+/** Page size per status column. */
+export const ISSUE_PAGE_SIZE = 50;
+
+/** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
+export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+
+/** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
+export function flattenIssueBuckets(data: ListIssuesCache) {
+  const out = [];
+  for (const status of PAGINATED_STATUSES) {
+    const bucket = data.byStatus[status];
+    if (bucket) out.push(...bucket.issues);
+  }
+  return out;
+}
+
+async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+  const responses = await Promise.all(
+    PAGINATED_STATUSES.map((status) =>
+      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
+    ),
+  );
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  PAGINATED_STATUSES.forEach((status, i) => {
+    const res = responses[i]!;
+    byStatus[status] = { issues: res.issues, total: res.total };
+  });
+  return { byStatus };
+}
 
 /**
- * CACHE SHAPE NOTE: The raw cache stores ListIssuesResponse ({ issues, total, doneTotal }),
- * but `select` transforms it to Issue[] for consumers. Mutations and ws-updaters
- * must use setQueryData<ListIssuesResponse>(...) — NOT setQueryData<Issue[]>.
+ * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
+ * by status, each with `{ issues, total }`), and `select` flattens it to
+ * `Issue[]` for consumers. Mutations and ws-updaters must use
+ * `setQueryData<ListIssuesCache>(...)` and preserve the byStatus shape.
  *
- * Fetches all open issues + first page of done issues. Use useLoadMoreDoneIssues()
- * to paginate additional done items into the cache.
+ * Fetches the first page of each paginated status in parallel. Use
+ * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
 export function issueListOptions(wsId: string) {
   return queryOptions({
     queryKey: issueKeys.list(wsId),
-    queryFn: async () => {
-      const [openRes, closedRes] = await Promise.all([
-        api.listIssues({ open_only: true }),
-        api.listIssues({ status: "done", limit: CLOSED_PAGE_SIZE, offset: 0 }),
-      ]);
-      return {
-        issues: [...openRes.issues, ...closedRes.issues],
-        total: openRes.total + closedRes.total,
-        doneTotal: closedRes.total,
-      };
-    },
-    select: (data) => data.issues,
+    queryFn: () => fetchFirstPages(),
+    select: flattenIssueBuckets,
   });
 }
 
@@ -64,23 +87,8 @@ export function myIssueListOptions(
 ) {
   return queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: async () => {
-      const [openRes, closedRes] = await Promise.all([
-        api.listIssues({ open_only: true, ...filter }),
-        api.listIssues({
-          status: "done",
-          limit: CLOSED_PAGE_SIZE,
-          offset: 0,
-          ...filter,
-        }),
-      ]);
-      return {
-        issues: [...openRes.issues, ...closedRes.issues],
-        total: openRes.total + closedRes.total,
-        doneTotal: closedRes.total,
-      };
-    },
-    select: (data) => data.issues,
+    queryFn: () => fetchFirstPages(filter),
+    select: flattenIssueBuckets,
   });
 }
 

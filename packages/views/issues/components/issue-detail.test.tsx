@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
+
+const mockNavigationPush = vi.hoisted(() => vi.fn());
+const mockNavigationReplace = vi.hoisted(() => vi.fn());
+
 // useWorkspaceId() derives from useCurrentWorkspace (relative import inside
 // @multica/core/hooks.tsx). vi.mock("@multica/core/paths") only intercepts
 // the bare-specifier, not the internal relative import. Mock the hooks module
@@ -85,7 +89,13 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues/issue-1", getShareableUrl: undefined }),
+  useNavigation: () => ({
+    push: mockNavigationPush,
+    replace: mockNavigationReplace,
+    pathname: "/issues/issue-1",
+    searchParams: new URLSearchParams(),
+    getShareableUrl: undefined,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -404,6 +414,14 @@ describe("IssueDetail (shared)", () => {
 
     await waitFor(() => {
       expect(screen.getByText("TES-1")).toBeInTheDocument();
+    });
+  });
+
+  it("canonicalizes legacy issue-id routes to identifier routes", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(mockNavigationReplace).toHaveBeenCalledWith("/test/issues/TES-1");
     });
   });
 

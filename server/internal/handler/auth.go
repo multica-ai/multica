@@ -37,22 +37,35 @@ var ErrSignupProhibited = SignupError{Message: "user registration is disabled on
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
 type UserResponse struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Email     string  `json:"email"`
-	AvatarURL *string `json:"avatar_url"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ID                      string          `json:"id"`
+	Name                    string          `json:"name"`
+	Email                   string          `json:"email"`
+	AvatarURL               *string         `json:"avatar_url"`
+	OnboardedAt             *string         `json:"onboarded_at"`
+	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
+	StarterContentState     *string         `json:"starter_content_state"`
+	CreatedAt               string          `json:"created_at"`
+	UpdatedAt               string          `json:"updated_at"`
 }
 
 func userToResponse(u db.User) UserResponse {
+	// JSONB column is []byte with DEFAULT '{}', so it's never nil at the DB
+	// level. Defensive coalesce just in case a future ALTER makes the column
+	// nullable and some row comes back with no default applied.
+	q := u.OnboardingQuestionnaire
+	if len(q) == 0 {
+		q = []byte("{}")
+	}
 	return UserResponse{
-		ID:        uuidToString(u.ID),
-		Name:      u.Name,
-		Email:     u.Email,
-		AvatarURL: textToPtr(u.AvatarUrl),
-		CreatedAt: timestampToString(u.CreatedAt),
-		UpdatedAt: timestampToString(u.UpdatedAt),
+		ID:                      uuidToString(u.ID),
+		Name:                    u.Name,
+		Email:                   u.Email,
+		AvatarURL:               textToPtr(u.AvatarUrl),
+		OnboardedAt:             timestampToPtr(u.OnboardedAt),
+		OnboardingQuestionnaire: json.RawMessage(q),
+		StarterContentState:     textToPtr(u.StarterContentState),
+		CreatedAt:               timestampToString(u.CreatedAt),
+		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
 }
 

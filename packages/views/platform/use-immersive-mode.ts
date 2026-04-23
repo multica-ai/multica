@@ -16,13 +16,19 @@ function getDesktopAPI(): ImmersiveCapableAPI | undefined {
  * modals (e.g. create-workspace) can place UI in the top-left corner without
  * fighting the native controls' hit-test. On web or non-macOS desktop this
  * is a no-op.
+ *
+ * `enabled=false` skips the IPC call (and cleanup) entirely, so a caller that
+ * conditionally wants traffic lights visible — like onboarding, which has no
+ * UI in the top-left and benefits from native window chrome — can opt out
+ * without unmounting the hook.
  */
-export function useImmersiveMode(): void {
+export function useImmersiveMode(enabled: boolean = true): void {
   useEffect(() => {
+    if (!enabled) return;
     const api = getDesktopAPI();
     api?.setImmersiveMode?.(true);
     return () => {
       api?.setImmersiveMode?.(false);
     };
-  }, []);
+  }, [enabled]);
 }

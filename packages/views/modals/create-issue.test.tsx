@@ -220,7 +220,7 @@ describe("CreateIssueModal", () => {
 
     await user.click(screen.getByRole("button", { name: "View issue" }));
 
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/TES-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 });
