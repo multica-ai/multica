@@ -13,6 +13,10 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+vi.mock("@multica/core/paths/hooks", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-1", name: "Test Workspace", slug: "test" }),
+}));
+
 // The runtime selector now filters to runtimes owned by the current user
 // to mirror the Runtimes page's "Mine" default. Stub useAuthStore so the
 // panel sees user-1 — the owner of the seeded runtime in beforeEach.
