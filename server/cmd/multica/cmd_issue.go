@@ -147,7 +147,7 @@ var issueSearchCmd = &cobra.Command{
 }
 
 var validIssueStatuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
+	"backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "checkpoint", "staged", "done", "blocked", "cancelled",
 }
 
 func init() {

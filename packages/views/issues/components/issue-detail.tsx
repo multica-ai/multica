@@ -179,6 +179,283 @@ function PropRow({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Phase state panel (BMAD integration)
+//
+// Renders the `phase_state` jsonb on an issue in a read-only sidebar section.
+// Recognized BMAD fields are rendered in a fixed order; any unknown keys are
+// collected under an "Other" catch-all. The whole section is hidden when the
+// issue has no phase_state or phase_state is empty.
+// ---------------------------------------------------------------------------
+
+const PHASE_STATE_KNOWN_KEYS = [
+  "dev_notes",
+  "impl_plan",
+  "tasks",
+  "file_list",
+  "review_items",
+  "completion_notes",
+] as const;
+
+const PHASE_STATE_FIELD_LABELS: Record<string, string> = {
+  dev_notes: "Dev Notes",
+  impl_plan: "Implementation Plan",
+  tasks: "Tasks",
+  file_list: "File List",
+  review_items: "Review Items",
+  completion_notes: "Completion Notes",
+};
+
+function phaseStateHasContent(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value as object).length > 0;
+  return true;
+}
+
+function PhaseStateField({ fieldKey, value }: { fieldKey: string; value: unknown }) {
+  const label = PHASE_STATE_FIELD_LABELS[fieldKey] ?? fieldKey;
+  return (
+    <div className="space-y-1">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <PhaseStateValue fieldKey={fieldKey} value={value} />
+    </div>
+  );
+}
+
+function PhaseStateValue({ fieldKey, value }: { fieldKey: string; value: unknown }) {
+  // Markdown-ish strings: dev_notes, impl_plan — render as preserved text.
+  if (typeof value === "string") {
+    return (
+      <div className="whitespace-pre-wrap break-words text-xs text-foreground/90">
+        {value}
+      </div>
+    );
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <div className="text-xs text-muted-foreground italic">(empty)</div>;
+    }
+
+    // Tasks — {id, text, done, subtasks[]}
+    if (fieldKey === "tasks") {
+      return (
+        <ul className="space-y-1">
+          {value.map((task, idx) => {
+            const t = task as { id?: string; text?: string; done?: boolean; subtasks?: unknown[] };
+            return (
+              <li key={t.id ?? idx} className="text-xs">
+                <div className="flex items-start gap-1.5">
+                  <span className={cn("mt-0.5 shrink-0", t.done ? "text-green-500" : "text-muted-foreground")}>
+                    {t.done ? "☑" : "☐"}
+                  </span>
+                  <span className={cn("break-words", t.done && "text-muted-foreground line-through")}>
+                    {t.text ?? JSON.stringify(t)}
+                  </span>
+                </div>
+                {Array.isArray(t.subtasks) && t.subtasks.length > 0 && (
+                  <ul className="ml-5 mt-0.5 space-y-0.5">
+                    {t.subtasks.map((st, sidx) => {
+                      const s = st as { id?: string; text?: string; done?: boolean };
+                      return (
+                        <li key={s.id ?? sidx} className="flex items-start gap-1.5 text-xs">
+                          <span className={cn("mt-0.5 shrink-0", s.done ? "text-green-500" : "text-muted-foreground")}>
+                            {s.done ? "☑" : "☐"}
+                          </span>
+                          <span className={cn("break-words", s.done && "text-muted-foreground line-through")}>
+                            {s.text ?? JSON.stringify(s)}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    // File list — {path, change_type}
+    if (fieldKey === "file_list") {
+      return (
+        <ul className="space-y-0.5">
+          {value.map((f, idx) => {
+            const file = f as { path?: string; change_type?: string };
+            const tagColor = file.change_type === "added"
+              ? "text-green-500"
+              : file.change_type === "deleted"
+                ? "text-red-500"
+                : "text-amber-500";
+            return (
+              <li key={idx} className="flex items-start gap-1.5 text-xs">
+                <span className={cn("shrink-0 uppercase text-[10px] font-mono mt-0.5", tagColor)}>
+                  {(file.change_type ?? "mod").slice(0, 3)}
+                </span>
+                <span className="break-all font-mono text-[11px]">{file.path ?? JSON.stringify(file)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    // Review items — {id, severity, text, related_ac, related_file, source_comment_id, done, resolved_at}
+    if (fieldKey === "review_items") {
+      return (
+        <ul className="space-y-1.5">
+          {value.map((r, idx) => {
+            const item = r as {
+              id?: string;
+              severity?: string;
+              text?: string;
+              related_ac?: string;
+              related_file?: string;
+              done?: boolean;
+            };
+            const sevColor =
+              item.severity === "critical" || item.severity === "high"
+                ? "text-red-500"
+                : item.severity === "medium"
+                  ? "text-amber-500"
+                  : "text-muted-foreground";
+            return (
+              <li key={item.id ?? idx} className="text-xs">
+                <div className="flex items-start gap-1.5">
+                  <span className={cn("mt-0.5 shrink-0", item.done ? "text-green-500" : "text-muted-foreground")}>
+                    {item.done ? "☑" : "☐"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {item.severity && (
+                      <span className={cn("mr-1 font-medium uppercase text-[10px]", sevColor)}>
+                        {item.severity}
+                      </span>
+                    )}
+                    <span className={cn("break-words", item.done && "text-muted-foreground line-through")}>
+                      {item.text ?? JSON.stringify(item)}
+                    </span>
+                    {(item.related_ac || item.related_file) && (
+                      <div className="mt-0.5 text-[10px] text-muted-foreground font-mono">
+                        {item.related_ac && <span>AC: {item.related_ac}</span>}
+                        {item.related_ac && item.related_file && <span> · </span>}
+                        {item.related_file && <span>{item.related_file}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    // Completion notes — {timestamp, pass, notes}
+    if (fieldKey === "completion_notes") {
+      return (
+        <ul className="space-y-1.5">
+          {value.map((n, idx) => {
+            const note = n as { timestamp?: string; pass?: boolean; notes?: string };
+            return (
+              <li key={idx} className="text-xs border-l-2 pl-2 border-muted">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <span className={note.pass ? "text-green-500" : "text-red-500"}>
+                    {note.pass ? "✓" : "✗"}
+                  </span>
+                  {note.timestamp && <span>{note.timestamp}</span>}
+                </div>
+                {note.notes && (
+                  <div className="mt-0.5 whitespace-pre-wrap break-words text-foreground/90">
+                    {note.notes}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    // Generic array fallback.
+    return (
+      <ul className="space-y-0.5">
+        {value.map((item, idx) => (
+          <li key={idx} className="text-xs break-words font-mono">
+            {typeof item === "string" ? item : JSON.stringify(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (typeof value === "object" && value !== null) {
+    return (
+      <pre className="whitespace-pre-wrap break-all text-[11px] font-mono text-foreground/80">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    );
+  }
+
+  return <div className="text-xs text-foreground/90">{String(value)}</div>;
+}
+
+function PhaseStatePanel({
+  phaseState,
+  open,
+  onToggle,
+}: {
+  phaseState: Record<string, unknown>;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  // Split into known (ordered) vs unknown (other) fields with content.
+  const knownEntries: [string, unknown][] = [];
+  for (const key of PHASE_STATE_KNOWN_KEYS) {
+    if (key in phaseState && phaseStateHasContent(phaseState[key])) {
+      knownEntries.push([key, phaseState[key]]);
+    }
+  }
+  const otherEntries: [string, unknown][] = Object.entries(phaseState).filter(
+    ([k, v]) => !(PHASE_STATE_KNOWN_KEYS as readonly string[]).includes(k) && phaseStateHasContent(v),
+  );
+
+  // Hide panel entirely if nothing to show.
+  if (knownEntries.length === 0 && otherEntries.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
+        onClick={onToggle}
+      >
+        Phase state
+        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="space-y-3 pl-2">
+          {knownEntries.map(([k, v]) => (
+            <PhaseStateField key={k} fieldKey={k} value={v} />
+          ))}
+          {otherEntries.length > 0 && (
+            <div className="space-y-2 border-t border-border/50 pt-2">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Other
+              </div>
+              {otherEntries.map(([k, v]) => (
+                <PhaseStateField key={k} fieldKey={k} value={v} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Issue Picker Dialog
@@ -356,6 +633,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [backlogHintOpen, setBacklogHintOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [phaseStateOpen, setPhaseStateOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
@@ -589,6 +867,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </PropRow>
         </div>}
       </div>
+
+      {/* Phase state (BMAD integration) */}
+      {issue.phase_state && typeof issue.phase_state === "object" && (
+        <PhaseStatePanel
+          phaseState={issue.phase_state as Record<string, unknown>}
+          open={phaseStateOpen}
+          onToggle={() => setPhaseStateOpen(!phaseStateOpen)}
+        />
+      )}
 
       {/* Parent issue */}
       {parentIssue && (
@@ -1439,3 +1726,4 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     </ResizablePanelGroup>
   );
 }
+

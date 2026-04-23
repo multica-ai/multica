@@ -45,6 +45,8 @@ export interface Issue {
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];
+  phase_state?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
+
