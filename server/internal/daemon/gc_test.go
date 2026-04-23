@@ -203,7 +203,7 @@ func TestShouldCleanTaskDir_APIErrorSkipped(t *testing.T) {
 	}
 }
 
-func TestShouldCleanTaskDir_Issue404CleansImmediately(t *testing.T) {
+func TestShouldCleanTaskDir_Issue404OldOrphan(t *testing.T) {
 	t.Parallel()
 	issueID := "66666666-6666-6666-6666-666666666666"
 
@@ -214,8 +214,7 @@ func TestShouldCleanTaskDir_Issue404CleansImmediately(t *testing.T) {
 	})
 
 	d := newGCTestDaemon(t, mux)
-	// Keep a long OrphanTTL to prove the 404 branch no longer gates on mtime.
-	d.cfg.GCOrphanTTL = 30 * 24 * time.Hour
+	d.cfg.GCOrphanTTL = 0 // treat orphans as immediately eligible
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task8", &execenv.GCMeta{
 		IssueID:     issueID,
 		WorkspaceID: "ws1",
@@ -224,7 +223,35 @@ func TestShouldCleanTaskDir_Issue404CleansImmediately(t *testing.T) {
 
 	action := d.shouldCleanTaskDir(context.Background(), taskDir)
 	if action != gcActionOrphan {
-		t.Fatalf("expected gcActionOrphan for deleted issue, got %d", action)
+		t.Fatalf("expected gcActionOrphan for unreachable issue past TTL, got %d", action)
+	}
+}
+
+// TestShouldCleanTaskDir_Issue404RecentSkipped locks in the cross-workspace
+// safety: the server returns 404 both for deleted issues and for workspaces
+// the daemon token can't see, so a recent 404 must NOT trigger immediate
+// cleanup — otherwise a token re-scope could wipe dirs whose issues are live.
+func TestShouldCleanTaskDir_Issue404RecentSkipped(t *testing.T) {
+	t.Parallel()
+	issueID := "66666666-6666-6666-6666-666666666667"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	})
+
+	d := newGCTestDaemon(t, mux)
+	// Default production OrphanTTL; taskDir mtime is now, so it's fresh.
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "fresh-404", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now(),
+	})
+
+	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for recent 404 (cross-workspace safety), got %d", action)
 	}
 }
 

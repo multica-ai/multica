@@ -140,10 +140,19 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 	if err != nil {
 		var reqErr *requestError
 		if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound {
-			// Issue deleted — clean immediately. The issue row is gone from the
-			// server, so there's nothing left to protect with a grace period.
-			d.logger.Info("gc: orphan directory (issue deleted)", "dir", taskDir, "issue", meta.IssueID)
-			return gcActionOrphan
+			// 404 is ambiguous: the server returns it for both "issue deleted"
+			// and "daemon token has no access to the workspace" (anti-enumeration,
+			// see requireDaemonWorkspaceAccess). Fall back to the mtime-gated
+			// orphan cleanup so a scoped-down token can't instantly wipe dirs
+			// whose issues are still live.
+			info, statErr := os.Stat(taskDir)
+			if statErr != nil {
+				return gcActionSkip
+			}
+			if time.Since(info.ModTime()) > d.cfg.GCOrphanTTL {
+				d.logger.Info("gc: orphan directory (issue not accessible)", "dir", taskDir, "issue", meta.IssueID)
+				return gcActionOrphan
+			}
 		}
 		// API error (network, auth, etc.) — skip and retry next cycle.
 		return gcActionSkip

@@ -30,17 +30,28 @@ func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) 
 	return d, nil
 }
 
-// dayUnit matches an integer followed by `d` (days), optionally mixed with
-// other Go duration components, e.g. "5d", "1d12h", "2d30m".
-var dayUnit = regexp.MustCompile(`(\d+)d`)
+// dayUnit matches a decimal number (with optional leading digits) followed by
+// `d` (days), so both "5d" and "1.5d" are captured whole and expanded to hours.
+var dayUnit = regexp.MustCompile(`(\d*\.\d+|\d+)d`)
 
 // parseFlexDuration accepts the standard Go time.ParseDuration syntax plus a
-// `d` (day) suffix, which the stdlib rejects. "5d" → 120h, "1d12h" → 36h.
+// `d` (day) suffix, which the stdlib rejects. "5d" → 120h, "1d12h" → 36h,
+// "0.5d" → 12h. Overflow or malformed numbers propagate as errors.
 func parseFlexDuration(value string) (time.Duration, error) {
+	var convErr error
 	expanded := dayUnit.ReplaceAllStringFunc(value, func(match string) string {
-		n, _ := strconv.Atoi(match[:len(match)-1])
-		return fmt.Sprintf("%dh", n*24)
+		days, err := strconv.ParseFloat(match[:len(match)-1], 64)
+		if err != nil {
+			convErr = err
+			return match
+		}
+		// time.ParseDuration handles fractional hours natively, and rejects
+		// overflow on its own.
+		return strconv.FormatFloat(days*24, 'f', -1, 64) + "h"
 	})
+	if convErr != nil {
+		return 0, convErr
+	}
 	return time.ParseDuration(expanded)
 }
 
