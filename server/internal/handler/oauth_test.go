@@ -209,3 +209,76 @@ func TestOAuthLoginUnknownProviderReturns404(t *testing.T) {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
 }
+
+// --- GitHub-specific ParseProfile behavior ------------------------------
+
+// TestGithubParseProfileUsesEmailsEndpoint asserts that /user/emails is the
+// authoritative source. /user.email is the public profile field and is not
+// guaranteed verified — trusting it would enable account takeover via an
+// unverified address.
+func TestGithubParseProfileUsesEmailsEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/user/emails") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"email":"public@example.com","primary":false,"verified":true},
+			{"email":"primary@example.com","primary":true,"verified":true}
+		]`))
+	}))
+	defer srv.Close()
+
+	// /user payload has a (potentially unverified) public email — it must be
+	// ignored in favour of the /user/emails primary+verified entry.
+	body := []byte(`{"login":"octocat","name":"The Cat","email":"spoofed@victim.com"}`)
+	client := &http.Client{Transport: rewriteHostTransport{dst: srv.URL}}
+
+	profile, err := auth.GithubSpec.ParseProfile(context.Background(), client, "tok", body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if profile.Email != "primary@example.com" {
+		t.Fatalf("email: got %q, want primary@example.com (ignoring /user.email)", profile.Email)
+	}
+	if !profile.EmailVerified {
+		t.Fatalf("expected verified")
+	}
+}
+
+func TestGithubParseProfileFallsBackToLoginWhenNameEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/user/emails") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"email":"cat@example.com","primary":true,"verified":true}]`))
+	}))
+	defer srv.Close()
+
+	body := []byte(`{"login":"octocat","name":""}`)
+	client := &http.Client{Transport: rewriteHostTransport{dst: srv.URL}}
+
+	profile, err := auth.GithubSpec.ParseProfile(context.Background(), client, "tok", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Name != "octocat" {
+		t.Fatalf("name fallback: got %q", profile.Name)
+	}
+}
+
+// rewriteHostTransport forwards any outbound GitHub API request to a local
+// test server while preserving the path/query.
+type rewriteHostTransport struct{ dst string }
+
+func (t rewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	u, err := http.NewRequest(req.Method, t.dst+req.URL.Path, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.Header = req.Header
+	return http.DefaultTransport.RoundTrip(u)
+}

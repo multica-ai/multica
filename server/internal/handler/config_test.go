@@ -17,6 +17,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origProviders := testHandler.OAuthProviders
 	testHandler.OAuthProviders = map[string]auth.OAuthProvider{
 		"google": auth.NewHTTPOAuthProvider(auth.GoogleSpec),
+		"github": auth.NewHTTPOAuthProvider(auth.GithubSpec),
 	}
 	defer func() { testHandler.OAuthProviders = origProviders }()
 
@@ -24,6 +25,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("GOOGLE_CLIENT_SECRET", "google-secret")
 	t.Setenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/callback")
+	t.Setenv("GITHUB_CLIENT_ID", "github-client-id")
+	t.Setenv("GITHUB_CLIENT_SECRET", "github-secret")
+	t.Setenv("GITHUB_REDIRECT_URI", "http://localhost:3000/auth/callback")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 
@@ -61,6 +65,22 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if google.ExtraAuthParams["access_type"] != "offline" {
 		t.Fatalf("oauth_providers[google].extra_auth_params[access_type]: unexpected %q", google.ExtraAuthParams["access_type"])
+	}
+	github, ok := cfg.OAuthProviders["github"]
+	if !ok {
+		t.Fatalf("oauth_providers[github]: missing")
+	}
+	if github.ClientID != "github-client-id" {
+		t.Fatalf("oauth_providers[github].client_id: want github-client-id, got %q", github.ClientID)
+	}
+	if github.AuthorizeURL != "https://github.com/login/oauth/authorize" {
+		t.Fatalf("oauth_providers[github].authorize_url: unexpected %q", github.AuthorizeURL)
+	}
+	if github.CallbackPath != "/auth/callback" {
+		t.Fatalf("oauth_providers[github].callback_path: unexpected %q", github.CallbackPath)
+	}
+	if github.Scope != "read:user user:email" {
+		t.Fatalf("oauth_providers[github].scope: unexpected %q", github.Scope)
 	}
 	if cfg.PosthogKey != "phc_test" {
 		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)
@@ -130,5 +150,36 @@ func TestGetConfigOmitsProviderWhenRedirectURIMissing(t *testing.T) {
 	}
 	if _, ok := cfg.OAuthProviders["google"]; ok {
 		t.Fatal("expected google to be omitted when REDIRECT_URI env is unset")
+	}
+}
+
+func TestGetConfigOmitsGithubWhenUnconfigured(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	origProviders := testHandler.OAuthProviders
+	testHandler.OAuthProviders = map[string]auth.OAuthProvider{
+		"github": auth.NewHTTPOAuthProvider(auth.GithubSpec),
+	}
+	defer func() { testHandler.OAuthProviders = origProviders }()
+
+	t.Setenv("GITHUB_CLIENT_ID", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d", w.Code)
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+
+	if _, ok := cfg.OAuthProviders["github"]; ok {
+		t.Fatalf("expected no github entry in oauth_providers")
 	}
 }

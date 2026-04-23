@@ -87,7 +87,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 	}
-	for _, spec := range []*auth.ProviderSpec{auth.GoogleSpec} {
+	for _, spec := range []*auth.ProviderSpec{auth.GoogleSpec, auth.GithubSpec} {
 		h.OAuthProviders[spec.ID] = auth.NewHTTPOAuthProvider(spec)
 	}
 
