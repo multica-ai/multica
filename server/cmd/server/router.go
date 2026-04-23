@@ -87,6 +87,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 	}
+	for _, spec := range []*auth.ProviderSpec{auth.GoogleSpec} {
+		h.OAuthProviders[spec.ID] = auth.NewHTTPOAuthProvider(spec)
+	}
+
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -151,7 +155,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	// Auth (public)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
-	r.Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/oauth/{provider}", h.OAuthLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API

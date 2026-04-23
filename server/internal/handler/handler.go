@@ -63,6 +63,7 @@ type Handler struct {
 	LocalSkillImportStore LocalSkillImportStore
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
+	OAuthProviders        map[string]auth.OAuthProvider
 	Analytics             analytics.Client
 	cfg                   Config
 }
@@ -93,6 +94,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
 		Storage:               store,
 		CFSigner:              cfSigner,
+		OAuthProviders:        map[string]auth.OAuthProvider{},
 		Analytics:             analyticsClient,
 		cfg:                   cfg,
 	}
