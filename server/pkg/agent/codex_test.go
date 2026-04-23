@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -974,9 +973,7 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		"echo \"error: unexpected argument '-m' found\" >&2\n" +
 		"exit 2\n"
-	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+	writeTestExecutable(t, fakePath, []byte(script))
 
 	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {

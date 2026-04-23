@@ -109,13 +109,13 @@ export function useRouteAnchorCandidate(wsId: string): {
 }
 
 /**
- * Focus-mode toggle. Three visual states driven by two dimensions:
- *   - focusMode (persisted)       on | off
- *   - candidate present           yes | no
+ * Focus-mode toggle. Disabled whenever the current page has no anchor
+ * (nothing to share) — focusMode persists across such pages, so returning
+ * to an anchorable page restores the user's prior on/off choice.
  *
- *   off                   →  ghost + muted, clickable (→ turns on)
+ *   no candidate          →  disabled
+ *   off + candidate       →  ghost + muted, clickable (→ turns on)
  *   on  + candidate       →  secondary (bright), clickable (→ turns off)
- *   on  + no candidate    →  disabled (can't click until a focus target exists)
  */
 export function ContextAnchorButton() {
   const wsId = useWorkspaceId();
@@ -124,16 +124,16 @@ export function ContextAnchorButton() {
   const setFocusMode = useChatStore((s) => s.setFocusMode);
 
   const hasAnchor = !!candidate;
-  const isDisabled = focusMode && !hasAnchor && !isResolving;
+  const isDisabled = !hasAnchor && !isResolving;
   const isBright = focusMode && hasAnchor;
 
-  const tooltipText = !focusMode
-    ? "Let Multica know what you're viewing"
-    : hasAnchor
+  const tooltipText = isDisabled
+    ? "Nothing to share with Multica on this page"
+    : focusMode && candidate
       ? candidate.type === "issue"
         ? `Multica knows you're viewing ${candidate.label} · Click to turn off`
         : `Multica knows you're viewing project "${candidate.label}" · Click to turn off`
-      : "Nothing to share with Multica on this page";
+      : "Let Multica know what you're viewing";
 
   return (
     <Tooltip>

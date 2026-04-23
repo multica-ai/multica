@@ -18,7 +18,7 @@ interface IssueMentionCardProps {
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const p = useWorkspacePaths();
   return (
-    <AppLink href={p.issueDetail(issueId)} className="inline-flex">
+    <AppLink href={p.issueDetail(issueId)} className="issue-mention not-prose inline-flex">
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}

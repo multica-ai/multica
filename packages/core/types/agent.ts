@@ -27,6 +27,9 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  // Empty string ("") when the task has no linked issue — either chat- or
+  // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
+  // which source produced it.
   issue_id: string;
   status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
   priority: number;
@@ -36,6 +39,10 @@ export interface AgentTask {
   result: unknown;
   error: string | null;
   created_at: string;
+  /** Non-empty when the task was spawned from a chat session. */
+  chat_session_id?: string;
+  /** Non-empty when the task was spawned by an autopilot run. */
+  autopilot_run_id?: string;
 }
 
 export interface Agent {

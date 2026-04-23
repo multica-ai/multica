@@ -202,4 +202,56 @@ describe("TasksTab", () => {
     expect(label.closest("a")).toBeNull();
     expect(mockGetIssue).not.toHaveBeenCalled();
   });
+
+  it("labels chat-spawned tasks as 'Chat session'", async () => {
+    renderTasksTab(
+      [
+        {
+          id: "task-chat",
+          agent_id: "agent-1",
+          runtime_id: "runtime-1",
+          issue_id: "",
+          chat_session_id: "chat-42",
+          status: "running",
+          priority: 1,
+          dispatched_at: "2026-04-16T00:30:00Z",
+          started_at: "2026-04-16T00:31:00Z",
+          completed_at: null,
+          result: null,
+          error: null,
+          created_at: "2026-04-16T00:00:00Z",
+        },
+      ],
+      [],
+    );
+
+    const label = await screen.findByText("Chat session");
+    expect(label.closest("a")).toBeNull();
+  });
+
+  it("labels autopilot-spawned tasks as 'Autopilot run'", async () => {
+    renderTasksTab(
+      [
+        {
+          id: "task-autopilot",
+          agent_id: "agent-1",
+          runtime_id: "runtime-1",
+          issue_id: "",
+          autopilot_run_id: "run-7",
+          status: "completed",
+          priority: 1,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: "2026-04-16T01:00:00Z",
+          result: null,
+          error: null,
+          created_at: "2026-04-16T00:00:00Z",
+        },
+      ],
+      [],
+    );
+
+    const label = await screen.findByText("Autopilot run");
+    expect(label.closest("a")).toBeNull();
+  });
 });

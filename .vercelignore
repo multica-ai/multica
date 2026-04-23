@@ -16,35 +16,33 @@ _features
 .husky
 .vscode
 
-!.env.example
+/.dockerignore
+/.goreleaser.yml
+/AGENTS.md
+/CLAUDE.md
+/CLI_AND_DAEMON.md
+/CLI_INSTALL.md
+/CONTRIBUTING.md
+/Dockerfile
+/Dockerfile.web
+/HANDOFF_ARCHITECTURE_AUDIT.md
+/Makefile
+/README.md
+/README.zh-CN.md
+/SELF_HOSTING.md
+/SELF_HOSTING_ADVANCED.md
+/SELF_HOSTING_AI.md
+/docker-compose*.yml
+/playwright.config.ts
+/skills-lock.json
 
-.dockerignore
-.goreleaser.yml
-AGENTS.md
-CLAUDE.md
-CLI_AND_DAEMON.md
-CLI_INSTALL.md
-CONTRIBUTING.md
-Dockerfile
-Dockerfile.web
-HANDOFF_ARCHITECTURE_AUDIT.md
-Makefile
-README.md
-README.zh-CN.md
-SELF_HOSTING.md
-SELF_HOSTING_ADVANCED.md
-SELF_HOSTING_AI.md
-docker-compose*.yml
-playwright.config.ts
-scripts
-skills-lock.json
-
-.github
-docker
-docs
-e2e
-server
-apps/desktop
+/.github/
+/docker/
+/docs/
+/e2e/
+/server/
+/apps/desktop/
+/scripts/
 
 *.log
 *.pid
@@ -66,6 +64,22 @@ dist
 out
 build
 dist-electron
+
+# Deployment-only trims: tests and lint configs are not used by `next build`.
+**/__tests__/**
+**/test/**
+**/*.test.*
+**/*.spec.*
+/packages/eslint-config/
+/apps/web/components.json
+/apps/web/eslint.config.mjs
+/apps/web/vitest.config.ts
+
+# Root repo metadata not needed in the deployment source.
+/.env.example
+/.gitattributes
+/.gitignore
+/LICENSE
 
 *.app
 *.dmg

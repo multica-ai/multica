@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -57,12 +58,34 @@ func main() {
 	bus := events.New()
 	hub := realtime.NewHub()
 	go hub.Run()
-	registerListeners(bus, hub)
+
+	// MUL-1138: when REDIS_URL is set, route fanout through a Redis relay so
+	// multiple API nodes can deliver each other's events. Without it the hub
+	// is the sole broadcaster and the server stays single-node (legacy).
+	relayCtx, relayCancel := context.WithCancel(context.Background())
+	defer relayCancel()
+	var broadcaster realtime.Broadcaster = hub
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+		opts, err := redis.ParseURL(redisURL)
+		if err != nil {
+			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
+		} else {
+			rdb := redis.NewClient(opts)
+			relay := realtime.NewRedisRelay(hub, rdb)
+			relay.Start(relayCtx)
+			broadcaster = relay
+			slog.Info("realtime: Redis relay enabled", "node_id", relay.NodeID())
+		}
+	} else {
+		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
+	}
+	registerListeners(bus, broadcaster)
 
 	analyticsClient := analytics.NewFromEnv()
 	defer analyticsClient.Close()
 
 	queries := db.New(pool)
+	hub.SetAuthorizer(newScopeAuthorizer(queries))
 	// Order matters: subscriber listeners must register BEFORE notification listeners.
 	// The notification listener queries the subscriber table to determine recipients,
 	// so subscribers must be written first within the same synchronous event dispatch.

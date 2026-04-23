@@ -282,6 +282,31 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "Local Skills, LaTeX, Focus Mode & Orphan-Task Recovery",
+        changes: [],
+        features: [
+          "Import runtime local Skills into the workspace as first-class artifacts",
+          "Orphan-task recovery — abandoned agent runs auto-retry, with manual rerun as fallback",
+          "LaTeX rendering in issues, comments and chat",
+          "Chat Focus mode — share the page you're on as conversation context",
+        ],
+        improvements: [
+          "Sub-issue `status_changed` events no longer spam parent-issue subscribers",
+          "Multi-arch Docker release images built natively per-arch (no QEMU)",
+          "Pin sidebar derives fields client-side for snappier reorders",
+          "Expanded reserved-slug list so new slugs can't collide with product routes",
+        ],
+        fixes: [
+          "Gemini runtime model list now includes Gemini 3 and CLI aliases",
+          "Chat focus button disabled on pages without an anchor",
+          "Onboarding pin sync, welcome layout and runtime bootstrap state",
+          "`install.ps1` OS architecture detection hardened for more Windows setups",
+          "`/download` falls back to the previous release within a 1h freshness window",
+        ],
+      },
+      {
         version: "0.2.11",
         date: "2026-04-21",
         title: "Desktop Cross-Platform Packaging, CLI Self-Update & Board Pagination",

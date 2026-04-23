@@ -15,6 +15,7 @@ const (
 	EventOnboardingCompleted           = "onboarding_completed"
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
 	EventStarterContentDecided         = "starter_content_decided"
+	EventFeedbackSubmitted             = "feedback_submitted"
 )
 
 // Onboarding completion paths. Keep in sync with docs/analytics.md.
@@ -259,6 +260,42 @@ func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
 			"decision": decision,
 			"branch":   branch,
 		},
+	}
+}
+
+// FeedbackSubmitted fires after a feedback row is successfully inserted.
+// The raw message is stored in the DB and never broadcast — we only emit a
+// coarse length bucket, an image-presence flag, and the client platform /
+// version so support can segment without leaking content.
+func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages bool, platform, appVersion string) Event {
+	props := map[string]any{
+		"message_length_bucket": feedbackLengthBucket(messageLen),
+		"has_images":            hasImages,
+	}
+	if platform != "" {
+		props["platform"] = platform
+	}
+	if appVersion != "" {
+		props["app_version"] = appVersion
+	}
+	return Event{
+		Name:        EventFeedbackSubmitted,
+		DistinctID:  userID,
+		WorkspaceID: workspaceID,
+		Properties:  props,
+	}
+}
+
+func feedbackLengthBucket(n int) string {
+	switch {
+	case n < 100:
+		return "0-100"
+	case n < 500:
+		return "100-500"
+	case n < 2000:
+		return "500-2000"
+	default:
+		return "2000+"
 	}
 }
 

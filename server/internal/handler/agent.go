@@ -139,6 +139,7 @@ type AgentTaskResponse struct {
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+	AutopilotRunID        string         `json:"autopilot_run_id,omitempty"`        // non-empty for autopilot-spawned tasks
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -181,6 +182,11 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		// Surface task source so the UI can distinguish issue-linked tasks
+		// from chat-spawned or autopilot-spawned ones; all three may arrive
+		// with issue_id = "" once a task has no linked issue.
+		ChatSessionID:  uuidToString(t.ChatSessionID),
+		AutopilotRunID: uuidToString(t.AutopilotRunID),
 	}
 }
 

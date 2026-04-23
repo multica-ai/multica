@@ -60,7 +60,7 @@ function IssueMention({
   };
 
   return (
-    <a href={issuePath} onClick={handleClick} className="inline-flex">
+    <a href={issuePath} onClick={handleClick} className="issue-mention inline-flex">
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}

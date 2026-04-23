@@ -63,6 +63,11 @@ export {
   type DownloadInitiatedPayload,
 } from "./download";
 
+export {
+  captureFeedbackOpened,
+  type FeedbackOpenedSource,
+} from "./feedback";
+
 export interface AnalyticsConfig {
   key: string;
   host: string;

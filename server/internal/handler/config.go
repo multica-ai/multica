@@ -22,6 +22,10 @@ type AppConfig struct {
 	PosthogHost string `json:"posthog_host"`
 }
 
+// GetConfig is mounted on the public (unauthenticated) route group because
+// the web app calls it before login to decide whether to render the Google
+// sign-in button and signup UI. Only add fields here that are safe to expose
+// to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
 		AllowSignup:    os.Getenv("ALLOW_SIGNUP") != "false",
