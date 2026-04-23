@@ -111,7 +111,11 @@ export function useRealtimeSync(
       },
       skill: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+          // Also invalidate skill matrix queries
+          qc.invalidateQueries({ queryKey: ["skill-matrix"] });
+        }
       },
       project: () => {
         const wsId = getCurrentWsId();
