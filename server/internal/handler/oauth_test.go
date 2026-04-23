@@ -28,7 +28,8 @@ func newFakeOAuthProvider(id string) *fakeOAuthProvider {
 		id:         id,
 		configured: true,
 		profile: auth.OAuthProfile{
-			Email: "user@example.com",
+			Email:         "user@example.com",
+			EmailVerified: true,
 		},
 	}
 }
@@ -53,12 +54,28 @@ func (f *fakeOAuthProvider) FetchProfile(ctx context.Context, accessToken string
 }
 
 // postOAuthLogin dispatches through h.OAuthLogin with the chi URL param
-// populated, matching how the router mounts the real route.
+// populated, matching how the router mounts the real route. Injects a
+// matching CSRF cookie+nonce so tests don't have to repeat the /start dance;
+// tests that exercise the CSRF path bypass this via postOAuthLoginRaw.
 func postOAuthLogin(provider string, body map[string]string) *httptest.ResponseRecorder {
+	const nonce = "test-nonce"
+	if body == nil {
+		body = map[string]string{}
+	}
+	if _, ok := body["nonce"]; !ok {
+		body["nonce"] = nonce
+	}
+	return postOAuthLoginRaw(provider, body, &http.Cookie{Name: auth.OAuthCSRFCookieName, Value: nonce})
+}
+
+func postOAuthLoginRaw(provider string, body any, cookie *http.Cookie) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
 	_ = json.NewEncoder(&buf).Encode(body)
 	req := httptest.NewRequest(http.MethodPost, "/auth/oauth/"+provider, &buf)
 	req.Header.Set("Content-Type", "application/json")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("provider", provider)
@@ -97,9 +114,10 @@ func TestOAuthLoginCreatesNewUser(t *testing.T) {
 
 	fp := newFakeOAuthProvider("google")
 	fp.profile = auth.OAuthProfile{
-		Email:   email,
-		Name:    "Google New User",
-		Picture: "https://example.com/avatar.png",
+		Email:         email,
+		Name:          "Google New User",
+		Picture:       "https://example.com/avatar.png",
+		EmailVerified: true,
 	}
 	defer withFakeProvider(t, "google", fp)()
 
@@ -133,7 +151,7 @@ func TestOAuthLoginReusesExistingUser(t *testing.T) {
 	email := handlerTestEmail
 
 	fp := newFakeOAuthProvider("google")
-	fp.profile = auth.OAuthProfile{Email: email, Name: "Handler Test User"}
+	fp.profile = auth.OAuthProfile{Email: email, Name: "Handler Test User", EmailVerified: true}
 	defer withFakeProvider(t, "google", fp)()
 
 	w := postOAuthLogin("google", map[string]string{"code": "c", "redirect_uri": "x"})
@@ -158,6 +176,17 @@ func TestOAuthLoginRejectsAccountWithNoEmail(t *testing.T) {
 	w := postOAuthLogin("google", map[string]string{"code": "c", "redirect_uri": "x"})
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOAuthLoginRejectsUnverifiedEmail(t *testing.T) {
+	fp := newFakeOAuthProvider("google")
+	fp.profile = auth.OAuthProfile{Email: "unverified@multica.ai", EmailVerified: false}
+	defer withFakeProvider(t, "google", fp)()
+
+	w := postOAuthLogin("google", map[string]string{"code": "c", "redirect_uri": "x"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
 	}
 }
 
@@ -207,6 +236,84 @@ func TestOAuthLoginUnknownProviderReturns404(t *testing.T) {
 	w := postOAuthLogin("does-not-exist", map[string]string{"code": "c"})
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestOAuthLoginRejectsMissingCSRFCookie(t *testing.T) {
+	defer withFakeProvider(t, "google", newFakeOAuthProvider("google"))()
+
+	// No cookie supplied — attacker-initiated flow with only a body nonce.
+	w := postOAuthLoginRaw("google", map[string]string{"code": "c", "redirect_uri": "x", "nonce": "attacker"}, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without cookie, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOAuthLoginRejectsCSRFNonceMismatch(t *testing.T) {
+	defer withFakeProvider(t, "google", newFakeOAuthProvider("google"))()
+
+	w := postOAuthLoginRaw("google",
+		map[string]string{"code": "c", "redirect_uri": "x", "nonce": "presented"},
+		&http.Cookie{Name: auth.OAuthCSRFCookieName, Value: "different"},
+	)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on mismatch, got %d", w.Code)
+	}
+}
+
+func TestStartOAuthIssuesNonceAndCookie(t *testing.T) {
+	defer withFakeProvider(t, "google", newFakeOAuthProvider("google"))()
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/oauth/google/start", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("provider", "google")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	testHandler.StartOAuth(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var out map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	nonce := out["nonce"]
+	if len(nonce) < 32 {
+		t.Fatalf("nonce too short: %q", nonce)
+	}
+
+	var seen *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == auth.OAuthCSRFCookieName {
+			seen = c
+			break
+		}
+	}
+	if seen == nil {
+		t.Fatal("expected OAuthCSRF cookie to be set")
+	}
+	if seen.Value != nonce {
+		t.Fatalf("cookie value != body nonce")
+	}
+	if !seen.HttpOnly {
+		t.Fatal("cookie must be HttpOnly")
+	}
+	if seen.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("expected SameSite=Lax, got %v", seen.SameSite)
+	}
+}
+
+func TestOAuthLoginRejectsEmptyBodyNonce(t *testing.T) {
+	defer withFakeProvider(t, "google", newFakeOAuthProvider("google"))()
+
+	w := postOAuthLoginRaw("google",
+		map[string]string{"code": "c", "redirect_uri": "x"},
+		&http.Cookie{Name: auth.OAuthCSRFCookieName, Value: "anything"},
+	)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when body nonce missing, got %d", w.Code)
 	}
 }
 

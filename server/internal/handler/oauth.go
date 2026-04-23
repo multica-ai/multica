@@ -19,6 +19,31 @@ import (
 type oauthLoginRequest struct {
 	Code        string `json:"code"`
 	RedirectURI string `json:"redirect_uri"`
+	Nonce       string `json:"nonce"`
+}
+
+// StartOAuth issues a CSRF nonce for an OAuth flow. The client embeds the
+// returned nonce into the `state` parameter and POSTs it back on callback;
+// the matching cookie set here makes an attacker-crafted callback URL
+// unusable in a victim's browser.
+func (h *Handler) StartOAuth(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "provider")
+	provider, ok := h.OAuthProviders[providerID]
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown provider")
+		return
+	}
+	if !provider.Configured() {
+		writeError(w, http.StatusServiceUnavailable, providerID+" login is not configured")
+		return
+	}
+	nonce, err := auth.GenerateOAuthCSRFNonce()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate nonce")
+		return
+	}
+	auth.SetOAuthCSRFCookie(w, nonce)
+	writeJSON(w, http.StatusOK, map[string]string{"nonce": nonce})
 }
 
 // OAuthLogin is the single entry point for all OAuth providers, dispatched
@@ -45,6 +70,11 @@ func (h *Handler) OAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
+	if !auth.VerifyOAuthCSRF(r, req.Nonce) {
+		writeError(w, http.StatusForbidden, "invalid or expired OAuth state")
+		return
+	}
+	auth.ClearOAuthCSRFCookie(w)
 
 	redirectURI := req.RedirectURI
 	if redirectURI == "" {
@@ -69,6 +99,10 @@ func (h *Handler) OAuthLogin(w http.ResponseWriter, r *http.Request) {
 	profile.Email = strings.ToLower(strings.TrimSpace(profile.Email))
 	if profile.Email == "" {
 		writeError(w, http.StatusForbidden, providerID+" account has no email")
+		return
+	}
+	if !profile.EmailVerified {
+		writeError(w, http.StatusForbidden, "email not verified by identity provider")
 		return
 	}
 

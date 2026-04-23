@@ -155,6 +155,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	// Auth (public)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
+	r.Post("/auth/oauth/{provider}/start", h.StartOAuth)
 	r.Post("/auth/oauth/{provider}", h.OAuthLogin)
 	r.Post("/auth/logout", h.Logout)
 

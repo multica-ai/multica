@@ -1,3 +1,4 @@
+import { api } from "../api";
 import type { OAuthProviderRuntimeConfig } from "../config";
 
 /**
@@ -11,6 +12,9 @@ export interface OAuthStateParts {
   platform?: string;
   /** Safe relative next-url. Caller is responsible for sanitising before encoding and after decoding. */
   next?: string;
+  /** CSRF nonce issued by POST /auth/oauth/{provider}/start; must round-trip
+   *  through the provider and match the cookie the server set at /start. */
+  nonce?: string;
 }
 
 export function encodeOAuthState(parts: OAuthStateParts): string {
@@ -18,6 +22,7 @@ export function encodeOAuthState(parts: OAuthStateParts): string {
   if (parts.providerId) params.set("provider", parts.providerId);
   if (parts.platform) params.set("platform", parts.platform);
   if (parts.next) params.set("next", parts.next);
+  if (parts.nonce) params.set("nonce", parts.nonce);
   return params.toString();
 }
 
@@ -28,6 +33,7 @@ export function decodeOAuthState(raw: string | null | undefined): OAuthStatePart
     providerId: params.get("provider") ?? undefined,
     platform: params.get("platform") ?? undefined,
     next: params.get("next") ?? undefined,
+    nonce: params.get("nonce") ?? undefined,
   };
 }
 
@@ -65,14 +71,17 @@ export interface StartOAuthOptions {
 }
 
 /**
- * Starts an OAuth flow: builds the provider authorize URL to navigate to.
- * All provider-agnostic.
+ * Starts an OAuth flow: asks the server to mint a CSRF nonce (which also sets
+ * the cookie the server will later verify) and returns the authorize URL to
+ * navigate to. All provider-agnostic.
  */
 export async function startOAuthRedirect(opts: StartOAuthOptions): Promise<string> {
+  const { nonce } = await api.oauthStart(opts.providerId);
   const state = encodeOAuthState({
     providerId: opts.providerId,
     platform: opts.platform,
     next: opts.next ?? undefined,
+    nonce,
   });
   const redirectUri = `${window.location.origin}${opts.cfg.callbackPath}`;
   return buildAuthorizeUrl(opts.cfg, state, redirectUri);

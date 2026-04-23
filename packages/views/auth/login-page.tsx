@@ -98,6 +98,7 @@ export function LoginPage({
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [existingUser, setExistingUser] = useState<User | null>(null);
   // Tracks how the existing session was detected so handleCliAuthorize
@@ -144,13 +145,21 @@ export function LoginPage({
     return () => clearTimeout(timer);
   }, [cooldown]);
 
+  // Ref-based re-entry guard. The `loading` state alone isn't enough because
+  // React batches state updates — two rapid clicks / Enter presses can both
+  // pass the `disabled` check before the first render flushes. The ref is
+  // updated synchronously and blocks concurrent handler invocations.
+  const submittingRef = useRef(false);
+
   const handleSendCode = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
+      if (submittingRef.current) return;
       if (!email) {
         setError("Email is required");
         return;
       }
+      submittingRef.current = true;
       setLoading(true);
       setError("");
       try {
@@ -165,6 +174,7 @@ export function LoginPage({
             : "Failed to send code. Make sure the server is running.",
         );
       } finally {
+        submittingRef.current = false;
         setLoading(false);
       }
     },
@@ -219,6 +229,8 @@ export function LoginPage({
 
   const handleCliAuthorize = async () => {
     if (!cliCallback) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
 
     try {
@@ -239,21 +251,30 @@ export function LoginPage({
       setError("Failed to authorize CLI. Please log in again.");
       setExistingUser(null);
       setStep("email");
+      submittingRef.current = false;
       setLoading(false);
     }
   };
 
   const handleProviderLogin = useCallback(
     async (provider: OAuthProviderButton) => {
+      if (submittingRef.current) return;
+      submittingRef.current = true;
+      setOauthLoading(true);
       setError("");
       try {
         await provider.onLogin();
+        // Keep `oauthLoading` true on success — provider.onLogin is expected
+        // to navigate the window away, and we don't want buttons re-enabling
+        // during that brief window between resolve and unload.
       } catch (err) {
         setError(
           err instanceof Error
             ? err.message
             : "Failed to sign in. Please try again.",
         );
+        submittingRef.current = false;
+        setOauthLoading(false);
       }
     },
     [],
@@ -399,7 +420,7 @@ export function LoginPage({
             form="login-form"
             className="w-full"
             size="lg"
-            disabled={!email || loading}
+            disabled={!email || loading || oauthLoading}
           >
             {loading ? "Sending code..." : "Continue"}
           </Button>
@@ -423,7 +444,7 @@ export function LoginPage({
               onClick={() => {
                 void handleProviderLogin(provider);
               }}
-              disabled={loading}
+              disabled={loading || oauthLoading}
             >
               {provider.icon}
               {provider.label}

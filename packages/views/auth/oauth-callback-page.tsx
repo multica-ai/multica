@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   buildDesktopDeepLink,
@@ -30,6 +30,7 @@ export function OAuthCallbackPage() {
   const oauthProviders = useConfigStore((s) => s.oauthProviders);
   const [error, setError] = useState("");
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
+  const exchangedRef = useRef(false);
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -48,7 +49,11 @@ export function OAuthCallbackPage() {
     // a valid provider state would be rejected here.
     if (Object.keys(oauthProviders).length === 0) return;
 
-    const { providerId, platform, next } = decodeOAuthState(
+    // Single-use: an OAuth code can only be exchanged once; StrictMode, effect
+    // re-runs, or the user refreshing the tab must not trigger a second POST.
+    if (exchangedRef.current) return;
+
+    const { providerId, platform, next, nonce } = decodeOAuthState(
       searchParams.get("state"),
     );
     const isDesktop = platform === "desktop";
@@ -59,12 +64,17 @@ export function OAuthCallbackPage() {
       setError("This sign-in method is not enabled on this instance");
       return;
     }
+    if (!nonce) {
+      setError("Missing OAuth state");
+      return;
+    }
 
     const redirectUri = `${window.location.origin}${providerCfg.callbackPath}`;
+    exchangedRef.current = true;
 
     if (isDesktop) {
       api
-        .oauthLogin(providerId, code, redirectUri)
+        .oauthLogin(providerId, code, redirectUri, nonce)
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = buildDesktopDeepLink(token);
@@ -75,7 +85,7 @@ export function OAuthCallbackPage() {
       return;
     }
 
-    loginWithOAuth(providerId, code, redirectUri)
+    loginWithOAuth(providerId, code, redirectUri, nonce)
       .then(async (loggedInUser) => {
         const wsList = await api.listWorkspaces();
         qc.setQueryData(workspaceKeys.list(), wsList);

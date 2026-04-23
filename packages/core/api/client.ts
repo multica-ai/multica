@@ -239,7 +239,8 @@ export class ApiClient {
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
       const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
-      const logLevel = res.status === 404 ? "warn" : "error";
+      // 401/404 are expected (no session, missing resource) — don't spam error logs.
+      const logLevel = res.status === 404 || res.status === 401 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new ApiError(message, res.status, res.statusText);
     }
@@ -273,11 +274,16 @@ export class ApiClient {
     providerId: string,
     code: string,
     redirectUri: string,
+    nonce: string,
   ): Promise<LoginResponse> {
     return this.fetch(`/auth/oauth/${providerId}`, {
       method: "POST",
-      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      body: JSON.stringify({ code, redirect_uri: redirectUri, nonce }),
     });
+  }
+
+  async oauthStart(providerId: string): Promise<{ nonce: string }> {
+    return this.fetch(`/auth/oauth/${providerId}/start`, { method: "POST" });
   }
 
   async logout(): Promise<void> {

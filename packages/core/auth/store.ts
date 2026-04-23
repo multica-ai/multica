@@ -24,6 +24,7 @@ export interface AuthState {
     providerId: string,
     code: string,
     redirectUri: string,
+    nonce: string,
   ) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
@@ -95,8 +96,8 @@ export function createAuthStore(options: AuthStoreOptions) {
       return user;
     },
 
-    loginWithOAuth: async (providerId: string, code: string, redirectUri: string) => {
-      const { token, user } = await api.oauthLogin(providerId, code, redirectUri);
+    loginWithOAuth: async (providerId: string, code: string, redirectUri: string, nonce: string) => {
+      const { token, user } = await api.oauthLogin(providerId, code, redirectUri, nonce);
       if (!cookieAuth) {
         storage.setItem("multica_token", token);
         api.setToken(token);

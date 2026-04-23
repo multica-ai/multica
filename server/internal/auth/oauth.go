@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,67 @@ import (
 	"strings"
 	"time"
 )
+
+// OAuthCSRFCookieName holds the random nonce issued when the user kicks off an
+// OAuth flow. The nonce also rides along in the `state` parameter; on callback
+// the server requires cookie and state nonce to match, preventing login-CSRF
+// where an attacker tricks the victim into completing the attacker's code.
+const OAuthCSRFCookieName = "multica_oauth_csrf"
+
+const oauthCSRFMaxAge = 10 * 60 // 10 minutes — long enough for any real flow, short enough to reject stale attempts
+
+// GenerateOAuthCSRFNonce returns a random hex nonce suitable for both the
+// state parameter and the CSRF cookie value.
+func GenerateOAuthCSRFNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// SetOAuthCSRFCookie writes the nonce cookie with SameSite=Lax so it rides
+// along on the provider's top-level redirect back to the callback page.
+func SetOAuthCSRFCookie(w http.ResponseWriter, nonce string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     OAuthCSRFCookieName,
+		Value:    nonce,
+		Path:     "/",
+		Domain:   cookieDomain(),
+		MaxAge:   oauthCSRFMaxAge,
+		HttpOnly: true,
+		Secure:   isSecureCookie(),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// ClearOAuthCSRFCookie removes the nonce cookie after a successful exchange so
+// the code and cookie can't be replayed.
+func ClearOAuthCSRFCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     OAuthCSRFCookieName,
+		Value:    "",
+		Path:     "/",
+		Domain:   cookieDomain(),
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   isSecureCookie(),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// VerifyOAuthCSRF returns true when presented nonce matches the cookie value.
+// Constant-time compare so callers can't probe for partial matches.
+func VerifyOAuthCSRF(r *http.Request, presented string) bool {
+	if presented == "" {
+		return false
+	}
+	c, err := r.Cookie(OAuthCSRFCookieName)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(c.Value), []byte(presented)) == 1
+}
 
 // OAuthProviderPublicConfig is the per-provider slice surfaced via /api/config.
 // CallbackPath is the redirect_uri and must be echoed verbatim on token exchange.
