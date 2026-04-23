@@ -23,9 +23,9 @@ export function IssuePipelinePicker({
   const activePipeline = pipelines.find((p) => p.id === pipelineId);
 
   const defaultTrigger = (
-    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-muted/60 text-muted-foreground">
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
       <Workflow className="h-3 w-3 shrink-0" />
-      <span className="truncate max-w-[120px]">{activePipeline?.name ?? "No pipeline"}</span>
+      <span className="min-w-0 truncate">{activePipeline?.name ?? "No pipeline"}</span>
     </span>
   );
 

@@ -174,7 +174,7 @@ function PropRow({
   return (
     <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
       <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs truncate">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs">
         {children}
       </div>
     </div>

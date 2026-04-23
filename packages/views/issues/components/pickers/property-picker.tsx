@@ -107,7 +107,7 @@ export function PropertyPicker({
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        className={triggerRender ? undefined : "flex min-w-0 max-w-full items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 overflow-hidden hover:bg-accent/30 transition-colors"}
         render={triggerRender}
       >
         {trigger}

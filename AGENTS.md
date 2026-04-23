@@ -45,3 +45,10 @@ make check            # Full verification pipeline
 ```
 
 See CLAUDE.md for the complete command reference.
+
+### Local Self-Hosted State
+
+- This checkout may be used with a locally modified self-hosted backend/daemon.
+- A CLI version ending with `-dirty` is expected when the self-hosted backend image was built from an uncommitted local checkout.
+- Do not "fix" self-hosted CLI version metadata back to `dev` unless explicitly requested.
+- When validating daemon or CLI behavior, prefer the locally rebuilt self-hosted stack over assumptions based on released artifacts.

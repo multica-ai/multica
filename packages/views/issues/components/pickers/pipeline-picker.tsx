@@ -24,7 +24,7 @@ export function PipelinePicker({ wsId }: { wsId: string }) {
       trigger={
         <>
           <Workflow className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{label}</span>
+          <span className="min-w-0 max-w-[7rem] truncate sm:max-w-[10rem]">{label}</span>
         </>
       }
     >
