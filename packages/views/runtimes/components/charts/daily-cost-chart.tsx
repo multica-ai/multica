@@ -14,7 +14,7 @@ import {
 import type { DailyCostData } from "../../utils";
 
 const costChartConfig = {
-  cost: { label: "Cost", color: "hsl(var(--chart-1))" },
+  cost: { label: "Cost", color: "var(--color-chart-1)" },
 } satisfies ChartConfig;
 
 export function DailyCostChart({ data }: { data: DailyCostData[] }) {
