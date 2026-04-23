@@ -137,6 +137,8 @@ type AgentTaskResponse struct {
 	PriorWorkDir          string         `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerAuthorType     string         `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName     string         `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
 	AutopilotRunID        string         `json:"autopilot_run_id,omitempty"`        // non-empty for autopilot-spawned tasks

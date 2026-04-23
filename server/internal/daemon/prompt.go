@@ -35,10 +35,21 @@ func buildCommentPrompt(task Task) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	if task.TriggerCommentContent != "" {
-		b.WriteString("[NEW COMMENT] A user just left a new comment that triggered this task. You MUST respond to THIS comment, not any previous ones:\n\n")
+		authorLabel := "A user"
+		if task.TriggerAuthorType == "agent" {
+			name := task.TriggerAuthorName
+			if name == "" {
+				name = "another agent"
+			}
+			authorLabel = fmt.Sprintf("Another agent (%s)", name)
+		}
+		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
+		if task.TriggerAuthorType == "agent" {
+			b.WriteString("⚠️ The triggering comment was posted by another agent. Before replying, decide whether a reply is warranted at all. If that comment was an acknowledgment, thanks, or sign-off and no concrete question or task is being asked of you, do NOT reply — silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
+		}
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n\n", task.IssueID)
+	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
