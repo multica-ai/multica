@@ -345,3 +345,77 @@ All queries filter by `workspace_id`. Membership checks gate access. `X-Workspac
 ## Agent Assignees
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
+
+---
+
+## Fork 专属上下文（WYQ425/multica）
+
+当前工作分支：`fix/windows-hide-windows-and-local-repo-path`
+
+### 部署状态
+
+- **自托管服务器**：GCP Linux，路径 `/opt/multica`
+  - 前端：https://multica.kiqq.top → localhost:3000
+  - 后端 API + WebSocket：https://multica-api.kiqq.top → localhost:8080
+  - 通过 Cloudflare Tunnel 暴露，`APP_ENV=development`，登录码 `888888`
+- **本地 Daemon**：Windows 本机，运行本 fork 编译的 `multica.exe`
+- **重新构建**：`make selfhost-build`（Docker Compose，自动跑 DB migration）
+
+### 已完成的改动
+
+**1. Windows Agent 弹窗修复**
+
+每次启动 Agent CLI 时 Windows 弹出可见 cmd 窗口的问题。
+
+- 新增 `server/pkg/agent/proc_windows.go`：`hideAgentWindow()` 设置 `HideWindow=true` + `CREATE_NO_WINDOW`
+- 新增 `server/pkg/agent/proc_other.go`：非 Windows 平台 no-op
+- 在所有 10 个 agent runner（claude, codex, copilot, cursor, gemini, hermes, kimi, openclaw, opencode, pi）的 `exec.CommandContext()` 后调用 `hideAgentWindow(cmd)`
+
+**2. Per-Agent 本地仓库路径（local_repo_path）**
+
+让每个 Agent 可以在前端 Settings 页面配置本地代码路径，Agent 执行时直接在该目录运行而不是创建隔离 workdir。
+
+已改动链路：
+- `server/migrations/057_agent_local_repo_path.up.sql` — DB 新增列
+- `server/pkg/db/queries/agent.sql` — UpdateAgent 查询加字段
+- `server/pkg/db/generated/models.go` — Agent struct 加 `LocalRepoPath pgtype.Text`
+- `server/pkg/db/generated/agent.sql.go` — **UpdateAgent** 的 const/params/scan 已更新（其余函数尚未更新，见下方 Bug）
+- `server/internal/handler/agent.go` — AgentResponse, UpdateAgentRequest, TaskAgentData 加字段
+- `server/internal/handler/daemon.go` — claim 接口填充 TaskAgentData.LocalRepoPath
+- `server/internal/daemon/types.go` — AgentData 加 LocalRepoPath
+- `server/internal/daemon/daemon.go` — 从 task.Agent.LocalRepoPath 传给 execenv
+- `server/internal/daemon/execenv/execenv.go` — PrepareParams 加 LocalRepoPath，Prepare() 支持跳过隔离目录
+- `packages/core/types/agent.ts` — Agent 和 UpdateAgentRequest 加 `local_repo_path?: string`
+- `packages/views/agents/components/tabs/settings-tab.tsx` — Settings Tab 加输入框（在 Model 下方）
+
+### 当前待修复的 Bug
+
+**Bug：切换页面后 local_repo_path 显示为空**
+
+现象：前端保存成功、数据库已有值，但导航离开再回来后输入框重置为空，Agent 执行时仍用默认隔离 workdir。
+
+根本原因：`server/pkg/db/generated/agent.sql.go` 中只有 `UpdateAgent` 函数的 `row.Scan()` 加了 `&i.LocalRepoPath`。其余所有返回 Agent 的函数（`GetAgent`, `ListAgents`, `ListAllAgents`, `GetAgentInWorkspace`, `CreateAgent`, `ArchiveAgent`, `RestoreAgent`, `ClearAgentMcpConfig`, `UpdateAgentStatus` 等）的 Scan 都没有加，导致读取时该字段始终为零值。
+
+**修复方法**：
+
+在 `server/pkg/db/generated/agent.sql.go` 里，找到**所有**包含 `&i.Model,` 的 Scan 调用，在其后加上 `&i.LocalRepoPath,`（已有的 UpdateAgent 处跳过，避免重复）。
+
+同时检查有显式 `RETURNING` 列表的 SQL const 字符串（非 `SELECT *` / `RETURNING *`），在末尾加 `local_repo_path`。
+
+验证：
+```bash
+# 修复后，LocalRepoPath 出现次数应等于返回 Agent 的函数数量
+grep -c "LocalRepoPath" server/pkg/db/generated/agent.sql.go
+
+# API 测试（替换为实际 agent ID 和 token）
+curl -s -H "Authorization: Bearer <token>" \
+  https://multica-api.kiqq.top/api/agents/<agent-id> | python3 -m json.tool | grep local_repo
+# 应返回之前设置的值，而不是空字符串
+```
+
+修复后重新构建：`make selfhost-build`
+
+### 上游 PR / Issue
+
+- PR #1548：https://github.com/multica-ai/multica/pull/1548（本次所有改动）
+- Issue #1521：https://github.com/multica-ai/multica/issues/1521（心跳检查弹窗，待修复）
