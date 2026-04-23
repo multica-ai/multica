@@ -23,10 +23,11 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: agentfarm
-      # Schedule on the DevOps Karpenter NodePool in EKS Auto Mode.
+      # Co-locate on the same arm64 `shared` pool the app pods use.
+      # postgres:17.2 publishes a multi-arch manifest so arm64 works fine.
       nodeSelector:
-        eks.amazonaws.com/compute-type: auto
-        karpenter.sh/nodepool: devops
+        karpenter.sh/nodepool: shared
+        kubernetes.io/arch: arm64
       securityContext:
         runAsNonRoot: true
         runAsUser: 999  # postgres user in postgres:17 image

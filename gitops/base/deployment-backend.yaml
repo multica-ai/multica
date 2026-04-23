@@ -30,10 +30,14 @@ spec:
       serviceAccountName: agentfarm-backend
       imagePullSecrets:
         - name: regcred
-      # EKS Auto Mode, Karpenter devops pool.
+      # EKS Auto Mode, Karpenter `shared` pool (arm64 variant, Graviton).
+      # Images are built linux/arm64 only; the `devops` pool is amd64-only so
+      # it would cause `exec format error`. `shared` is the only tools-cluster
+      # pool with both amd64 + arm64 requirements; vibekanban and
+      # vibekanban-electric use the same pattern.
       nodeSelector:
-        eks.amazonaws.com/compute-type: auto
-        karpenter.sh/nodepool: devops
+        karpenter.sh/nodepool: shared
+        kubernetes.io/arch: arm64
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

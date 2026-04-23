@@ -30,10 +30,12 @@ spec:
       serviceAccountName: agentfarm
       imagePullSecrets:
         - name: regcred
-      # EKS Auto Mode, Karpenter devops pool.
+      # EKS Auto Mode, Karpenter `shared` pool (arm64 variant, Graviton).
+      # See deployment-backend.yaml for rationale (images are arm64-only,
+      # devops pool is amd64-only, shared is the tools-cluster arm64 path).
       nodeSelector:
-        eks.amazonaws.com/compute-type: auto
-        karpenter.sh/nodepool: devops
+        karpenter.sh/nodepool: shared
+        kubernetes.io/arch: arm64
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
