@@ -119,7 +119,8 @@ export function createEditorExtensions(
     TableCell,
     BlockMathExtension,
     InlineMathExtension,
-    Markdown,
+    // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
+    Markdown.configure({ indentation: { style: "space", size: 3 } }),
     FileCardExtension,
     BaseMentionExtension.configure({
       HTMLAttributes: { class: "mention" },

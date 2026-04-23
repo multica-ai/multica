@@ -270,6 +270,24 @@ funnel and used to size hosted-runtime interest.
 
 `distinct_id` is the user's id.
 
+### `feedback_submitted`
+
+Fires from `CreateFeedback` after the `feedback` row is inserted and the
+hourly per-user rate-limit check has passed. Retries within the same hour
+that were rate-limited (429) don't emit. The free-text message is stored
+in the DB and never broadcast.
+
+| Property | Type | Description |
+|---|---|---|
+| `message_length_bucket` | string | `0-100` / `100-500` / `500-2000` / `2000+` — coarse bucket of `len(message)` so we can tell "quick note" from "bug report with repro steps" without leaking content. |
+| `has_images` | bool | `true` when the markdown contains at least one `![...](url)` image reference — signals bug reports with visual evidence. |
+| `platform` | string | Client platform from `X-Client-Platform` header (`web` / `desktop`). Omitted when the header is absent. |
+| `app_version` | string | Client version from `X-Client-Version` header. Omitted when absent. |
+
+`distinct_id` is the submitter's user id; `workspace_id` is attached from
+the modal's current-workspace context and may be empty when feedback is
+sent from a pre-workspace surface.
+
 ### `starter_content_decided`
 
 Fires on the atomic NULL → terminal state transition in both
@@ -343,6 +361,16 @@ request payload.
   - `matched_detect`: `true` when the chosen platform+arch matches
     what the page detected. `false` lets us quantify detect misses
     from the single event (no cross-join needed).
+- `feedback_opened` — fired when the in-app Feedback modal mounts
+  (user clicked "Feedback" in the Help launcher). Paired with the
+  backend's `feedback_submitted` to give a completion rate for the
+  form. Wrapper lives in `packages/core/analytics/feedback.ts`
+  (`captureFeedbackOpened`). Properties:
+  - `source`: `help_menu` (reserved — future entry points like
+    keyboard shortcut or error-toast CTA will pass their own value)
+  - `workspace_id`: string (UUID) when the modal opens inside a
+    workspace. Omitted on pre-workspace surfaces.
+
 - Attribution is NOT a separate event; UTM + referrer origin are written
   to the `multica_signup_source` cookie on the first anonymous pageview
   and read by the backend's `signup` emission. The cookie carries a JSON

@@ -222,6 +222,23 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestConfigRouteIsPublic(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/api/config")
+	if err != nil {
+		t.Fatalf("config request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		CdnDomain string `json:"cdn_domain"`
+	}
+	readJSON(t, resp, &result)
+}
+
 // ---- Auth ----
 
 func TestSendCodeAndVerify(t *testing.T) {

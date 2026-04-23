@@ -15,6 +15,7 @@ import (
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
+// For Hermes:   writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; AGENTS.md points there)
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from ~/.pi/agent/skills/)
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
@@ -26,7 +27,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
@@ -156,8 +157,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
 			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "gemini":
-			// Gemini reads GEMINI.md directly; point it at the fallback skills dir.
+		case "gemini", "hermes":
+			// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path
+			// wired up in resolveSkillsDir, so both fall back to .agent_context/skills/.
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")

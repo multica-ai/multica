@@ -123,15 +123,21 @@ function AppContent() {
   // warning because `switchWorkspace` is a Zustand setState that the
   // TabBar is subscribed to. useLayoutEffect flushes both renders before
   // the user sees anything, so there's no visible flicker.
+  //
+  // Gate on `workspaceListFetched`: useQuery defaults `data` to `[]` before
+  // the first fetch, so without this guard we'd run validation against an
+  // empty slug set, wipe the persisted `activeWorkspaceSlug`, then fall
+  // back to `workspaces[0]` once the real list arrives — losing the user's
+  // last-opened workspace on every app start.
   useLayoutEffect(() => {
-    if (!workspaces) return;
+    if (!workspaceListFetched) return;
     const validSlugs = new Set(workspaces.map((w) => w.slug));
-    const tabStore = useTabStore.getState();
-    tabStore.validateWorkspaceSlugs(validSlugs);
-    if (!tabStore.activeWorkspaceSlug && workspaces.length > 0) {
-      tabStore.switchWorkspace(workspaces[0].slug);
+    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
+    if (!activeWorkspaceSlug && workspaces.length > 0) {
+      switchWorkspace(workspaces[0].slug);
     }
-  }, [workspaces]);
+  }, [workspaces, workspaceListFetched]);
 
   // null = undecided (pre-login or list hasn't settled yet)
   // true  = session started with zero workspaces; next transition to >=1 triggers restart

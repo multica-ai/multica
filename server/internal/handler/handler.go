@@ -121,6 +121,32 @@ func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, pay
 	})
 }
 
+// publishTask is publish() plus a TaskID hint so the realtime layer can route
+// the event to the per-task scope rather than the whole workspace.
+func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID string, payload any) {
+	h.Bus.Publish(events.Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		TaskID:      taskID,
+		Payload:     payload,
+	})
+}
+
+// publishChat is publish() plus a ChatSessionID hint so the realtime layer
+// can route the event to the per-chat-session scope.
+func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
+	h.Bus.Publish(events.Event{
+		Type:          eventType,
+		WorkspaceID:   workspaceID,
+		ActorType:     actorType,
+		ActorID:       actorID,
+		ChatSessionID: chatSessionID,
+		Payload:       payload,
+	})
+}
+
 func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
