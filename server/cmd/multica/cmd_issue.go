@@ -139,9 +139,6 @@ var issueSearchCmd = &cobra.Command{
 	RunE:  runIssueSearch,
 }
 
-var validIssueStatuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
-}
 
 func init() {
 	issueCmd.AddCommand(issueListCmd)
@@ -591,17 +588,6 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
-
-	valid := false
-	for _, s := range validIssueStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validIssueStatuses, ", "))
-	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
