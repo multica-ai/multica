@@ -25,8 +25,10 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { MyIssuesHeader } from "./my-issues-header";
+import { useI18n } from "../../i18n";
 
 export function MyIssuesPage() {
+  const { t } = useI18n();
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
@@ -114,10 +116,10 @@ export function MyIssuesPage() {
 
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error("Failed to move issue") },
+        { onError: () => toast.error(t("issues.page.moveFailed")) },
       );
     },
-    [updateIssueMutation],
+    [t, updateIssueMutation],
   );
 
   if (loading) {
@@ -166,10 +168,10 @@ export function MyIssuesPage() {
       <PageHeader className="gap-1.5">
         <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
         <span className="text-sm text-muted-foreground">
-          {workspace?.name ?? "Workspace"}
+          {workspace?.name ?? t("issues.workspaceFallback")}
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">My Issues</span>
+        <span className="text-sm font-medium">{t("myIssues.page.title")}</span>
       </PageHeader>
 
       {/* Header: scope tabs (left) + controls (right) */}
@@ -180,8 +182,8 @@ export function MyIssuesPage() {
         {myIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">No issues assigned to you</p>
-            <p className="text-xs">Issues you create or are assigned to will appear here.</p>
+            <p className="text-sm">{t("myIssues.page.emptyTitle")}</p>
+            <p className="text-xs">{t("myIssues.page.emptyDescription")}</p>
           </div>
         ) : (
           <div className="flex flex-col flex-1 min-h-0">

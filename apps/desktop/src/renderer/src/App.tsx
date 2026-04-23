@@ -7,6 +7,7 @@ import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { I18nProvider } from "@multica/views/i18n";
 import { Toaster } from "sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
@@ -212,14 +213,16 @@ export default function App() {
   );
   return (
     <ThemeProvider>
-      <CoreProvider
-        apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
-        wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
-        onLogout={handleDaemonLogout}
-        identity={identity}
-      >
-        <AppContent />
-      </CoreProvider>
+      <I18nProvider>
+        <CoreProvider
+          apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
+          wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
+          onLogout={handleDaemonLogout}
+          identity={identity}
+        >
+          <AppContent />
+        </CoreProvider>
+      </I18nProvider>
       <Toaster />
       <UpdateNotification />
     </ThemeProvider>

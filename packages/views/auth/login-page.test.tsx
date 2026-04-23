@@ -55,14 +55,19 @@ vi.mock("@multica/core/types", () => ({}));
 // ---------------------------------------------------------------------------
 
 import { LoginPage, validateCliCallback } from "./login-page";
+import { I18nProvider } from "../i18n";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function getOTPInput() {
-  // input-otp renders a single hidden <input> that holds the OTP value
-  return screen.getByRole("textbox", { hidden: true });
+  // input-otp renders a single hidden <input> with data-input-otp="true".
+  // The page now also includes a language Select, which renders its own
+  // hidden input, so querying by generic textbox role is no longer unique.
+  const input = document.querySelector<HTMLInputElement>('input[data-input-otp="true"]');
+  expect(input).not.toBeNull();
+  return input!;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +110,18 @@ describe("LoginPage", () => {
     expect(
       screen.getByRole("button", { name: /continue/i }),
     ).toBeInTheDocument();
+  });
+
+  it("renders translated copy when a non-default locale is provided", () => {
+    render(
+      <I18nProvider initialLocale="zh">
+        <LoginPage onSuccess={onSuccess} />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("登录 Multica")).toBeInTheDocument();
+    expect(screen.getByText("输入邮箱以获取登录验证码")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续" })).toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
