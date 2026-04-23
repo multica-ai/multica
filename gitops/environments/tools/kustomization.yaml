@@ -23,6 +23,6 @@ patches:
       name: agentfarm-backend
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
-    newTag: SET_BY_CI
+    newTag: 0fedcb22
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: SET_BY_CI
