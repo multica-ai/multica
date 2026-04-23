@@ -4,10 +4,12 @@ import type { TestApiClient } from "./fixtures";
 
 test.describe("Comments", () => {
   let api: TestApiClient;
+  let issueId: string;
 
   test.beforeEach(async ({ page }) => {
     api = await createTestApi();
-    await api.createIssue("E2E Comment Test " + Date.now());
+    const issue = await api.createIssue("E2E Comment Test " + Date.now());
+    issueId = issue.id;
     await loginAsDefault(page);
   });
 
@@ -16,42 +18,38 @@ test.describe("Comments", () => {
   });
 
   test("can add a comment on an issue", async ({ page }) => {
-    // Wait for issues to load and click first one. `*=` matches both legacy
-    // `/issues/{id}` and URL-refactored `/{slug}/issues/{id}` hrefs.
-    const issueLink = page.locator('a[href*="/issues/"]').first();
-    await expect(issueLink).toBeVisible({ timeout: 5000 });
-    await issueLink.click();
-    await page.waitForURL(/\/issues\/[\w-]+/);
+    await page.goto(`/e2e-workspace/issues/${issueId}`);
+    await page.waitForURL(new RegExp(`/issues/${issueId}$`));
 
-    // Wait for issue detail to load
     await expect(page.locator("text=Properties")).toBeVisible();
 
-    // Type a comment
     const commentText = "E2E comment " + Date.now();
-    const commentInput = page.locator(
-      'input[placeholder="Leave a comment..."]',
+    const commentEditor = page.locator(".rich-text-editor").last();
+    const composer = commentEditor.locator(
+      'xpath=ancestor::div[contains(@class, "ring-1")][1]',
     );
-    await commentInput.fill(commentText);
+    await commentEditor.focus();
+    await page.keyboard.type(commentText);
+    const submitBtn = composer.locator('button[data-slot="button"]').last();
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click({ force: true });
 
-    // Submit the comment
-    await page.locator('form button[type="submit"]').last().click();
-
-    // Comment should appear in the activity section
-    await expect(page.locator(`text=${commentText}`)).toBeVisible({
-      timeout: 5000,
+    await expect(page.getByText(commentText).last()).toBeVisible({
+      timeout: 10000,
     });
   });
 
   test("comment submit button is disabled when empty", async ({ page }) => {
-    const issueLink = page.locator('a[href*="/issues/"]').first();
-    await expect(issueLink).toBeVisible({ timeout: 5000 });
-    await issueLink.click();
-    await page.waitForURL(/\/issues\/[\w-]+/);
+    await page.goto(`/e2e-workspace/issues/${issueId}`);
+    await page.waitForURL(new RegExp(`/issues/${issueId}$`));
 
     await expect(page.locator("text=Properties")).toBeVisible();
 
-    // Submit button should be disabled when input is empty
-    const submitBtn = page.locator('form button[type="submit"]').last();
+    const commentEditor = page.locator(".rich-text-editor").last();
+    const composer = commentEditor.locator(
+      'xpath=ancestor::div[contains(@class, "ring-1")][1]',
+    );
+    const submitBtn = composer.locator('button[data-slot="button"]').last();
     await expect(submitBtn).toBeDisabled();
   });
 });

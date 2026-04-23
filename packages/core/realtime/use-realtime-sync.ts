@@ -168,6 +168,7 @@ export function useRealtimeSync(
       if (!issue?.id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
         onIssueUpdated(qc, wsId, issue);
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
@@ -179,7 +180,10 @@ export function useRealtimeSync(
       const { issue } = p as IssueCreatedPayload;
       if (!issue) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueCreated(qc, wsId, issue);
+      if (wsId) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
+        onIssueCreated(qc, wsId, issue);
+      }
     });
 
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
@@ -187,6 +191,7 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
         onIssueDeleted(qc, wsId, issue_id);
         onInboxIssueDeleted(qc, wsId, issue_id);
       }
@@ -211,7 +216,11 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) {
+        invalidateTimeline(comment.issue_id);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
+      }
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
@@ -418,6 +427,10 @@ export function useRealtimeSync(
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
+      const wsId = getCurrentWsId();
+      if (wsId && payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
+      }
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
@@ -431,6 +444,10 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
+      const wsId = getCurrentWsId();
+      if (wsId && payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
+      }
       if (!payload.chat_session_id) return;
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
@@ -446,6 +463,22 @@ export function useRealtimeSync(
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:session_read (global)", payload);
       invalidateSessionLists();
+    });
+
+    const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
+      const payload = p as { issue_id?: string };
+      const wsId = getCurrentWsId();
+      if (wsId && payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
+      }
+    });
+
+    const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
+      const payload = p as { issue_id?: string };
+      const wsId = getCurrentWsId();
+      if (wsId && payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
+      }
     });
 
     return () => {
@@ -477,6 +510,8 @@ export function useRealtimeSync(
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
+      unsubTaskDispatch();
+      unsubTaskCancelled();
       timers.forEach(clearTimeout);
       timers.clear();
     };

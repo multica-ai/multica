@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueExecutionSummary, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
@@ -103,6 +103,9 @@ export function BoardView({
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  executionSummaryMap,
+  selectedIssueId,
+  onOpenIssue,
   myIssuesScope,
   myIssuesFilter,
 }: {
@@ -115,6 +118,9 @@ export function BoardView({
     newPosition?: number
   ) => void;
   childProgressMap?: Map<string, ChildProgress>;
+  executionSummaryMap?: Map<string, IssueExecutionSummary>;
+  selectedIssueId?: string;
+  onOpenIssue?: (issue: Issue) => void;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -168,6 +174,42 @@ export function BoardView({
   if (!isDraggingRef.current) {
     issueMapRef.current = issueMap;
   }
+
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!selectedIssueId) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    const scrollSelectedIssueIntoView = () => {
+      const card = scroller.querySelector<HTMLElement>(
+        `[data-issue-card-id="${selectedIssueId}"]`,
+      );
+      if (!card) return;
+
+      const scrollerRect = scroller.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const safeLeft = scrollerRect.left + 24;
+      const safeRight = scrollerRect.right - 24;
+      if (cardRect.left >= safeLeft && cardRect.right <= safeRight) return;
+
+      const centeredLeft =
+        card.offsetLeft - Math.max(0, (scroller.clientWidth - card.offsetWidth) / 2);
+      scroller.scrollTo({
+        left: Math.max(0, centeredLeft),
+        behavior: "smooth",
+      });
+    };
+
+    const frameId = requestAnimationFrame(scrollSelectedIssueIntoView);
+    const timeoutId = window.setTimeout(scrollSelectedIssueIntoView, 180);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [selectedIssueId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -279,7 +321,11 @@ export function BoardView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
+      <div
+        ref={scrollerRef}
+        className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4"
+        data-testid="issues-board-scroll-container"
+      >
         {visibleStatuses.map((status) => (
           <PaginatedBoardColumn
             key={status}
@@ -287,6 +333,8 @@ export function BoardView({
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
+            executionSummaryMap={executionSummaryMap}
+            onOpenIssue={onOpenIssue}
             myIssuesOpts={myIssuesOpts}
           />
         ))}
@@ -302,7 +350,11 @@ export function BoardView({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
-            <BoardCardContent issue={activeIssue} childProgress={childProgressMap.get(activeIssue.id)} />
+            <BoardCardContent
+              issue={activeIssue}
+              childProgress={childProgressMap.get(activeIssue.id)}
+              executionSummary={executionSummaryMap?.get(activeIssue.id)}
+            />
           </div>
         ) : null}
       </DragOverlay>
@@ -315,12 +367,16 @@ function PaginatedBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
+  executionSummaryMap,
+  onOpenIssue,
   myIssuesOpts,
 }: {
   status: IssueStatus;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
+  executionSummaryMap?: Map<string, IssueExecutionSummary>;
+  onOpenIssue?: (issue: Issue) => void;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
@@ -333,6 +389,8 @@ function PaginatedBoardColumn({
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
+      executionSummaryMap={executionSummaryMap}
+      onOpenIssue={onOpenIssue}
       totalCount={total}
       footer={
         hasMore ? (

@@ -3,6 +3,7 @@ import type {
   CreateIssueRequest,
   UpdateIssueRequest,
   ListIssuesResponse,
+  IssueExecutionSummary,
   SearchIssuesResponse,
   SearchProjectsResponse,
   UpdateMeRequest,
@@ -283,6 +284,10 @@ export class ApiClient {
 
   async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
     return this.fetch("/api/issues/child-progress");
+  }
+
+  async getIssueExecutionSummaries(): Promise<{ summaries: IssueExecutionSummary[] }> {
+    return this.fetch("/api/issues/execution-summary");
   }
 
   async deleteIssue(id: string): Promise<void> {

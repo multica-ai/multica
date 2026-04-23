@@ -73,7 +73,13 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import {
+  issueListOptions,
+  issueDetailOptions,
+  childIssuesOptions,
+  issueUsageOptions,
+  issueExecutionSummaryOptions,
+} from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -90,6 +96,7 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
 import { ProgressRing } from "./progress-ring";
+import { IssueExecutionBanner } from "./issue-execution";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -335,6 +342,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: executionSummaryMap = new Map() } = useQuery(
+    issueExecutionSummaryOptions(wsId),
+  );
   const currentMemberRole = members.find((m) => m.user_id === user?.id)?.role;
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
@@ -431,6 +441,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   const loading = issueLoading;
+  const executionSummary = executionSummaryMap.get(id);
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
@@ -1014,6 +1025,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
             }}
           />
+
+          <div className="mt-4">
+            <IssueExecutionBanner summary={executionSummary} />
+          </div>
 
           {parentIssue && (
             <AppLink

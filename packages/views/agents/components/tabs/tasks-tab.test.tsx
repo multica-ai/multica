@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Agent, AgentTask, Issue } from "@multica/core/types";
+import type { Agent, AgentTask } from "@multica/core/types";
 
 const mockListAgentTasks = vi.hoisted(() => vi.fn());
-const mockGetIssue = vi.hoisted(() => vi.fn());
+const mockCancelTask = vi.hoisted(() => vi.fn());
+const mockBatchUpdateIssues = vi.hoisted(() => vi.fn());
+const toastState = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -25,8 +30,21 @@ vi.mock("@multica/core/paths", async () => {
 vi.mock("@multica/core/api", () => ({
   api: {
     listAgentTasks: (...args: unknown[]) => mockListAgentTasks(...args),
-    getIssue: (...args: unknown[]) => mockGetIssue(...args),
+    cancelTask: (...args: unknown[]) => mockCancelTask(...args),
   },
+}));
+
+vi.mock("@multica/core/issues/mutations", () => ({
+  useBatchUpdateIssues: () => ({
+    mutateAsync: (...args: unknown[]) => mockBatchUpdateIssues(...args),
+  }),
+}));
+
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "agents"],
+    queryFn: () => Promise.resolve([]),
+  }),
 }));
 
 vi.mock("../../../navigation", () => ({
@@ -35,6 +53,10 @@ vi.mock("../../../navigation", () => ({
       {children}
     </a>
   ),
+}));
+
+vi.mock("sonner", () => ({
+  toast: toastState,
 }));
 
 import { TasksTab } from "./tasks-tab";
@@ -64,12 +86,14 @@ const agent: Agent = {
   archived_by: null,
 };
 
-function renderTasksTab(tasks: AgentTask[], issues: Issue[]) {
+function renderTasksTab(tasks: AgentTask[]) {
   mockListAgentTasks.mockResolvedValue(tasks);
-  mockGetIssue.mockImplementation((id: string) => {
-    const found = issues.find((i) => i.id === id);
-    return found ? Promise.resolve(found) : Promise.reject(new Error("not found"));
+  mockCancelTask.mockResolvedValue({
+    id: "task-1",
+    issue_id: "issue-1",
+    status: "cancelled",
   });
+  mockBatchUpdateIssues.mockResolvedValue(undefined);
 
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -107,39 +131,21 @@ describe("TasksTab", () => {
           result: null,
           error: null,
           created_at: "2026-04-16T00:00:00Z",
-        },
-      ],
-      [
-        {
-          id: "issue-1",
-          workspace_id: "ws-1",
-          number: 1,
-          identifier: "MUL-1",
-          title: "Fix agent task routing",
-          description: "",
-          status: "todo",
-          priority: "medium",
-          assignee_type: null,
-          assignee_id: null,
-          creator_type: "member",
-          creator_id: "user-1",
-          parent_issue_id: null,
-          project_id: null,
-          position: 1,
-          due_date: null,
-          created_at: "2026-04-16T00:00:00Z",
-          updated_at: "2026-04-16T00:00:00Z",
+          trigger_source: "message",
+          trigger_excerpt: "Please fix agent task routing",
+          issue_identifier: "MUL-1",
+          issue_title: "Fix agent task routing",
         },
       ],
     );
 
-    const title = await screen.findByText("Fix agent task routing");
+    const title = await screen.findByText("Please fix agent task routing");
     const link = title.closest("a");
 
     expect(link?.getAttribute("href")).toBe("/test/issues/issue-1");
   });
 
-  it("keeps task rows clickable when the issue is missing from the list query", async () => {
+  it("does not link task rows when the issue cannot be resolved in the workspace", async () => {
     renderTasksTab(
       [
         {
@@ -157,16 +163,59 @@ describe("TasksTab", () => {
           created_at: "2026-04-16T00:00:00Z",
         },
       ],
-      [],
     );
 
     await waitFor(() => {
       expect(mockListAgentTasks).toHaveBeenCalledWith("agent-1");
     });
 
-    const title = await screen.findByText("Issue 12345678...");
+    const title = await screen.findByText("Linked issue unavailable");
     const link = title.closest("a");
 
-    expect(link?.getAttribute("href")).toBe("/test/issues/12345678-fallback");
+    expect(link).toBeNull();
+  });
+
+  it("shows queue metadata and supports single-task cancel", async () => {
+    renderTasksTab([
+      {
+        id: "task-3",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-queue",
+        status: "queued",
+        priority: 2,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-04-16T00:00:00Z",
+        trigger_source: "issue",
+        issue_identifier: "MUL-7",
+        issue_title: "Queued execution",
+        queue_position: 2,
+        queue_ahead_count: 1,
+      },
+    ]);
+
+    await screen.findByText("Issue-triggered execution");
+    expect(screen.getByText("MUL-7 Queued execution")).toBeInTheDocument();
+    expect(screen.getByText("Queue #2 • 1 ahead")).toBeInTheDocument();
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel task" });
+    expect(cancelButton).toHaveTextContent("Cancel");
+    expect(cancelButton).toHaveClass("border-destructive/30");
+
+    const bulkSelect = screen.getByRole("checkbox", {
+      name: "Select task for bulk actions",
+    });
+    expect(bulkSelect.closest("a")).toBeNull();
+
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => {
+      expect(mockCancelTask).toHaveBeenCalledWith("issue-queue", "task-3");
+    });
+    expect(toastState.success).toHaveBeenCalledWith("Task cancelled");
   });
 });

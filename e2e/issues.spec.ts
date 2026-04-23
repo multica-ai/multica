@@ -59,24 +59,15 @@ test.describe("Issues", () => {
   });
 
   test("can navigate to issue detail page", async ({ page }) => {
-    // Create a known issue via API so the test controls its own fixture
     const issue = await api.createIssue("E2E Detail Test " + Date.now());
-
-    // Reload to see the new issue
     await page.reload();
 
-    // Navigate to the issue detail. Use a suffix match so the selector works
-    // whether the href is legacy `/issues/{id}` or URL-refactored
-    // `/{slug}/issues/{id}`.
-    const issueLink = page.locator(`a[href$="/issues/${issue.id}"]`);
-    await expect(issueLink).toBeVisible({ timeout: 5000 });
-    await issueLink.click();
+    await page.getByText(issue.title).first().click();
+    await page.waitForURL(new RegExp(`\\?peek=${issue.id}$`));
+    await page.locator('button[title="Open full detail"]').first().click();
+    await page.waitForURL(new RegExp(`/issues/${issue.id}$`));
 
-    await page.waitForURL(/\/issues\/[\w-]+/);
-
-    // Should show Properties panel
     await expect(page.locator("text=Properties")).toBeVisible();
-    // Should show breadcrumb link back to Issues
     await expect(
       page.locator("a", { hasText: "Issues" }).first(),
     ).toBeVisible();
@@ -92,5 +83,42 @@ test.describe("Issues", () => {
 
     await expect(titleInput).not.toBeVisible();
     await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible();
+  });
+
+  test("clicking an issue card opens preview and expand opens full detail", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const title = "E2E Preview Workbench " + Date.now();
+    const issue = await api.createIssue(title);
+
+    await page.reload();
+    await page.getByText(title).first().click();
+
+    await page.waitForURL(new RegExp(`\\?peek=${issue.id}$`));
+    await expect(page.locator('button[title="Open full detail"]').first()).toBeVisible();
+    await page.locator('button[title="Open full detail"]').first().click();
+    await page.waitForURL(new RegExp(`/issues/${issue.id}$`));
+    await expect(
+      page.getByRole("button", { name: "Back to Workbench" }),
+    ).toBeHidden();
+  });
+
+  test("preview shows queued execution details for a seeded task", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const title = "E2E Queued Preview " + Date.now();
+    const issue = await api.createIssue(title);
+    await api.seedIssueExecution(issue.id, {
+      status: "queued",
+      triggerText: "Please investigate queued preview",
+      priority: 3,
+    });
+
+    await page.reload();
+    await page.getByText(title).first().click();
+
+    await page.waitForURL(new RegExp(`\\?peek=${issue.id}$`));
+    await expect(page.getByText("Queued for execution").first()).toBeVisible();
+    await expect(
+      page.getByText("Trigger: Please investigate queued preview").first(),
+    ).toBeVisible();
   });
 });

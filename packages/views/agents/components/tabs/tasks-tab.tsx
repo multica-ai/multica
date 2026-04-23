@@ -1,60 +1,263 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
-import { ListTodo } from "lucide-react";
-import type { Agent, AgentTask, Issue } from "@multica/core/types";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  ListTodo,
+  Loader2,
+  Play,
+  XCircle,
+} from "lucide-react";
+import { toast } from "sonner";
+import type { Agent, AgentTask } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useQueries } from "@tanstack/react-query";
+import { useBatchUpdateIssues } from "@multica/core/issues/mutations";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { AppLink } from "../../../navigation";
 import { taskStatusConfig } from "../../config";
 
+const ACTIVE_STATUSES = ["running", "dispatched", "queued"] as const;
+
+function isActiveTask(task: AgentTask) {
+  return ACTIVE_STATUSES.includes(task.status as (typeof ACTIVE_STATUSES)[number]);
+}
+
+function canOpenTaskIssue(task: AgentTask) {
+  return Boolean(task.issue_id && task.issue_identifier && task.issue_title);
+}
+
+function formatTaskHeadline(task: AgentTask) {
+  if (task.trigger_source === "chat") {
+    return task.trigger_excerpt?.trim() || "Responded in chat";
+  }
+  if (task.trigger_source === "message") {
+    return task.trigger_excerpt?.trim() || "Responded to a message";
+  }
+  return "Issue-triggered execution";
+}
+
+function formatTaskSubline(task: AgentTask) {
+  if (task.issue_identifier || task.issue_title) {
+    const prefix = [task.issue_identifier, task.issue_title].filter(Boolean).join(" ");
+    return prefix.trim();
+  }
+  if (task.issue_id) {
+    return "Linked issue unavailable";
+  }
+  return "No linked issue";
+}
+
+function formatTaskMeta(task: AgentTask) {
+  if (task.status === "queued") {
+    if (task.queue_blocked_reason) {
+      return task.queue_blocked_reason;
+    }
+    if (task.queue_position) {
+      return `Queue #${task.queue_position} • ${task.queue_ahead_count ?? 0} ahead`;
+    }
+    return `Queued ${new Date(task.created_at).toLocaleString()}`;
+  }
+  if (task.status === "running" && task.started_at) {
+    return `Started ${new Date(task.started_at).toLocaleString()}`;
+  }
+  if (task.status === "dispatched" && task.dispatched_at) {
+    return `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`;
+  }
+  if (task.status === "completed" && task.completed_at) {
+    return `Completed ${new Date(task.completed_at).toLocaleString()}`;
+  }
+  if (task.status === "failed" && task.completed_at) {
+    return `Failed ${new Date(task.completed_at).toLocaleString()}`;
+  }
+  if (task.status === "cancelled" && task.completed_at) {
+    return `Cancelled ${new Date(task.completed_at).toLocaleString()}`;
+  }
+  return `Queued ${new Date(task.created_at).toLocaleString()}`;
+}
+
+function TaskRowBody({ task }: { task: AgentTask }) {
+  const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
+  const Icon = config.icon;
+  const isRunning = task.status === "running";
+  const isActive = isActiveTask(task);
+
+  return (
+    <>
+      <Icon
+        className={`h-4 w-4 shrink-0 ${config.color} ${isRunning ? "animate-spin" : ""}`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">
+          {formatTaskHeadline(task)}
+        </div>
+        <div className="mt-0.5 truncate text-xs text-muted-foreground">
+          {formatTaskSubline(task)}
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {formatTaskMeta(task)}
+        </div>
+        {task.error && task.status === "failed" && (
+          <div className="mt-1 line-clamp-2 text-xs text-destructive">
+            {task.error}
+          </div>
+        )}
+      </div>
+      <span
+        className={`shrink-0 text-xs font-medium ${config.color} ${isActive ? "" : "opacity-80"}`}
+      >
+        {config.label}
+      </span>
+    </>
+  );
+}
+
 export function TasksTab({ agent }: { agent: Agent }) {
-  const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [cancelling, setCancelling] = useState(false);
+  const batchUpdateIssues = useBatchUpdateIssues();
+
+  const {
+    data: tasks = [],
+    isLoading,
+    refetch,
+  } = useQuery({
+    queryKey: ["workspaces", wsId, "agents", agent.id, "tasks"],
+    queryFn: () => api.listAgentTasks(agent.id),
+    retry: false,
+  });
+
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+
+  const sortedTasks = useMemo(() => {
+    return [...tasks].sort((left, right) => {
+      const leftActive = ACTIVE_STATUSES.indexOf(
+        left.status as (typeof ACTIVE_STATUSES)[number],
+      );
+      const rightActive = ACTIVE_STATUSES.indexOf(
+        right.status as (typeof ACTIVE_STATUSES)[number],
+      );
+      const leftIsActive = leftActive !== -1;
+      const rightIsActive = rightActive !== -1;
+      if (leftIsActive && !rightIsActive) return -1;
+      if (!leftIsActive && rightIsActive) return 1;
+      if (leftIsActive && rightIsActive) return leftActive - rightActive;
+      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+    });
+  }, [tasks]);
+
+  const activeTasks = sortedTasks.filter(isActiveTask);
+  const historyTasks = sortedTasks.filter((task) => !isActiveTask(task));
+  const selectedTasks = activeTasks.filter((task) => selectedTaskIds.has(task.id));
+  const selectedIssueIds = Array.from(
+    new Set(
+      selectedTasks
+        .map((task) => task.issue_id)
+        .filter((issueId): issueId is string => !!issueId),
+    ),
+  );
+
+  const toggleSelected = (taskId: string) => {
+    setSelectedTaskIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  const clearSelected = () => setSelectedTaskIds(new Set());
 
   useEffect(() => {
-    setLoading(true);
-    api
-      .listAgentTasks(agent.id)
-      .then(setTasks)
-      .catch(() => setTasks([]))
-      .finally(() => setLoading(false));
-  }, [agent.id]);
-
-  // Resolve each task's issue via its own cached detail query. A task's
-  // issue may or may not be in the paginated issue-list cache, so going
-  // through `issueDetailOptions` is the reliable lookup path (and it shares
-  // the same cache as the issue detail page).
-  const issueIds = useMemo(
-    () => Array.from(new Set(tasks.map((t) => t.issue_id))),
-    [tasks],
-  );
-  const issueQueries = useQueries({
-    queries: issueIds.map((id) => issueDetailOptions(wsId, id)),
-  });
-  const issueMap = useMemo(() => {
-    const map = new Map<string, Issue>();
-    issueQueries.forEach((q, i) => {
-      const id = issueIds[i]!;
-      if (q.data) map.set(id, q.data);
+    setSelectedTaskIds((current) => {
+      const activeIds = new Set(activeTasks.map((task) => task.id));
+      const next = new Set(Array.from(current).filter((taskId) => activeIds.has(taskId)));
+      if (next.size === current.size) return current;
+      return next;
     });
-    return map;
-  }, [issueQueries, issueIds]);
+  }, [activeTasks]);
 
-  if (loading) {
+  const handleCancelSelected = async () => {
+    if (selectedTasks.length === 0 || cancelling) return;
+    setCancelling(true);
+    try {
+      const results = await Promise.allSettled(
+        selectedTasks
+          .filter((task) => !!task.issue_id)
+          .map((task) => api.cancelTask(task.issue_id, task.id)),
+      );
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      if (succeeded > 0) {
+        toast.success(`Cancelled ${succeeded} task${succeeded > 1 ? "s" : ""}`);
+      }
+      if (succeeded !== results.length) {
+        toast.error("Some tasks could not be cancelled");
+      }
+      clearSelected();
+      await refetch();
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleCancelTask = async (task: AgentTask) => {
+    if (!task.issue_id) return;
+    try {
+      await api.cancelTask(task.issue_id, task.id);
+      toast.success("Task cancelled");
+      setSelectedTaskIds((current) => {
+        if (!current.has(task.id)) return current;
+        const next = new Set(current);
+        next.delete(task.id);
+        return next;
+      });
+      await refetch();
+    } catch {
+      toast.error("Failed to cancel task");
+    }
+  };
+
+  const handleReassign = async (agentId: string) => {
+    if (selectedIssueIds.length === 0) return;
+    try {
+      await batchUpdateIssues.mutateAsync({
+        ids: selectedIssueIds,
+        updates: { assignee_type: "agent", assignee_id: agentId },
+      });
+      toast.success(
+        `Reassigned ${selectedIssueIds.length} issue${selectedIssueIds.length > 1 ? "s" : ""}`,
+      );
+      clearSelected();
+      await refetch();
+    } catch {
+      toast.error("Failed to reassign issues");
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="space-y-2">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 rounded-lg border px-4 py-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div
+            key={index}
+            className="flex items-center gap-3 rounded-lg border px-4 py-3"
+          >
             <Skeleton className="h-4 w-4 rounded shrink-0" />
             <div className="flex-1 space-y-1.5">
               <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-3 w-2/3" />
               <Skeleton className="h-3 w-1/3" />
             </div>
             <Skeleton className="h-4 w-16" />
@@ -64,27 +267,64 @@ export function TasksTab({ agent }: { agent: Agent }) {
     );
   }
 
-  // Sort: active tasks (running > dispatched > queued) first, then completed/failed by date
-  const activeStatuses = ["running", "dispatched", "queued"];
-  const sortedTasks = [...tasks].sort((a, b) => {
-    const aActive = activeStatuses.indexOf(a.status);
-    const bActive = activeStatuses.indexOf(b.status);
-    const aIsActive = aActive !== -1;
-    const bIsActive = bActive !== -1;
-    if (aIsActive && !bIsActive) return -1;
-    if (!aIsActive && bIsActive) return 1;
-    if (aIsActive && bIsActive) return aActive - bActive;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
-
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Task Queue</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Issues assigned to this agent and their execution status.
+        <h3 className="text-sm font-semibold">Execution Queue</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Each row represents one execution instance, including queue status and trigger source.
         </p>
       </div>
+
+      {selectedTasks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+          <span className="text-sm font-medium">
+            {selectedTasks.length} selected
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleCancelSelected}
+            disabled={cancelling}
+          >
+            {cancelling ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <XCircle className="mr-1 h-3.5 w-3.5" />
+            )}
+            Cancel
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={selectedIssueIds.length === 0}
+                >
+                  <Play className="mr-1 h-3.5 w-3.5" />
+                  Reassign Agent
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="start">
+              {agents
+                .filter((candidate) => !candidate.archived_at && candidate.id !== agent.id)
+                .map((candidate) => (
+                  <DropdownMenuItem
+                    key={candidate.id}
+                    onClick={() => void handleReassign(candidate.id)}
+                  >
+                    {candidate.name}
+                  </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button size="sm" variant="ghost" onClick={clearSelected}>
+            Clear
+          </Button>
+        </div>
+      )}
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
@@ -95,69 +335,149 @@ export function TasksTab({ agent }: { agent: Agent }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-1.5">
-          {sortedTasks.map((task) => {
-            const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
-            const Icon = config.icon;
-            const issue = issueMap.get(task.issue_id);
-            const isActive = task.status === "running" || task.status === "dispatched";
-            const isRunning = task.status === "running";
-            const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
-              isRunning
-                ? "border-success/40 bg-success/5"
-                : task.status === "dispatched"
-                  ? "border-info/40 bg-info/5"
-                  : ""
-            }`;
-
-            const content = (
-              <>
-                <Icon
-                  className={`h-4 w-4 shrink-0 ${config.color} ${
-                    isRunning ? "animate-spin" : ""
-                  }`}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    {issue && (
-                      <span className="shrink-0 text-xs font-mono text-muted-foreground">
-                        {issue.identifier}
-                      </span>
-                    )}
-                    <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
-                    </span>
+        <div className="space-y-4">
+          <section className="space-y-1.5">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Active
+            </div>
+            {activeTasks.length === 0 ? (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                No active tasks.
+              </div>
+            ) : (
+              activeTasks.map((task) => {
+                const canOpenIssue = canOpenTaskIssue(task);
+                const selectable = canOpenIssue;
+                const selected = selectedTaskIds.has(task.id);
+                const rowClassName = cnRow(task);
+                const selectionControl = (
+                  <div
+                    className={`shrink-0 transition-opacity ${
+                      selected
+                        ? "opacity-100"
+                        : "opacity-0 group-hover/task:opacity-100 focus-within:opacity-100"
+                    }`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <Checkbox
+                      aria-label="Select task for bulk actions"
+                      checked={selected}
+                      disabled={!selectable}
+                      onCheckedChange={() => toggleSelected(task.id)}
+                    />
                   </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {isRunning && task.started_at
-                      ? `Started ${new Date(task.started_at).toLocaleString()}`
-                      : task.status === "dispatched" && task.dispatched_at
-                        ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
-                        : task.status === "completed" && task.completed_at
-                          ? `Completed ${new Date(task.completed_at).toLocaleString()}`
-                          : task.status === "failed" && task.completed_at
-                            ? `Failed ${new Date(task.completed_at).toLocaleString()}`
-                            : `Queued ${new Date(task.created_at).toLocaleString()}`}
-                  </div>
-                </div>
-                <span className={`shrink-0 text-xs font-medium ${config.color}`}>
-                  {config.label}
-                </span>
-              </>
-            );
+                );
 
-            return (
-              <AppLink
-                key={task.id}
-                href={paths.issueDetail(task.issue_id)}
-                className={`${rowClassName} text-foreground no-underline hover:no-underline`}
-              >
-                {content}
-              </AppLink>
-            );
-          })}
+                if (canOpenIssue) {
+                  return (
+                    <div
+                      key={task.id}
+                      className={`${rowClassName} group/task pr-3`}
+                    >
+                      {selectionControl}
+                      <AppLink
+                        href={paths.issueDetail(task.issue_id)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-foreground no-underline hover:no-underline"
+                      >
+                        <TaskRowBody task={task} />
+                      </AppLink>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0 gap-1.5 border-destructive/30 bg-background px-2.5 font-medium text-destructive shadow-sm hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void handleCancelTask(task);
+                        }}
+                        aria-label="Cancel task"
+                        title="Cancel task"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={task.id} className={`${rowClassName} group/task`}>
+                    {selectionControl}
+                    <TaskRowBody task={task} />
+                  </div>
+                );
+              })
+            )}
+          </section>
+
+          <section className="space-y-1.5">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              History
+            </div>
+            {historyTasks.length === 0 ? (
+              <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                No execution history yet.
+              </div>
+            ) : (
+              historyTasks.map((task) => {
+                const rowClassName = cnRow(task);
+                const canOpenIssue = canOpenTaskIssue(task);
+                const rowBody = (
+                  <>
+                    <div className="w-4 shrink-0" />
+                    <TaskRowBody task={task} />
+                  </>
+                );
+
+                if (canOpenIssue) {
+                  return (
+                    <div
+                      key={task.id}
+                      className={`${rowClassName} pr-2`}
+                    >
+                      <AppLink
+                        href={paths.issueDetail(task.issue_id)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-foreground no-underline hover:no-underline"
+                      >
+                        {rowBody}
+                      </AppLink>
+                      <span className="w-8 shrink-0" />
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={task.id} className={rowClassName}>
+                    {rowBody}
+                  </div>
+                );
+              })
+            )}
+          </section>
         </div>
       )}
     </div>
   );
+}
+
+function cnRow(task: AgentTask) {
+  if (task.status === "running") {
+    return "flex items-center gap-3 rounded-lg border border-success/40 bg-success/5 px-4 py-3 transition-shadow hover:shadow-sm";
+  }
+  if (task.status === "dispatched") {
+    return "flex items-center gap-3 rounded-lg border border-info/40 bg-info/5 px-4 py-3 transition-shadow hover:shadow-sm";
+  }
+  if (task.status === "queued") {
+    return "flex items-center gap-3 rounded-lg border border-muted-foreground/20 bg-muted/20 px-4 py-3 transition-shadow hover:shadow-sm";
+  }
+  if (task.status === "failed") {
+    return "flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 transition-shadow hover:shadow-sm";
+  }
+  if (task.status === "completed") {
+    return "flex items-center gap-3 rounded-lg border border-success/20 bg-success/5 px-4 py-3 transition-shadow hover:shadow-sm";
+  }
+  if (task.status === "cancelled") {
+    return "flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm";
+  }
+  return "flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm";
 }

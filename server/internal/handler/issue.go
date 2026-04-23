@@ -44,6 +44,32 @@ type IssueResponse struct {
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
 }
 
+type IssueExecutionSummaryResponse struct {
+	IssueID                string  `json:"issue_id"`
+	State                  string  `json:"state"`
+	QueuedCount            int32   `json:"queued_count"`
+	RunningCount           int32   `json:"running_count"`
+	LatestTaskID           *string `json:"latest_task_id"`
+	LatestAgentID          *string `json:"latest_agent_id"`
+	LatestCompletedAt      *string `json:"latest_completed_at"`
+	LatestError            *string `json:"latest_error"`
+	LatestTriggerCommentID *string `json:"latest_trigger_comment_id"`
+	LatestTriggerExcerpt   *string `json:"latest_trigger_excerpt"`
+}
+
+type issueExecutionSummaryRow struct {
+	IssueID                pgtype.UUID
+	State                  string
+	QueuedCount            int32
+	RunningCount           int32
+	LatestTaskID           pgtype.UUID
+	LatestAgentID          pgtype.UUID
+	LatestCompletedAt      pgtype.Timestamptz
+	LatestError            pgtype.Text
+	LatestTriggerCommentID pgtype.UUID
+	LatestTriggerExcerpt   pgtype.Text
+}
+
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -673,6 +699,122 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		"issues": resp,
 		"total":  total,
 	})
+}
+
+func (h *Handler) GetIssueExecutionSummaries(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	rows, err := h.DB.Query(r.Context(), `
+WITH task_base AS (
+	SELECT
+		atq.issue_id,
+		atq.id,
+		atq.agent_id,
+		atq.status,
+		atq.completed_at,
+		atq.error,
+		atq.created_at,
+		atq.trigger_comment_id
+	FROM agent_task_queue atq
+	JOIN issue i ON i.id = atq.issue_id
+	WHERE i.workspace_id = $1
+),
+active_counts AS (
+	SELECT
+		issue_id,
+		COUNT(*) FILTER (WHERE status = 'queued')::int4 AS queued_count,
+		COUNT(*) FILTER (WHERE status IN ('dispatched', 'running'))::int4 AS running_count
+	FROM task_base
+	WHERE status IN ('queued', 'dispatched', 'running')
+	GROUP BY issue_id
+),
+latest_task AS (
+	SELECT
+		tb.*,
+		ROW_NUMBER() OVER (
+			PARTITION BY tb.issue_id
+			ORDER BY
+				CASE WHEN tb.status IN ('queued', 'dispatched', 'running') THEN 0 ELSE 1 END,
+				COALESCE(tb.completed_at, tb.created_at) DESC,
+				tb.created_at DESC,
+				tb.id DESC
+		) AS row_num
+	FROM task_base tb
+)
+SELECT
+	i.id,
+	CASE
+		WHEN COALESCE(ac.running_count, 0) > 0 THEN 'running'
+		WHEN COALESCE(ac.queued_count, 0) > 0 THEN 'queued'
+		WHEN lt.status = 'failed' THEN 'failed'
+		WHEN lt.status = 'completed' THEN 'completed'
+		ELSE 'idle'
+	END AS state,
+	COALESCE(ac.queued_count, 0) AS queued_count,
+	COALESCE(ac.running_count, 0) AS running_count,
+	lt.id AS latest_task_id,
+	lt.agent_id AS latest_agent_id,
+	lt.completed_at AS latest_completed_at,
+	lt.error AS latest_error,
+	lt.trigger_comment_id AS latest_trigger_comment_id,
+	c.content AS latest_trigger_excerpt
+FROM issue i
+LEFT JOIN active_counts ac ON ac.issue_id = i.id
+LEFT JOIN latest_task lt ON lt.issue_id = i.id AND lt.row_num = 1
+LEFT JOIN comment c ON c.id = lt.trigger_comment_id
+WHERE i.workspace_id = $1
+ORDER BY i.created_at DESC
+`, parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("execution summary query failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load execution summary")
+		return
+	}
+	defer rows.Close()
+
+	summaries := make([]IssueExecutionSummaryResponse, 0)
+	for rows.Next() {
+		var row issueExecutionSummaryRow
+		if err := rows.Scan(
+			&row.IssueID,
+			&row.State,
+			&row.QueuedCount,
+			&row.RunningCount,
+			&row.LatestTaskID,
+			&row.LatestAgentID,
+			&row.LatestCompletedAt,
+			&row.LatestError,
+			&row.LatestTriggerCommentID,
+			&row.LatestTriggerExcerpt,
+		); err != nil {
+			slog.Warn("execution summary scan failed", "workspace_id", workspaceID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to load execution summary")
+			return
+		}
+		summaries = append(summaries, IssueExecutionSummaryResponse{
+			IssueID:                uuidToString(row.IssueID),
+			State:                  row.State,
+			QueuedCount:            row.QueuedCount,
+			RunningCount:           row.RunningCount,
+			LatestTaskID:           uuidToPtr(row.LatestTaskID),
+			LatestAgentID:          uuidToPtr(row.LatestAgentID),
+			LatestCompletedAt:      timestampToPtr(row.LatestCompletedAt),
+			LatestError:            textToPtr(row.LatestError),
+			LatestTriggerCommentID: uuidToPtr(row.LatestTriggerCommentID),
+			LatestTriggerExcerpt:   textToPtr(row.LatestTriggerExcerpt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("execution summary rows failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load execution summary")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"summaries": summaries})
 }
 
 func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {

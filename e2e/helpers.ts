@@ -1,9 +1,11 @@
-import { type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 
 const DEFAULT_E2E_NAME = "E2E User";
 const DEFAULT_E2E_EMAIL = "e2e@multica.ai";
 const DEFAULT_E2E_WORKSPACE = "e2e-workspace";
+const DEFAULT_E2E_WORKSPACE_NAME = "E2E Workspace";
+const PLAYWRIGHT_BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:13366";
 
 /**
  * Log in as the default E2E user and ensure the workspace exists first.
@@ -21,12 +23,34 @@ export async function loginAsDefault(page: Page): Promise<string> {
   );
 
   const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
-    localStorage.setItem("multica_token", t);
-  }, token);
+  await page.context().addCookies([
+    {
+      name: "multica_logged_in",
+      value: "1",
+      url: PLAYWRIGHT_BASE_URL,
+    },
+    {
+      name: "last_workspace_slug",
+      value: workspace.slug,
+      url: PLAYWRIGHT_BASE_URL,
+    },
+    {
+      name: "multica-locale",
+      value: "en",
+      url: PLAYWRIGHT_BASE_URL,
+    },
+  ]);
+  await page.addInitScript(({ authToken }) => {
+    window.localStorage.setItem("multica_token", authToken);
+  }, { authToken: token });
   await page.goto(`/${workspace.slug}/issues`);
-  await page.waitForURL("**/issues", { timeout: 10000 });
+  await expect(page).toHaveURL(
+    new RegExp(`/${workspace.slug}/issues(?:\\?.*)?$`),
+    { timeout: 15000 },
+  );
+  await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible({
+    timeout: 15000,
+  });
   return workspace.slug;
 }
 
@@ -42,8 +66,8 @@ export async function createTestApi(): Promise<TestApiClient> {
 }
 
 export async function openWorkspaceMenu(page: Page) {
-  // Click the workspace switcher button (has ChevronDown icon)
-  await page.locator("aside button").first().click();
-  // Wait for dropdown to appear
-  await page.locator('[class*="popover"]').waitFor({ state: "visible" });
+  await page
+    .getByRole("button", { name: new RegExp(DEFAULT_E2E_WORKSPACE_NAME, "i") })
+    .click();
+  await expect(page.getByText("Log out")).toBeVisible();
 }

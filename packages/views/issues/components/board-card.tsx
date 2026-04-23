@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, memo } from "react";
-import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -20,6 +19,9 @@ import { PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
+import type { IssueExecutionSummary } from "@multica/core/types";
+import { IssueExecutionBadge } from "./issue-execution";
+import { IssueCardLink } from "./issue-card-link";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -45,10 +47,12 @@ export const BoardCardContent = memo(function BoardCardContent({
   issue,
   editable = false,
   childProgress,
+  executionSummary,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
+  executionSummary?: IssueExecutionSummary;
 }) {
   const storeProperties = useViewStore((s) => s.cardProperties);
   const priorityCfg = PRIORITY_CONFIG[issue.priority];
@@ -80,7 +84,10 @@ export const BoardCardContent = memo(function BoardCardContent({
   return (
     <div className="rounded-lg border-[0.5px] bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-shadow group-hover:shadow-sm">
       {/* Row 1: Identifier */}
-      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+        <IssueExecutionBadge summary={executionSummary} />
+      </div>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
@@ -207,7 +214,17 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({
+  issue,
+  childProgress,
+  executionSummary,
+  onOpenIssue,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+  executionSummary?: IssueExecutionSummary;
+  onOpenIssue?: (issue: Issue) => void;
+}) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -233,14 +250,21 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
       style={style}
       {...attributes}
       {...listeners}
+      data-issue-card-id={issue.id}
       className={isDragging ? "opacity-30" : ""}
     >
-      <AppLink
+      <IssueCardLink
         href={p.issueDetail(issue.id)}
+        onOpenIssue={onOpenIssue ? () => onOpenIssue(issue) : undefined}
         className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
       >
-        <BoardCardContent issue={issue} editable childProgress={childProgress} />
-      </AppLink>
+        <BoardCardContent
+          issue={issue}
+          editable
+          childProgress={childProgress}
+          executionSummary={executionSummary}
+        />
+      </IssueCardLink>
     </div>
   );
 });

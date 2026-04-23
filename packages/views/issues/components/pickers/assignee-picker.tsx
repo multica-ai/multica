@@ -32,6 +32,7 @@ export function AssigneePicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  showSelection = true,
 }: {
   assigneeType: IssueAssigneeType | null;
   assigneeId: string | null;
@@ -41,6 +42,7 @@ export function AssigneePicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  showSelection?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -110,7 +112,7 @@ export function AssigneePicker({
       {/* Unassigned option — hidden when search is active */}
       {!query && (
         <PickerItem
-          selected={!assigneeType && !assigneeId}
+          selected={showSelection && !assigneeType && !assigneeId}
           onClick={() => {
             onUpdate({ assignee_type: null, assignee_id: null });
             setOpen(false);
@@ -127,7 +129,7 @@ export function AssigneePicker({
           {filteredMembers.map((m) => (
             <PickerItem
               key={m.user_id}
-              selected={isSelected("member", m.user_id)}
+              selected={showSelection && isSelected("member", m.user_id)}
               onClick={() => {
                 onUpdate({
                   assignee_type: "member",
@@ -151,7 +153,7 @@ export function AssigneePicker({
             return (
               <PickerItem
                 key={a.id}
-                selected={isSelected("agent", a.id)}
+                selected={showSelection && isSelected("agent", a.id)}
                 disabled={!allowed}
                 onClick={() => {
                   if (!allowed) return;

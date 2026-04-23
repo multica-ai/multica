@@ -36,6 +36,14 @@ export interface AgentTask {
   result: unknown;
   error: string | null;
   created_at: string;
+  trigger_source?: "message" | "issue" | "chat";
+  trigger_comment_id?: string | null;
+  trigger_excerpt?: string | null;
+  queue_position?: number | null;
+  queue_ahead_count?: number | null;
+  queue_blocked_reason?: string | null;
+  issue_identifier?: string | null;
+  issue_title?: string | null;
 }
 
 export interface Agent {
