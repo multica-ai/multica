@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -20,6 +20,7 @@ import { useCreateFeedback } from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { captureFeedbackOpened } from "@multica/core/analytics";
 
 const MAX_MESSAGE_LEN = 10000;
 
@@ -32,6 +33,15 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
   });
   const { uploadWithToast } = useFileUpload(api);
   const mutation = useCreateFeedback();
+
+  // Fire the "modal opened" analytics event once per mount. Pairs with
+  // the backend's `feedback_submitted` to give a funnel completion rate.
+  // Workspace id is captured from the closure at mount time — the modal
+  // is short-lived, so there's no meaningful workspace switch to track.
+  useEffect(() => {
+    captureFeedbackOpened("help_menu", workspace?.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const canSubmit =
     message.trim().length > 0 &&

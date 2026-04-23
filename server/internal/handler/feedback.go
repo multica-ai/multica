@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// feedbackImageRegex is a coarse check for markdown image syntax ![alt](url).
+// It exists only to set the `has_images` analytics flag — we don't need a
+// full markdown parser; a false positive on a literal "![" in prose is
+// acceptable for a support-triage signal.
+var feedbackImageRegex = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
 
 const (
 	feedbackMaxMessageLen   = 10000
@@ -103,6 +111,16 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("feedback submitted", append(logger.RequestAttrs(r), "feedback_id", uuidToString(fb.ID))...)
+
+	h.Analytics.Capture(analytics.FeedbackSubmitted(
+		userID,
+		uuidToString(fb.WorkspaceID),
+		len(message),
+		feedbackImageRegex.MatchString(message),
+		platform,
+		version,
+	))
+
 	writeJSON(w, http.StatusCreated, FeedbackResponse{
 		ID:        uuidToString(fb.ID),
 		CreatedAt: timestampToString(fb.CreatedAt),
