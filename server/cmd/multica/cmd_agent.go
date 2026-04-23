@@ -124,6 +124,7 @@ func init() {
 	agentUpdateCmd.Flags().String("name", "", "New name")
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
+	agentUpdateCmd.Flags().String("instructions-file", "", "Path to a file containing the new instructions (mutually exclusive with --instructions)")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
@@ -413,9 +414,20 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
+	if cmd.Flags().Changed("instructions") && cmd.Flags().Changed("instructions-file") {
+		return fmt.Errorf("--instructions and --instructions-file are mutually exclusive")
+	}
 	if cmd.Flags().Changed("instructions") {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
+	}
+	if cmd.Flags().Changed("instructions-file") {
+		path, _ := cmd.Flags().GetString("instructions-file")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("--instructions-file: %w", err)
+		}
+		body["instructions"] = string(data)
 	}
 	if cmd.Flags().Changed("runtime-id") {
 		v, _ := cmd.Flags().GetString("runtime-id")
@@ -455,7 +467,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --instructions-file, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
