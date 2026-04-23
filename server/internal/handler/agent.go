@@ -331,6 +331,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only the runtime owner or workspace owner/admin may bind this runtime to an agent.
+	// Runtimes without an owner_id (legacy) are usable by anyone.
+	if member, ok := ctxMember(r.Context()); ok {
+		runtimeOwner := uuidToString(runtime.OwnerID)
+		if runtimeOwner != "" && !roleAllowed(member.Role, "owner", "admin") && runtimeOwner != ownerID {
+			writeError(w, http.StatusForbidden, "you can only use your own runtime to create an agent")
+			return
+		}
+	}
+
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -516,6 +526,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
+		}
+		// Only the runtime owner or workspace owner/admin may bind this runtime to an agent.
+		// Runtimes without an owner_id (legacy) are usable by anyone.
+		userID := requestUserID(r)
+		if member, ok := ctxMember(r.Context()); ok {
+			runtimeOwner := uuidToString(runtime.OwnerID)
+			if runtimeOwner != "" && !roleAllowed(member.Role, "owner", "admin") && runtimeOwner != userID {
+				writeError(w, http.StatusForbidden, "you can only use your own runtime")
+				return
+			}
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}

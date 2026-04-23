@@ -29,8 +29,6 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
 
-type RuntimeFilter = "mine" | "all";
-
 export function CreateAgentDialog({
   runtimes,
   runtimesLoading,
@@ -52,25 +50,17 @@ export function CreateAgentDialog({
   const [model, setModel] = useState("");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
-  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
 
   const getOwnerMember = (ownerId: string | null) => {
     if (!ownerId) return null;
     return members.find((m) => m.user_id === ownerId) ?? null;
   };
 
-  const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-
   const filteredRuntimes = useMemo(() => {
-    const filtered = runtimeFilter === "mine" && currentUserId
+    return currentUserId
       ? runtimes.filter((r) => r.owner_id === currentUserId)
       : runtimes;
-    return [...filtered].sort((a, b) => {
-      if (a.owner_id === currentUserId && b.owner_id !== currentUserId) return -1;
-      if (a.owner_id !== currentUserId && b.owner_id === currentUserId) return 1;
-      return 0;
-    });
-  }, [runtimes, runtimeFilter, currentUserId]);
+  }, [runtimes, currentUserId]);
 
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(filteredRuntimes[0]?.id ?? "");
 
@@ -172,35 +162,7 @@ export function CreateAgentDialog({
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Runtime</Label>
-              {hasOtherRuntimes && (
-                <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => { setRuntimeFilter("mine"); setSelectedRuntimeId(""); }}
-                    className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
-                      runtimeFilter === "mine"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Mine
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setRuntimeFilter("all"); setSelectedRuntimeId(""); }}
-                    className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
-                      runtimeFilter === "all"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    All
-                  </button>
-                </div>
-              )}
-            </div>
+            <Label className="text-xs text-muted-foreground">Runtime</Label>
             <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
               <PopoverTrigger
                 disabled={runtimes.length === 0 && !runtimesLoading}
