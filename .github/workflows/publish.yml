@@ -6,6 +6,7 @@ on:
       - main
     paths-ignore:
       - 'gitops/**'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
