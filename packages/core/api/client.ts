@@ -59,6 +59,9 @@ import type {
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
   UpdateNotificationPreferenceRequest,
+  StartDingTalkBindingRequest,
+  StartDingTalkBindingResponse,
+  CompleteDingTalkBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -333,6 +336,25 @@ export class ApiClient {
   async deleteNotificationBinding(id: string): Promise<void> {
     await this.fetch(`/api/me/notification-bindings/${id}`, {
       method: "DELETE",
+    });
+  }
+
+  async startDingTalkBinding(
+    payload: StartDingTalkBindingRequest,
+  ): Promise<StartDingTalkBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/dingtalk/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeDingTalkBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteDingTalkBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/dingtalk/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
     });
   }
 

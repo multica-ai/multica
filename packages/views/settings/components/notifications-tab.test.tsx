@@ -7,6 +7,7 @@ const apiMock = vi.hoisted(() => ({
   listNotificationPreferences: vi.fn(),
   updateNotificationPreference: vi.fn(),
   deleteNotificationBinding: vi.fn(),
+  startDingTalkBinding: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -50,6 +51,9 @@ describe("NotificationsTab", () => {
       requires_binding: payload.channel === "dingtalk",
     }));
     apiMock.deleteNotificationBinding.mockResolvedValue(undefined);
+    apiMock.startDingTalkBinding.mockResolvedValue({
+      auth_url: "https://login.dingtalk.com/oauth2/auth?state=test",
+    });
   });
 
   it("shows not connected state for dingtalk and keeps the toggle disabled", async () => {
@@ -79,6 +83,22 @@ describe("NotificationsTab", () => {
         channel: "inbox",
         event_type: "mentioned",
         enabled: false,
+      });
+    });
+  });
+
+  it("starts dingtalk binding when connect is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<NotificationsTab />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Connect" }),
+    );
+
+    await waitFor(() => {
+      expect(apiMock.startDingTalkBinding).toHaveBeenCalledWith({
+        next_path: window.location.pathname,
       });
     });
   });

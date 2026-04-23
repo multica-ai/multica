@@ -34,3 +34,16 @@ export interface UpdateNotificationPreferenceRequest {
   event_type: NotificationEventType;
   enabled: boolean;
 }
+
+export interface StartDingTalkBindingRequest {
+  next_path?: string;
+}
+
+export interface StartDingTalkBindingResponse {
+  auth_url: string;
+}
+
+export interface CompleteDingTalkBindingResponse {
+  binding: ExternalAccountBinding;
+  next_path: string | null;
+}

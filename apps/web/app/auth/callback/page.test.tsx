@@ -2,13 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { paths } from "@multica/core/paths";
 
-const { mockPush, mockSearchParams, mockLoginWithGoogle, mockListWorkspaces } =
-  vi.hoisted(() => ({
-    mockPush: vi.fn(),
-    mockSearchParams: new URLSearchParams(),
-    mockLoginWithGoogle: vi.fn(),
-    mockListWorkspaces: vi.fn(),
-  }));
+const {
+  mockPush,
+  mockSearchParams,
+  mockLoginWithGoogle,
+  mockListWorkspaces,
+  mockCompleteDingTalkBinding,
+} = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockSearchParams: new URLSearchParams(),
+  mockLoginWithGoogle: vi.fn(),
+  mockListWorkspaces: vi.fn(),
+  mockCompleteDingTalkBinding: vi.fn(),
+}));
 
 const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
   id: "user-1",
@@ -53,6 +59,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockListWorkspaces,
     googleLogin: vi.fn(),
+    completeDingTalkBinding: mockCompleteDingTalkBinding,
   },
 }));
 
@@ -65,6 +72,19 @@ describe("CallbackPage", () => {
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
+    mockCompleteDingTalkBinding.mockResolvedValue({
+      binding: {
+        id: "binding-1",
+        provider: "dingtalk",
+        external_user_id: "ding-open-id",
+        display_name: "Ding User",
+        status: "active",
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      next_path: "/acme/settings",
+    });
   });
 
   it("unonboarded user lands on /onboarding regardless of next=", async () => {
@@ -107,6 +127,44 @@ describe("CallbackPage", () => {
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
+    });
+  });
+
+  it("routes dingtalk callback through the binding completion API", async () => {
+    mockSearchParams.set("state", "dingtalk.signed-state");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockCompleteDingTalkBinding).toHaveBeenCalledWith(
+        "test-code",
+        "dingtalk.signed-state",
+      );
+      expect(mockPush).toHaveBeenCalledWith("/acme/settings");
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("falls back to / when dingtalk callback has no next_path", async () => {
+    mockSearchParams.set("state", "dingtalk.signed-state");
+    mockCompleteDingTalkBinding.mockResolvedValue({
+      binding: {
+        id: "binding-1",
+        provider: "dingtalk",
+        external_user_id: "ding-open-id",
+        display_name: "Ding User",
+        status: "active",
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      next_path: null,
+    });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.root());
     });
   });
 });

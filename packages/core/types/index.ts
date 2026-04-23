@@ -37,6 +37,9 @@ export type {
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
   UpdateNotificationPreferenceRequest,
+  StartDingTalkBindingRequest,
+  StartDingTalkBindingResponse,
+  CompleteDingTalkBindingResponse,
 } from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";

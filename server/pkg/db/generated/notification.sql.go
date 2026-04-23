@@ -349,6 +349,73 @@ func (q *Queries) ListNotificationEventsByRecipient(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const upsertExternalAccountBinding = `-- name: UpsertExternalAccountBinding :one
+INSERT INTO external_account_binding (
+    user_id,
+    provider,
+    external_user_id,
+    display_name,
+    access_token_encrypted,
+    refresh_token_encrypted,
+    token_expires_at,
+    status,
+    metadata
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (user_id, provider)
+DO UPDATE SET
+    external_user_id = EXCLUDED.external_user_id,
+    display_name = EXCLUDED.display_name,
+    access_token_encrypted = EXCLUDED.access_token_encrypted,
+    refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
+    token_expires_at = EXCLUDED.token_expires_at,
+    status = EXCLUDED.status,
+    metadata = EXCLUDED.metadata,
+    updated_at = now()
+RETURNING id, user_id, provider, external_user_id, display_name, access_token_encrypted, refresh_token_encrypted, token_expires_at, status, metadata, created_at, updated_at
+`
+
+type UpsertExternalAccountBindingParams struct {
+	UserID                pgtype.UUID        `json:"user_id"`
+	Provider              string             `json:"provider"`
+	ExternalUserID        string             `json:"external_user_id"`
+	DisplayName           pgtype.Text        `json:"display_name"`
+	AccessTokenEncrypted  pgtype.Text        `json:"access_token_encrypted"`
+	RefreshTokenEncrypted pgtype.Text        `json:"refresh_token_encrypted"`
+	TokenExpiresAt        pgtype.Timestamptz `json:"token_expires_at"`
+	Status                string             `json:"status"`
+	Metadata              []byte             `json:"metadata"`
+}
+
+func (q *Queries) UpsertExternalAccountBinding(ctx context.Context, arg UpsertExternalAccountBindingParams) (ExternalAccountBinding, error) {
+	row := q.db.QueryRow(ctx, upsertExternalAccountBinding,
+		arg.UserID,
+		arg.Provider,
+		arg.ExternalUserID,
+		arg.DisplayName,
+		arg.AccessTokenEncrypted,
+		arg.RefreshTokenEncrypted,
+		arg.TokenExpiresAt,
+		arg.Status,
+		arg.Metadata,
+	)
+	var i ExternalAccountBinding
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Provider,
+		&i.ExternalUserID,
+		&i.DisplayName,
+		&i.AccessTokenEncrypted,
+		&i.RefreshTokenEncrypted,
+		&i.TokenExpiresAt,
+		&i.Status,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertNotificationChannelPreference = `-- name: UpsertNotificationChannelPreference :one
 INSERT INTO notification_channel_preference (
     user_id,

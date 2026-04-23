@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, Link2Off, Loader2 } from "lucide-react";
+import { BellRing, Link2, Link2Off, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type {
@@ -42,6 +42,7 @@ export function NotificationsTab() {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [removingBindingId, setRemovingBindingId] = useState<string | null>(null);
+  const [startingBinding, setStartingBinding] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -111,6 +112,19 @@ export function NotificationsTab() {
     }
   };
 
+  const handleConnect = async () => {
+    setStartingBinding(true);
+    try {
+      const { auth_url } = await api.startDingTalkBinding({
+        next_path: window.location.pathname,
+      });
+      window.location.assign(auth_url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start DingTalk binding");
+      setStartingBinding(false);
+    }
+  };
+
   const dingTalkBinding = bindingByProvider.get("dingtalk");
 
   if (loading) {
@@ -137,7 +151,7 @@ export function NotificationsTab() {
           <BellRing className="h-4 w-4" />
           <AlertTitle>Current scope</AlertTitle>
           <AlertDescription>
-            DingTalk preference persistence is live here. The account linking callback flow is the next implementation step.
+            DingTalk preference persistence is live here. This step also exposes the real account-linking flow; message delivery worker remains the next implementation step.
           </AlertDescription>
         </Alert>
       </section>
@@ -203,7 +217,7 @@ export function NotificationsTab() {
           <CardHeader>
             <CardTitle className="text-base">DingTalk</CardTitle>
             <CardDescription>
-              The linking entrypoint is the next phase. This tab already reflects binding state and disconnect behavior.
+              Link your DingTalk account here, then opt into the channel above for mentioned notifications.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex items-center justify-between gap-4">
@@ -219,7 +233,7 @@ export function NotificationsTab() {
               <p className="text-sm text-muted-foreground">
                 {dingTalkBinding
                   ? `External user: ${dingTalkBinding.external_user_id}`
-                  : "Once the OAuth callback flow lands, this section will show the linked DingTalk identity."}
+                  : "Connect a DingTalk account to unlock external mention delivery for this channel."}
               </p>
             </div>
 
@@ -239,7 +253,23 @@ export function NotificationsTab() {
                 )}
                 Disconnect
               </Button>
-            ) : null}
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void handleConnect();
+                }}
+                disabled={savingKey !== null || removingBindingId !== null || startingBinding}
+              >
+                {startingBinding ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Link2 className="h-4 w-4" />
+                )}
+                Connect
+              </Button>
+            )}
           </CardContent>
         </Card>
       </section>

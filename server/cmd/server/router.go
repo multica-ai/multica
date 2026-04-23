@@ -169,6 +169,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Get("/api/config", h.GetConfig)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		r.Post("/api/me/notification-bindings/dingtalk/start", h.StartMyDingTalkBinding)
+		r.Post("/api/me/notification-bindings/dingtalk/callback", h.CompleteMyDingTalkBinding)
 		r.Get("/api/me/notification-bindings", h.GetMyNotificationBindings)
 		r.Delete("/api/me/notification-bindings/{bindingId}", h.DeleteMyNotificationBinding)
 		r.Get("/api/me/notification-preferences", h.GetMyNotificationPreferences)

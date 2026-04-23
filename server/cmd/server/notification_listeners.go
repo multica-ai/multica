@@ -107,6 +107,20 @@ func recordMentionNotification(
 		details = emptyDetails
 	}
 
+	payloadSnapshot, err := json.Marshal(map[string]any{
+		"type":       "mentioned",
+		"severity":   "info",
+		"title":      title,
+		"body":       body,
+		"link":       link,
+		"issue_id":   issueID,
+		"comment_id": commentID,
+		"details":    json.RawMessage(details),
+	})
+	if err != nil {
+		payloadSnapshot = emptyDetails
+	}
+
 	event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
 		WorkspaceID:     parseUUID(e.WorkspaceID),
 		RecipientUserID: parseUUID(recipientID),
@@ -131,20 +145,6 @@ func recordMentionNotification(
 		return
 	}
 
-	payloadSnapshot, err := json.Marshal(map[string]any{
-		"type":       "mentioned",
-		"severity":   "info",
-		"title":      title,
-		"body":       body,
-		"link":       link,
-		"issue_id":   issueID,
-		"comment_id": commentID,
-		"details":    json.RawMessage(details),
-	})
-	if err != nil {
-		payloadSnapshot = emptyDetails
-	}
-
 	_, err = queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
 		NotificationEventID: event.ID,
 		Channel:             "inbox",
@@ -156,6 +156,91 @@ func recordMentionNotification(
 	})
 	if err != nil {
 		slog.Error("failed to create inbox delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+
+	recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+}
+
+func recordMentionDingTalkDelivery(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for dingtalk delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var dingtalkPref *db.NotificationChannelPreference
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "dingtalk" && pref.EventType == "mentioned" && pref.Enabled {
+			dingtalkPref = pref
+			break
+		}
+	}
+	if dingtalkPref == nil {
+		return
+	}
+
+	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load external account bindings for dingtalk delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var binding *db.ExternalAccountBinding
+	for i := range bindings {
+		candidate := &bindings[i]
+		if candidate.Provider != "dingtalk" || candidate.Status != "active" {
+			continue
+		}
+		if dingtalkPref.BindingID.Valid && util.UUIDToString(dingtalkPref.BindingID) != util.UUIDToString(candidate.ID) {
+			continue
+		}
+		binding = candidate
+		break
+	}
+	if binding == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"binding_id":         util.UUIDToString(binding.ID),
+		"provider":           binding.Provider,
+		"external_user_id":   binding.ExternalUserID,
+		"notification_event": json.RawMessage(payloadSnapshot),
+	}
+	dingtalkPayload, err := json.Marshal(payload)
+	if err != nil {
+		dingtalkPayload = payloadSnapshot
+	}
+
+	if _, err := queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "dingtalk",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     dingtalkPayload,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Error("failed to create dingtalk delivery record for mention notification",
 			"notification_event_id", util.UUIDToString(event.ID),
 			"recipient_id", recipientID,
 			"error", err,
