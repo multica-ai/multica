@@ -11,6 +11,80 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimNotificationDelivery = `-- name: ClaimNotificationDelivery :one
+UPDATE notification_delivery
+SET status = $2,
+    attempt_count = attempt_count + 1,
+    last_error = NULL,
+    updated_at = now()
+WHERE id = $1 AND status = $3
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at
+`
+
+type ClaimNotificationDeliveryParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Status   string      `json:"status"`
+	Status_2 string      `json:"status_2"`
+}
+
+func (q *Queries) ClaimNotificationDelivery(ctx context.Context, arg ClaimNotificationDeliveryParams) (NotificationDelivery, error) {
+	row := q.db.QueryRow(ctx, claimNotificationDelivery, arg.ID, arg.Status, arg.Status_2)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.NotificationEventID,
+		&i.Channel,
+		&i.Status,
+		&i.AttemptCount,
+		&i.LastError,
+		&i.PayloadSnapshot,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completeNotificationDelivery = `-- name: CompleteNotificationDelivery :one
+UPDATE notification_delivery
+SET status = $2,
+    last_error = $3,
+    sent_at = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at
+`
+
+type CompleteNotificationDeliveryParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	Status    string             `json:"status"`
+	LastError pgtype.Text        `json:"last_error"`
+	SentAt    pgtype.Timestamptz `json:"sent_at"`
+}
+
+func (q *Queries) CompleteNotificationDelivery(ctx context.Context, arg CompleteNotificationDeliveryParams) (NotificationDelivery, error) {
+	row := q.db.QueryRow(ctx, completeNotificationDelivery,
+		arg.ID,
+		arg.Status,
+		arg.LastError,
+		arg.SentAt,
+	)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.NotificationEventID,
+		&i.Channel,
+		&i.Status,
+		&i.AttemptCount,
+		&i.LastError,
+		&i.PayloadSnapshot,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createNotificationDelivery = `-- name: CreateNotificationDelivery :one
 INSERT INTO notification_delivery (
     notification_event_id,
@@ -124,6 +198,31 @@ func (q *Queries) CreateNotificationEvent(ctx context.Context, arg CreateNotific
 		&i.Link,
 		&i.Details,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getExternalAccountBinding = `-- name: GetExternalAccountBinding :one
+SELECT id, user_id, provider, external_user_id, display_name, access_token_encrypted, refresh_token_encrypted, token_expires_at, status, metadata, created_at, updated_at FROM external_account_binding
+WHERE id = $1
+`
+
+func (q *Queries) GetExternalAccountBinding(ctx context.Context, id pgtype.UUID) (ExternalAccountBinding, error) {
+	row := q.db.QueryRow(ctx, getExternalAccountBinding, id)
+	var i ExternalAccountBinding
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Provider,
+		&i.ExternalUserID,
+		&i.DisplayName,
+		&i.AccessTokenEncrypted,
+		&i.RefreshTokenEncrypted,
+		&i.TokenExpiresAt,
+		&i.Status,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -46,10 +46,32 @@ SELECT * FROM notification_delivery
 WHERE status = $1
 ORDER BY created_at ASC;
 
+-- name: ClaimNotificationDelivery :one
+UPDATE notification_delivery
+SET status = $2,
+    attempt_count = attempt_count + 1,
+    last_error = NULL,
+    updated_at = now()
+WHERE id = $1 AND status = $3
+RETURNING *;
+
+-- name: CompleteNotificationDelivery :one
+UPDATE notification_delivery
+SET status = $2,
+    last_error = $3,
+    sent_at = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ListExternalAccountBindingsByUser :many
 SELECT * FROM external_account_binding
 WHERE user_id = $1
 ORDER BY created_at ASC;
+
+-- name: GetExternalAccountBinding :one
+SELECT * FROM external_account_binding
+WHERE id = $1;
 
 -- name: UpsertExternalAccountBinding :one
 INSERT INTO external_account_binding (
