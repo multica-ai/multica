@@ -296,6 +296,71 @@ func TestFetchFromSkillsSh_ResolvesAliasedSkillNamesViaFrontmatter(t *testing.T)
 	if !containsString(*requests, "api.github.com /repos/vercel-labs/agent-skills/git/trees/main?recursive=1") {
 		t.Fatalf("expected fallback tree lookup, got requests %v", *requests)
 	}
+	for _, request := range *requests {
+		if request == "raw.githubusercontent.com /vercel-labs/agent-skills/main/skills/react-best-practices/SKILL.md" {
+			t.Fatalf("unexpected non-matching fallback fetch: %v", *requests)
+		}
+	}
+}
+
+func TestFetchFromSkillsSh_ReturnsActionableErrorForTruncatedTrees(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				if got := r.URL.Query().Get("recursive"); got != "1" {
+					t.Fatalf("tree recursive = %q, want 1", got)
+				}
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/deploy-to-vercel/SKILL.md", Type: "blob"},
+					},
+					Truncated: true,
+				})
+			case "/repos/acme/skills/contents/skills":
+				if got := r.URL.Query().Get("ref"); got != "main" {
+					t.Fatalf("skills ref = %q, want main", got)
+				}
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "SKILL.md",
+						Path:        "skills/deploy-to-vercel/SKILL.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/deploy-to-vercel/SKILL.md",
+					},
+				})
+			case "/repos/acme/skills/contents/.claude/skills":
+				http.NotFound(w, r)
+			case "/repos/acme/skills/contents/plugin/skills":
+				http.NotFound(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/deploy-to-vercel/SKILL.md":
+				w.Write([]byte("---\nname: deploy-to-vercel\n---\ncontent"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/vercel-composition-patterns")
+	if err == nil {
+		t.Fatal("expected error for truncated tree fallback miss")
+	}
+	if !strings.Contains(err.Error(), "tree is too large to scan exhaustively") {
+		t.Fatalf("error = %q, want actionable truncated-tree message", err.Error())
+	}
+	if !containsString(*requests, "api.github.com /repos/acme/skills/contents/skills?ref=main") {
+		t.Fatalf("expected conventional prefix listing, got %v", *requests)
+	}
 }
 
 func TestFetchFromSkillsSh_AnthropicPptxIntegration(t *testing.T) {

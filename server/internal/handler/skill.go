@@ -701,7 +701,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	if skillMdBody == nil {
 		skillDir, skillMdBody, err = resolveGitHubSkillDirByName(httpClient, owner, repo, defaultBranch, rawPrefix, skillName)
 		if err != nil {
-			return nil, fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
+			return nil, err
 		}
 	}
 
@@ -768,37 +768,35 @@ func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBr
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
 	resp, err := httpClient.Get(apiURL)
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: %w", owner, repo, skillName, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: HTTP %d", owner, repo, skillName, resp.StatusCode)
 	}
 
 	var tree githubTreeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
-		return "", nil, err
-	}
-	if tree.Truncated {
-		slog.Warn("skills.sh import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
+		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: %w", owner, repo, skillName, err)
 	}
 
-	for _, entry := range tree.Tree {
-		if entry.Type != "blob" || !strings.HasSuffix(entry.Path, "/SKILL.md") && entry.Path != "SKILL.md" {
-			continue
+	skillPaths := extractSkillMdPaths(tree.Tree)
+	preferred, remaining := partitionSkillMdPaths(skillName, skillPaths)
+	if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, preferred); ok {
+		return dir, body, nil
+	}
+	if !tree.Truncated {
+		if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, remaining); ok {
+			return dir, body, nil
 		}
-		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, entry.Path))
-		if err != nil {
-			slog.Warn("skills.sh import: fallback SKILL.md fetch failed", "path", entry.Path, "error", err)
-			continue
-		}
-		name, _ := parseSkillFrontmatter(string(body))
-		if name == skillName {
-			return skillDirFromSkillFilePath(entry.Path), body, nil
-		}
+		return "", nil, skillMdNotFoundError(owner, repo, skillName)
 	}
 
-	return "", nil, fmt.Errorf("skill %q not found", skillName)
+	slog.Warn("skills.sh import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
+	if dir, body, ok := findSkillDirFromConventionalPrefixes(httpClient, owner, repo, defaultBranch, rawPrefix, skillName); ok {
+		return dir, body, nil
+	}
+	return "", nil, fmt.Errorf("repository %s/%s tree is too large to scan exhaustively for skill %s", owner, repo, skillName)
 }
 
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
@@ -845,6 +843,174 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 			collectGitHubFiles(httpClient, subEntries, out, subURL)
 		}
 	}
+}
+
+func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, bool) {
+	prefixes := []string{"skills", ".claude/skills", "plugin/skills"}
+	var skillPaths []string
+	for _, prefix := range prefixes {
+		paths, err := listGitHubSkillMdPaths(httpClient, owner, repo, prefix, defaultBranch)
+		if err != nil {
+			slog.Warn("skills.sh import: failed to list conventional skill prefix", "prefix", prefix, "error", err)
+			continue
+		}
+		skillPaths = append(skillPaths, paths...)
+	}
+
+	preferred, remaining := partitionSkillMdPaths(skillName, skillPaths)
+	if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, preferred); ok {
+		return dir, body, true
+	}
+	return findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, remaining)
+}
+
+func listGitHubSkillMdPaths(httpClient *http.Client, owner, repo, repoPath, ref string) ([]string, error) {
+	apiURL := buildGitHubContentsURL(owner, repo, repoPath, ref)
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var entries []githubContentEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	collectGitHubSkillMdPaths(httpClient, entries, &paths, apiURL)
+	return paths, nil
+}
+
+func collectGitHubSkillMdPaths(httpClient *http.Client, entries []githubContentEntry, out *[]string, parentURL string) {
+	for _, entry := range entries {
+		lower := strings.ToLower(entry.Name)
+		if entry.Type == "file" {
+			if lower == "skill.md" {
+				*out = append(*out, entry.Path)
+			}
+			continue
+		}
+		if entry.Type != "dir" {
+			continue
+		}
+
+		subURL := entry.URL
+		if subURL == "" {
+			parsed, err := url.Parse(parentURL)
+			if err != nil {
+				slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
+				continue
+			}
+			parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
+			subURL = parsed.String()
+		}
+
+		subResp, err := httpClient.Get(subURL)
+		if err != nil || subResp.StatusCode != http.StatusOK {
+			attrs := []any{"url", subURL}
+			if subResp != nil {
+				attrs = append(attrs, "status", subResp.StatusCode)
+				subResp.Body.Close()
+			}
+			if err != nil {
+				attrs = append(attrs, "error", err)
+			}
+			slog.Warn("skills.sh import: failed to list skill metadata subdirectory", attrs...)
+			continue
+		}
+
+		var subEntries []githubContentEntry
+		if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
+			subResp.Body.Close()
+			slog.Warn("skills.sh import: failed to decode skill metadata subdirectory", "url", subURL, "error", err)
+			continue
+		}
+		subResp.Body.Close()
+		collectGitHubSkillMdPaths(httpClient, subEntries, out, subURL)
+	}
+}
+
+func extractSkillMdPaths(entries []githubTreeEntry) []string {
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Type != "blob" || (!strings.HasSuffix(entry.Path, "/SKILL.md") && entry.Path != "SKILL.md") {
+			continue
+		}
+		paths = append(paths, entry.Path)
+	}
+	return paths
+}
+
+func partitionSkillMdPaths(skillName string, skillPaths []string) (preferred []string, remaining []string) {
+	for _, skillPath := range skillPaths {
+		if isLikelySkillPathMatch(skillName, skillPath) {
+			preferred = append(preferred, skillPath)
+			continue
+		}
+		remaining = append(remaining, skillPath)
+	}
+	return preferred, remaining
+}
+
+func findMatchingSkillDirByFrontmatter(httpClient *http.Client, rawPrefix, skillName string, skillPaths []string) (string, []byte, bool) {
+	for _, skillPath := range skillPaths {
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillPath))
+		if err != nil {
+			slog.Warn("skills.sh import: fallback SKILL.md fetch failed", "path", skillPath, "error", err)
+			continue
+		}
+		name, _ := parseSkillFrontmatter(string(body))
+		if name == skillName {
+			return skillDirFromSkillFilePath(skillPath), body, true
+		}
+	}
+	return "", nil, false
+}
+
+func isLikelySkillPathMatch(skillName, skillPath string) bool {
+	dir := strings.ToLower(skillDirFromSkillFilePath(skillPath))
+	base := strings.ToLower(filepath.Base(dir))
+	for _, hint := range skillNameHints(skillName) {
+		if strings.Contains(dir, hint) || strings.Contains(base, hint) || strings.Contains(hint, base) {
+			return true
+		}
+	}
+	return false
+}
+
+func skillNameHints(skillName string) []string {
+	skillName = strings.ToLower(skillName)
+	parts := strings.Split(skillName, "-")
+	seen := map[string]struct{}{}
+	var hints []string
+
+	addHint := func(value string) {
+		value = strings.TrimSpace(value)
+		if len(value) < 3 {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		hints = append(hints, value)
+	}
+
+	addHint(skillName)
+	for i := 1; i < len(parts); i++ {
+		addHint(strings.Join(parts[i:], "-"))
+	}
+	for _, part := range parts {
+		addHint(part)
+	}
+	return hints
 }
 
 // parseSkillFrontmatter extracts name and description from YAML frontmatter in SKILL.md.
@@ -914,6 +1080,10 @@ func skillDirFromSkillFilePath(path string) string {
 		return ""
 	}
 	return strings.TrimSuffix(path, "/SKILL.md")
+}
+
+func skillMdNotFoundError(owner, repo, skillName string) error {
+	return fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
 }
 
 // --- Import handler ---
