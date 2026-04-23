@@ -33,13 +33,14 @@ Run this from the repository root on your development machine:
 
 ```bash
 pnpm install
-bash scripts/package-backend-linux-amd64.sh
+RELEASE_TARGETS=linux/amd64 bash scripts/package-release-multi.sh dist/backend-linux-amd64
 ```
 
 This produces:
 
 - release directory: `dist/backend-linux-amd64/multica-backend-linux-amd64`
 - tarball: `dist/backend-linux-amd64/multica-backend-linux-amd64.tar.gz`
+- shared workspace directory: `dist/backend-linux-amd64/workspace`
 
 The package includes:
 
@@ -47,6 +48,8 @@ The package includes:
 - `migrate`
 - `migrations/`
 - `config/server.env.example`
+
+The shared `workspace/` directory is generated once by the multi-platform packaging flow. For this Vercel deployment path, you can ignore it because the frontend is already deployed separately.
 
 ## 3. Upload and run the backend on your Linux server
 

@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build release-build release-package test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build release-build release-build-multi release-package release-package-multi test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -159,8 +159,14 @@ build:
 release-build:
 	bash scripts/build-release.sh
 
+release-build-multi:
+	RELEASE_TARGETS="$(RELEASE_TARGETS)" bash scripts/build-release-multi.sh
+
 release-package:
 	bash scripts/package-release.sh $(RELEASE_OUTPUT_DIR)
+
+release-package-multi:
+	RELEASE_TARGETS="$(RELEASE_TARGETS)" SKIP_BUILD="$(SKIP_BUILD)" bash scripts/package-release-multi.sh $(RELEASE_OUTPUT_DIR)
 
 test:
 	$(REQUIRE_ENV)
