@@ -263,6 +263,51 @@ After installing Docker, re-run this script with --with-server."
   fi
 
   ok "Docker is available"
+
+  check_docker_compose_version
+}
+
+# Multica's docker-compose.selfhost.yml uses the top-level `name:` key,
+# which requires Compose spec v1.28+ (shipped in Docker Compose V2).
+# Running this on Compose V1 produces a cryptic schema error
+# ("Additional property name is not allowed"). Fail fast with guidance.
+check_docker_compose_version() {
+  local version_output
+  if ! version_output=$(docker compose version --short 2>/dev/null); then
+    fail "Docker Compose V2 is not available.
+
+Multica self-hosting requires Docker Compose v2.x or later
+(bundled with Docker Desktop 4.x+ or installable as the
+'docker compose' plugin on Linux).
+
+The legacy 'docker-compose' (V1) binary is not supported.
+
+Upgrade Docker Desktop:
+  macOS:   https://docs.docker.com/desktop/install/mac-install/
+  Windows: https://docs.docker.com/desktop/install/windows-install/
+Install the Compose V2 plugin on Linux:
+  https://docs.docker.com/compose/install/linux/"
+  fi
+
+  local version="${version_output#v}"
+  local major="${version%%.*}"
+
+  case "$major" in
+    ''|*[!0-9]*)
+      warn "Could not parse Docker Compose version: $version_output (continuing)"
+      return
+      ;;
+  esac
+
+  if [ "$major" -lt 2 ]; then
+    fail "Docker Compose $version_output is too old.
+
+Multica self-hosting requires Docker Compose v2.x or later.
+Please upgrade Docker Desktop (4.x+) or install the Compose V2 plugin:
+  https://docs.docker.com/compose/install/"
+  fi
+
+  ok "Docker Compose $version_output"
 }
 
 # ---------------------------------------------------------------------------

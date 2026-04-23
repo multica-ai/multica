@@ -12,6 +12,17 @@ Deploy Multica on your own infrastructure in minutes.
 
 Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
+## Requirements
+
+- **Docker Desktop 4.x or later** (macOS / Windows), or Docker Engine 20.10+ on Linux.
+- **Docker Compose v2.x or later** — required by the bundled `docker-compose.selfhost.yml`. The legacy standalone `docker-compose` (V1) binary is **not** supported; on older installs you'll see a cryptic `Additional property name is not allowed` error. Upgrade Docker Desktop, or install the [Compose V2 plugin on Linux](https://docs.docker.com/compose/install/linux/).
+
+Check your version with:
+
+```bash
+docker compose version
+```
+
 ## Quick Install (Recommended)
 
 Two commands to set up everything — server, CLI, and configuration:

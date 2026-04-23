@@ -5,7 +5,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,6 +184,15 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
 	printConfigLocation(profile)
 
+	// If we're pointing at localhost, the user is likely running the bundled
+	// docker-compose stack. Verify Compose V2 is available so the cryptic
+	// "Additional property name is not allowed" error can't surprise them.
+	if isLocalhostURL(serverURL) {
+		if err := checkDockerComposeVersion(); err != nil {
+			fmt.Fprintf(os.Stderr, "\n⚠ %s\n", err)
+		}
+	}
+
 	// Check if the server is reachable.
 	if !probeServer(serverURL) {
 		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
@@ -200,6 +212,41 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
+	return nil
+}
+
+// isLocalhostURL reports whether the URL's host resolves to the local machine.
+func isLocalhostURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// checkDockerComposeVersion ensures Docker Compose V2 (>= 2.x) is available.
+// Multica's docker-compose.selfhost.yml uses the top-level `name:` key, which
+// requires Compose spec v1.28+ — shipped in V2. V1 produces a cryptic
+// "Additional property name is not allowed" schema error.
+func checkDockerComposeVersion() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "docker", "compose", "version", "--short").Output()
+	if err != nil {
+		return fmt.Errorf("Docker Compose V2 not detected. Self-hosting requires Docker Desktop 4.x+ (Compose v2.x). Upgrade: https://docs.docker.com/compose/install/")
+	}
+
+	version := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "v"))
+	majorStr, _, _ := strings.Cut(version, ".")
+	major, parseErr := strconv.Atoi(majorStr)
+	if parseErr != nil {
+		return fmt.Errorf("Could not parse Docker Compose version %q — please ensure Compose v2.x or later is installed.", version)
+	}
+	if major < 2 {
+		return fmt.Errorf("Docker Compose %s is too old. Self-hosting requires v2.x or later. Upgrade Docker Desktop: https://docs.docker.com/compose/install/", version)
+	}
 	return nil
 }
 

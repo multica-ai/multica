@@ -266,6 +266,56 @@ After installing Docker, re-run this script with `$env:MULTICA_MODE="local"`.
     }
 
     Write-Ok "Docker is available"
+
+    Test-DockerComposeVersion
+}
+
+# Multica's docker-compose.selfhost.yml uses the top-level `name:` key,
+# which requires Compose spec v1.28+ (shipped in Docker Compose V2).
+# Running this on Compose V1 produces a cryptic schema error
+# ("Additional property name is not allowed"). Fail fast with guidance.
+function Test-DockerComposeVersion {
+    $versionOutput = $null
+    try {
+        $versionOutput = (& docker compose version --short 2>$null) | Select-Object -First 1
+    } catch {
+        $versionOutput = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($versionOutput)) {
+        Write-Fail @"
+Docker Compose V2 is not available.
+
+Multica self-hosting requires Docker Compose v2.x or later
+(bundled with Docker Desktop 4.x+).
+
+The legacy 'docker-compose' (V1) binary is not supported.
+
+Upgrade Docker Desktop for Windows:
+  https://docs.docker.com/desktop/install/windows-install/
+"@
+    }
+
+    $normalized = $versionOutput.Trim().TrimStart('v')
+    $major = ($normalized -split '\.')[0]
+
+    $majorInt = 0
+    if (-not [int]::TryParse($major, [ref]$majorInt)) {
+        Write-Warn "Could not parse Docker Compose version: $versionOutput (continuing)"
+        return
+    }
+
+    if ($majorInt -lt 2) {
+        Write-Fail @"
+Docker Compose $versionOutput is too old.
+
+Multica self-hosting requires Docker Compose v2.x or later.
+Please upgrade Docker Desktop (4.x+):
+  https://docs.docker.com/desktop/install/windows-install/
+"@
+    }
+
+    Write-Ok "Docker Compose $versionOutput"
 }
 
 # ---------------------------------------------------------------------------
