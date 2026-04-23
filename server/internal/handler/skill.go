@@ -335,6 +335,67 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sync update to other workspaces with the same skill name
+	// Find all skills with the same name in user's other workspaces
+	userID := requestUserID(r)
+	relatedSkills, err := h.Queries.GetSkillsByNameAcrossWorkspaces(r.Context(), db.GetSkillsByNameAcrossWorkspacesParams{
+		Name:   skill.Name,
+		UserID: parseUUID(userID),
+	})
+	if err == nil {
+		for _, relatedSkill := range relatedSkills {
+			// Skip the current skill we just updated
+			if uuidToString(relatedSkill.ID) == id {
+				continue
+			}
+
+			// Update related skill with same content
+			updateParams := db.UpdateSkillParams{
+				ID: relatedSkill.ID,
+			}
+			if req.Name != nil {
+				updateParams.Name = pgtype.Text{String: *req.Name, Valid: true}
+			}
+			if req.Description != nil {
+				updateParams.Description = pgtype.Text{String: *req.Description, Valid: true}
+			}
+			if req.Content != nil {
+				updateParams.Content = pgtype.Text{String: *req.Content, Valid: true}
+			}
+			if req.Config != nil {
+				config, _ := json.Marshal(req.Config)
+				updateParams.Config = config
+			}
+
+			_, err := qtx.UpdateSkill(r.Context(), updateParams)
+			if err != nil {
+				// Log error but continue with other skills
+				continue
+			}
+
+			// Sync files if provided
+			if req.Files != nil {
+				qtx.DeleteSkillFilesBySkill(r.Context(), relatedSkill.ID)
+				for _, f := range req.Files {
+					qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+						SkillID: relatedSkill.ID,
+						Path:    f.Path,
+						Content: f.Content,
+					})
+				}
+			}
+
+			// Publish event for related workspace
+			relatedWsID := uuidToString(relatedSkill.WorkspaceID)
+			actorType, actorID := h.resolveActor(r, userID, relatedWsID)
+			h.publish(protocol.EventSkillUpdated, relatedWsID, actorType, actorID, map[string]any{
+				"skill_id":    uuidToString(relatedSkill.ID),
+				"skill_name":  skill.Name,
+				"synced_from": uuidToString(skill.WorkspaceID),
+			})
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return

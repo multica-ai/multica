@@ -66,6 +66,12 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  SkillMatrixResponse,
+  SkillComparisonResponse,
+  SyncSkillRequest,
+  SyncSkillResponse,
+  BulkCopySkillsRequest,
+  BulkCopySkillsResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -844,6 +850,47 @@ export class ApiClient {
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/skills`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Skill Bulk Operations
+  async listAllSkills(): Promise<Skill[]> {
+    return this.fetch("/api/skills/all");
+  }
+
+  async getSkillMatrix(): Promise<SkillMatrixResponse> {
+    return this.fetch("/api/skills/matrix");
+  }
+
+  async compareSkill(name: string): Promise<SkillComparisonResponse> {
+    return this.fetch(`/api/skills/compare?name=${encodeURIComponent(name)}`);
+  }
+
+  async syncSkillToWorkspaces(skillId: string, data: SyncSkillRequest): Promise<SyncSkillResponse> {
+    return this.fetch(`/api/skills/${skillId}/sync`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async bulkCopySkills(data: BulkCopySkillsRequest): Promise<BulkCopySkillsResponse> {
+    return this.fetch("/api/skills/bulk-copy", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async bulkDeleteSkills(data: { skill_ids: string[] }): Promise<{ deleted_count: number; failed_count: number; failed_ids?: string[] }> {
+    return this.fetch("/api/skills/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSkillFromWorkspaces(skillId: string, data: { target_workspace_ids: string[] }): Promise<{ deleted_count: number; failed_count: number; failed_ids?: string[] }> {
+    return this.fetch(`/api/skills/${skillId}/delete-from-workspaces`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

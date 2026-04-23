@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   Sparkles,
@@ -10,6 +11,7 @@ import {
   AlertCircle,
   Download,
   HardDrive,
+  Grid3X3,
 } from "lucide-react";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
 import {
@@ -25,7 +27,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -492,21 +494,15 @@ function SkillDetail({
               {saving ? "Saving..." : "Save"}
             </Button>
           )}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              }
-            />
-            <TooltipContent>Delete skill</TooltipContent>
-          </Tooltip>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setConfirmDelete(true)}
+            className="text-muted-foreground hover:text-destructive"
+            title="Delete skill"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
         </div>
       </div>
 
@@ -519,37 +515,25 @@ function SkillDetail({
               Files
             </span>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setShowAddFile(true)}
-                      className="text-muted-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Add file</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setShowAddFile(true)}
+                className="text-muted-foreground"
+                title="Add file"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
               {selectedPath !== SKILL_MD && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={handleDeleteFile}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Delete file</TooltipContent>
-                </Tooltip>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleDeleteFile}
+                  className="text-muted-foreground hover:text-destructive"
+                  title="Delete file"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               )}
             </div>
           </div>
@@ -611,7 +595,7 @@ function SkillDetail({
               <DialogHeader className="flex-1 gap-1">
                 <DialogTitle className="text-sm font-semibold">Delete skill?</DialogTitle>
                 <DialogDescription className="text-xs">
-                  This will permanently delete &quot;{skill.name}&quot; and remove it from all agents.
+                  This will permanently delete &quot;{skill.name}&quot; from workspace &quot;{workspace?.name ?? "this workspace"}&quot; and remove it from all agents.
                 </DialogDescription>
               </DialogHeader>
             </div>
@@ -753,20 +737,21 @@ export default function SkillsPage() {
         <div className="overflow-y-auto h-full border-r">
           <PageHeader className="justify-between">
             <h1 className="text-sm font-semibold">Skills</h1>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Add skill</TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-1">
+              <Link href="skills/matrix">
+                <Button variant="ghost" size="icon-sm" title="Matrix View">
+                  <Grid3X3 className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setShowCreate(true)}
+                title="Add skill"
+              >
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
           </PageHeader>
           {skills.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">

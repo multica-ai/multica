@@ -60,3 +60,16 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  SkillMatrixSkill,
+  SkillMatrixWorkspace,
+  SkillMatrixResponse,
+  SkillMatrixItem,
+  SyncSkillRequest,
+  SyncSkillResponse,
+  BulkCopySkillsRequest,
+  BulkCopySkillsResponse,
+  SkillWorkspaceVersion,
+  SkillDifference,
+  SkillComparisonResponse,
+} from "./skill-bulk";
