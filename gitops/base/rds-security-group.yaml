@@ -1,0 +1,64 @@
+# Security Group for agentfarm RDS Aurora Postgres
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroup
+metadata:
+  name: agentfarm-postgresql-sg
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    description: Security group for agentfarm RDS Aurora Postgres
+    groupName: agentfarm-postgresql-sg
+    vpcId: vpc-07532d54172d22514
+    tags:
+      Name: agentfarm-postgresql-sg
+      Owner: DevOps
+      Application: agentfarm
+      Environment: tools
+      CostCenter: shared
+      Production: "false"
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config
+---
+# Allow PostgreSQL access from tools VPC CIDRs (follows user-mapping-db pattern)
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroupRule
+metadata:
+  name: agentfarm-postgres-allow-vpc
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    type: ingress
+    fromPort: 5432
+    toPort: 5432
+    protocol: tcp
+    securityGroupIdRef:
+      name: agentfarm-postgresql-sg
+    cidrBlocks:
+      - 10.220.0.0/16
+      - 10.219.0.0/16
+    description: Allow PostgreSQL access from tools VPC
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config
+---
+# Egress rule (all outbound)
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroupRule
+metadata:
+  name: agentfarm-postgres-allow-egress
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    type: egress
+    fromPort: 0
+    toPort: 0
+    protocol: "-1"
+    securityGroupIdRef:
+      name: agentfarm-postgresql-sg
+    cidrBlocks:
+      - 0.0.0.0/0
+    description: Allow all outbound traffic
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

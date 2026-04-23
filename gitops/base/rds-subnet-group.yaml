@@ -1,0 +1,22 @@
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: agentfarm-db-subnet-group
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    description: Subnet group for agentfarm database
+    subnetIds:
+      - subnet-02718d0e0034d6706
+      - subnet-06c0632867c0d494c
+      - subnet-0559498400c1ee808
+    tags:
+      Name: agentfarm-db-subnet-group
+      Owner: DevOps
+      Application: agentfarm
+      Environment: tools
+      CostCenter: shared
+      Production: "false"
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

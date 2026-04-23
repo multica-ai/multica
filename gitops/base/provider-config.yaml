@@ -1,0 +1,7 @@
+apiVersion: aws.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: agentfarm-provider-aws-upbound-config
+spec:
+  credentials:
+    source: IRSA

@@ -1,0 +1,12 @@
+name: Kustomize Validation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'gitops/**'
+      - '.github/workflows/gitops-kustomize-validate.yml'
+
+jobs:
+  validate:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-kustomize-validate.yml@main
+    secrets: inherit

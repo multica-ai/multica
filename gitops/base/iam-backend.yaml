@@ -1,0 +1,87 @@
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-backend-role
+spec:
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+      - key: Purpose
+        value: "S3 uploads access for agentfarm-backend"
+    assumeRolePolicyDocument: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::637423279283:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:sub": "system:serviceaccount:agentfarm:agentfarm-backend",
+              "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:aud": "sts.amazonaws.com"
+            }
+          }
+        }]
+      }
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-backend-policy
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+    description: "Allow agentfarm-backend to read/write S3 uploads bucket"
+    document: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowS3ObjectAccess",
+            "Effect": "Allow",
+            "Action": [
+              "s3:PutObject",
+              "s3:GetObject",
+              "s3:DeleteObject",
+              "s3:ListBucket"
+            ],
+            "Resource": [
+              "arn:aws:s3:::g2-agentfarm-tools-uploads",
+              "arn:aws:s3:::g2-agentfarm-tools-uploads/*"
+            ]
+          }
+        ]
+      }
+    name: agentfarm-backend-policy-document
+  providerConfigRef:
+    name: provider-aws-config
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: RolePolicyAttachment
+metadata:
+  name: agentfarm-backend-policy-attachment
+spec:
+  forProvider:
+    policyArnRef:
+      name: agentfarm-backend-policy
+    roleNameRef:
+      name: agentfarm-backend-role
+  providerConfigRef:
+    name: provider-aws-config

@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agentfarm
+
+resources:
+  - namespace.yaml
+  - service-account.yaml
+  - service-account-backend.yaml
+  - secret-store.yaml
+  - provider-config.yaml
+  - rds-security-group.yaml
+  - rds-subnet-group.yaml
+  - rds-cluster.yaml
+  - rds-instance.yaml
+  - s3-uploads-bucket.yaml
+  - iam-resources.yaml
+  - iam-backend.yaml
+  - pgvector-init-job.yaml
+  - deployment-backend.yaml
+  - deployment-web.yaml
+  - service-backend.yaml
+  - service-web.yaml
+  - ingress.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: agentfarm

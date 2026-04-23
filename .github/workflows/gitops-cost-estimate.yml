@@ -1,0 +1,15 @@
+name: Cost Estimate
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'gitops/**'
+      - '.github/workflows/gitops-cost-estimate.yml'
+
+jobs:
+  cost:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-cost-estimate.yml@main
+    with:
+      root_dir: gitops
+      app_root_depth: "1"
+    secrets: inherit

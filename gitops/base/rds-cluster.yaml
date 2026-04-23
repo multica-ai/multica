@@ -1,0 +1,64 @@
+apiVersion: rds.aws.upbound.io/v1beta2
+kind: Cluster
+metadata:
+  name: agentfarm-postgres-cluster
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    engine: aurora-postgresql
+    engineVersion: "16.4"
+    allowMajorVersionUpgrade: true
+    applyImmediately: false
+
+    # Password: SSM /agentfarm/tools/POSTGRES_MASTER_PASSWORD → surfaced into
+    # agentfarm-secret-store by secret-store.yaml's bulk dataFrom.find (prefix
+    # stripped). Upbound then writes endpoint/port/master_username/
+    # attribute.master_password back into agentfarm-rds-connection-secret —
+    # the single source of truth for consumers. Pattern: optio, user-mapping-db.
+    databaseName: agentfarm
+    masterUsername: agentfarmadmin
+    masterPasswordSecretRef:
+      key: POSTGRES_MASTER_PASSWORD
+      name: agentfarm-secret-store
+      namespace: agentfarm
+
+    # Network and security
+    dbSubnetGroupNameRef:
+      name: agentfarm-db-subnet-group
+    vpcSecurityGroupIdRefs:
+      - name: agentfarm-postgresql-sg
+
+    # Backup and maintenance
+    backupRetentionPeriod: 7
+    preferredBackupWindow: "03:00-04:00"
+    preferredMaintenanceWindow: "sun:04:00-sun:05:00"
+    storageEncrypted: true
+    skipFinalSnapshot: false
+    finalSnapshotIdentifier: agentfarm-postgres-final-snapshot
+
+    # Performance
+    enabledCloudwatchLogsExports:
+      - postgresql
+
+    # Serverless v2 scaling
+    serverlessv2ScalingConfiguration:
+      maxCapacity: 2.0
+      minCapacity: 0.5
+
+    # Tags
+    tags:
+      Owner: DevOps
+      Production: "false"
+      Name: agentfarm-postgres-cluster
+      Environment: tools
+      CostCenter: shared
+      Application: agentfarm
+      Purpose: "agentfarm application database with pgvector for embeddings"
+
+  writeConnectionSecretToRef:
+    name: agentfarm-rds-connection-secret
+    namespace: agentfarm
+
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

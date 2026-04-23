@@ -1,0 +1,128 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentfarm-backend
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: backend
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: agentfarm
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: backend
+      annotations:
+        # Reloader rolls pods when agentfarm-secret-store changes (10m SSM refresh).
+        reloader.stakater.com/auto: "true"
+    spec:
+      serviceAccountName: agentfarm-backend
+      imagePullSecrets:
+        - name: regcred
+      # EKS Auto Mode, Karpenter devops pool.
+      nodeSelector:
+        eks.amazonaws.com/compute-type: auto
+        karpenter.sh/nodepool: devops
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: ghcr.io/g2crowd/agentfarm-backend-prod
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: agentfarm-secret-store
+          env:
+            # APP_ENV=production disables the dev-only `888888` master login
+            # code path in server/internal/handler/auth.go (active whenever
+            # APP_ENV != "production"). Use "production" on any externally
+            # reachable or multi-tenant deploy, including the tools cluster.
+            - name: APP_ENV
+              value: production
+            - name: PORT
+              value: "8080"
+            # DB connection: endpoint/port/master_username/attribute.master_password
+            # come from Upbound-written agentfarm-rds-connection-secret.
+            # POSTGRES_DB is hardcoded to match rds-cluster.yaml's databaseName
+            # (Upbound does not echo databaseName back into the connection secret).
+            # Final DATABASE_URL is composed in-pod via $(VAR) substitution — that's
+            # the single env var the Go server and migrate binary actually read.
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: endpoint
+            - name: POSTGRES_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: port
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: master_username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: attribute.master_password
+            - name: POSTGRES_DB
+              value: agentfarm
+            - name: DATABASE_URL
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

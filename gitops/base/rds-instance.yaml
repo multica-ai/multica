@@ -1,0 +1,31 @@
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ClusterInstance
+metadata:
+  name: agentfarm-postgres-instance
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    region: us-east-1
+    engine: aurora-postgresql
+    instanceClass: db.serverless
+    clusterIdentifierRef:
+      name: agentfarm-postgres-cluster
+
+    # Performance monitoring
+    performanceInsightsEnabled: true
+    performanceInsightsRetentionPeriod: 7
+
+    # Public accessibility
+    publiclyAccessible: false
+
+    # Tags
+    tags:
+      Owner: DevOps
+      Production: "false"
+      Name: agentfarm-postgres-instance
+      Environment: tools
+      CostCenter: shared
+      Application: agentfarm
+
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

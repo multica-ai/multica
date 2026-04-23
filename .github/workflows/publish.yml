@@ -1,0 +1,53 @@
+name: Prod cluster Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'gitops/**'
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bake-build-backend:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: prod
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.backend.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
+  bake-build-web:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: prod
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.web.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
+  commit-to-gitops-backend:
+    needs: [bake-build-backend, bake-build-web]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.bake-build-backend.outputs.image_name }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/tools/kustomization.yaml
+      image_yq_matcher: .images[0].newName
+
+  commit-to-gitops-web:
+    needs: [bake-build-backend, bake-build-web, commit-to-gitops-backend]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.bake-build-web.outputs.image_name }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/tools/kustomization.yaml
+      image_yq_matcher: .images[1].newName

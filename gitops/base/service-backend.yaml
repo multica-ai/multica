@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentfarm-backend
+  labels:
+    app: agentfarm
+    component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: agentfarm
+    component: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

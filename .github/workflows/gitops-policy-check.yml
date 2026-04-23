@@ -1,0 +1,15 @@
+name: Policy Check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths:
+      - 'gitops/**'
+      - '.github/workflows/gitops-policy-check.yml'
+
+jobs:
+  policy:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-policy-check.yml@main
+    with:
+      root_dir: gitops
+    secrets: inherit

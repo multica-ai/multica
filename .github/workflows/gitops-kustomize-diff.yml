@@ -1,0 +1,15 @@
+name: Kustomize Diff
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'gitops/**'
+      - '.github/workflows/gitops-kustomize-diff.yml'
+
+jobs:
+  diff:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-kustomize-diff.yml@main
+    with:
+      root_dir: ./gitops
+      max_depth: "1"
+    secrets: inherit

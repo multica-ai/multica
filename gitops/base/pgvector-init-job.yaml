@@ -1,0 +1,96 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentfarm-pgvector-init
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: pgvector-init
+  annotations:
+    # Run after the main sync so the ExternalSecret has populated agentfarm-secret-store.
+    argocd.argoproj.io/hook: PostSync
+    # Delete any previous run before creating a new one so re-syncs don't collide on the immutable Job name.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # Only needs to succeed once per sync; fail after 3 retries.
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: pgvector-init
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: agentfarm
+      # Schedule on the DevOps Karpenter NodePool in EKS Auto Mode.
+      nodeSelector:
+        eks.amazonaws.com/compute-type: auto
+        karpenter.sh/nodepool: devops
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999  # postgres user in postgres:17 image
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: pgvector-init
+        image: postgres:17.2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          echo "Testing database connection..."
+          psql "$DATABASE_URL" -c "SELECT version();"
+          echo "Initializing pgvector extension..."
+          psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          echo "Verifying extension installation..."
+          psql "$DATABASE_URL" -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
+          echo "pgvector extension initialized successfully"
+        env:
+          - name: POSTGRES_HOST
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: endpoint
+          - name: POSTGRES_PORT
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: port
+          - name: POSTGRES_USER
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: master_username
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: agentfarm-rds-connection-secret
+                key: attribute.master_password
+          - name: POSTGRES_DB
+            value: agentfarm
+          - name: DATABASE_URL
+            value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Mi
