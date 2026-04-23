@@ -40,6 +40,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 20 * time.Second
+	hideAgentWindow(cmd)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

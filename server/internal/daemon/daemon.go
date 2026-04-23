@@ -1070,6 +1070,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	}
 	if env == nil {
 		var err error
+		localRepoPath := ""
+		if task.Agent != nil && task.Agent.LocalRepoPath != "" {
+			localRepoPath = task.Agent.LocalRepoPath
+		}
 		env, err = execenv.Prepare(execenv.PrepareParams{
 			WorkspacesRoot: d.cfg.WorkspacesRoot,
 			WorkspaceID:    task.WorkspaceID,
@@ -1078,6 +1082,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			Provider:       provider,
 			CodexVersion:   codexVersion,
 			Task:           taskCtx,
+			LocalRepoPath:  localRepoPath,
 		}, d.logger)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)

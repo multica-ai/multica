@@ -1262,9 +1262,10 @@ UPDATE agent SET
     custom_args = COALESCE($13, custom_args),
     mcp_config = COALESCE($14, mcp_config),
     model = COALESCE($15, model),
+    local_repo_path = COALESCE($16, local_repo_path),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, local_repo_path
 `
 
 type UpdateAgentParams struct {
@@ -1283,6 +1284,7 @@ type UpdateAgentParams struct {
 	CustomArgs         []byte      `json:"custom_args"`
 	McpConfig          []byte      `json:"mcp_config"`
 	Model              pgtype.Text `json:"model"`
+	LocalRepoPath      pgtype.Text `json:"local_repo_path"`
 }
 
 func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent, error) {
@@ -1302,6 +1304,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.CustomArgs,
 		arg.McpConfig,
 		arg.Model,
+		arg.LocalRepoPath,
 	)
 	var i Agent
 	err := row.Scan(
@@ -1326,6 +1329,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.CustomArgs,
 		&i.McpConfig,
 		&i.Model,
+		&i.LocalRepoPath,
 	)
 	return i, err
 }

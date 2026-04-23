@@ -46,6 +46,7 @@ export function SettingsTab({
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
   const [model, setModel] = useState(agent.model ?? "");
+  const [localRepoPath, setLocalRepoPath] = useState(agent.local_repo_path ?? "");
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
   const [saving, setSaving] = useState(false);
@@ -93,7 +94,8 @@ export function SettingsTab({
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
     selectedRuntimeId !== agent.runtime_id ||
-    model !== (agent.model ?? "");
+    model !== (agent.model ?? "") ||
+    localRepoPath !== (agent.local_repo_path ?? "");
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -110,6 +112,7 @@ export function SettingsTab({
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
         model,
+        local_repo_path: localRepoPath,
       });
       toast.success("Settings saved");
     } catch {
@@ -332,6 +335,20 @@ export function SettingsTab({
         onChange={setModel}
         disabled={!selectedRuntime}
       />
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Local Repo Path</Label>
+        <p className="text-xs text-muted-foreground/70 mt-0.5 mb-1.5">
+          When set, the agent runs directly in this local directory instead of an isolated workspace.
+          Leave empty to use the default isolated workdir.
+        </p>
+        <Input
+          value={localRepoPath}
+          onChange={(e) => setLocalRepoPath(e.target.value)}
+          placeholder="e.g. C:\Users\you\projects\my-repo"
+          className="font-mono text-xs"
+        />
+      </div>
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}

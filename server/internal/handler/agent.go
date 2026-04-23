@@ -34,6 +34,7 @@ type AgentResponse struct {
 	McpConfig          json.RawMessage   `json:"mcp_config"`
 	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
 	McpConfigRedacted  bool              `json:"mcp_config_redacted"`
+	LocalRepoPath      string            `json:"local_repo_path"`
 	Visibility         string            `json:"visibility"`
 	Status             string            `json:"status"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
@@ -93,6 +94,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		CustomEnv:          customEnv,
 		CustomArgs:         customArgs,
 		McpConfig:          mcpConfig,
+		LocalRepoPath:      a.LocalRepoPath.String,
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
@@ -145,14 +147,15 @@ type AgentTaskResponse struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
-	Model        string                   `json:"model,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	LocalRepoPath string                   `json:"local_repo_path,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -452,6 +455,7 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+	LocalRepoPath      *string            `json:"local_repo_path"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -576,6 +580,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+	}
+	if req.LocalRepoPath != nil {
+		params.LocalRepoPath = pgtype.Text{String: *req.LocalRepoPath, Valid: true}
 	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)

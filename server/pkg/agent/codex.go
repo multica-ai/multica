@@ -101,6 +101,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	codexArgs := append([]string{"app-server", "--listen", "stdio://"}, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
+	hideAgentWindow(cmd)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

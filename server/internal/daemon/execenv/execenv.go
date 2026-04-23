@@ -27,6 +27,7 @@ type PrepareParams struct {
 	Provider       string            // agent provider ("claude", "codex") — determines skill injection paths
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
 	Task           TaskContextForEnv // context data for writing files
+	LocalRepoPath  string            // if set, agent runs directly in this local directory instead of an isolated workdir
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -78,6 +79,25 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 	if params.TaskID == "" {
 		return nil, fmt.Errorf("execenv: task ID is required")
+	}
+
+	// If LocalRepoPath is set, run the agent directly in that directory
+	// instead of creating an isolated workdir. Context files are still
+	// injected so skills and issue context are available.
+	if params.LocalRepoPath != "" {
+		if _, err := os.Stat(params.LocalRepoPath); err != nil {
+			return nil, fmt.Errorf("execenv: local repo path does not exist: %s", params.LocalRepoPath)
+		}
+		env := &Environment{
+			RootDir: params.LocalRepoPath,
+			WorkDir: params.LocalRepoPath,
+			logger:  logger,
+		}
+		if err := writeContextFiles(params.LocalRepoPath, params.Provider, params.Task); err != nil {
+			return nil, fmt.Errorf("execenv: write context files to local repo: %w", err)
+		}
+		logger.Info("execenv: using local repo path", "path", params.LocalRepoPath)
+		return env, nil
 	}
 
 	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))

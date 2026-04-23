@@ -62,6 +62,7 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  local_repo_path: string;
   owner_id: string | null;
   skills: Skill[];
   created_at: string;
@@ -100,6 +101,7 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  local_repo_path?: string;
 }
 
 // Skills

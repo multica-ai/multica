@@ -40,6 +40,7 @@ UPDATE agent SET
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
+    local_repo_path = COALESCE(sqlc.narg('local_repo_path'), local_repo_path),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
