@@ -46,6 +46,7 @@ UPDATE issue SET
     due_date = sqlc.narg('due_date'),
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
+    phase_state = COALESCE(sqlc.narg('phase_state')::jsonb, phase_state),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

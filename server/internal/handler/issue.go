@@ -40,6 +40,7 @@ type IssueResponse struct {
 	DueDate            *string                 `json:"due_date"`
 	CreatedAt          string                  `json:"created_at"`
 	UpdatedAt          string                  `json:"updated_at"`
+	PhaseState         json.RawMessage         `json:"phase_state,omitempty"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
 }
@@ -65,6 +66,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		PhaseState:    bytesToRawJSON(i.PhaseState),
 	}
 }
 
@@ -930,16 +932,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title              *string          `json:"title"`
+	Description        *string          `json:"description"`
+	Status             *string          `json:"status"`
+	Priority           *string          `json:"priority"`
+	AssigneeType       *string          `json:"assignee_type"`
+	AssigneeID         *string          `json:"assignee_id"`
+	Position           *float64         `json:"position"`
+	DueDate            *string          `json:"due_date"`
+	ParentIssueID      *string          `json:"parent_issue_id"`
+	ProjectID          *string          `json:"project_id"`
+	PhaseState         json.RawMessage  `json:"phase_state"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1060,6 +1063,21 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ProjectID = parseUUID(*req.ProjectID)
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
+		}
+	}
+
+	// phase_state: set when a JSON object is provided. Explicit JSON null is
+	// a no-op (use a fresh object to overwrite) — the sqlc COALESCE pattern
+	// preserves the existing column on NULL input. Clearing requires a direct
+	// DB update, which the sidecar should never need.
+	if _, ok := rawFields["phase_state"]; ok {
+		if len(req.PhaseState) > 0 && string(req.PhaseState) != "null" {
+			var tmp map[string]interface{}
+			if err := json.Unmarshal(req.PhaseState, &tmp); err != nil {
+				writeError(w, http.StatusBadRequest, "phase_state must be a JSON object")
+				return
+			}
+			params.PhaseState = []byte(req.PhaseState)
 		}
 	}
 
@@ -1503,4 +1521,14 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+// bytesToRawJSON converts raw jsonb bytes from the DB to json.RawMessage for
+// pass-through into IssueResponse without re-serializing. Returns nil when
+// the column is SQL-NULL, producing JSON `null` (elided by omitempty on empty).
+func bytesToRawJSON(b []byte) json.RawMessage {
+	if len(b) == 0 {
+		return nil
+	}
+	return json.RawMessage(b)
 }
