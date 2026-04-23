@@ -7,7 +7,8 @@
 # Install CLI + provision self-host server:
 #   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
 #
-# After installation, run `multica setup` to configure your environment.
+# The default install flow configures the internal cloud, opens browser login,
+# and starts the daemon automatically.
 #
 set -euo pipefail
 
@@ -18,6 +19,8 @@ REPO_URL="https://github.com/multica-ai/multica.git"
 REPO_WEB_URL="https://github.com/multica-ai/multica"  # without .git, for GitHub web APIs
 INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.multica/server}"
 BREW_PACKAGE="multica-ai/tap/multica"
+APP_URL="${MULTICA_APP_URL:-https://multica.wujieai.com}"
+SERVER_URL="${MULTICA_SERVER_URL:-https://multica.wujieai.com}"
 
 # Colors (disabled when not a terminal)
 if [ -t 1 ] || [ -t 2 ]; then
@@ -194,6 +197,37 @@ install_cli() {
   fi
 }
 
+configure_internal_cloud() {
+  info "Configuring Multica CLI for $APP_URL ..."
+  multica config set server_url "$SERVER_URL" >/dev/null
+  multica config set app_url "$APP_URL" >/dev/null
+  ok "CLI config updated for the internal cloud"
+}
+
+is_daemon_running() {
+  multica daemon status 2>/dev/null | grep -qi "running"
+}
+
+login_and_start_daemon() {
+  printf "\n"
+  info "Opening browser login for $APP_URL ..."
+  info "Complete authorization in the browser, then return here."
+  if ! multica login; then
+    fail "Login did not complete successfully."
+  fi
+
+  if is_daemon_running; then
+    ok "Multica daemon is already running"
+    return 0
+  fi
+
+  info "Starting Multica daemon..."
+  if ! multica daemon start; then
+    fail "Failed to start the Multica daemon."
+  fi
+  ok "Multica daemon started"
+}
+
 # ---------------------------------------------------------------------------
 # Docker check
 # ---------------------------------------------------------------------------
@@ -291,20 +325,24 @@ setup_server() {
 run_default() {
   printf "\n"
   printf "${BOLD}  Multica — Installer${RESET}\n"
+  printf "  Configuring the internal cloud at ${CYAN}%s${RESET}\n" "$APP_URL"
   printf "\n"
 
   detect_os
   install_cli
+  configure_internal_cloud
+  login_and_start_daemon
 
   printf "\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "${BOLD}${GREEN}  ✓ Multica CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  printf "  ${BOLD}Next: configure your environment${RESET}\n"
+  printf "  ${BOLD}Configured server:${RESET} %s\n" "$SERVER_URL"
+  printf "  ${BOLD}Configured app:${RESET}    %s\n" "$APP_URL"
   printf "\n"
-  printf "     ${CYAN}multica setup${RESET}                # Connect to Multica Cloud (multica.ai)\n"
-  printf "     ${CYAN}multica setup self-host${RESET}       # Connect to a self-hosted server\n"
+  printf "     ${CYAN}multica config list${RESET}          # Verify config values\n"
+  printf "     ${CYAN}multica daemon status${RESET}        # Verify daemon status\n"
   printf "\n"
   printf "  ${BOLD}Self-hosting?${RESET} Install the server first:\n"
   printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server\n"
@@ -386,11 +424,11 @@ main() {
       --help|-h)
         echo "Usage: install.sh [--with-server | --stop]"
         echo ""
-        echo "  (default)       Install / upgrade the Multica CLI"
+        echo "  (default)       Install / upgrade the Multica CLI, configure the internal cloud,"
+        echo "                  run browser login, and start the daemon"
         echo "  --with-server   Install CLI + provision a self-host server (Docker)"
         echo "  --stop          Stop a self-hosted installation"
         echo ""
-        echo "After installation, run 'multica setup' to configure your environment."
         exit 0
         ;;
       *) warn "Unknown option: $1" ;;
