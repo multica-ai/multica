@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CircleHelp, History, MessageCircle } from "lucide-react";
+import { ArrowUpRight, BookOpen, CircleHelp, History, MessageCircle } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,12 +35,7 @@ export function HelpLauncher() {
         >
           <BookOpen className="h-3.5 w-3.5" />
           Docs
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => useModalStore.getState().open("feedback")}
-        >
-          <MessageCircle className="h-3.5 w-3.5" />
-          Feedback
+          <ArrowUpRight className="size-3 translate-y-px text-muted-foreground/50" />
         </DropdownMenuItem>
         <DropdownMenuItem
           render={
@@ -53,6 +48,13 @@ export function HelpLauncher() {
         >
           <History className="h-3.5 w-3.5" />
           Change log
+          <ArrowUpRight className="size-3 translate-y-px text-muted-foreground/50" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => useModalStore.getState().open("feedback")}
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+          Feedback
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
