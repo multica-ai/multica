@@ -639,7 +639,8 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	//   skills/{name}/SKILL.md          (most common)
 	//   .claude/skills/{name}/SKILL.md  (Claude Code native discovery)
 	//   plugin/skills/{name}/SKILL.md   (e.g. microsoft repos)
-	//   {name}/SKILL.md                 (skill at repo root level)
+	//   {name}/SKILL.md                 (named directory at repo root)
+	//   SKILL.md                        (single-skill repo root)
 	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
 	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
@@ -649,6 +650,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		".claude/skills/" + skillName,
 		"plugin/skills/" + skillName,
 		skillName,
+		"",
 	}
 
 	var skillMdBody []byte

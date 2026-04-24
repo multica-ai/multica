@@ -172,6 +172,83 @@ func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.
 	}
 }
 
+func TestFetchFromSkillsSh_SupportsRootLevelSkillMD(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/root-skill":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/root-skill/contents":
+				if got := r.URL.Query().Get("ref"); got != "main" {
+					t.Fatalf("root contents ref = %q, want main", got)
+				}
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "README.md",
+						Path:        "README.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/root-skill/main/README.md",
+					},
+					{
+						Name: "scripts",
+						Path: "scripts",
+						Type: "dir",
+						URL:  "https://api.github.com/repos/acme/root-skill/contents/scripts?ref=main",
+					},
+				})
+			case "/repos/acme/root-skill/contents/scripts":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "run.sh",
+						Path:        "scripts/run.sh",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/root-skill/main/scripts/run.sh",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/root-skill/main/SKILL.md":
+				w.Write([]byte("---\nname: Root Skill\ndescription: Root-level skill\n---\ncontent"))
+			case "/acme/root-skill/main/README.md":
+				w.Write([]byte("readme"))
+			case "/acme/root-skill/main/scripts/run.sh":
+				w.Write([]byte("echo run"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/root-skill/root-skill")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+
+	if result.name != "Root Skill" {
+		t.Fatalf("name = %q, want Root Skill", result.name)
+	}
+	if result.description != "Root-level skill" {
+		t.Fatalf("description = %q, want Root-level skill", result.description)
+	}
+	gotPaths := importedFilePaths(result.files)
+	wantPaths := []string{"README.md", "scripts/run.sh"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
+	}
+	if !containsString(*requests, "raw.githubusercontent.com /acme/root-skill/main/SKILL.md") {
+		t.Fatalf("expected root SKILL.md request, got %v", *requests)
+	}
+	if !containsString(*requests, "api.github.com /repos/acme/root-skill/contents?ref=main") {
+		t.Fatalf("expected root contents request, got %v", *requests)
+	}
+}
+
 func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
