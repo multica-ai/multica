@@ -221,7 +221,7 @@ describe("CreateIssueModal", () => {
     renderModal(<CreateIssueModal onClose={onClose} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "  Ship create issue regression coverage  ");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.click(screen.getByRole("button", { name: /Create Issue/ }));
 
     await waitFor(() => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
