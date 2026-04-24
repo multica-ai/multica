@@ -1305,6 +1305,60 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	}
 }
 
+func TestClaimTaskByRuntime_IssueBoundTaskWithoutIssueIDFailsExplicitly(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, NULL, 'queued', 2)
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create malformed issue-bound task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "issue-bound dispatch requires issue_id") {
+		t.Fatalf("expected explicit issue_id error, got %s", w.Body.String())
+	}
+
+	var status, failureReason string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status, &failureReason); err != nil {
+		t.Fatalf("read task status: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("expected malformed issue-bound task status=failed, got %q", status)
+	}
+	if failureReason != "missing_issue_id" {
+		t.Fatalf("expected failure_reason=missing_issue_id, got %q", failureReason)
+	}
+}
+
 // Regression test for MUL-1198: comment-triggered tasks that finish without
 // the agent posting any comment must still deliver a synthesized result
 // comment, threaded under the trigger. Before the fix, CompleteTask exempted

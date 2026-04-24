@@ -611,6 +611,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isMalformedIssueBoundTask(*task) {
+		outcome = "error_missing_issue_id"
+		errMsg := fmt.Sprintf("issue-bound dispatch requires issue_id: task_id=%s runtime_id=%s", uuidToString(task.ID), runtimeID)
+		slog.Error("task claim: issue-bound task missing issue_id, failing task",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"has_chat", task.ChatSessionID.Valid,
+			"has_autopilot_run", task.AutopilotRunID.Valid,
+		)
+		if _, ferr := h.TaskService.FailTask(r.Context(), task.ID, errMsg, "", "", "missing_issue_id"); ferr != nil {
+			slog.Error("task claim: fail after missing issue_id check failed",
+				"task_id", uuidToString(task.ID), "error", ferr)
+		}
+		writeError(w, http.StatusInternalServerError, errMsg)
+		return
+	}
+
 	outcome = "claimed"
 	buildStart = time.Now()
 
@@ -803,6 +820,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func isMalformedIssueBoundTask(task db.AgentTaskQueue) bool {
+	return !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.

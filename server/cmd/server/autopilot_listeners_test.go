@@ -11,13 +11,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
+func TestAutopilotRunOnlyDispatchRejectedBeforeTask(t *testing.T) {
 	ctx := context.Background()
 	queries := db.New(testPool)
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
-	registerAutopilotListeners(bus, autopilotSvc)
 
 	var agentID string
 	if err := testPool.QueryRow(ctx,
@@ -27,96 +26,103 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		t.Fatalf("load fixture agent: %v", err)
 	}
 
-	tests := []struct {
-		name       string
-		finalize   func(task db.AgentTaskQueue)
-		wantStatus string
-		wantResult string
-		wantReason string
-	}{
-		{
-			name: "completed",
-			finalize: func(task db.AgentTaskQueue) {
-				if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", ""); err != nil {
-					t.Fatalf("CompleteTask: %v", err)
-				}
-			},
-			wantStatus: "completed",
-			wantResult: "done",
-		},
-		{
-			name: "failed",
-			finalize: func(task db.AgentTaskQueue) {
-				if _, err := taskSvc.FailTask(ctx, task.ID, "boom", "", "", "agent_error"); err != nil {
-					t.Fatalf("FailTask: %v", err)
-				}
-			},
-			wantStatus: "failed",
-			wantReason: "boom",
-		},
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Run-only guardrail regression",
+		Description:        pgtype.Text{String: "Legacy run-only issue-bound prompt", Valid: true},
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "run_only",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID); err != nil {
+			t.Logf("cleanup autopilot: %v", err)
+		}
+	})
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err == nil {
+		t.Fatal("expected run_only dispatch to fail before task creation")
+	}
+	if !strings.Contains(err.Error(), "issue-bound dispatch requires issue_id") {
+		t.Fatalf("expected explicit issue_id error, got %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected failed autopilot run to be returned")
+	}
+	if run.TaskID.Valid {
+		t.Fatalf("run_only guardrail should not create task, got task_id=%v", run.TaskID)
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
-				WorkspaceID:        parseUUID(testWorkspaceID),
-				Title:              "Run-only listener " + tc.name,
-				Description:        pgtype.Text{String: "Run listener regression test", Valid: true},
-				AssigneeID:         parseUUID(agentID),
-				Status:             "active",
-				ExecutionMode:      "run_only",
-				IssueTitleTemplate: pgtype.Text{},
-				CreatedByType:      "member",
-				CreatedByID:        parseUUID(testUserID),
-			})
-			if err != nil {
-				t.Fatalf("CreateAutopilot: %v", err)
-			}
-			t.Cleanup(func() {
-				if _, err := testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID); err != nil {
-					t.Logf("cleanup autopilot: %v", err)
-				}
-			})
+	var taskCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE autopilot_run_id = $1`,
+		run.ID,
+	).Scan(&taskCount); err != nil {
+		t.Fatalf("count task rows: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("expected no agent tasks for rejected run_only dispatch, got %d", taskCount)
+	}
+}
 
-			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
-			if err != nil {
-				t.Fatalf("DispatchAutopilot: %v", err)
-			}
-			if !run.TaskID.Valid {
-				t.Fatal("run_only dispatch did not link a task")
-			}
+func TestAutopilotCreateIssueDispatchLinksIssueBeforeTask(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
 
-			if _, err := testPool.Exec(ctx,
-				`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
-				run.TaskID,
-			); err != nil {
-				t.Fatalf("mark task dispatched: %v", err)
-			}
-			task, err := queries.StartAgentTask(ctx, run.TaskID)
-			if err != nil {
-				t.Fatalf("StartAgentTask: %v", err)
-			}
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
 
-			tc.finalize(task)
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Create issue guardrail regression",
+		Description:        pgtype.Text{String: "Create issue before dispatch", Valid: true},
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "Guardrail issue {{date}}", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID); err != nil {
+			t.Logf("cleanup autopilot: %v", err)
+		}
+	})
 
-			updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
-			if err != nil {
-				t.Fatalf("GetAutopilotRun: %v", err)
-			}
-			if updatedRun.Status != tc.wantStatus {
-				t.Fatalf("expected run status %q, got %q", tc.wantStatus, updatedRun.Status)
-			}
-			if tc.wantResult != "" && !strings.Contains(string(updatedRun.Result), tc.wantResult) {
-				t.Fatalf("expected run result to contain %q, got %s", tc.wantResult, string(updatedRun.Result))
-			}
-			if tc.wantReason != "" {
-				if !updatedRun.FailureReason.Valid {
-					t.Fatalf("expected failure reason %q, got invalid", tc.wantReason)
-				}
-				if updatedRun.FailureReason.String != tc.wantReason {
-					t.Fatalf("expected failure reason %q, got %q", tc.wantReason, updatedRun.FailureReason.String)
-				}
-			}
-		})
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot create_issue: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("create_issue dispatch must return a run with issue_id, got %#v", run)
+	}
+
+	var taskIssueID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT issue_id::text FROM agent_task_queue WHERE issue_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		run.IssueID,
+	).Scan(&taskIssueID); err != nil {
+		t.Fatalf("load queued task for created issue: %v", err)
+	}
+	if taskIssueID == "" {
+		t.Fatal("create_issue dispatch queued a task without issue_id")
 	}
 }
