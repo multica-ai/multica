@@ -159,10 +159,12 @@ func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
 		}
 		seen[key] = struct{}{}
 		normalized = append(normalized, RepoData{
-			URL:         url,
-			Description: strings.TrimSpace(repo.Description),
-			LocalPath:   localPath,
-			UserPaths:   repo.UserPaths,
+			URL:          url,
+			Description:  strings.TrimSpace(repo.Description),
+			LocalPath:    localPath,
+			SourceBranch: strings.TrimSpace(repo.SourceBranch),
+			TargetBranch: strings.TrimSpace(repo.TargetBranch),
+			MachinePaths: repo.MachinePaths,
 		})
 	}
 	return normalized
@@ -195,30 +197,6 @@ func workspaceReposVersion(repos []RepoData) string {
 	sort.Strings(keys)
 	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
 	return hex.EncodeToString(sum[:])
-}
-
-// resolveUserLocalPaths returns a copy of repos with local_path resolved for
-// the given user. When a repo has user_paths[userID], that value replaces
-// local_path. user_paths is stripped from the returned entries so the daemon
-// receives a clean local_path without needing to know about user_paths itself.
-// Returns repos unchanged when userID is empty.
-func resolveUserLocalPaths(repos []RepoData, userID string) []RepoData {
-	if userID == "" || len(repos) == 0 {
-		return repos
-	}
-	resolved := make([]RepoData, len(repos))
-	for i, repo := range repos {
-		r := RepoData{
-			URL:         repo.URL,
-			Description: repo.Description,
-			LocalPath:   repo.LocalPath,
-		}
-		if path, ok := repo.UserPaths[userID]; ok && path != "" {
-			r.LocalPath = path
-		}
-		resolved[i] = r
-	}
-	return resolved
 }
 
 func parseWorkspaceRepos(raw []byte) []RepoData {
@@ -315,6 +293,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			status = "offline"
 		}
 		metadata, _ := json.Marshal(map[string]any{
+			"device_name":        req.DeviceName,
 			"version":            runtime.Version,
 			"cli_version":        req.CLIVersion,
 			"cli_install_source": req.CLIInstallSource,
@@ -382,7 +361,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
-	repoResp.Repos = resolveUserLocalPaths(repoResp.Repos, requestUserID(r))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
 		"repos":         repoResp.Repos,
@@ -484,9 +462,7 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	repoResp := workspaceReposResponse(workspaceID, ws.Repos)
-	repoResp.Repos = resolveUserLocalPaths(repoResp.Repos, requestUserID(r))
-	writeJSON(w, http.StatusOK, repoResp)
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -748,9 +724,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-
-			// Apply per-user local path resolution: user_paths[user_id] overrides local_path.
-			resp.Repos = resolveUserLocalPaths(resp.Repos, requestUserID(r))
 
 			// Inject pipeline column context so the agent knows active instructions and valid transitions.
 			if issue.PipelineID.Valid {

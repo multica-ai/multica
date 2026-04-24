@@ -28,8 +28,8 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
-	reposVersion    string // stored for future use: skip refresh when version unchanged
-	allowedRepos    map[string]RepoData // key: repoIdentifier (URL or LocalPath)
+	reposVersion    string              // stored for future use: skip refresh when version unchanged
+	allowedRepos    map[string]RepoData // keyed by every checkout identifier (URL and resolved local path)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 }
@@ -237,8 +237,8 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 			}
 			return "standalone"
 		}(),
-		"launched_by":       d.cfg.LaunchedBy,
-		"runtimes":          runtimes,
+		"launched_by": d.cfg.LaunchedBy,
+		"runtimes":    runtimes,
 	}
 
 	resp, err := d.client.Register(ctx, req)
@@ -260,7 +260,7 @@ func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion str
 	}
 }
 
-// repoIdentifier returns the lookup key for a repo: LocalPath if set, URL otherwise.
+// repoIdentifier returns the primary lookup key for a repo: LocalPath if set, URL otherwise.
 func repoIdentifier(r RepoData) string {
 	if r.LocalPath != "" {
 		return r.LocalPath
@@ -268,16 +268,53 @@ func repoIdentifier(r RepoData) string {
 	return r.URL
 }
 
-func repoAllowlist(repos []RepoData) map[string]RepoData {
-	allowed := make(map[string]RepoData, len(repos))
-	for _, repo := range repos {
-		key := repoIdentifier(repo)
+func repoIdentifiers(r RepoData) []string {
+	seen := make(map[string]struct{}, 2)
+	var keys []string
+	for _, key := range []string{strings.TrimSpace(r.LocalPath), strings.TrimSpace(r.URL)} {
 		if key == "" {
 			continue
 		}
-		allowed[key] = repo
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func repoAllowlist(repos []RepoData) map[string]RepoData {
+	allowed := make(map[string]RepoData, len(repos))
+	for _, repo := range repos {
+		for _, key := range repoIdentifiers(repo) {
+			allowed[key] = repo
+		}
 	}
 	return allowed
+}
+
+func resolveRepoForMachine(repo RepoData, deviceName string) RepoData {
+	resolved := repo
+	if deviceName != "" {
+		if path := strings.TrimSpace(repo.MachinePaths[deviceName]); path != "" {
+			resolved.LocalPath = path
+			return resolved
+		}
+	}
+	resolved.LocalPath = strings.TrimSpace(repo.LocalPath)
+	return resolved
+}
+
+func (d *Daemon) resolveReposForMachine(repos []RepoData) []RepoData {
+	if len(repos) == 0 {
+		return repos
+	}
+	resolved := make([]RepoData, len(repos))
+	for i, repo := range repos {
+		resolved[i] = resolveRepoForMachine(repo, d.cfg.DeviceName)
+	}
+	return resolved
 }
 
 func (d *Daemon) setWorkspaceRepoSyncError(workspaceID, syncErr string) {
@@ -341,10 +378,11 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 		return nil, err
 	}
 
+	resolvedRepos := d.resolveReposForMachine(resp.Repos)
 	d.mu.Lock()
 	if ws, ok := d.workspaces[workspaceID]; ok {
 		ws.reposVersion = resp.ReposVersion
-		ws.allowedRepos = repoAllowlist(resp.Repos)
+		ws.allowedRepos = repoAllowlist(resolvedRepos)
 	}
 	d.mu.Unlock()
 
@@ -413,7 +451,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, identifier st
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	d.syncWorkspaceRepos(workspaceID, d.resolveReposForMachine(resp.Repos))
 
 	if d.repoCache.Lookup(workspaceID, repo.URL) != "" {
 		return nil
@@ -486,15 +524,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			runtimeIDs[i] = rt.ID
 			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
+		resolvedRepos := d.resolveReposForMachine(resp.Repos)
 		d.mu.Lock()
-		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos)
+		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resolvedRepos)
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
 		}
 		d.mu.Unlock()
 
-		if d.repoCache != nil && len(resp.Repos) > 0 {
-			go d.syncWorkspaceRepos(id, resp.Repos)
+		if d.repoCache != nil && len(resolvedRepos) > 0 {
+			go d.syncWorkspaceRepos(id, resolvedRepos)
 		}
 
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
@@ -1038,7 +1077,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentName:         agentName,
 		AgentInstructions: instructions,
 		AgentSkills:       convertSkillsForEnv(skills),
-		Repos:             convertReposForEnv(task.Repos),
+		Repos:             convertReposForEnv(d.resolveReposForMachine(task.Repos)),
 		ChatSessionID:     task.ChatSessionID,
 	}
 
@@ -1485,7 +1524,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 			LocalPath:    r.LocalPath,
 			SourceBranch: r.SourceBranch,
 			TargetBranch: r.TargetBranch,
-			UserPaths:    r.UserPaths,
+			MachinePaths: r.MachinePaths,
 		}
 	}
 	return result

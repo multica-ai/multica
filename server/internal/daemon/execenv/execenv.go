@@ -19,7 +19,7 @@ type RepoContextForEnv struct {
 	LocalPath    string            // absolute local path (non-empty for local-path repos)
 	SourceBranch string            // branch to check out (empty = default branch)
 	TargetBranch string            // branch to commit work to (empty = no restriction)
-	UserPaths    map[string]string // user_id -> local path override (informational; local_path is pre-resolved)
+	MachinePaths map[string]string // device_name -> local path override
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.

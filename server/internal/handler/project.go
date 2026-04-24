@@ -71,7 +71,7 @@ type repoEntry struct {
 	LocalPath    string            `json:"local_path,omitempty"`
 	SourceBranch string            `json:"source_branch,omitempty"`
 	TargetBranch string            `json:"target_branch,omitempty"`
-	UserPaths    map[string]string `json:"user_paths,omitempty"` // user_id -> local path override
+	MachinePaths map[string]string `json:"machine_paths,omitempty"` // device_name -> local path override
 }
 
 func repoEntryKey(r repoEntry) string {

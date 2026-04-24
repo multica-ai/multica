@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,7 @@ type AgentRuntimeResponse struct {
 	Provider     string  `json:"provider"`
 	LaunchHeader string  `json:"launch_header"`
 	Status       string  `json:"status"`
+	DeviceName   string  `json:"device_name"`
 	DeviceInfo   string  `json:"device_info"`
 	Metadata     any     `json:"metadata"`
 	OwnerID      *string `json:"owner_id"`
@@ -39,6 +41,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	deviceName := runtimeDeviceName(metadata, rt.DeviceInfo)
 
 	return AgentRuntimeResponse{
 		ID:           uuidToString(rt.ID),
@@ -49,6 +52,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Provider:     rt.Provider,
 		LaunchHeader: agent.LaunchHeader(rt.Provider),
 		Status:       rt.Status,
+		DeviceName:   deviceName,
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
@@ -56,6 +60,16 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
 	}
+}
+
+func runtimeDeviceName(metadata any, deviceInfo string) string {
+	if m, ok := metadata.(map[string]any); ok {
+		if v, ok := m["device_name"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	deviceName, _, _ := strings.Cut(deviceInfo, " · ")
+	return strings.TrimSpace(deviceName)
 }
 
 // ---------------------------------------------------------------------------

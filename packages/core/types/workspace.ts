@@ -4,6 +4,7 @@ export interface WorkspaceRepo {
   url?: string;
   description: string;
   local_path?: string;
+  machine_paths?: Record<string, string>;
 }
 
 export interface ProjectRepo extends WorkspaceRepo {

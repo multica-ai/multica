@@ -626,13 +626,13 @@ type repoIdentifierInput struct {
 	Identifier   string // URL or local path
 	SourceBranch string
 	TargetBranch string
-	UserPaths    map[string]string // user_id -> local path override
+	MachinePaths map[string]string // device_name -> local path override
 }
 
 // parseRepoInput parses a --repo flag value. Supports two formats:
 //
 //	"https://github.com/foo/bar"                   — plain identifier (backward-compatible)
-//	'{"url":"...","source_branch":"...","target_branch":"...","user_paths":{"uid":"/path"}}'  — JSON with optional branches and per-user paths
+//	'{"url":"...","source_branch":"...","target_branch":"...","machine_paths":{"host":"/path"}}'  — JSON with optional branches and per-machine paths
 func parseRepoInput(s string) (repoIdentifierInput, error) {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "{") {
@@ -641,7 +641,7 @@ func parseRepoInput(s string) (repoIdentifierInput, error) {
 			LocalPath    string            `json:"local_path"`
 			SourceBranch string            `json:"source_branch"`
 			TargetBranch string            `json:"target_branch"`
-			UserPaths    map[string]string `json:"user_paths"`
+			MachinePaths map[string]string `json:"machine_paths"`
 		}
 		if err := json.Unmarshal([]byte(s), &parsed); err != nil {
 			return repoIdentifierInput{}, fmt.Errorf("invalid JSON repo format: %w", err)
@@ -653,7 +653,7 @@ func parseRepoInput(s string) (repoIdentifierInput, error) {
 		if id == "" {
 			return repoIdentifierInput{}, fmt.Errorf("JSON repo must have a 'url' or 'local_path' field")
 		}
-		return repoIdentifierInput{Identifier: id, SourceBranch: parsed.SourceBranch, TargetBranch: parsed.TargetBranch, UserPaths: parsed.UserPaths}, nil
+		return repoIdentifierInput{Identifier: id, SourceBranch: parsed.SourceBranch, TargetBranch: parsed.TargetBranch, MachinePaths: parsed.MachinePaths}, nil
 	}
 	return repoIdentifierInput{Identifier: s}, nil
 }
@@ -673,11 +673,11 @@ func resolveRepoIdentifiers(ctx context.Context, client *cli.APIClient, identifi
 			continue
 		}
 		key := strVal(r, "local_path")
-		if key == "" {
-			key = strVal(r, "url")
-		}
 		if key != "" {
 			wsRepoMap[key] = r
+		}
+		if url := strVal(r, "url"); url != "" {
+			wsRepoMap[url] = r
 		}
 	}
 	result := make([]map[string]any, 0, len(identifiers))
@@ -693,8 +693,9 @@ func resolveRepoIdentifiers(ctx context.Context, client *cli.APIClient, identifi
 		entry := map[string]any{"description": strVal(r, "description")}
 		if lp := strVal(r, "local_path"); lp != "" {
 			entry["local_path"] = lp
-		} else {
-			entry["url"] = strVal(r, "url")
+		}
+		if url := strVal(r, "url"); url != "" {
+			entry["url"] = url
 		}
 		if input.SourceBranch != "" {
 			entry["source_branch"] = input.SourceBranch
@@ -702,8 +703,8 @@ func resolveRepoIdentifiers(ctx context.Context, client *cli.APIClient, identifi
 		if input.TargetBranch != "" {
 			entry["target_branch"] = input.TargetBranch
 		}
-		if len(input.UserPaths) > 0 {
-			entry["user_paths"] = input.UserPaths
+		if len(input.MachinePaths) > 0 {
+			entry["machine_paths"] = input.MachinePaths
 		}
 		result = append(result, entry)
 	}

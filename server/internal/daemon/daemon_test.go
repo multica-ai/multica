@@ -371,6 +371,71 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	}
 }
 
+func TestResolveReposForMachineUsesMachinePath(t *testing.T) {
+	t.Parallel()
+
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	})
+	d.cfg.DeviceName = "dev-laptop"
+
+	repos := d.resolveReposForMachine([]RepoData{{
+		URL:       "https://example.com/org/repo.git",
+		LocalPath: "/fallback/repo",
+		MachinePaths: map[string]string{
+			"dev-laptop": "/Users/alice/src/repo",
+			"ci-box":     "/srv/repo",
+		},
+	}})
+
+	if got := repos[0].LocalPath; got != "/Users/alice/src/repo" {
+		t.Fatalf("expected machine path, got %q", got)
+	}
+}
+
+func TestEnsureRepoReadyFallsBackToRemoteWhenNoLocalPathForMachine(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	otherMachinePath := filepath.Join(t.TempDir(), "repo")
+	var refreshCalls atomic.Int32
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			http.NotFound(w, r)
+			return
+		}
+		refreshCalls.Add(1)
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID: "ws-1",
+			Repos: []RepoData{{
+				URL:         sourceRepo,
+				Description: "repo",
+				MachinePaths: map[string]string{
+					"other-machine": otherMachinePath,
+				},
+			}},
+			ReposVersion: "v2",
+		})
+	})
+	d.cfg.DeviceName = "dev-laptop"
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", d.resolveReposForMachine([]RepoData{{
+		URL: sourceRepo,
+		MachinePaths: map[string]string{
+			"other-machine": otherMachinePath,
+		},
+	}}))
+
+	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+		t.Fatalf("ensureRepoReady: %v", err)
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected 1 refresh call, got %d", got)
+	}
+	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+		t.Fatal("expected remote repo to be cached")
+	}
+}
+
 func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 	t.Parallel()
 

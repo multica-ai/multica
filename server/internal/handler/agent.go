@@ -108,32 +108,34 @@ func agentToResponse(a db.Agent) AgentResponse {
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
-	URL         string            `json:"url,omitempty"`
-	Description string            `json:"description"`
-	LocalPath   string            `json:"local_path,omitempty"`
-	UserPaths   map[string]string `json:"user_paths,omitempty"` // user_id -> local path override
+	URL          string            `json:"url,omitempty"`
+	Description  string            `json:"description"`
+	LocalPath    string            `json:"local_path,omitempty"`
+	SourceBranch string            `json:"source_branch,omitempty"`
+	TargetBranch string            `json:"target_branch,omitempty"`
+	MachinePaths map[string]string `json:"machine_paths,omitempty"` // device_name -> local path override
 }
 
 type AgentTaskResponse struct {
-	ID                    string         `json:"id"`
-	AgentID               string         `json:"agent_id"`
-	RuntimeID             string         `json:"runtime_id"`
-	IssueID               string         `json:"issue_id"`
-	WorkspaceID           string         `json:"workspace_id"`
-	Status                string         `json:"status"`
-	Priority              int32          `json:"priority"`
-	DispatchedAt          *string        `json:"dispatched_at"`
-	StartedAt             *string        `json:"started_at"`
-	CompletedAt           *string        `json:"completed_at"`
-	Result                any            `json:"result"`
-	Error                 *string        `json:"error"`
-	Agent                 *TaskAgentData `json:"agent,omitempty"`
-	Repos                 []RepoData     `json:"repos,omitempty"`
-	CreatedAt             string         `json:"created_at"`
-	PriorSessionID        string         `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
-	PriorWorkDir          string         `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
-	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	ID                    string               `json:"id"`
+	AgentID               string               `json:"agent_id"`
+	RuntimeID             string               `json:"runtime_id"`
+	IssueID               string               `json:"issue_id"`
+	WorkspaceID           string               `json:"workspace_id"`
+	Status                string               `json:"status"`
+	Priority              int32                `json:"priority"`
+	DispatchedAt          *string              `json:"dispatched_at"`
+	StartedAt             *string              `json:"started_at"`
+	CompletedAt           *string              `json:"completed_at"`
+	Result                any                  `json:"result"`
+	Error                 *string              `json:"error"`
+	Agent                 *TaskAgentData       `json:"agent,omitempty"`
+	Repos                 []RepoData           `json:"repos,omitempty"`
+	CreatedAt             string               `json:"created_at"`
+	PriorSessionID        string               `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
+	PriorWorkDir          string               `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
+	TriggerCommentID      *string              `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent string               `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string               `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string               `json:"chat_message,omitempty"`            // user message for chat tasks
 	PipelineContext       *PipelineContextData `json:"pipeline_context,omitempty"`        // pipeline column context for the issue
@@ -142,11 +144,11 @@ type AgentTaskResponse struct {
 // PipelineContextData provides pipeline column metadata to the agent so it can
 // follow column-specific instructions and know which status transitions are valid.
 type PipelineContextData struct {
-	PipelineID           string               `json:"pipeline_id"`
-	CurrentColumnLabel   string               `json:"current_column_label"`
-	Instructions         string               `json:"instructions,omitempty"`
-	AllowedTransitions   []string             `json:"allowed_transitions,omitempty"`
-	Columns              []PipelineColumnInfo `json:"columns"`
+	PipelineID         string               `json:"pipeline_id"`
+	CurrentColumnLabel string               `json:"current_column_label"`
+	Instructions       string               `json:"instructions,omitempty"`
+	AllowedTransitions []string             `json:"allowed_transitions,omitempty"`
+	Columns            []PipelineColumnInfo `json:"columns"`
 }
 
 // PipelineColumnInfo describes a single pipeline column.

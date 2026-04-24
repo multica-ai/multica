@@ -13,6 +13,7 @@ export interface RuntimeDevice {
   provider: string;
   launch_header: string;
   status: "online" | "offline";
+  device_name: string;
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
