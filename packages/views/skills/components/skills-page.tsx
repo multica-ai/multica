@@ -430,7 +430,10 @@ export default function SkillsPage() {
       <div className="flex flex-1 min-h-0 flex-col">
         <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
         <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
-          <Skeleton className="h-12 w-full max-w-3xl rounded-md" />
+          <div className="space-y-3 pl-4">
+            <Skeleton className="h-5 w-full max-w-2xl rounded-md" />
+            <Skeleton className="h-14 w-full max-w-3xl rounded-md" />
+          </div>
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border">
             <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
               <Skeleton className="h-8 w-64 rounded-md" />
@@ -505,18 +508,31 @@ export default function SkillsPage() {
       )}
 
       {/* Page body — padding here keeps the card from touching the chrome,
-          and `gap-4` separates the sharing banner from the table card. */}
+          and `gap-4` separates the intro block from the table card. */}
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
         {!showEmpty && (
-          <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            <span className="font-medium text-foreground">
-              Shared with your workspace.
-            </span>{" "}
-            Anyone can create a skill, import one from a URL, or copy one from
-            their local runtime — and every agent can use it.{" "}
-            <span className="font-semibold text-brand">
-              Local runtime skills stay private until you copy one here.
-            </span>
+          <div className="space-y-3 pl-4">
+            <p className="text-base text-foreground">
+              Instructions any agent in this workspace can use.{" "}
+              <a
+                href="https://multica.ai/docs/skills"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-muted-foreground underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
+              >
+                Learn more about Skills →
+              </a>
+            </p>
+            <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">
+                Shared with your workspace.
+              </span>{" "}
+              Anyone can create a skill, import one from a URL, or copy one
+              from their local runtime — and every agent can use it.{" "}
+              <span className="font-semibold text-brand">
+                Local runtime skills stay private until you copy one here.
+              </span>
+            </div>
           </div>
         )}
 
