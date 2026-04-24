@@ -22,6 +22,7 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const loginWithDingTalk = useAuthStore((s) => s.loginWithDingTalk);
   const [error, setError] = useState("");
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -40,10 +41,48 @@ function CallbackContent() {
 
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
+
+    // DingTalk login flow
+    if (stateParts.includes("provider:dingtalk")) {
+      const isDesktop = stateParts.includes("platform:desktop");
+      const nextPart = stateParts.find((p) => p.startsWith("next:"));
+      const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
+      const redirectUri = `${window.location.origin}/auth/callback`;
+
+      if (isDesktop) {
+        api
+          .dingtalkLogin(code, redirectUri)
+          .then(({ token }) => {
+            setDesktopToken(token);
+            window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : "Login failed");
+          });
+      } else {
+        loginWithDingTalk(code, redirectUri)
+          .then(async (loggedInUser) => {
+            const wsList = await api.listWorkspaces();
+            qc.setQueryData(workspaceKeys.list(), wsList);
+            const onboarded = loggedInUser.onboarded_at != null;
+            if (!onboarded) {
+              router.push(paths.onboarding());
+              return;
+            }
+            router.push(
+              nextUrl || resolvePostAuthDestination(wsList, onboarded),
+            );
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : "Login failed");
+          });
+      }
+      return;
+    }
+
+    // Google login flow
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    // Strip "next:" prefix, then drop anything that isn't a safe relative path
-    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
     const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
 
     const redirectUri = `${window.location.origin}/auth/callback`;
@@ -78,7 +117,7 @@ function CallbackContent() {
           setError(err instanceof Error ? err.message : "Login failed");
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, loginWithDingTalk, router, qc]);
 
   if (desktopToken) {
     return (

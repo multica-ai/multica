@@ -659,6 +659,79 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
+  // -------------------------------------------------------------------------
+  // DingTalk login
+  // -------------------------------------------------------------------------
+
+  it("renders DingTalk button when dingtalk config is provided", () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        dingtalk={{
+          clientId: "dt-test-id",
+          redirectUri: "http://localhost:3000/auth/callback",
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /continue with dingtalk/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not render DingTalk button when dingtalk config is omitted", () => {
+    render(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.queryByRole("button", { name: /continue with dingtalk/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("redirects to DingTalk OAuth URL on click", async () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        dingtalk={{
+          clientId: "dt-test-id",
+          redirectUri: "http://localhost:3000/auth/callback",
+          state: "platform:desktop",
+        }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: /continue with dingtalk/i }),
+    );
+
+    expect(window.location.href).toContain("https://login.dingtalk.com/oauth2/auth");
+    expect(window.location.href).toContain("client_id=dt-test-id");
+    expect(window.location.href).toContain("provider%3Adingtalk");
+  });
+
+  // -------------------------------------------------------------------------
+  // hideEmailLogin
+  // -------------------------------------------------------------------------
+
+  it("hides email form when hideEmailLogin is true", () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        hideEmailLogin
+        dingtalk={{
+          clientId: "dt-test-id",
+          redirectUri: "http://localhost:3000/auth/callback",
+        }}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /continue$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /continue with dingtalk/i }),
+    ).toBeInTheDocument();
+  });
+
 });
 
 // ---------------------------------------------------------------------------

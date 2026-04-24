@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { paths } from "@multica/core/paths";
 
-const { mockPush, mockSearchParams, mockLoginWithGoogle, mockListWorkspaces } =
+const { mockPush, mockSearchParams, mockLoginWithGoogle, mockLoginWithDingTalk, mockListWorkspaces, mockDingtalkLogin } =
   vi.hoisted(() => ({
     mockPush: vi.fn(),
     mockSearchParams: new URLSearchParams(),
     mockLoginWithGoogle: vi.fn(),
+    mockLoginWithDingTalk: vi.fn(),
     mockListWorkspaces: vi.fn(),
+    mockDingtalkLogin: vi.fn(),
   }));
 
 const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
@@ -41,7 +43,7 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({ loginWithGoogle: mockLoginWithGoogle, loginWithDingTalk: mockLoginWithDingTalk }),
   };
 });
 
@@ -53,6 +55,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockListWorkspaces,
     googleLogin: vi.fn(),
+    dingtalkLogin: mockDingtalkLogin,
   },
 }));
 
@@ -64,6 +67,7 @@ describe("CallbackPage", () => {
     mockSearchParams.forEach((_v, k) => mockSearchParams.delete(k));
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
   });
 
@@ -107,6 +111,46 @@ describe("CallbackPage", () => {
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
+    });
+  });
+
+  // DingTalk callback tests
+  it("routes to loginWithDingTalk when state contains provider:dingtalk", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
+    mockSearchParams.set("state", "provider:dingtalk");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockLoginWithDingTalk).toHaveBeenCalledWith(
+        "test-code",
+        expect.stringContaining("/auth/callback"),
+      );
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("unonboarded DingTalk user lands on /onboarding", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
+    mockSearchParams.set("state", "provider:dingtalk");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("onboarded DingTalk user honors safe next= from state", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockSearchParams.set("state", "provider:dingtalk,next:/invite/xyz");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/invite/xyz");
     });
   });
 });

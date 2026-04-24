@@ -255,6 +255,13 @@ export class ApiClient {
     });
   }
 
+  async dingtalkLogin(code: string, redirectUri: string): Promise<LoginResponse> {
+    return this.fetch("/auth/dingtalk", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }

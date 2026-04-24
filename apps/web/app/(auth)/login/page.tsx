@@ -25,6 +25,7 @@ import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+const dingtalkClientId = process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID;
 
 function LoginPageContent() {
   const router = useRouter();
@@ -108,6 +109,13 @@ function LoginPageContent() {
     .filter(Boolean)
     .join(",") || undefined;
 
+  const dingtalkState = [
+    platform === "desktop" ? "platform:desktop" : "",
+    nextUrl ? `next:${nextUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join(",") || undefined;
+
   // While the desktop handoff is in progress (or has produced a token/error),
   // render a dedicated screen instead of flashing the login form or redirecting
   // away to a workspace page.
@@ -166,6 +174,16 @@ function LoginPageContent() {
             }
           : undefined
       }
+      dingtalk={
+        dingtalkClientId
+          ? {
+              clientId: dingtalkClientId,
+              redirectUri: `${window.location.origin}/auth/callback`,
+              state: dingtalkState,
+            }
+          : undefined
+      }
+      hideEmailLogin={process.env.NEXT_PUBLIC_HIDE_EMAIL_LOGIN === "true"}
       cliCallback={
         cliCallbackRaw && validateCliCallback(cliCallbackRaw)
           ? { url: cliCallbackRaw, state: cliState }
