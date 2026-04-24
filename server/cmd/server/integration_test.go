@@ -765,8 +765,8 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 403/404 for non-owner DELETE, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-owner DELETE, got %d", resp.StatusCode)
 	}
 
 	var exists bool
