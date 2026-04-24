@@ -63,6 +63,11 @@ export interface Agent {
   archived_by: string | null;
 }
 
+/** Optional body for POST /api/agents/:id/copy */
+export interface CopyAgentRequest {
+  name?: string;
+}
+
 export interface CreateAgentRequest {
   name: string;
   description?: string;

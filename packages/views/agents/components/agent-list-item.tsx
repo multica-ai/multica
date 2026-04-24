@@ -1,7 +1,7 @@
 "use client";
 
 import { Cloud, Monitor } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { statusConfig } from "../config";
 
@@ -9,10 +9,13 @@ export function AgentListItem({
   agent,
   isSelected,
   onClick,
+  ownerMember,
 }: {
   agent: Agent;
   isSelected: boolean;
   onClick: () => void;
+  /** When set (e.g. All scope), show owner under the agent name. */
+  ownerMember?: MemberWithUser | null;
 }) {
   const st = statusConfig[agent.status];
   const isArchived = !!agent.archived_at;
@@ -35,14 +38,20 @@ export function AgentListItem({
             <Monitor className="h-3 w-3 text-muted-foreground" />
           )}
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
+        <div className="mt-0.5 flex flex-col gap-0.5">
+          {ownerMember ? (
+            <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <ActorAvatar actorType="member" actorId={ownerMember.user_id} size={14} />
+              <span className="truncate">{ownerMember.name}</span>
+            </span>
+          ) : null}
           {isArchived ? (
             <span className="text-xs text-muted-foreground">Archived</span>
           ) : (
-            <>
+            <span className="flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
               <span className={`text-xs ${st.color}`}>{st.label}</span>
-            </>
+            </span>
           )}
         </div>
       </div>

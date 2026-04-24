@@ -179,11 +179,25 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 
+	ownerFilter := r.URL.Query().Get("owner")
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+
 	var agents []db.Agent
 	var err error
-	if r.URL.Query().Get("include_archived") == "true" {
+	switch {
+	case ownerFilter == "me":
+		byOwner := db.ListAgentsByOwnerParams{
+			WorkspaceID: parseUUID(workspaceID),
+			OwnerID:     parseUUID(userID),
+		}
+		if includeArchived {
+			agents, err = h.Queries.ListAllAgentsByOwner(r.Context(), byOwner)
+		} else {
+			agents, err = h.Queries.ListAgentsByOwner(r.Context(), byOwner)
+		}
+	case includeArchived:
 		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
-	} else {
+	default:
 		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
 	}
 	if err != nil {
@@ -400,6 +414,149 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(agent)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+type CopyAgentRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sourceAgent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	wsID := uuidToString(sourceAgent.WorkspaceID)
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	if !ok {
+		return
+	}
+	userID := requestUserID(r)
+	isAgentOwner := uuidToString(sourceAgent.OwnerID) == userID
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	if !isAgentOwner && !isAdmin {
+		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can duplicate this agent")
+		return
+	}
+
+	var req CopyAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	newName := req.Name
+	if newName == "" {
+		newName = "Copy of " + sourceAgent.Name
+	}
+
+	skills, err := h.Queries.ListAgentSkills(r.Context(), sourceAgent.ID)
+	if err != nil {
+		slog.Warn("failed to load agent skills for copy", "agent_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+
+	rc := sourceAgent.RuntimeConfig
+	if len(rc) == 0 {
+		rc = []byte("{}")
+	} else {
+		rc = append([]byte(nil), rc...)
+	}
+	ce := sourceAgent.CustomEnv
+	if len(ce) == 0 {
+		ce = []byte("{}")
+	} else {
+		ce = append([]byte(nil), ce...)
+	}
+	ca := sourceAgent.CustomArgs
+	if len(ca) == 0 {
+		ca = []byte("[]")
+	} else {
+		ca = append([]byte(nil), ca...)
+	}
+	var mc []byte
+	if len(sourceAgent.McpConfig) > 0 {
+		mc = append([]byte(nil), sourceAgent.McpConfig...)
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+
+	newAgent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
+		WorkspaceID:        sourceAgent.WorkspaceID,
+		Name:               newName,
+		Description:        sourceAgent.Description,
+		Instructions:       sourceAgent.Instructions,
+		AvatarUrl:          sourceAgent.AvatarUrl,
+		RuntimeMode:        sourceAgent.RuntimeMode,
+		RuntimeConfig:      rc,
+		RuntimeID:          sourceAgent.RuntimeID,
+		Visibility:         sourceAgent.Visibility,
+		MaxConcurrentTasks: sourceAgent.MaxConcurrentTasks,
+		OwnerID:            parseUUID(userID),
+		CustomEnv:          ce,
+		CustomArgs:         ca,
+		McpConfig:          mc,
+		Model:              sourceAgent.Model,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "agent_workspace_name_unique" {
+			writeError(w, http.StatusConflict, fmt.Sprintf("an agent named %q already exists in this workspace", newName))
+			return
+		}
+		slog.Warn("duplicate agent failed", append(logger.RequestAttrs(r), "source_agent_id", id, "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to duplicate agent: "+err.Error())
+		return
+	}
+
+	for _, s := range skills {
+		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
+			AgentID: newAgent.ID,
+			SkillID: s.ID,
+		}); err != nil {
+			slog.Warn("failed to copy agent skill", append(logger.RequestAttrs(r), "source_agent_id", id, "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to copy agent skills")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	slog.Info("agent duplicated", append(logger.RequestAttrs(r), "source_agent_id", id, "new_agent_id", uuidToString(newAgent.ID))...)
+
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          newAgent.RuntimeID,
+		WorkspaceID: newAgent.WorkspaceID,
+	})
+	if err == nil && runtime.Status == "online" {
+		h.TaskService.ReconcileAgentStatus(r.Context(), newAgent.ID)
+		newAgent, _ = h.Queries.GetAgent(r.Context(), newAgent.ID)
+	}
+
+	resp := agentToResponse(newAgent)
+	skillRows, err := h.Queries.ListAgentSkills(r.Context(), newAgent.ID)
+	if err == nil && len(skillRows) > 0 {
+		resp.Skills = make([]SkillResponse, len(skillRows))
+		for i, s := range skillRows {
+			resp.Skills[i] = skillToResponse(s)
+		}
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, wsID)
+	h.publish(protocol.EventAgentCreated, wsID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
 
