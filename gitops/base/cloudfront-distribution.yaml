@@ -17,13 +17,9 @@ spec:
     origin:
       - originId: s3-uploads
         domainName: "g2-agentfarm-tools-uploads.s3.us-east-1.amazonaws.com"
-        # Reference the OAC created in cloudfront-oac.yaml.
-        # Crossplane resolves this to the OAC ID at sync time.
+        # Cross-resource ref: Crossplane resolves the OAC ID from the OriginAccessControl object.
         originAccessControlIdRef:
           name: agentfarm-uploads-oac
-        s3OriginConfig:
-          # Must be empty string when OAC is used (OAI field kept for schema compatibility).
-          - originAccessIdentity: ""
 
     defaultCacheBehavior:
       - targetOriginId: s3-uploads
@@ -37,26 +33,20 @@ spec:
         cachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
         viewerProtocolPolicy: redirect-to-https
         compress: true
-        # Restrict access to signed-cookie holders only.
-        trustedKeyGroupsRefs:
-          - name: agentfarm-cloudfront-key-group
+        # Cross-resource ref: Crossplane resolves the KeyGroup ID from the KeyGroup object.
+        trustedKeyGroups:
+          - agentfarm-cloudfront-key-group
 
     restrictions:
       - geoRestriction:
           - restrictionType: none
+            locations: []
 
     viewerCertificate:
-      # Using the default *.cloudfront.net certificate for now.
-      # Replace with a custom ACM certificate once a vanity domain (e.g. cdn.g2.ai) is ready.
-      - cloudfrontDefaultCertificate: true
+      - # Using the default *.cloudfront.net certificate for now.
+        # Replace with a custom ACM certificate once a vanity domain (e.g. cdn.g2.ai) is ready.
+        cloudfrontDefaultCertificate: true
         minimumProtocolVersion: TLSv1.2_2021
 
-    tags:
-      Owner: DevOps
-      Application: agentfarm
-      Environment: tools
-      Production: "false"
-      Purpose: "CDN for user-uploaded attachments"
-
   providerConfigRef:
-    name: provider-aws-config
+    name: agentfarm-provider-aws-upbound-config

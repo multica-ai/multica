@@ -8,7 +8,7 @@ spec:
   forProvider:
     region: us-east-1
     description: Security group for agentfarm RDS Aurora Postgres
-    groupName: agentfarm-postgresql-sg
+    name: agentfarm-postgresql-sg
     vpcId: vpc-07532d54172d22514
     tags:
       Name: agentfarm-postgresql-sg

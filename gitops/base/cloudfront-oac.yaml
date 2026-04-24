@@ -10,4 +10,4 @@ spec:
     signingBehavior: always
     signingProtocol: sigv4
   providerConfigRef:
-    name: provider-aws-config
+    name: agentfarm-provider-aws-upbound-config

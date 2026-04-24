@@ -5,39 +5,40 @@
 #   1. Generate an RSA 2048-bit key pair:
 #        openssl genrsa -out cf-private.pem 2048
 #        openssl rsa -pubout -in cf-private.pem -out cf-public.pem
-#   2. Store the private key in Secrets Manager as raw PEM. The backend
+#   2. Store the private key in AWS Secrets Manager as raw PEM. The backend
 #      (server/internal/auth/cloudfront.go) reads SecretString and feeds it
 #      straight to pem.Decode — no base64 layer, or the decode will fail:
 #        aws secretsmanager create-secret \
 #          --name multica/cloudfront-signing-key \
 #          --secret-string file://cf-private.pem
-#   3. Paste the PUBLIC key PEM into encodedKey below, then apply.
-#   4. After Crossplane creates the PublicKey, retrieve its ID from:
-#        kubectl get publickey agentfarm-cloudfront-signing-key -o jsonpath='{.status.atProvider.id}'
-#      The backend reads this as CLOUDFRONT_KEY_PAIR_ID (stored in SSM at
-#      /agentfarm/tools/CLOUDFRONT_KEY_PAIR_ID).
+#   3. Store the PUBLIC key PEM in SSM (not sensitive, but kept consistent with
+#      the ExternalSecret pattern so Crossplane can read it from the cluster Secret):
+#        aws ssm put-parameter \
+#          --name /agentfarm/tools/CLOUDFRONT_PUBLIC_KEY \
+#          --type SecureString \
+#          --value "$(cat cf-public.pem)"
+#      The ExternalSecret in secret-store.yaml will sync it into the
+#      agentfarm-secret-store Secret under key CLOUDFRONT_PUBLIC_KEY.
+#   4. Apply this manifest. Crossplane will create the PublicKey in CloudFront,
+#      then resolve the KeyGroup's itemRefs to obtain the PublicKey ID automatically.
+#      No manual ID lookup or placeholder replacement needed.
+---
 apiVersion: cloudfront.aws.upbound.io/v1beta1
 kind: PublicKey
 metadata:
   name: agentfarm-cloudfront-signing-key
 spec:
   forProvider:
-    comment: "RSA signing key for agentfarm CloudFront signed cookies"
     name: agentfarm-cloudfront-signing-key
-    # RSA 2048-bit public key. Matching private key lives in Secrets Manager at
-    # multica/cloudfront-signing-key. Rotate both together.
-    encodedKey: |
-      -----BEGIN PUBLIC KEY-----
-      MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqV/JE1uDBheenwuzWLrK
-      23V5Z2xkhkKQYujSz5/ubxLYyLPQAULwb8qsMVTkTtHcDcx+OzvdN3XD94OPLKNp
-      FNkaxt0upooHUCicX+DIhA/O4Mibzwz2dFY+fY82qL8hYxg+OERHbylWu+97mVw7
-      YNj7mxr4Ck0FSOTuvO0Ou16aXp31D29o6Qa4jJFd+L+/Y1t7+g4mYrlfpLFvSZR+
-      Ut8wtvI6UrjpTlz9fgRpAKOQS5vaUNW6Lf1dNV7hpy2u99MAk9H5+uCLFJ9NoAbN
-      RJ6X21NrGXqsJjLH8sHOGuXCCgQ7nR4zhHLMMsYrezHIrdA6C4DsDHx2kyPqCw9a
-      IwIDAQAB
-      -----END PUBLIC KEY-----
+    comment: "RSA signing key for agentfarm CloudFront signed cookies"
+    # Crossplane reads the public key PEM from the agentfarm-secret-store Secret,
+    # key CLOUDFRONT_PUBLIC_KEY (synced from SSM /agentfarm/tools/CLOUDFRONT_PUBLIC_KEY).
+    encodedKeySecretRef:
+      name: agentfarm-secret-store
+      namespace: agentfarm
+      key: CLOUDFRONT_PUBLIC_KEY
   providerConfigRef:
-    name: provider-aws-config
+    name: agentfarm-provider-aws-upbound-config
 ---
 apiVersion: cloudfront.aws.upbound.io/v1beta1
 kind: KeyGroup
@@ -45,9 +46,10 @@ metadata:
   name: agentfarm-cloudfront-key-group
 spec:
   forProvider:
-    comment: "Signing key group for agentfarm signed-cookie authentication"
     name: agentfarm-cloudfront-key-group
-    itemsRefs:
+    comment: "Signing key group for agentfarm signed-cookie authentication"
+    # Cross-resource ref: Crossplane resolves the PublicKey ID automatically.
+    itemRefs:
       - name: agentfarm-cloudfront-signing-key
   providerConfigRef:
-    name: provider-aws-config
+    name: agentfarm-provider-aws-upbound-config

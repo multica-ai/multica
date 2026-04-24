@@ -1,12 +1,12 @@
-apiVersion: s3.aws.upbound.io/v1beta1
+apiVersion: s3.aws.crossplane.io/v1alpha3
 kind: BucketPolicy
 metadata:
   name: g2-agentfarm-tools-uploads-policy
 spec:
   forProvider:
     region: us-east-1
-    bucket: g2-agentfarm-tools-uploads
-    policy: |
+    bucketName: g2-agentfarm-tools-uploads
+    rawPolicy: |
       {
         "Version": "2012-10-17",
         "Statement": [
