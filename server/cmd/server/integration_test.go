@@ -722,6 +722,62 @@ func TestWorkspacesThroughRouter(t *testing.T) {
 	}
 }
 
+// TestDeleteWorkspaceRequiresOwner is a defense-in-depth regression test for the
+// permission gate on DELETE /api/workspaces/{id}. It creates a separate workspace
+// in which the integration test user is only an "admin" (not "owner") and asserts
+// that DELETE returns 403, leaving the workspace intact. This guards against both
+// router misconfiguration (missing middleware) and handler regressions.
+func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "integration-tests-delete-403"
+	// Best-effort cleanup from any prior run.
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, "Integration Tests Delete 403", slug, "DeleteWorkspace permission test").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+	`, wsID, testUserID); err != nil {
+		t.Fatalf("create admin member: %v", err)
+	}
+
+	req, err := http.NewRequest("DELETE", testServer.URL+"/api/workspaces/"+wsID, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("X-Workspace-ID", wsID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 403/404 for non-owner DELETE, got %d", resp.StatusCode)
+	}
+
+	var exists bool
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
+		t.Fatalf("verify workspace: %v", err)
+	}
+	if !exists {
+		t.Fatal("workspace was deleted despite non-owner request")
+	}
+}
+
 // ---- Inbox through full router ----
 
 func TestInboxThroughRouter(t *testing.T) {

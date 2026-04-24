@@ -599,6 +599,19 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
+	// Defense in depth: the route is already gated by the
+	// RequireWorkspaceRoleFromURL("owner") middleware, but we re-check here
+	// so that the handler is safe regardless of how it gets wired up
+	// (direct calls in tests, future router refactors, etc.).
+	requester, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if requester.Role != "owner" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
 	if err := h.Queries.DeleteWorkspace(r.Context(), parseUUID(workspaceID)); err != nil {
 		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
