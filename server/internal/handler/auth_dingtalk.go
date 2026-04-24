@@ -135,6 +135,13 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer userInfoResp.Body.Close()
 
+	if userInfoResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(userInfoResp.Body)
+		slog.Error("dingtalk userinfo returned error", "status", userInfoResp.StatusCode, "body", string(body))
+		writeError(w, http.StatusBadGateway, "failed to fetch user info from DingTalk")
+		return
+	}
+
 	var dtUser dingtalkUserInfo
 	if err := json.NewDecoder(userInfoResp.Body).Decode(&dtUser); err != nil {
 		writeError(w, http.StatusBadGateway, "failed to parse DingTalk user info")
