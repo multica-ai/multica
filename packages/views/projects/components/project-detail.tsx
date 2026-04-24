@@ -517,10 +517,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </p>
           )}
           {(workspace?.repos ?? []).map((wsRepo) => {
-            const isLinked = (project.repos ?? []).some((r) => r.url === wsRepo.url);
+            const repoKey = wsRepo.local_path || wsRepo.url || "";
+            const displayLabel = wsRepo.local_path
+              ? `local: ${wsRepo.local_path}`
+              : (wsRepo.url ?? "");
+            const isLinked = (project.repos ?? []).some(
+              (r) => (r.local_path || r.url || "") === repoKey,
+            );
             return (
               <label
-                key={wsRepo.url}
+                key={repoKey}
                 className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs cursor-pointer transition-colors ${isLinked ? "bg-accent/50" : "hover:bg-accent/30"}`}
               >
                 <input
@@ -531,14 +537,27 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   onChange={(e) => {
                     const current = project.repos ?? [];
                     if (e.target.checked) {
-                      handleUpdateField({ repos: [...current, { url: wsRepo.url, description: wsRepo.description }] });
+                      handleUpdateField({
+                        repos: [
+                          ...current,
+                          {
+                            url: wsRepo.url,
+                            local_path: wsRepo.local_path,
+                            description: wsRepo.description,
+                          },
+                        ],
+                      });
                     } else {
-                      handleUpdateField({ repos: current.filter((r) => r.url !== wsRepo.url) });
+                      handleUpdateField({
+                        repos: current.filter(
+                          (r) => (r.local_path || r.url || "") !== repoKey,
+                        ),
+                      });
                     }
                   }}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="truncate">{wsRepo.url}</p>
+                  <p className="truncate">{displayLabel}</p>
                   {wsRepo.description && (
                     <p className="text-muted-foreground truncate">{wsRepo.description}</p>
                   )}

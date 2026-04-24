@@ -128,6 +128,14 @@ type daemonWorkspaceReposResponse struct {
 	ReposVersion string     `json:"repos_version"`
 }
 
+// repoKey returns the deduplication key for a repo: LocalPath if set, URL otherwise.
+func repoKey(r RepoData) string {
+	if r.LocalPath != "" {
+		return r.LocalPath
+	}
+	return r.URL
+}
+
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
 	if len(repos) == 0 {
 		return []RepoData{}
@@ -137,16 +145,22 @@ func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
 	seen := make(map[string]struct{}, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
-		if url == "" {
+		localPath := strings.TrimSpace(repo.LocalPath)
+		key := localPath
+		if key == "" {
+			key = url
+		}
+		if key == "" {
 			continue
 		}
-		if _, exists := seen[url]; exists {
+		if _, exists := seen[key]; exists {
 			continue
 		}
-		seen[url] = struct{}{}
+		seen[key] = struct{}{}
 		normalized = append(normalized, RepoData{
 			URL:         url,
 			Description: strings.TrimSpace(repo.Description),
+			LocalPath:   localPath,
 		})
 	}
 	return normalized
@@ -156,11 +170,11 @@ func mergeRepos(workspaceRepos []RepoData, projectRepos []RepoData) []RepoData {
 	seen := make(map[string]struct{}, len(workspaceRepos))
 	merged := make([]RepoData, 0, len(workspaceRepos)+len(projectRepos))
 	for _, r := range workspaceRepos {
-		seen[r.URL] = struct{}{}
+		seen[repoKey(r)] = struct{}{}
 		merged = append(merged, r)
 	}
 	for _, r := range projectRepos {
-		if _, exists := seen[r.URL]; !exists {
+		if _, exists := seen[repoKey(r)]; !exists {
 			merged = append(merged, r)
 		}
 	}
@@ -168,15 +182,16 @@ func mergeRepos(workspaceRepos []RepoData, projectRepos []RepoData) []RepoData {
 }
 
 func workspaceReposVersion(repos []RepoData) string {
-	urls := make([]string, 0, len(repos))
+	keys := make([]string, 0, len(repos))
 	for _, repo := range repos {
-		if repo.URL == "" {
+		k := repoKey(repo)
+		if k == "" {
 			continue
 		}
-		urls = append(urls, repo.URL)
+		keys = append(keys, k)
 	}
-	sort.Strings(urls)
-	sum := sha256.Sum256([]byte(strings.Join(urls, "\n")))
+	sort.Strings(keys)
+	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 

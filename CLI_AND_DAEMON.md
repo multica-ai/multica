@@ -434,6 +434,21 @@ multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
 ```
 
+### Project Repositories
+
+Projects can be linked to workspace repositories. When an issue belongs to a project, the agent receives the project's linked repos (in addition to workspace repos). Repos must be configured in **Settings → Repositories** first.
+
+```bash
+# List repos linked to a project
+multica project repo list <project-id>
+
+# Link a workspace repo to a project (URL must exist in workspace settings)
+multica project repo add <project-id> https://github.com/org/repo
+
+# Unlink a repo from a project
+multica project repo remove <project-id> https://github.com/org/repo
+```
+
 ## Setup
 
 ```bash

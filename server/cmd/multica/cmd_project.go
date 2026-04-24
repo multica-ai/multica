@@ -71,14 +71,14 @@ var projectRepoListCmd = &cobra.Command{
 }
 
 var projectRepoAddCmd = &cobra.Command{
-	Use:   "add <project-id> <url>",
-	Short: "Add a repository to a project",
-	Args:  exactArgs(2),
+	Use:   "add <project-id> [url]",
+	Short: "Add a repository to a project (use --path for local repos)",
+	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runProjectRepoAdd,
 }
 
 var projectRepoRemoveCmd = &cobra.Command{
-	Use:   "remove <project-id> <url>",
+	Use:   "remove <project-id> <url-or-path>",
 	Short: "Remove a repository from a project",
 	Args:  exactArgs(2),
 	RunE:  runProjectRepoRemove,
@@ -131,6 +131,9 @@ func init() {
 
 	// project repo list
 	projectRepoListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project repo add
+	projectRepoAddCmd.Flags().String("path", "", "Absolute local path to the repository (alternative to url positional arg)")
 
 	// project repo remove
 	// no extra flags needed
@@ -422,7 +425,7 @@ func runProjectRepoList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, repos)
 	}
 
-	headers := []string{"URL", "DESCRIPTION"}
+	headers := []string{"URL", "LOCAL PATH", "DESCRIPTION"}
 	rows := make([][]string, 0, len(repos))
 	for _, raw := range repos {
 		r, ok := raw.(map[string]any)
@@ -431,6 +434,7 @@ func runProjectRepoList(cmd *cobra.Command, args []string) error {
 		}
 		rows = append(rows, []string{
 			strVal(r, "url"),
+			strVal(r, "local_path"),
 			strVal(r, "description"),
 		})
 	}
@@ -440,7 +444,25 @@ func runProjectRepoList(cmd *cobra.Command, args []string) error {
 
 func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 	projectID := args[0]
-	repoURL := args[1]
+	localPath, _ := cmd.Flags().GetString("path")
+
+	var repoURL string
+	if len(args) >= 2 {
+		repoURL = args[1]
+	}
+
+	if repoURL == "" && localPath == "" {
+		return fmt.Errorf("provide a URL (positional arg) or a local path (--path)")
+	}
+	if repoURL != "" && localPath != "" {
+		return fmt.Errorf("--path and url are mutually exclusive")
+	}
+
+	// identifier used for lookups and display
+	identifier := repoURL
+	if localPath != "" {
+		identifier = localPath
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -458,14 +480,22 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 	var wsDesc string
 	foundInWs := false
 	for _, raw := range wsRepos {
-		if r, ok := raw.(map[string]any); ok && strVal(r, "url") == repoURL {
+		r, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		wsKey := strVal(r, "local_path")
+		if wsKey == "" {
+			wsKey = strVal(r, "url")
+		}
+		if wsKey == identifier {
 			foundInWs = true
 			wsDesc = strVal(r, "description")
 			break
 		}
 	}
 	if !foundInWs {
-		return fmt.Errorf("repository %s is not configured in this workspace — add it in Settings → Repositories first", repoURL)
+		return fmt.Errorf("repository %s is not configured in this workspace — add it in Settings → Repositories first", identifier)
 	}
 
 	var project map[string]any
@@ -475,12 +505,25 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 
 	repos, _ := project["repos"].([]any)
 	for _, raw := range repos {
-		if r, ok := raw.(map[string]any); ok && strVal(r, "url") == repoURL {
-			return fmt.Errorf("repository %s already linked to this project", repoURL)
+		r, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		existing := strVal(r, "local_path")
+		if existing == "" {
+			existing = strVal(r, "url")
+		}
+		if existing == identifier {
+			return fmt.Errorf("repository %s already linked to this project", identifier)
 		}
 	}
 
-	newRepo := map[string]any{"url": repoURL, "description": wsDesc}
+	var newRepo map[string]any
+	if localPath != "" {
+		newRepo = map[string]any{"local_path": localPath, "description": wsDesc}
+	} else {
+		newRepo = map[string]any{"url": repoURL, "description": wsDesc}
+	}
 	repos = append(repos, newRepo)
 
 	body := map[string]any{"repos": repos}
@@ -489,13 +532,13 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update project repos: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Repository %s added to project %s.\n", repoURL, truncateID(projectID))
+	fmt.Fprintf(os.Stderr, "Repository %s added to project %s.\n", identifier, truncateID(projectID))
 	return nil
 }
 
 func runProjectRepoRemove(cmd *cobra.Command, args []string) error {
 	projectID := args[0]
-	repoURL := args[1]
+	identifier := args[1] // URL or local path
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -514,14 +557,23 @@ func runProjectRepoRemove(cmd *cobra.Command, args []string) error {
 	filtered := make([]any, 0, len(repos))
 	found := false
 	for _, raw := range repos {
-		if r, ok := raw.(map[string]any); ok && strVal(r, "url") == repoURL {
+		r, ok := raw.(map[string]any)
+		if !ok {
+			filtered = append(filtered, raw)
+			continue
+		}
+		key := strVal(r, "local_path")
+		if key == "" {
+			key = strVal(r, "url")
+		}
+		if key == identifier {
 			found = true
 			continue
 		}
 		filtered = append(filtered, raw)
 	}
 	if !found {
-		return fmt.Errorf("repository %s not found in this project", repoURL)
+		return fmt.Errorf("repository %s not found in this project", identifier)
 	}
 
 	body := map[string]any{"repos": filtered}
@@ -530,7 +582,7 @@ func runProjectRepoRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update project repos: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Repository %s removed from project %s.\n", repoURL, truncateID(projectID))
+	fmt.Fprintf(os.Stderr, "Repository %s removed from project %s.\n", identifier, truncateID(projectID))
 	return nil
 }
 

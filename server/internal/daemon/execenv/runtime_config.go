@@ -98,17 +98,23 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
-		b.WriteString("| URL | Description |\n")
-		b.WriteString("|-----|-------------|\n")
+		b.WriteString("Use `multica repo checkout <identifier>` to check out a repository into your working directory.\n\n")
+		b.WriteString("| Identifier | Type | Description |\n")
+		b.WriteString("|------------|------|-------------|\n")
 		for _, repo := range ctx.Repos {
 			desc := repo.Description
 			if desc == "" {
 				desc = "—"
 			}
-			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			if repo.LocalPath != "" {
+				fmt.Fprintf(&b, "| %s | local | %s |\n", repo.LocalPath, desc)
+			} else {
+				fmt.Fprintf(&b, "| %s | remote | %s |\n", repo.URL, desc)
+			}
 		}
-		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
+		b.WriteString("\nFor remote repos, the checkout command clones and creates a git worktree with a dedicated branch.\n")
+		b.WriteString("For local repos, the checkout command creates a symlink to the local directory — git operations work normally.\n")
+		b.WriteString("You can check out one or more repos as needed.\n\n")
 	}
 
 	b.WriteString("### Workflow\n\n")

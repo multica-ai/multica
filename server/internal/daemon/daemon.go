@@ -29,7 +29,7 @@ type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
-	allowedRepoURLs map[string]struct{}
+	allowedRepos    map[string]RepoData // key: repoIdentifier (URL or LocalPath)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 }
@@ -253,20 +253,29 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData) *workspaceState {
 	return &workspaceState{
-		workspaceID:     workspaceID,
-		runtimeIDs:      runtimeIDs,
-		reposVersion:    reposVersion,
-		allowedRepoURLs: repoAllowlist(repos),
+		workspaceID:  workspaceID,
+		runtimeIDs:   runtimeIDs,
+		reposVersion: reposVersion,
+		allowedRepos: repoAllowlist(repos),
 	}
 }
 
-func repoAllowlist(repos []RepoData) map[string]struct{} {
-	allowed := make(map[string]struct{}, len(repos))
+// repoIdentifier returns the lookup key for a repo: LocalPath if set, URL otherwise.
+func repoIdentifier(r RepoData) string {
+	if r.LocalPath != "" {
+		return r.LocalPath
+	}
+	return r.URL
+}
+
+func repoAllowlist(repos []RepoData) map[string]RepoData {
+	allowed := make(map[string]RepoData, len(repos))
 	for _, repo := range repos {
-		if repo.URL == "" {
+		key := repoIdentifier(repo)
+		if key == "" {
 			continue
 		}
-		allowed[repo.URL] = struct{}{}
+		allowed[key] = repo
 	}
 	return allowed
 }
@@ -279,15 +288,26 @@ func (d *Daemon) setWorkspaceRepoSyncError(workspaceID, syncErr string) {
 	}
 }
 
-func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
+func (d *Daemon) workspaceRepoAllowed(workspaceID, identifier string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
 		return false
 	}
-	_, allowed := ws.allowedRepoURLs[repoURL]
+	_, allowed := ws.allowedRepos[identifier]
 	return allowed
+}
+
+func (d *Daemon) workspaceRepoConfig(workspaceID, identifier string) (RepoData, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return RepoData{}, false
+	}
+	repo, found := ws.allowedRepos[identifier]
+	return repo, found
 }
 
 func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
@@ -324,19 +344,19 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	d.mu.Lock()
 	if ws, ok := d.workspaces[workspaceID]; ok {
 		ws.reposVersion = resp.ReposVersion
-		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+		ws.allowedRepos = repoAllowlist(resp.Repos)
 	}
 	d.mu.Unlock()
 
 	return resp, nil
 }
 
-func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
+func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, identifier string) error {
 	if d.repoCache == nil {
 		return fmt.Errorf("repo cache not initialized")
 	}
 
-	repoURL = strings.TrimSpace(repoURL)
+	identifier = strings.TrimSpace(identifier)
 
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -345,15 +365,35 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	// Fast path: repo already in allowlist.
+	if repo, found := d.workspaceRepoConfig(workspaceID, identifier); found {
+		if repo.LocalPath != "" {
+			// Local-path repos don't need a bare clone — just check the path exists.
+			if _, err := os.Stat(repo.LocalPath); err != nil {
+				return fmt.Errorf("local repo path not accessible: %s", repo.LocalPath)
+			}
+			return nil
+		}
+		// Remote repo: check bare clone is present.
+		if d.repoCache.Lookup(workspaceID, repo.URL) != "" {
+			return nil
+		}
 	}
 
 	ws.repoRefreshMu.Lock()
 	defer ws.repoRefreshMu.Unlock()
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	// Re-check after acquiring lock.
+	if repo, found := d.workspaceRepoConfig(workspaceID, identifier); found {
+		if repo.LocalPath != "" {
+			if _, err := os.Stat(repo.LocalPath); err != nil {
+				return fmt.Errorf("local repo path not accessible: %s", repo.LocalPath)
+			}
+			return nil
+		}
+		if d.repoCache.Lookup(workspaceID, repo.URL) != "" {
+			return nil
+		}
 	}
 
 	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
@@ -361,13 +401,21 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("refresh workspace repos: %w", err)
 	}
 
-	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
+	if !d.workspaceRepoAllowed(workspaceID, identifier) {
 		return ErrRepoNotConfigured
+	}
+
+	repo, _ := d.workspaceRepoConfig(workspaceID, identifier)
+	if repo.LocalPath != "" {
+		if _, err := os.Stat(repo.LocalPath); err != nil {
+			return fmt.Errorf("local repo path not accessible: %s", repo.LocalPath)
+		}
+		return nil
 	}
 
 	d.syncWorkspaceRepos(workspaceID, resp.Repos)
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if d.repoCache.Lookup(workspaceID, repo.URL) != "" {
 		return nil
 	}
 
@@ -1418,7 +1466,7 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
 	for i, r := range repos {
-		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description}
+		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description, LocalPath: r.LocalPath}
 	}
 	return info
 }
@@ -1429,7 +1477,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, LocalPath: r.LocalPath}
 	}
 	return result
 }

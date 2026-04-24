@@ -48,7 +48,7 @@ export function RepositoriesTab() {
   };
 
   const handleAddRepo = () => {
-    setRepos([...repos, { url: "", description: "" }]);
+    setRepos([...repos, { url: "", description: "", local_path: "" }]);
   };
 
   const handleRemoveRepo = (index: number) => {
@@ -77,10 +77,18 @@ export function RepositoriesTab() {
                 <div className="flex-1 space-y-1.5">
                   <Input
                     type="url"
-                    value={repo.url}
+                    value={repo.url ?? ""}
                     onChange={(e) => handleRepoChange(index, "url", e.target.value)}
                     disabled={!canManageWorkspace}
                     placeholder="https://git.example.com/org/repo.git"
+                    className="text-sm"
+                  />
+                  <Input
+                    type="text"
+                    value={repo.local_path ?? ""}
+                    onChange={(e) => handleRepoChange(index, "local_path", e.target.value)}
+                    disabled={!canManageWorkspace}
+                    placeholder="/home/user/projects/my-app (local path, optional)"
                     className="text-sm"
                   />
                   <Input

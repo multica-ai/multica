@@ -295,11 +295,49 @@ type WorktreeResult struct {
 	BranchName string `json:"branch_name"` // git branch created for this worktree
 }
 
+// createLocalSymlink handles checkout for local-path repos: creates a symlink
+// in the workdir pointing at the absolute local path. Idempotent on reuse.
+func (c *Cache) createLocalSymlink(params WorktreeParams) (*WorktreeResult, error) {
+	localPath := params.LocalPath
+	if _, err := os.Stat(localPath); err != nil {
+		return nil, fmt.Errorf("local repo path does not exist: %s", localPath)
+	}
+
+	dirName := filepath.Base(localPath)
+	symlinkPath := filepath.Join(params.WorkDir, dirName)
+
+	if existing, err := os.Readlink(symlinkPath); err == nil {
+		if existing == localPath {
+			c.logger.Info("repo checkout: local symlink already exists", "path", localPath, "symlink", symlinkPath)
+			return &WorktreeResult{Path: symlinkPath, BranchName: ""}, nil
+		}
+		// Points somewhere else — remove and re-create.
+		if err := os.Remove(symlinkPath); err != nil {
+			return nil, fmt.Errorf("remove stale symlink: %w", err)
+		}
+	} else if _, err := os.Stat(symlinkPath); err == nil {
+		return nil, fmt.Errorf("checkout path already exists and is not a symlink: %s", symlinkPath)
+	}
+
+	if err := os.Symlink(localPath, symlinkPath); err != nil {
+		return nil, fmt.Errorf("create symlink: %w", err)
+	}
+
+	c.logger.Info("repo checkout: local symlink created", "path", localPath, "symlink", symlinkPath)
+	return &WorktreeResult{Path: symlinkPath, BranchName: ""}, nil
+}
+
 // CreateWorktree looks up the bare cache for a repo, fetches latest, and creates
 // a git worktree in the agent's working directory. If a worktree already exists
 // at the target path (reused environment), it updates the existing worktree to
 // the latest remote default branch instead of failing.
+//
+// For local-path repos (params.LocalPath non-empty), creates a symlink instead.
 func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
+	if params.LocalPath != "" {
+		return c.createLocalSymlink(params)
+	}
+
 	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
 	if barePath == "" {
 		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)

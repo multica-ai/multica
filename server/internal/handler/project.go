@@ -66,8 +66,16 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 }
 
 type repoEntry struct {
-	URL         string `json:"url"`
+	URL         string `json:"url,omitempty"`
 	Description string `json:"description"`
+	LocalPath   string `json:"local_path,omitempty"`
+}
+
+func repoEntryKey(r repoEntry) string {
+	if r.LocalPath != "" {
+		return strings.TrimSpace(r.LocalPath)
+	}
+	return strings.TrimSpace(r.URL)
 }
 
 func (h *Handler) validateProjectRepos(ctx context.Context, workspaceID string, repos any) ([]byte, error) {
@@ -90,17 +98,19 @@ func (h *Handler) validateProjectRepos(ctx context.Context, workspaceID string, 
 	if ws.Repos != nil {
 		json.Unmarshal(ws.Repos, &wsRepos)
 	}
-	wsURLSet := make(map[string]struct{}, len(wsRepos))
+	wsKeySet := make(map[string]struct{}, len(wsRepos))
 	for _, r := range wsRepos {
-		wsURLSet[strings.TrimSpace(r.URL)] = struct{}{}
+		if k := repoEntryKey(r); k != "" {
+			wsKeySet[k] = struct{}{}
+		}
 	}
 	for _, r := range projectRepos {
-		url := strings.TrimSpace(r.URL)
-		if url == "" {
-			return nil, fmt.Errorf("repo URL cannot be empty")
+		key := repoEntryKey(r)
+		if key == "" {
+			return nil, fmt.Errorf("repo must have a URL or local path")
 		}
-		if _, ok := wsURLSet[url]; !ok {
-			return nil, fmt.Errorf("repo %s is not configured in this workspace — add it in Settings → Repositories first", url)
+		if _, ok := wsKeySet[key]; !ok {
+			return nil, fmt.Errorf("repo %s is not configured in this workspace — add it in Settings → Repositories first", key)
 		}
 	}
 	return reposJSON, nil
