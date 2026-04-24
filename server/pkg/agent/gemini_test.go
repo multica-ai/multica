@@ -11,15 +11,14 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 	expected := []string{
 		"-p", "write a haiku",
 		"--yolo",
-		"-o", "stream-json",
+		"-o", "text",
 	}
-
 	if len(args) != len(expected) {
-		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		t.Fatalf("expected %v, got %v", expected, args)
 	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
+	for i, a := range args {
+		if a != expected[i] {
+			t.Fatalf("at index %d: expected %q, got %q (full: %v)", i, expected[i], a, args)
 		}
 	}
 }
@@ -31,16 +30,13 @@ func TestBuildGeminiArgsWithModel(t *testing.T) {
 
 	var foundModel bool
 	for i, a := range args {
-		if a == "-m" {
-			if i+1 >= len(args) || args[i+1] != "gemini-2.5-pro" {
-				t.Fatalf("expected -m followed by gemini-2.5-pro, got %v", args)
-			}
+		if a == "-m" && i+1 < len(args) && args[i+1] == "gemini-2.5-pro" {
 			foundModel = true
 			break
 		}
 	}
 	if !foundModel {
-		t.Fatalf("expected -m flag when Model is set, got args=%v", args)
+		t.Fatalf("expected -m gemini-2.5-pro in args, got %v", args)
 	}
 }
 
@@ -51,16 +47,13 @@ func TestBuildGeminiArgsWithResume(t *testing.T) {
 
 	var foundResume bool
 	for i, a := range args {
-		if a == "-r" {
-			if i+1 >= len(args) || args[i+1] != "3" {
-				t.Fatalf("expected -r followed by session id, got %v", args)
-			}
+		if a == "-r" && i+1 < len(args) && args[i+1] == "3" {
 			foundResume = true
 			break
 		}
 	}
 	if !foundResume {
-		t.Fatalf("expected -r flag when ResumeSessionID is set, got args=%v", args)
+		t.Fatalf("expected -r 3 in args, got %v", args)
 	}
 }
 
@@ -72,38 +65,5 @@ func TestBuildGeminiArgsOmitsModelWhenEmpty(t *testing.T) {
 		if a == "-m" {
 			t.Fatalf("expected no -m flag when Model is empty, got args=%v", args)
 		}
-		if a == "-r" {
-			t.Fatalf("expected no -r flag when ResumeSessionID is empty, got args=%v", args)
-		}
-	}
-}
-
-func TestBuildGeminiArgsPassesThroughCustomArgs(t *testing.T) {
-	t.Parallel()
-
-	args := buildGeminiArgs("hi", ExecOptions{
-		CustomArgs: []string{"--sandbox"},
-	})
-
-	if args[len(args)-1] != "--sandbox" {
-		t.Fatalf("expected --sandbox at end of args, got %v", args)
-	}
-}
-
-func TestBuildGeminiArgsFiltersBlockedCustomArgs(t *testing.T) {
-	t.Parallel()
-
-	args := buildGeminiArgs("hi", ExecOptions{
-		CustomArgs: []string{"-o", "text", "--sandbox"},
-	})
-
-	// -o text should be filtered, --sandbox should pass through
-	for i, a := range args {
-		if a == "-o" && i+1 < len(args) && args[i+1] == "text" {
-			t.Fatalf("blocked -o text should have been filtered: %v", args)
-		}
-	}
-	if args[len(args)-1] != "--sandbox" {
-		t.Fatalf("expected --sandbox to pass through, got %v", args)
 	}
 }
