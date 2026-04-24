@@ -145,9 +145,11 @@ type AgentTaskResponse struct {
 	QueueBlockedReason    *string        `json:"queue_blocked_reason,omitempty"`
 	IssueIdentifier       *string        `json:"issue_identifier,omitempty"`
 	IssueTitle            *string        `json:"issue_title,omitempty"`
-	ChatSessionID         string         `json:"chat_session_id,omitempty"`  // non-empty for chat tasks
-	ChatMessage           string         `json:"chat_message,omitempty"`     // user message for chat tasks
-	AutopilotRunID        string         `json:"autopilot_run_id,omitempty"` // non-empty for autopilot-spawned tasks
+	TriggerAuthorType     string         `json:"trigger_author_type,omitempty"` // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName     string         `json:"trigger_author_name,omitempty"` // display name of the triggering comment author
+	ChatSessionID         string         `json:"chat_session_id,omitempty"`     // non-empty for chat tasks
+	ChatMessage           string         `json:"chat_message,omitempty"`        // user message for chat tasks
+	AutopilotRunID        string         `json:"autopilot_run_id,omitempty"`    // non-empty for autopilot-spawned tasks
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

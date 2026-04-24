@@ -660,10 +660,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 		// Fetch the triggering comment content so the daemon can embed it
 		// directly in the agent prompt (prevents the agent from ignoring comments
-		// when stale output files exist in a reused workdir).
+		// when stale output files exist in a reused workdir). Also surface the
+		// comment author's kind and display name so the agent knows whether it
+		// was triggered by a human or by another agent — a signal used by the
+		// harness instructions to avoid mention loops between agents.
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				resp.TriggerAuthorType = comment.AuthorType
+				switch comment.AuthorType {
+				case "agent":
+					if comment.AuthorID.Valid {
+						if a, err := h.Queries.GetAgent(r.Context(), comment.AuthorID); err == nil {
+							resp.TriggerAuthorName = a.Name
+						}
+					}
+				case "member":
+					// For member-authored comments, AuthorID is a user UUID
+					// (see handler.resolveActor) — look up the user's display name.
+					if comment.AuthorID.Valid {
+						if u, err := h.Queries.GetUser(r.Context(), comment.AuthorID); err == nil {
+							resp.TriggerAuthorName = u.Name
+						}
+					}
+				}
 			}
 		}
 
