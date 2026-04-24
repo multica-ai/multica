@@ -758,6 +758,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.PriorWorkDir = prior.WorkDir.String
 			}
 		}
+
+		// If no prior workdir found and the issue requests parent workdir inheritance,
+		// look up the most recent workdir from the parent issue.
+		if resp.PriorWorkDir == "" {
+			if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil &&
+				issue.InheritParentWorkdir && issue.ParentIssueID.Valid {
+				if workDir, err := h.Queries.GetLastWorkDirForIssue(r.Context(), issue.ParentIssueID); err == nil && workDir.Valid {
+					resp.PriorWorkDir = workDir.String
+				}
+			}
+		}
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.

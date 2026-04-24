@@ -783,17 +783,18 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	PipelineID         *string  `json:"pipeline_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title                string   `json:"title"`
+	Description          *string  `json:"description"`
+	Status               string   `json:"status"`
+	Priority             string   `json:"priority"`
+	AssigneeType         *string  `json:"assignee_type"`
+	AssigneeID           *string  `json:"assignee_id"`
+	ParentIssueID        *string  `json:"parent_issue_id"`
+	ProjectID            *string  `json:"project_id"`
+	PipelineID           *string  `json:"pipeline_id"`
+	DueDate              *string  `json:"due_date"`
+	AttachmentIDs        []string `json:"attachment_ids,omitempty"`
+	InheritParentWorkdir bool     `json:"inherit_parent_workdir,omitempty"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -935,21 +936,22 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        parseUUID(workspaceID),
-		Title:              req.Title,
-		Description:        ptrToText(req.Description),
-		Status:             status,
-		Priority:           priority,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
-		ParentIssueID:      parentIssueID,
-		Position:           0,
-		DueDate:            dueDate,
-		Number:             issueNumber,
-		ProjectID:          projectID,
-		PipelineID:         pipelineID,
+		WorkspaceID:          parseUUID(workspaceID),
+		Title:                req.Title,
+		Description:          ptrToText(req.Description),
+		Status:               status,
+		Priority:             priority,
+		AssigneeType:         assigneeType,
+		AssigneeID:           assigneeID,
+		CreatorType:          creatorType,
+		CreatorID:            parseUUID(actualCreatorID),
+		ParentIssueID:        parentIssueID,
+		Position:             0,
+		DueDate:              dueDate,
+		Number:               issueNumber,
+		ProjectID:            projectID,
+		PipelineID:           pipelineID,
+		InheritParentWorkdir: req.InheritParentWorkdir,
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)

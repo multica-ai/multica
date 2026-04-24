@@ -26,9 +26,11 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number, project_id, pipeline_id
+    parent_issue_id, position, due_date, number, project_id, pipeline_id,
+    inherit_parent_workdir
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, sqlc.narg('pipeline_id')
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, sqlc.narg('pipeline_id'),
+    $16
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one

@@ -1,0 +1,1 @@
+ALTER TABLE issue ADD COLUMN inherit_parent_workdir BOOLEAN NOT NULL DEFAULT FALSE;

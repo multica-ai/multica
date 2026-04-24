@@ -256,8 +256,9 @@ type Issue struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
-	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
-	PipelineID         pgtype.UUID        `json:"pipeline_id"`
+	FirstExecutedAt        pgtype.Timestamptz `json:"first_executed_at"`
+	PipelineID             pgtype.UUID        `json:"pipeline_id"`
+	InheritParentWorkdir   bool               `json:"inherit_parent_workdir"`
 }
 
 type IssueDependency struct {

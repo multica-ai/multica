@@ -596,6 +596,22 @@ func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSession
 	return i, err
 }
 
+const getLastWorkDirForIssue = `-- name: GetLastWorkDirForIssue :one
+SELECT work_dir FROM agent_task_queue
+WHERE issue_id = $1 AND status = 'completed' AND work_dir IS NOT NULL
+ORDER BY completed_at DESC
+LIMIT 1
+`
+
+// Returns the work_dir from the most recent completed task for a given issue,
+// regardless of agent. Used when a subtask inherits workdir from its parent issue.
+func (q *Queries) GetLastWorkDirForIssue(ctx context.Context, issueID pgtype.UUID) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getLastWorkDirForIssue, issueID)
+	var workDir pgtype.Text
+	err := row.Scan(&workDir)
+	return workDir, err
+}
+
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')

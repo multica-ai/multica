@@ -129,6 +129,14 @@ WHERE agent_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS
 ORDER BY completed_at DESC
 LIMIT 1;
 
+-- name: GetLastWorkDirForIssue :one
+-- Returns the work_dir from the most recent completed task for a given issue,
+-- regardless of agent. Used when a subtask inherits workdir from its parent issue.
+SELECT work_dir FROM agent_task_queue
+WHERE issue_id = $1 AND status = 'completed' AND work_dir IS NOT NULL
+ORDER BY completed_at DESC
+LIMIT 1;
+
 -- name: FailAgentTask :one
 -- Marks a task as failed. session_id and work_dir are merged via COALESCE so
 -- if the agent already established a real session before failing (e.g. it

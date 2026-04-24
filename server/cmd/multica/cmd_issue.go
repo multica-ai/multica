@@ -185,6 +185,7 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().Bool("inherit-parent-workdir", false, "Reuse parent issue's workdir/branch (only for subtasks)")
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -410,6 +411,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("parent"); v != "" {
 		body["parent_issue_id"] = v
+	}
+	if v, _ := cmd.Flags().GetBool("inherit-parent-workdir"); v {
+		body["inherit_parent_workdir"] = true
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		body["project_id"] = v
