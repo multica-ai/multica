@@ -18,13 +18,16 @@ function getRendererUrl(slug: string | null): string {
   return `${base}${separator}${params.toString()}`;
 }
 
-function createQuickAddWindow(slug: string | null): void {
+function createQuickAddWindow(slug: string | null, mainWin?: BrowserWindow): void {
   if (quickAddWindow && !quickAddWindow.isDestroyed()) {
     quickAddWindow.destroy();
     quickAddWindow = null;
   }
 
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const targetDisplay = mainWin
+    ? screen.getDisplayMatching(mainWin.getBounds())
+    : screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = targetDisplay.workAreaSize;
   const winWidth = 640;
   const winHeight = 420;
 
@@ -101,7 +104,8 @@ function requestWorkspaceSlug(mainWin: BrowserWindow): Promise<string | null> {
 export function setupQuickAdd(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.on("quick-add:set-size", (_event, width: number, height: number) => {
     if (quickAddWindow && !quickAddWindow.isDestroyed()) {
-      const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+      const display = screen.getDisplayMatching(quickAddWindow.getBounds());
+      const { width: sw, height: sh } = display.workAreaSize;
       // Animate: true — content uses w-full h-full, so only the window
       // animates. The webview naturally reflows; no CSS size transitions
       // means no sync issues between window bounds and content.
@@ -122,7 +126,7 @@ export function setupQuickAdd(getMainWindow: () => BrowserWindow | null): void {
     if (!mainWin) return;
 
     requestWorkspaceSlug(mainWin).then((slug) => {
-      createQuickAddWindow(slug);
+      createQuickAddWindow(slug, mainWin);
     });
   });
 
