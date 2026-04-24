@@ -7,12 +7,24 @@ metadata:
     #   /agentfarm/tools/CLOUDFRONT_DOMAIN  → value from status.atProvider.domainName
     # The backend reads this env var to generate signed cookie domains.
 spec:
+  # Explicit so it matches the CRD default and ArgoCD does not report drift.
+  # Same pattern as kustomize/GDC/mlflow/base/rds-cluster.yaml.
+  deletionPolicy: Delete
   forProvider:
     comment: "CDN for agentfarm user-uploaded attachments (g2-agentfarm-tools-uploads)"
     enabled: true
     httpVersion: http2and3
     isIpv6Enabled: true
     priceClass: PriceClass_100
+    # Own our tags explicitly. Crossplane merges its own crossplane-{kind,name,
+    # providerconfig} tags into the live object; those extra keys are not in
+    # last-applied-configuration so ArgoCD's three-way merge ignores them.
+    tags:
+      Application: agentfarm
+      Environment: tools
+      Owner: Platform
+      Name: agentfarm-uploads-cdn
+      Purpose: "Signed-cookie CDN for user-uploaded attachments"
 
     # origin remains a list in v1beta2 (one entry per CloudFront origin).
     origin:
@@ -49,8 +61,10 @@ spec:
     # (both were single-item lists in v1beta1).
     restrictions:
       geoRestriction:
+        # locations is omitted on purpose — the AWS API and Crossplane both drop
+        # an empty locations list when restrictionType=none, so declaring []
+        # causes ArgoCD to report drift forever.
         restrictionType: none
-        locations: []
 
     # v1beta2: viewerCertificate is an OBJECT (was a single-item list in v1beta1).
     viewerCertificate:
