@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/pathutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -22,6 +23,7 @@ type ProjectResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
+	LocalPath   *string `json:"local_path"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -39,6 +41,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Title:       p.Title,
 		Description: textToPtr(p.Description),
 		Icon:        textToPtr(p.Icon),
+		LocalPath:   textToPtr(p.LocalPath),
 		Status:      p.Status,
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
@@ -60,6 +63,7 @@ type CreateProjectRequest struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
+	LocalPath   *string `json:"local_path"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -70,6 +74,7 @@ type UpdateProjectRequest struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
+	LocalPath   *string `json:"local_path"`
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
 	LeadType    *string `json:"lead_type"`
@@ -162,17 +167,27 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	var leadType pgtype.Text
 	var leadID pgtype.UUID
+	var localPath pgtype.Text
 	if req.LeadType != nil {
 		leadType = pgtype.Text{String: *req.LeadType, Valid: true}
 	}
 	if req.LeadID != nil {
 		leadID = parseUUID(*req.LeadID)
 	}
+	if req.LocalPath != nil {
+		normalized, err := pathutil.NormalizeLocalPath(*req.LocalPath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid local_path: "+err.Error())
+			return
+		}
+		localPath = pgtype.Text{String: normalized, Valid: true}
+	}
 	project, err := h.Queries.CreateProject(r.Context(), db.CreateProjectParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
 		Icon:        ptrToText(req.Icon),
+		LocalPath:   localPath,
 		Status:      status,
 		LeadType:    leadType,
 		LeadID:      leadID,
@@ -220,6 +235,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		Icon:        prevProject.Icon,
 		LeadType:    prevProject.LeadType,
 		LeadID:      prevProject.LeadID,
+		LocalPath:   prevProject.LocalPath,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -256,6 +272,18 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = parseUUID(*req.LeadID)
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["local_path"]; ok {
+		if req.LocalPath == nil {
+			params.LocalPath = pgtype.Text{Valid: false}
+		} else {
+			normalized, err := pathutil.NormalizeLocalPath(*req.LocalPath)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid local_path: "+err.Error())
+				return
+			}
+			params.LocalPath = pgtype.Text{String: normalized, Valid: true}
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)

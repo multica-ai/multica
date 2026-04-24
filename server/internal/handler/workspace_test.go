@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -126,5 +127,66 @@ VALUES ($1, $2, 'owner')
 	}
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+}
+
+func TestUpdateWorkspace_DoesNotResetLocalPathWhenFieldAbsent(t *testing.T) {
+	ctx := context.Background()
+	original := "/tmp/ws-preserve"
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET local_path = $1 WHERE id = $2`, original, testWorkspaceID); err != nil {
+		t.Fatalf("seed local_path: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"description": "workspace local_path preserve test",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateWorkspace expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var localPath *string
+	if err := testPool.QueryRow(ctx, `SELECT local_path FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&localPath); err != nil {
+		t.Fatalf("load local_path: %v", err)
+	}
+	if localPath == nil || *localPath != original {
+		t.Fatalf("local_path = %v, want %q", localPath, original)
+	}
+}
+
+func TestUpdateWorkspace_ClearsLocalPathWhenNullPassed(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET local_path = $1 WHERE id = $2`, "/tmp/ws-clear", testWorkspaceID); err != nil {
+		t.Fatalf("seed local_path: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"local_path": nil,
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateWorkspace expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var localPath *string
+	if err := testPool.QueryRow(ctx, `SELECT local_path FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&localPath); err != nil {
+		t.Fatalf("load local_path: %v", err)
+	}
+	if localPath != nil {
+		t.Fatalf("local_path = %q, want NULL", *localPath)
+	}
+
+	var resp WorkspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.LocalPath != nil {
+		t.Fatalf("response local_path = %q, want nil", *resp.LocalPath)
 	}
 }

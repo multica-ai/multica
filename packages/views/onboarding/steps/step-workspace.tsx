@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -94,6 +95,8 @@ export function StepWorkspace({
   // the footer CTA can read `canCreate` and trigger `handleCreate`.
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [useExistingFolder, setUseExistingFolder] = useState(false);
+  const [localPath, setLocalPath] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
   const slugTouched = useRef(false);
 
@@ -103,7 +106,10 @@ export function StepWorkspace({
       : null;
   const slugError = slugValidationError ?? slugServerError;
   const canCreate =
-    name.trim().length > 0 && slug.trim().length > 0 && !slugError;
+    name.trim().length > 0 &&
+    slug.trim().length > 0 &&
+    !slugError &&
+    (!useExistingFolder || localPath.trim().length > 0);
 
   const handleNameChange = (value: string) => {
     setName(value);
@@ -123,8 +129,14 @@ export function StepWorkspace({
 
   const handleCreate = () => {
     if (!canCreate || createWorkspace.isPending) return;
+    const normalizedPath = localPath.trim();
+    const localPathPayload = useExistingFolder && normalizedPath ? normalizedPath : undefined;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+        local_path: localPathPayload,
+      },
       {
         onSuccess: onCreated,
         onError: (error) => {
@@ -235,6 +247,41 @@ export function StepWorkspace({
           </span>
           . You can change this later in settings.
         </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <label
+          htmlFor="onboarding-ws-existing-folder"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <Checkbox
+            id="onboarding-ws-existing-folder"
+            checked={useExistingFolder}
+            onCheckedChange={(checked) => setUseExistingFolder(Boolean(checked))}
+          />
+          Create from existing folder
+        </label>
+        {useExistingFolder && (
+          <div className="flex flex-col gap-1.5">
+            <Label
+              htmlFor="onboarding-ws-local-path"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Folder path
+            </Label>
+            <Input
+              id="onboarding-ws-local-path"
+              type="text"
+              value={localPath}
+              onChange={(e) => setLocalPath(e.target.value)}
+              placeholder="/home/user/projects/my-workspace"
+              aria-describedby="onboarding-ws-local-path-help"
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            />
+            <p id="onboarding-ws-local-path-help" className="text-xs text-muted-foreground">
+              Absolute path on the machine where daemon runs.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

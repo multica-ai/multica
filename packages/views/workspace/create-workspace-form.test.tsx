@@ -82,4 +82,60 @@ describe("CreateWorkspaceForm", () => {
       screen.getByRole("button", { name: /create workspace/i }),
     ).toBeDisabled();
   });
+
+  it("does not send local_path when create-from-folder is disabled", async () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/workspace name/i), {
+      target: { value: "Acme Root" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /create workspace/i }));
+
+    await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+    expect(mockMutate.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        name: "Acme Root",
+        slug: "acme-root",
+      }),
+    );
+    expect(mockMutate.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        local_path: undefined,
+      }),
+    );
+  });
+
+  it("requires folder path when create-from-folder is enabled", () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/workspace name/i), {
+      target: { value: "Acme Root" },
+    });
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(
+      screen.getByRole("button", { name: /create workspace/i }),
+    ).toBeDisabled();
+  });
+
+  it("trims and sends local_path when create-from-folder is enabled", async () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/workspace name/i), {
+      target: { value: "Acme Root" },
+    });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.change(screen.getByLabelText(/folder path/i), {
+      target: { value: "  /home/user/projects/acme-root  " },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /create workspace/i }));
+
+    await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+    expect(mockMutate.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        name: "Acme Root",
+        slug: "acme-root",
+        local_path: "/home/user/projects/acme-root",
+      }),
+    );
+  });
 });
