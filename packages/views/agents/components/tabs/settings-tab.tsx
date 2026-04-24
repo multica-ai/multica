@@ -25,8 +25,6 @@ import { ActorAvatar } from "../../../common/actor-avatar";
 import { ProviderLogo } from "../../../runtimes/components/provider-logo";
 import { ModelDropdown } from "../model-dropdown";
 
-type RuntimeFilter = "mine" | "all";
-
 export function SettingsTab({
   agent,
   runtimes,
@@ -47,7 +45,6 @@ export function SettingsTab({
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
   const [model, setModel] = useState(agent.model ?? "");
   const [runtimeOpen, setRuntimeOpen] = useState(false);
-  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,18 +54,11 @@ export function SettingsTab({
     return members.find((m) => m.user_id === ownerId) ?? null;
   };
 
-  const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-
   const filteredRuntimes = useMemo(() => {
-    const filtered = runtimeFilter === "mine" && currentUserId
+    return currentUserId
       ? runtimes.filter((r) => r.owner_id === currentUserId)
       : runtimes;
-    return [...filtered].sort((a, b) => {
-      if (a.owner_id === currentUserId && b.owner_id !== currentUserId) return -1;
-      if (a.owner_id !== currentUserId && b.owner_id === currentUserId) return 1;
-      return 0;
-    });
-  }, [runtimes, runtimeFilter, currentUserId]);
+  }, [runtimes, currentUserId]);
 
   const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
   const selectedOwnerMember = selectedRuntime ? getOwnerMember(selectedRuntime.owner_id) : null;
@@ -220,35 +210,7 @@ export function SettingsTab({
       </div>
 
       <div>
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Runtime</Label>
-          {hasOtherRuntimes && (
-            <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-              <button
-                type="button"
-                onClick={() => setRuntimeFilter("mine")}
-                className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
-                  runtimeFilter === "mine"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Mine
-              </button>
-              <button
-                type="button"
-                onClick={() => setRuntimeFilter("all")}
-                className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
-                  runtimeFilter === "all"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                All
-              </button>
-            </div>
-          )}
-        </div>
+        <Label className="text-xs text-muted-foreground">Runtime</Label>
         <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
           <PopoverTrigger
             disabled={runtimes.length === 0}
