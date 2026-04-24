@@ -144,6 +144,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     ],
     cta: "\u5f00\u59cb\u4f7f\u7528",
     ctaGithub: "\u5728 GitHub \u4e0a\u67e5\u770b",
+    ctaDocs: "\u9605\u8bfb\u6587\u6863",
   },
 
   openSource: {
@@ -232,7 +233,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       resources: {
         label: "\u8d44\u6e90",
         links: [
-          { label: "\u6587\u6863", href: githubUrl },
+          { label: "\u6587\u6863", href: "/docs/zh" },
           { label: "API", href: githubUrl },
           { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],

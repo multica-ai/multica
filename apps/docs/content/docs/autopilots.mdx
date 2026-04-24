@@ -1,0 +1,85 @@
+---
+title: Autopilots
+description: Let agents start work on a cron schedule — or trigger once manually via the UI or CLI.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Autopilots let [agents](/agents) **start work automatically on a schedule** — configure a cron expression and a timezone, and Multica dispatches a [`task`](/tasks) on its own, without you triggering anything. It fits periodic checks, recurring reports, and overnight cleanup jobs — the "standing order" shape of work. Compared to the other three trigger paths ([assigning](/assigning-issues), [@-mention](/mentioning-agents), and [chat](/chat), where you are the one kicking things off), the core difference with Autopilots is that they are **time-driven**.
+
+## Configure an autopilot
+
+Create a new autopilot on the workspace's **Autopilot** page. You set:
+
+- **Name** — display name
+- **Agent** — who the run is dispatched to
+- **Priority** — inherited by the `task` it produces (same semantics as issue priority)
+- **Description / prompt** — the work description the agent receives each run
+- **Execution mode** — see below
+- **Triggers** — at least one `schedule` (cron + timezone)
+
+## Pick an execution mode
+
+An autopilot has two execution modes. **Start with "create issue" mode.**
+
+- **Create issue mode** (`create_issue`) — default, **recommended**. Each trigger first creates an issue in the workspace (the title supports interpolation like `{{date}}`), then assigns the issue to the agent through the normal assignment flow. All work lands on the issue board with the same history, comments, and status as a manually assigned issue.
+- **Run-only mode** (`run_only`) — skips issue creation and enqueues a `task` directly. The run is invisible on the board — you can only see it in the autopilot's run history.
+
+<Callout type="warning">
+**Run-only mode is currently unstable.** The CLI labels it "not yet supported end-to-end," and the dispatch path has known issues. New users should stick to create issue mode and wait for run-only mode to ship a stable release before switching.
+</Callout>
+
+## Run it on a schedule
+
+Every autopilot needs at least one `schedule` trigger. Cron uses the **standard 5-field format** (minute hour day month weekday), with **1-minute** minimum granularity (no seconds). Timezone is IANA-formatted (for example, `Asia/Shanghai`) and determines which timezone the cron expression is interpreted in.
+
+A few examples:
+
+- `0 9 * * 1-5`, `Asia/Shanghai` — 9 AM Beijing time on weekdays
+- `*/30 * * * *`, `UTC` — every 30 minutes
+- `0 3 * * *`, `UTC` — every day at 3 AM UTC
+
+The Multica server scans for due triggers every **30 seconds** — **the actual fire time can lag by up to 30 seconds**, not down to the second. If the server is restarted across a fire time, it catches up missed triggers on startup (nothing is lost, but they fire right away).
+
+## Trigger once manually
+
+To avoid waiting for cron while debugging an autopilot, trigger it manually:
+
+- UI: click "Run now" on the autopilot detail page
+- CLI:
+
+```bash
+multica autopilot trigger <autopilot-id>
+```
+
+A manual trigger goes through the exact same execution flow as a `schedule` trigger — only the `source` field on the run record is marked `manual`.
+
+## View run history
+
+Every trigger produces a **run record**, visible on the "History" tab of the autopilot detail page:
+
+- Trigger source (`schedule` / `manual`)
+- Start time, completion time
+- Status (`issue_created` / `running` / `completed` / `failed`)
+- The linked issue (create issue mode) or `task` (run-only mode)
+- Failure reason (if failed)
+
+## What happens when an autopilot fails
+
+<Callout type="warning">
+**Autopilot failures are not auto-retried and do not send inbox notifications.** A failure leaves a `failed` entry in run history — no system-level re-enqueue like assign or @-mention, and no notification to anyone. If the autopilot is periodic, **the next cron fire will trigger a new run**, but the failed work is not automatically re-run.
+
+If an autopilot is important, design your own monitoring — for example, have the agent post a comment on success, and catch failures by noticing missing comments.
+</Callout>
+
+Why no auto-retry: autopilots are already periodic, so adding system-level retries stacks on top of the next scheduled run and creates duplicate executions. Leaving the schedule entirely to cron keeps it clean.
+
+## What's not yet available
+
+**Webhook and API triggers are not available yet.** The autopilot trigger schema reserves `webhook` and `api` types, but **they are not wired up to any ingress route** — the UI can create triggers of either type, but they will not actually fire. Today, **only `schedule` and manual triggers are end-to-end usable.**
+
+## Next
+
+- [**Assign issues to agents**](/assigning-issues) — a one-shot hand-off of an issue to an agent
+- [**@-mention agents in comments**](/mentioning-agents) — pull an agent in to take a look from a comment
+- [**Chat**](/chat) — one-to-one conversation outside any issue

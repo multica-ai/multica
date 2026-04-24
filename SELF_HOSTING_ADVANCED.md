@@ -290,14 +290,23 @@ HTTP requests (issues, comments, uploads) work on LAN out of the box — Next.js
 
 ## Health Check
 
-The backend exposes a health check endpoint:
+The backend exposes public health endpoints:
 
-```
+```text
 GET /health
 → {"status":"ok"}
+
+GET /readyz
+→ {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+
+GET /healthz
+→ same response as /readyz
 ```
 
-Use this for load balancer health checks or monitoring.
+Use `/health` for basic liveness / reachability checks. Use `/readyz` for
+dependency-aware readiness probes and external monitoring that should fail when
+the database is unavailable or migrations are not fully applied. `/healthz` is
+kept as an alias for operator familiarity.
 
 ## Upgrading
 

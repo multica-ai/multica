@@ -1,0 +1,121 @@
+---
+title: Sign-in and signup configuration
+description: Configure email + verification code sign-in, Google OAuth, and signup allowlists. Avoid the 888888 trap.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica supports two sign-in methods: **email + verification code** (default) and **Google OAuth** (optional). On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
+
+For the list of environment variables referenced below, see [Environment variables](/environment-variables); for token usage and lifecycle details, see [Authentication and tokens](/auth-tokens).
+
+## How email + verification code sign-in works
+
+The user enters an email on the sign-in page → the server sends a 6-digit code → the user enters it → the server verifies it → a JWT cookie is issued. Standard flow. It requires [Resend](https://resend.com/) as the email provider:
+
+1. Create a Resend account and verify your domain
+2. Create an API key
+3. Set the environment variables:
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com  # must be a domain verified in Resend
+    ```
+
+4. Restart the server
+
+**What happens if you don't set `RESEND_API_KEY`**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
+
+## The 888888 trap
+
+<Callout type="warning">
+**If `APP_ENV` is not set to `production`, anyone can sign in to any account with the code `888888`.**
+
+Multica has a development-only master code, `888888` — a backdoor so local development doesn't depend on Resend. The rule is straightforward: when `APP_ENV != "production"`, **any email** plus `888888` passes verification.
+
+**Production deployments must set `APP_ENV=production`**. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, this value is already set to `production` by default; but if you deploy from source yourself, write your own Docker config, or redefine environment variables in Kubernetes — you must add `APP_ENV=production` yourself.
+</Callout>
+
+To check whether your deployment has this trap: open the sign-in page, enter **any email** to request a code, then enter `888888`. If you get in, your `APP_ENV` is not set to `production`, and **the entire instance is wide open**.
+
+## Google OAuth configuration
+
+Optional. Without it, only email + verification code is available; with it, the sign-in page gets a "Sign in with Google" button.
+
+1. Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/)
+2. Set the **Authorized redirect URIs** to your Multica frontend address plus `/auth/callback`, for example:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+3. Once you have the client ID and client secret, set three environment variables:
+
+    ```bash
+    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+    GOOGLE_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    ```
+
+4. Restart the server.
+
+**Takes effect at runtime**: the frontend reads these settings at runtime via `/api/config` — after changing them, restart the server and the frontend picks up the new values with no rebuild or redeploy.
+
+<Callout type="warning">
+**The redirect URI must match exactly in both the Google Console and `GOOGLE_REDIRECT_URI`** — including protocol (`http` vs `https`), trailing slash, and port. Any mismatch and Google rejects the entire OAuth flow; the error shown to the user is `redirect_uri_mismatch`.
+</Callout>
+
+## Restricting who can sign up
+
+Three environment variables combine by priority:
+
+<Mermaid chart={`
+graph TD
+    Start[New user first sign-in] --> A{Email in<br/>ALLOWED_EMAILS?}
+    A -- Yes --> Allow[Allow signup]
+    A -- No --> B{Domain in<br/>ALLOWED_EMAIL_DOMAINS?}
+    B -- Yes --> Allow
+    B -- No --> C{Any allowlist<br/>non-empty?}
+    C -- Yes --> Block[Reject]
+    C -- No --> D{ALLOW_SIGNUP<br/>= true?}
+    D -- Yes --> Allow
+    D -- No --> Block
+`} />
+
+**Existing users can always sign in again** — the signup allowlist only applies to **first-time signup**, not returning users.
+
+- **`ALLOWED_EMAILS`** (highest priority) — explicit email allowlist, comma-separated. **When non-empty, only listed emails can sign up.**
+- **`ALLOWED_EMAIL_DOMAINS`** — domain allowlist, comma-separated (for example `company.io,partner.com`).
+- **`ALLOW_SIGNUP`** — master switch, default `true`. Set `false` to disable signup entirely.
+
+<Callout type="warning">
+**The three layers are AND semantics, not OR.** A common wrong intuition is that `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` means "allow company.io plus everyone else." It does **not**. If any layer has a non-empty value, **emails not matching it are rejected outright** — `ALLOW_SIGNUP=true` does not override that.
+
+To actually "allow everyone," leave all three variables empty (or keep `ALLOW_SIGNUP=true`).
+</Callout>
+
+**Typical configurations**:
+
+| Goal | Configuration |
+|---|---|
+| Internal only, employees of `company.io` | `ALLOWED_EMAIL_DOMAINS=company.io` |
+| Internal + a few external collaborators | `ALLOWED_EMAIL_DOMAINS=company.io` + collaborator addresses added to `ALLOWED_EMAILS` |
+| Disable self-serve signup entirely, invite-only | `ALLOW_SIGNUP=false` |
+| Open signup (not recommended for production) | All three empty |
+
+## Can you still invite people when signup is disabled?
+
+**Only people who already have a Multica account.** Accepting an invite doesn't check the signup allowlist — if the invitee has signed up already (for example in another workspace), clicking the invite link and signing in lets them accept.
+
+**But people who have never signed up cannot be rescued by an invite.** Before accepting, they must sign in, and the first step of sign-in (requesting the verification code) passes through the signup allowlist check. If `ALLOW_SIGNUP=false`, or their email isn't in `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, they **cannot complete signup**, and therefore cannot accept the invite.
+
+To invite an external collaborator who hasn't signed up yet: temporarily add their email to `ALLOWED_EMAILS`, wait for them to sign up and accept the invite, then remove the entry.
+
+For how to create and use invites, see [Members and roles](/members-roles).
+
+## Next
+
+- [Environment variables](/environment-variables) — full definitions of every variable used on this page
+- [Authentication and tokens](/auth-tokens) — JWT / PAT / daemon token categories and usage
+- [Troubleshooting](/troubleshooting) — verification code not received, OAuth `redirect_uri_mismatch`, signup rejected

@@ -1,0 +1,67 @@
+---
+title: Skills
+description: 给智能体挂上"专业知识包"——兼容 Anthropic Agent Skills 开放标准。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Skill 是给 [智能体](/agents) 的**专业知识包**——一个 `SKILL.md` 加上可选的支持文件（脚本、配置、参考模板等），告诉智能体"遇到某类任务时该怎么想、怎么做"。Multica 采用 [Anthropic Agent Skills](https://agentskills.io) 开放标准，所有符合规范的 Skill（Anthropic 官方仓库、ClawHub、skills.sh 上的包）都能直接导入。
+
+## 工作区 Skill 和本机 Skill
+
+Multica 支持两种 Skill 来源：
+
+- **工作区 Skill（workspace skill）** —— 存在 Multica 云端。挂到智能体后，任务执行时自动同步到你本机的守护进程。这是**团队共享 Skill 的标准方式**。
+- **本机 Skill（local skill）** —— 直接存在你本机的某个目录里（每款 AI 编程工具有约定的默认路径，比如 Claude Code 的 `~/.claude/skills/`）。[守护进程](/daemon-runtimes) 按你的请求扫描本机，发现后由你手动选入工作区。
+
+大多数情况用**工作区 Skill**：导入一次，团队所有成员的智能体都能用。本机 Skill 适合先在本地测试、或涉及敏感本地内容的场景。
+
+## 导入 Skill
+
+工作区 Skill 有四种来源：
+
+- **新建** —— 在 UI 里直接写 `SKILL.md` 和相关文件
+- **从 GitHub** —— 贴一个仓库 URL（例如 `https://github.com/owner/repo/tree/main/skills/my-skill`），Multica 自动拉取目录下的 `SKILL.md` 和所有文件
+- **从 ClawHub** —— 从 [ClawHub](https://clawhub.io) 公开市场搜索并导入，支持选版本
+- **从本机** —— 守护进程扫描你本机的 skill 目录，你选要用的导入到工作区
+
+单个文件和整个 Skill 包都有容量上限（从 GitHub 导入时单文件上限约 1 MB）。精确规则会在导入界面里提示——超过时会报错。
+
+## 挂到智能体
+
+Skill 导入后需要**挂载到具体的智能体**才会生效。一个智能体能挂多个 Skill，一个 Skill 也能挂到多个智能体。
+
+挂上之后，智能体下次开工时会自动拿到挂着的 Skill——不同 AI 编程工具有各自的 Skill 发现路径（Claude Code 是 `.claude/skills/`、Cursor 是 `.cursor/skills/` 等），Multica 会自动放到对的位置。**但有 3 款工具（Gemini / Hermes / OpenClaw）当前走的是通用 fallback 路径 `.agent_context/skills/`——这些工具能否真的从这里读到 skill，取决于工具本身是否支持**。完整路径对照和原生发现 vs fallback 的区分见 [AI 编程工具对照 → skill 文件该放哪儿](/providers#skill-文件该放哪儿)。
+
+修改 Skill 的内容后，**只有之后新创建的任务会拿到新版本**——正在跑的任务继续用旧版 Skill。
+
+## 第三方 Skill 的安全
+
+从 GitHub 或 ClawHub 导入的 Skill 可能包含脚本和可执行内容。Multica 本身**不做签名验证、不做代码审查、不做沙盒隔离**——Skill 里的内容原封不动交给对应的 AI 编程工具，工具怎么用这些文件（是否当脚本执行）由工具本身决定。
+
+<Callout type="warning">
+**导入第三方 Skill 前，审查 `SKILL.md` 和它附带的所有文件。**
+
+2026 年 2 月发生过 "ClawHavoc" 事件——有人在热门 Skill 包里植入恶意指令，受害用户的 API key 被窃取。ClawHub 之后加了 VirusTotal 扫描，但**自动扫描不能替代你自己的审查**。
+
+**只从你信任的来源导入**。涉及敏感数据的项目，考虑只用你自己写的本机 Skill。
+</Callout>
+
+## Skill 和 MCP 的区别
+
+两者都是给智能体"增强能力"的机制，方向不同：
+
+- **Skill** = 结构化的**知识包**（静态内容 + 指令）。智能体读 Skill 来学"遇到 X 类问题该怎么想、怎么做"。
+- **MCP**（Model Context Protocol）= **工具通道**。智能体通过 MCP 连外部服务（数据库、文件系统、第三方 API）并**调用**它们。
+
+两者可以同时用。目前 Multica 的 MCP 支持**只有 Claude Code 真正消费**——其他工具会接收到 MCP 配置但不会实际用。MCP 的专题会在后续版本展开。
+
+---
+
+到这里你已经知道智能体是什么、怎么创建、怎么挂 Skill。下一个问题：**它具体在哪跑？为什么我的智能体有时候会卡住不动？** 下一章讲执行架构——守护进程、运行时、任务怎么协作。
+
+## 下一步
+
+- [守护进程与运行时](/daemon-runtimes) —— 智能体到底跑在哪、怎么判断在线 / 离线
+- [执行任务](/tasks) —— 一次"智能体工作"的完整生命周期
+- [AI 编程工具对照](/providers) —— 10 款工具的完整对比（含每款的 Skill 注入路径）

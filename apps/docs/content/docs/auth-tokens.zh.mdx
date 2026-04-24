@@ -1,0 +1,80 @@
+---
+title: 认证与令牌
+description: Multica 有三种令牌——浏览器、CLI、守护进程各用一种。什么场景用哪种。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 有三种令牌，对应三种使用场景：浏览器 Web UI、命令行 / 脚本、守护进程（daemon）。三种都代表同一个你，但作用域和有效期不同。
+
+## 三种令牌
+
+| 令牌 | 格式 | 用在哪 | 有效期 |
+|---|---|---|---|
+| **JWT Cookie** | `multica_auth` cookie（HttpOnly） | Web 浏览器 | 30 天 |
+| **个人访问令牌（PAT）** | 以 `mul_` 开头 | CLI / 脚本 / 直接调 API | 默认不过期；用 API 创建时可选传 `expires_in_days` |
+| **守护进程令牌（Daemon Token）** | 以 `mdt_` 开头 | Daemon 内部和 server 通信 | 由 daemon 自己管理 |
+
+日常使用你只会直接接触前两种。**[守护进程](/daemon-runtimes)令牌**是 `multica daemon login` 自动生成和刷新的，你不用关心。
+
+## 三种令牌能访问哪些 API
+
+| API 路由 | JWT Cookie | PAT | Daemon Token |
+|---|---|---|---|
+| `/api/user/*`（用户级操作） | ✓ | ✓ | ✗ |
+| `/api/workspaces/:id/*`（工作区级） | ✓ | ✓ | ✗ |
+| `/api/daemon/*`（daemon 专用） | ✗ | ✓ | ✓ |
+| WebSocket `/ws`（实时推送） | ✓（cookie） | ✓（首条消息认证） | ✗ |
+
+**PAT 几乎什么都能命中**——它代表"完整的你"。Daemon Token 能做的事非常有限，只够 daemon 拉任务和汇报结果。
+
+**同样是访问 `/api/daemon/*`，两者作用域不同**：PAT 代表**一整个用户**——进来之后能看到你所有的工作区；daemon token 在创建时就绑死一个工作区，只能动这一个工作区的资源。生产部署用 daemon token 跑 daemon，不要图方便用 PAT——权限会被放大。
+
+## 登录
+
+### Email + 验证码
+
+1. 填邮箱，server 发一封带 6 位验证码的邮件
+2. 输入验证码，server 签发 JWT cookie（浏览器）或交换出 PAT（CLI）
+
+<Callout type="warning">
+**自部署运维注意**：如果环境变量 `APP_ENV` 不是 `production`，验证码恒为 `888888`——任何人能登录任何账号。详见 [自部署的认证配置](/auth-setup)。
+</Callout>
+
+### Google OAuth
+
+点 **Sign in with Google**，走标准 OAuth 回调。自部署时需要配好 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / redirect URI——详见 [自部署的认证配置](/auth-setup)。
+
+## 创建、查看、撤销 PAT
+
+**创建**有两种方式：
+
+- **Web UI**：Settings → Personal Access Tokens → New token
+- **CLI**：`multica login` 在本地没有 PAT 时会自动创建一个
+
+<Callout type="warning">
+**PAT 创建时完整内容只显示一次。** 刷新页面或关闭对话框之后就看不到了。
+
+Multica 在数据库里只保存 PAT 的哈希值——服务端也查不回来。创建时**立即复制保存**。丢了只能撤销后重新创建。
+</Callout>
+
+**查看**已签发的 PAT 列表（名字、创建时间、最后使用时间，**不含**完整令牌）：Settings → Personal Access Tokens。
+
+**撤销** PAT：在列表里点 Revoke。撤销是立即生效的——被撤销的 PAT 下一次请求就 401。
+
+## 退出登录只是删本地令牌
+
+执行 `multica auth logout` 或在 Web UI 点退出时：
+
+- **本地令牌被清除** —— CLI 从 `~/.multica/config.json` 里删掉 PAT；Web 删 cookie
+- **服务端的 PAT 仍然有效** —— 如果登出前有人已经拿到过你的 PAT（比如复制到了另一台机器），他们**还能继续用**
+
+<Callout type="warning">
+**如果怀疑 PAT 泄露，不要只 logout。** 去 Settings → Personal Access Tokens 把那个 PAT **撤销**。撤销才会让泄露出去的令牌立刻失效。
+</Callout>
+
+## 下一步
+
+- [CLI 命令速查](/cli) —— 每条 CLI 命令的认证是自动的
+- [自部署的认证配置](/auth-setup) —— 自部署时怎么配邮件 / OAuth / signup 白名单
+- [守护进程与运行时](/daemon-runtimes) —— 守护进程令牌是从哪来的

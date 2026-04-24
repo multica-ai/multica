@@ -1,0 +1,119 @@
+---
+title: Cloud quickstart
+description: From sign-up to assigning your first task to an agent in 5 minutes.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This page walks you end-to-end through Multica Cloud — **sign up → install the [CLI](/cli) → start the [daemon](/daemon-runtimes) → create an [agent](/agents) → assign your first [task](/tasks)**. Takes about 5 minutes.
+
+One prerequisite: you already have at least one [AI coding tool](/providers) installed locally ([Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), or [Pi](/providers#pi)). The daemon auto-detects them on startup and refuses to start if none are present.
+
+## 1. Create an account
+
+Sign up at [multica.ai](https://multica.ai). You can log in with email (6-digit verification code) or Google.
+
+After sign-up you're automatically placed in a default workspace (generated from your account name). You can rename it later, or create new workspaces.
+
+## 2. Install the Multica CLI
+
+**macOS / Linux (Homebrew recommended)**:
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+**macOS / Linux (no Homebrew)**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell)**:
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Verify the install:
+
+```bash
+multica version
+```
+
+## 3. Log in + start the daemon
+
+A single command handles login and starts the daemon:
+
+```bash
+multica setup
+```
+
+`multica setup` will:
+
+1. Configure the CLI to connect to Multica Cloud
+2. Open your browser for login (same email verification code / Google OAuth as the web)
+3. Store the generated PAT in `~/.multica/config.json`
+4. **Start the daemon automatically** — it begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds
+
+<Callout type="info">
+**Using the desktop app?** The desktop app **starts the daemon automatically** on launch — no need to run `multica setup` by hand. See [Desktop app](/desktop-app).
+</Callout>
+
+Verify the daemon is running:
+
+```bash
+multica daemon status
+```
+
+`online` means it has registered with the server.
+
+## 4. Verify the runtime is online
+
+In the web UI, go to **Settings → Runtimes**. The daemon you just started should appear as one or more active runtimes — one per AI coding tool installed locally.
+
+If it shows as offline, don't panic — see [Troubleshooting → Daemon can't reach the server](/troubleshooting#daemon-cant-reach-the-server).
+
+## 5. Create an agent
+
+In the web UI, go to **Settings → Agents** and click **New Agent**:
+
+- **Name** — the name shown for this agent on boards and in comments. Pick something you like
+- **Provider** — choose an AI coding tool you have installed locally (the dropdown only lists tools detected by your runtimes)
+- **Model** (optional) — the model selection inside that tool (a static list or dynamic discovery, depending on the provider)
+- **Instructions** (optional) — system prompt for this agent
+
+Once created, the agent shows up in your workspace member list and can be assigned work like a human member.
+
+## 6. Assign your first task
+
+Create an issue in the web UI, or from the CLI:
+
+```bash
+multica issue create --title "Add an ASCII architecture diagram to the README"
+```
+
+Assign the issue to the agent you just created — click its avatar in the web UI, or use the CLI:
+
+```bash
+multica issue assign MUL-1 --to my-agent-name
+```
+
+`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it.
+
+**What happens next from the daemon**:
+
+1. It picks up the task within 3 seconds (status goes from `queued` to `dispatched`)
+2. It invokes the matching AI coding tool to start work (status becomes `running`)
+3. The AI works locally — it may read your code directory, run commands, edit files
+4. When done, it reports the result back to Multica (status becomes `completed` or `failed`, depending on whether auto-retry kicks in)
+
+The web UI updates in **real time** (via WebSocket) — no refresh needed.
+
+## Next steps
+
+- [Daemon and runtimes](/daemon-runtimes) — how the daemon operates and what runtimes mean
+- [Tasks](/tasks) — task lifecycle and retry rules
+- [AI coding tools compared](/providers) — capability differences across the 10 tools
+- [Desktop app](/desktop-app) — if you'd rather not run the daemon yourself
+- [Self-host quickstart](/self-host-quickstart) — run your own backend

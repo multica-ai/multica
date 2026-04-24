@@ -1,3 +1,679 @@
 @import "tailwindcss";
-@import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+@import "../../../packages/ui/styles/tokens.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@source "../../../packages/ui/**/*.{ts,tsx}";
+
+/* ---------------------------------------------------------------------------
+ * Multica Docs — editorial visual identity (v2)
+ *
+ * Docs site is intentionally distinct from the product app: warm-paper
+ * background, editorial serif headings (Source Serif 4), indigo accent,
+ * ruled dividers. Product app keeps its cool-gray dense Linear-style; docs
+ * reads like a literary publication. Same split as Stripe, Cursor, Linear.
+ *
+ * Implementation: docs-scoped token override on top of Multica tokens
+ * (whose @theme inline references read --background / --foreground / etc
+ * at runtime, so re-pointing the vars cascades through fumadocs's full
+ * --color-fd-* bridge below).
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --fd-page-width: 1080px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Editorial palette — light
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --background: oklch(0.972 0.003 85);          /* near-white, faint warm — matches landing #f7f7f5 */
+  --foreground: oklch(0.182 0.012 50);          /* warm ink */
+  --muted: oklch(0.955 0.006 85);               /* hairline, slightly warmer than bg */
+  --muted-foreground: oklch(0.482 0.012 65);    /* warm muted */
+  --card: oklch(0.99 0.002 85);                 /* paper — near white */
+  --card-foreground: oklch(0.182 0.012 50);
+  --popover: oklch(0.99 0.002 85);
+  --popover-foreground: oklch(0.182 0.012 50);
+  --primary: oklch(0.55 0.16 255);              /* Multica brand */
+  --primary-foreground: oklch(0.985 0.008 85);
+  --secondary: oklch(0.945 0.012 85);
+  --secondary-foreground: oklch(0.182 0.012 50);
+  --accent: oklch(0.945 0.022 255);             /* brand soft wash */
+  --accent-foreground: oklch(0.46 0.16 255);    /* brand ink */
+  --border: oklch(0.91 0.014 85);               /* ruled lines */
+  --input: oklch(0.91 0.014 85);
+  --ring: oklch(0.55 0.16 255);
+  --sidebar: oklch(0.99 0.002 85);              /* paper — same as card */
+  --sidebar-foreground: oklch(0.182 0.012 50);
+  --sidebar-accent: oklch(0.945 0.006 85);      /* subtle cream, hover/active fill */
+  --sidebar-accent-foreground: oklch(0.182 0.012 50);
+  --sidebar-border: oklch(0.91 0.014 85);
+
+  /* Docs-only extras (not bridged to fumadocs slots) */
+  --docs-rule: oklch(0.835 0.018 85);           /* heavier rule */
+  --docs-faint: oklch(0.72 0.018 75);           /* faintest accent */
+  --docs-code-bg: oklch(0.94 0.018 85);         /* warm beige code surface */
+  --docs-code-border: oklch(0.89 0.018 85);
+  --docs-terminal-bg: oklch(0.18 0.012 50);     /* terminal warm dark */
+  --docs-terminal-fg: oklch(0.92 0.012 80);
+  --docs-terminal-accent: oklch(0.65 0.16 255);
+}
+
+/* ---------------------------------------------------------------------------
+ * Editorial palette — dark (warm dark, NOT Multica's cool dark)
+ * ------------------------------------------------------------------------- */
+
+.dark {
+  --background: oklch(0.18 0.008 50);
+  --foreground: oklch(0.95 0.012 85);
+  --muted: oklch(0.22 0.008 50);
+  --muted-foreground: oklch(0.65 0.012 75);
+  --card: oklch(0.21 0.008 50);
+  --card-foreground: oklch(0.95 0.012 85);
+  --popover: oklch(0.22 0.008 50);
+  --popover-foreground: oklch(0.95 0.012 85);
+  --primary: oklch(0.7 0.15 255);               /* Multica brand — dark */
+  --primary-foreground: oklch(0.18 0.008 50);
+  --secondary: oklch(0.24 0.008 50);
+  --secondary-foreground: oklch(0.95 0.012 85);
+  --accent: oklch(0.3 0.05 255);                /* brand soft wash — dark */
+  --accent-foreground: oklch(0.78 0.14 255);    /* brand ink — dark */
+  --border: oklch(0.28 0.012 50);
+  --input: oklch(0.28 0.012 50);
+  --ring: oklch(0.7 0.15 255);
+  --sidebar: oklch(0.21 0.008 50);
+  --sidebar-foreground: oklch(0.95 0.012 85);
+  --sidebar-accent: oklch(0.26 0.01 50);        /* warm neutral, hover/active fill — dark */
+  --sidebar-accent-foreground: oklch(0.95 0.012 85);
+  --sidebar-border: oklch(0.28 0.012 50);
+
+  --docs-rule: oklch(0.36 0.012 50);
+  --docs-faint: oklch(0.42 0.012 50);
+  --docs-code-bg: oklch(0.165 0.008 50);
+  --docs-code-border: oklch(0.26 0.012 50);
+  --docs-terminal-bg: oklch(0.155 0.012 50);
+  --docs-terminal-fg: oklch(0.92 0.012 80);
+  --docs-terminal-accent: oklch(0.78 0.14 255);
+}
+
+/* ---------------------------------------------------------------------------
+ * Fumadocs slot bridge
+ *
+ * Map fumadocs's --color-fd-* slots to our (now warm) Multica tokens.
+ * @theme inline keeps the var() reference live so the cascade resolves
+ * at runtime — same pattern tokens.css uses.
+ * ------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-primary: var(--primary);
+  --color-fd-primary-foreground: var(--primary-foreground);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+}
+
+/* Sidebar uses dedicated --sidebar-* tokens so it sits a hair off the main
+ * canvas. Fumadocs renders it as #nd-sidebar (desktop) and
+ * #nd-sidebar-mobile (mobile drawer); both IDs need the override. */
+#nd-sidebar,
+#nd-sidebar-mobile {
+  --color-fd-background: var(--sidebar);
+  --color-fd-foreground: var(--sidebar-foreground);
+  --color-fd-muted: var(--sidebar-accent);
+  --color-fd-muted-foreground: var(--sidebar-foreground);
+  --color-fd-accent: var(--sidebar-accent);
+  --color-fd-accent-foreground: var(--sidebar-accent-foreground);
+  --color-fd-border: var(--sidebar-border);
+}
+
+/* ---------------------------------------------------------------------------
+ * Editorial typography
+ *
+ * Body keeps Inter for legibility (especially CJK where serif Latin clashes
+ * with sans CJK). Headings switch to Source Serif 4 for the editorial
+ * signature. Italic is intentionally avoided — Chinese italic is a CSS
+ * synthetic slant against upright-designed glyphs and reads as broken.
+ * Emphasis is carried by serif/sans contrast, brand color, and weight.
+ *
+ * Sizing:
+ *   - DocsHero h1 (welcome page only): 44px serif, brand-color em accent
+ *   - prose h1 (guide / reference pages): 30px serif
+ *   - prose h2: 26px serif (no italic)
+ *   - prose h3: 13px sans uppercase label
+ *   - body: 15.5px (kept from previous build — proven reading size for CN)
+ * ------------------------------------------------------------------------- */
+
+article:has(.prose),
+.prose {
+  font-size: 0.96875rem; /* 15.5px */
+  line-height: 1.7;
+}
+
+/* DocsTitle h1 (Fumadocs hardcodes text-[1.75em] font-semibold — utility
+ * specificity 0,1,0 beats plain article > h1 0,0,2; !important wins). */
+article > h1 {
+  font-family: var(--font-serif), ui-serif, serif !important;
+  font-size: 1.875rem !important; /* 30px guide-page heading */
+  font-weight: 400 !important;
+  letter-spacing: -0.018em;
+  line-height: 1.15;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+}
+
+/* Lead paragraph below DocsTitle */
+article > p.text-lg {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.125rem; /* 18px serif lede */
+  line-height: 1.55;
+  margin-bottom: 2rem;
+  color: var(--muted-foreground);
+}
+
+/* Paragraph rhythm */
+.prose :where(p):not(:where([class~="not-prose"] *)) {
+  margin-top: 0;
+  margin-bottom: 0.875rem;
+  color: oklch(from var(--foreground) calc(l + 0.06) c h);
+}
+.prose :where(p):not(:where([class~="not-prose"] *)):last-child {
+  margin-bottom: 0;
+}
+.prose :where(p) strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.prose :where(ul, ol) {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.prose h1 {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.875rem; /* 30px */
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+}
+/* Italic is avoided sitewide (Chinese italic = synthetic slant, looks broken).
+ * Force any italicized element to non-italic in prose. Tailwind Typography
+ * defaults blockquote to italic; we also undo it here. Emphasis is carried
+ * by brand color + font-weight in headings, foreground+weight in body. */
+.prose em,
+.prose i,
+.prose cite,
+.prose blockquote,
+.prose blockquote p {
+  font-style: normal;
+}
+.prose h1 em {
+  color: var(--primary);
+  font-weight: 500;
+}
+.prose p em,
+.prose li em {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.prose h2 {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.625rem; /* 26px */
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+  scroll-margin-top: 80px;
+}
+
+/* h3 = small uppercase sans label, ruled-bottom — v2 editorial signature */
+.prose h3 {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.8125rem; /* 13px */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+  margin-top: 2.25em;
+  margin-bottom: 0.75em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+
+.prose h4 {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.0625rem; /* 17px */
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  margin-top: 1.5em;
+  margin-bottom: 0.375em;
+  color: var(--foreground);
+}
+
+/* Description paragraph (fumadocs adds text-lg + muted) */
+.prose > p:first-of-type:has(+ *) {
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------------------
+ * Links — Vercel-style hairline underline, reveal brand on hover
+ *
+ * Markdown-heavy prose can put 4+ inline links in a single sentence; a
+ * permanent brand-color underline on every one turns the paragraph into
+ * highlighter spam. The trick isn't "no underline" — it's underlining
+ * in the hairline border color so the line exists but visually recedes.
+ * Hover swaps both text and underline to brand color (no thickness
+ * change) — the link "arrives" as a single color shift.
+ * ------------------------------------------------------------------------- */
+
+.prose a:not([data-card]):not(.not-prose) {
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms, color 150ms;
+}
+.prose a:not([data-card]):not(.not-prose):hover {
+  color: var(--primary);
+  text-decoration-color: var(--primary);
+}
+
+/* Callout already carries four visual signals (left brand bar, brand-wash
+ * bg, uppercase NOTE label, body). Another decoration over-loads it — so
+ * links inside a callout drop the underline entirely. Color shift on
+ * hover is the full affordance. */
+.prose div.shadow-md:has(> [role="none"]) a:not([data-card]):not(.not-prose),
+.prose div.shadow-md:has(> [role="none"]) a:not([data-card]):not(.not-prose):hover {
+  text-decoration: none;
+}
+
+/* Inline code — warm beige chip, accent-color text */
+.prose :not(pre) > code {
+  background: var(--docs-code-bg);
+  color: var(--accent-foreground);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.875em;
+  font-weight: 500;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
+  content: none;
+}
+
+/* Lists */
+.prose :where(ul, ol) > li {
+  margin-top: 0.375em;
+  margin-bottom: 0.375em;
+  padding-inline-start: 0.375em;
+}
+.prose :where(ul) > li::marker {
+  color: var(--docs-faint);
+  content: "—  ";
+  font-family: var(--font-serif), serif;
+}
+.prose :where(ol) > li::marker {
+  color: var(--muted-foreground);
+}
+
+/* Blockquote — editorial accent rule, serif voice */
+.prose blockquote {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-weight: 400;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--foreground);
+  border-inline-start-width: 2px;
+  border-inline-start-color: var(--primary);
+  padding-inline-start: 1.25em;
+  margin-block: 1.5em;
+  quotes: none;
+}
+.prose blockquote p::before,
+.prose blockquote p::after {
+  content: none;
+}
+
+/* Tables — hairline below thead only, no outer frame (Stripe / Linear
+ * docs convention). The heavier ink-color top rule v2 used on its API
+ * reference block is intentionally not applied here — that treatment is
+ * "this is a formal declaration"; regular guide tables want quiet. */
+.prose table {
+  font-size: 0.9375em;
+  border-collapse: collapse;
+  margin-block: 1.5em;
+}
+.prose thead {
+  border-bottom: 1px solid var(--border);
+}
+.prose thead th {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  padding-block: 0.5rem 0.625rem;
+  text-align: start;
+}
+.prose tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+.prose tbody td {
+  padding-block: 0.875rem;
+}
+
+/* HR — heavier ruled separator */
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--docs-rule);
+  margin-block: 3em;
+}
+
+/* ---------------------------------------------------------------------------
+ * Callout — editorial 2px accent bar + soft accent wash
+ * ------------------------------------------------------------------------- */
+
+.prose div.shadow-md:has(> [role="none"]) {
+  box-shadow: none !important;
+  border-radius: 0 4px 4px 0 !important;
+  background: var(--accent) !important;
+  border: none !important;
+  border-inline-start: 2px solid var(--primary) !important;
+  padding: 0.875rem 1.125rem !important;
+  gap: 0.625rem !important;
+  align-items: flex-start;
+  margin-block: 1.5rem;
+}
+
+.prose div.shadow-md:has(> [role="none"]) > [role="none"] {
+  display: none;
+}
+
+.prose div.shadow-md:has(> [role="none"]) > div:last-child > p {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 0.375rem;
+}
+
+.prose div.shadow-md:has(> [role="none"]) > div:last-child > div {
+  color: var(--foreground) !important;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------------------
+ * Cards — fallback editorial treatment for fumadocs's <Cards>/<Card>
+ * (NumberedCards is the showpiece; this keeps non-showpiece pages on tone)
+ * ------------------------------------------------------------------------- */
+
+.prose [data-card]:not(.peer) {
+  border-radius: 4px !important;
+  border: 1px solid var(--border) !important;
+  background: var(--card);
+  padding: 1.125rem !important;
+  transition: border-color 150ms, background-color 150ms !important;
+}
+
+.prose [data-card]:not(.peer):hover {
+  border-color: var(--primary) !important;
+  background: var(--card) !important;
+}
+
+.prose [data-card]:not(.peer) > div:first-child {
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--accent-foreground) !important;
+  margin-bottom: 0.75rem !important;
+}
+
+.prose [data-card]:not(.peer) > div:first-child svg {
+  color: var(--accent-foreground);
+}
+
+.prose [data-card]:not(.peer) h3 {
+  font-family: var(--font-serif), serif !important;
+  font-size: 1.125rem !important;
+  font-weight: 500 !important;
+  font-style: normal !important;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.25rem !important;
+  margin-top: 0 !important;
+  text-transform: none !important;
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+  color: var(--foreground) !important;
+}
+
+.prose [data-card]:not(.peer) p {
+  color: var(--muted-foreground) !important;
+  line-height: 1.6;
+  font-size: 0.9375rem !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Sidebar — editorial chrome
+ *
+ * Section headers: small uppercase sans label, ruled bottom border.
+ * Items: muted-foreground at rest, foreground on hover.
+ * Active: solid background fill (mirrors product app's app-sidebar.tsx —
+ * data-active:bg-sidebar-accent / data-active:text-sidebar-accent-foreground).
+ * ------------------------------------------------------------------------- */
+
+#nd-sidebar p,
+#nd-sidebar-mobile p {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.6875rem; /* 11px */
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  height: auto;
+  display: block;
+  margin-top: 1.5rem;
+  margin-bottom: 0.375rem;
+  padding-block: 0 0.375rem;
+  padding-inline-start: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+#nd-sidebar p:first-child,
+#nd-sidebar-mobile p:first-child {
+  margin-top: 0;
+}
+
+#nd-sidebar a[data-active],
+#nd-sidebar-mobile a[data-active] {
+  height: auto;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.84375rem; /* 13.5px */
+  border-radius: var(--radius-sm);
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+}
+
+#nd-sidebar a[data-active="false"],
+#nd-sidebar-mobile a[data-active="false"] {
+  color: var(--muted-foreground);
+}
+
+#nd-sidebar a[data-active="false"]:hover,
+#nd-sidebar-mobile a[data-active="false"]:hover {
+  background: color-mix(in oklab, var(--sidebar-accent) 70%, transparent);
+  color: var(--foreground);
+}
+
+/* Active — solid background fill, no left mark (matches product app) */
+#nd-sidebar a[data-active="true"],
+#nd-sidebar-mobile a[data-active="true"] {
+  background: var(--sidebar-accent) !important;
+  color: var(--sidebar-accent-foreground) !important;
+  font-weight: 500;
+}
+
+/* Sidebar footer — drop the hard top rule. The scroll viewport already
+ * fades content into the footer, so a 1px line on top reads as a
+ * double-weight edge. Fumadocs hardcodes `border-t p-4 pt-2` on its
+ * SidebarFooter div; target that exact class trio inside the sidebar IDs
+ * so we don't touch any other border-t in the app. */
+#nd-sidebar .border-t.p-4.pt-2,
+#nd-sidebar-mobile .border-t.p-4.pt-2 {
+  border-top-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Top nav — quiet, ruled bottom
+ * ------------------------------------------------------------------------- */
+
+#nd-nav,
+#nd-subnav {
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+#nd-nav a,
+#nd-subnav a {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  transition: color 150ms;
+}
+
+#nd-nav a:hover,
+#nd-subnav a:hover {
+  color: var(--foreground);
+}
+
+/* ---------------------------------------------------------------------------
+ * TOC (right rail) — quiet sans, brand-color when active
+ * ------------------------------------------------------------------------- */
+
+#nd-toc a {
+  font-size: 0.84375rem;
+  color: var(--muted-foreground);
+  padding-block: 0.3125rem;
+  letter-spacing: -0.005em;
+  transition: color 150ms;
+}
+
+#nd-toc a:hover {
+  color: var(--foreground);
+}
+
+#nd-toc a[data-active="true"] {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+/* TOC heading (Fumadocs renders "On this page" as an h3 / first p) */
+#nd-toc h3,
+#nd-toc > p:first-child {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 0.625rem;
+  padding-bottom: 0.375rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------------------
+ * Code blocks — warm beige (light) / warm dark (dark), NOT pinned
+ *
+ * Removes the previous "always-dark hero black" treatment. Code surface
+ * now follows page theme so it harmonizes with the warm-paper background
+ * in light mode and warm-dark in dark mode. Terminal-style blocks
+ * (handled by the custom <Terminal> component, not here) stay pinned to
+ * the deeper warm dark for the "shell session" feel.
+ * ------------------------------------------------------------------------- */
+
+article figure.shiki {
+  background: var(--docs-code-bg) !important;
+  border: 1px solid var(--docs-code-border) !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  margin-block: 1.25rem !important;
+  color: var(--foreground);
+}
+
+article figure.shiki pre {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+  margin: 0 !important;
+}
+
+article figure.shiki > div[class*="overflow-auto"] {
+  font-size: 0.84375rem !important;
+  line-height: 1.7;
+  padding: 1rem 1.125rem !important;
+}
+
+/* Header bar (filename via ```lang filename="x.ts") */
+article figure.shiki > div[class*="border-b"] {
+  border-bottom-color: var(--docs-code-border) !important;
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: -0.005em;
+}
+
+/* Shiki tokens — pick the palette that matches page theme.
+ * Default (light): use --shiki-light. Override under .dark to --shiki-dark.
+ * Specificity: article figure.shiki code span (0,1,4) beats fumadocs's
+ * default, so no !important needed for the light path. */
+article figure.shiki code span {
+  color: var(--shiki-light);
+}
+
+.dark article figure.shiki code span {
+  color: var(--shiki-dark);
+}
+
+/* Copy button on code blocks */
+article figure.shiki button {
+  color: var(--muted-foreground) !important;
+  background: transparent !important;
+}
+article figure.shiki button:hover {
+  color: var(--foreground) !important;
+  background: var(--muted) !important;
+}

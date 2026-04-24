@@ -24,11 +24,9 @@ func computeNextRun(cronExpr, timezone string) (time.Time, error) {
 type AutopilotResponse struct {
 	ID                 string  `json:"id"`
 	WorkspaceID        string  `json:"workspace_id"`
-	ProjectID          *string `json:"project_id"`
 	Title              string  `json:"title"`
 	Description        *string `json:"description"`
 	AssigneeID         string  `json:"assignee_id"`
-	Priority           string  `json:"priority"`
 	Status             string  `json:"status"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
@@ -76,11 +74,9 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 	return AutopilotResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
-		ProjectID:          uuidToPtr(a.ProjectID),
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
 		AssigneeID:         uuidToString(a.AssigneeID),
-		Priority:           a.Priority,
 		Status:             a.Status,
 		ExecutionMode:      a.ExecutionMode,
 		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
@@ -141,8 +137,6 @@ type CreateAutopilotRequest struct {
 	Title              string  `json:"title"`
 	Description        *string `json:"description"`
 	AssigneeID         string  `json:"assignee_id"`
-	ProjectID          *string `json:"project_id"`
-	Priority           string  `json:"priority"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
 }
@@ -151,8 +145,6 @@ type UpdateAutopilotRequest struct {
 	Title              *string `json:"title"`
 	Description        *string `json:"description"`
 	AssigneeID         *string `json:"assignee_id"`
-	ProjectID          *string `json:"project_id"`
-	Priority           *string `json:"priority"`
 	Status             *string `json:"status"`
 	ExecutionMode      *string `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
@@ -268,26 +260,14 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	priority := req.Priority
-	if priority == "" {
-		priority = "none"
-	}
-
-	var projectID pgtype.UUID
-	if req.ProjectID != nil {
-		projectID = parseUUID(*req.ProjectID)
-	}
-
 	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Title:              req.Title,
 		AssigneeID:         parseUUID(req.AssigneeID),
-		Priority:           priority,
 		Status:             "active",
 		ExecutionMode:      req.ExecutionMode,
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(userID),
-		ProjectID:          projectID,
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
 	})
@@ -336,14 +316,10 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		ID:                 prev.ID,
 		Description:        prev.Description,
 		AssigneeID:         prev.AssigneeID,
-		ProjectID:          prev.ProjectID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
-	}
-	if req.Priority != nil {
-		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
@@ -367,13 +343,6 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			params.AssigneeID = parseUUID(*req.AssigneeID)
-		}
-	}
-	if _, ok := rawFields["project_id"]; ok {
-		if req.ProjectID != nil {
-			params.ProjectID = parseUUID(*req.ProjectID)
-		} else {
-			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 

@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueExecutionSummary } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -11,9 +11,9 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
-import type { IssueExecutionSummary } from "@multica/core/types";
 import { IssueExecutionBadge } from "./issue-execution";
 import { IssueCardLink } from "./issue-card-link";
+import { IssueActionsContextMenu } from "../actions";
 
 export interface ChildProgress {
   done: number;
@@ -55,64 +55,66 @@ export const ListRow = memo(function ListRow({
   const showDueDate = storeProperties.dueDate && issue.due_date;
 
   return (
-    <div
-      className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:bg-accent/50 ${
-        selected ? "bg-accent/30" : ""
-      }`}
-    >
-      <div className="relative flex shrink-0 items-center justify-center w-4 h-4">
-        <PriorityIcon
-          priority={issue.priority}
-          className={selected ? "hidden" : "group-hover/row:hidden"}
-        />
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => toggle(issue.id)}
-          className={`absolute inset-0 cursor-pointer accent-primary ${
-            selected ? "" : "hidden group-hover/row:block"
-          }`}
-        />
-      </div>
-      <IssueCardLink
-        href={p.issueDetail(issue.id)}
-        onOpenIssue={onOpenIssue ? () => onOpenIssue(issue) : undefined}
-        className="flex flex-1 items-center gap-2 min-w-0"
+    <IssueActionsContextMenu issue={issue}>
+      <div
+        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
+          selected ? "bg-accent/30" : ""
+        }`}
       >
-        <span className="w-16 shrink-0 text-xs text-muted-foreground">
-          {issue.identifier}
-        </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="truncate">{issue.title}</span>
-          <IssueExecutionBadge summary={executionSummary} className="shrink-0" />
-          {showChildProgress && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-              <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
-              <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                {childProgress!.done}/{childProgress!.total}
+        <div className="relative flex shrink-0 items-center justify-center w-4 h-4">
+          <PriorityIcon
+            priority={issue.priority}
+            className={selected ? "hidden" : "group-hover/row:hidden"}
+          />
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => toggle(issue.id)}
+            className={`absolute inset-0 cursor-pointer accent-primary ${
+              selected ? "" : "hidden group-hover/row:block"
+            }`}
+          />
+        </div>
+        <IssueCardLink
+          href={p.issueDetail(issue.id)}
+          onOpenIssue={onOpenIssue ? () => onOpenIssue(issue) : undefined}
+          className="flex flex-1 items-center gap-2 min-w-0"
+        >
+          <span className="w-16 shrink-0 text-xs text-muted-foreground">
+            {issue.identifier}
+          </span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="truncate">{issue.title}</span>
+            <IssueExecutionBadge summary={executionSummary} className="shrink-0" />
+            {showChildProgress && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+                <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
+                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                  {childProgress!.done}/{childProgress!.total}
+                </span>
               </span>
+            )}
+          </span>
+          {showProject && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
+              <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
+              <span className="truncate">{project!.title}</span>
             </span>
           )}
-        </span>
-        {showProject && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
-            <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
-            <span className="truncate">{project!.title}</span>
-          </span>
-        )}
-        {showDueDate && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatDate(issue.due_date!)}
-          </span>
-        )}
-        {showAssignee && (
-          <ActorAvatar
-            actorType={issue.assignee_type!}
-            actorId={issue.assignee_id!}
-            size={20}
-          />
-        )}
-      </IssueCardLink>
-    </div>
+          {showDueDate && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatDate(issue.due_date!)}
+            </span>
+          )}
+          {showAssignee && (
+            <ActorAvatar
+              actorType={issue.assignee_type!}
+              actorId={issue.assignee_id!}
+              size={20}
+            />
+          )}
+        </IssueCardLink>
+      </div>
+    </IssueActionsContextMenu>
   );
 });

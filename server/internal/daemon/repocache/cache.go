@@ -5,6 +5,7 @@ package repocache
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,28 +126,77 @@ func (c *Cache) Fetch(barePath string) error {
 	return gitFetch(barePath)
 }
 
-// bareDirName derives a directory name from a repo URL.
-// e.g. "https://github.com/org/my-repo.git" → "my-repo.git"
-func bareDirName(url string) string {
-	url = strings.TrimRight(url, "/")
-	name := url
-	if i := strings.LastIndex(url, "/"); i >= 0 {
-		name = url[i+1:]
+// bareDirName returns a filesystem-safe, collision-free directory name for
+// the bare clone of rawURL. The name is built from the host plus each
+// path segment, joined by '+'. '+' is disallowed in GitHub and GitLab
+// path segments, so two URLs produce the same name only if they point at
+// the same repository on the same host.
+//
+// Examples:
+//
+//	https://github.com/org/my-repo.git           -> github.com+org+my-repo.git
+//	git@github.com:org/my-repo                   -> github.com+org+my-repo.git
+//	git@github.com:foo/bar-baz.git               -> github.com+foo+bar-baz.git
+//	git@github.com:foo-bar/baz.git               -> github.com+foo-bar+baz.git
+//	git@github.com:org/repo.git                  -> github.com+org+repo.git
+//	git@gitlab.example.com:org/repo.git          -> gitlab.example.com+org+repo.git
+//	ssh://git@gitlab.example.com:22/g/s/r.git    -> gitlab.example.com%3A22+g+s+r.git
+//	git@gitlab.example.com-22:org/repo.git       -> gitlab.example.com-22+org+repo.git
+//	my-repo                                      -> my-repo.git (bare name fallback)
+func bareDirName(rawURL string) string {
+	rawURL = strings.TrimRight(rawURL, "/")
+
+	host, path := splitHostAndPath(rawURL)
+	host = strings.ToLower(strings.TrimSpace(host))
+	// Encode ':' as '%3A' so host:port is lossless. A naive ':'->'-' rewrite
+	// would collapse `gitlab.example.com:22` onto a literal hostname
+	// `gitlab.example.com-22`, reintroducing the silent wrong-remote class
+	// this function exists to prevent. '%' is forbidden in valid hostnames
+	// (RFC 952 / RFC 1123), and in GitHub/GitLab path segments, so the
+	// encoded marker can never come from a legal input.
+	host = strings.ReplaceAll(host, ":", "%3A")
+
+	var parts []string
+	if host != "" {
+		parts = append(parts, host)
 	}
-	// Handle SSH-style "host:org/repo".
-	if i := strings.LastIndex(name, ":"); i >= 0 {
-		name = name[i+1:]
-		if j := strings.LastIndex(name, "/"); j >= 0 {
-			name = name[j+1:]
+	for _, seg := range strings.Split(path, "/") {
+		if seg != "" {
+			parts = append(parts, seg)
 		}
 	}
+
+	name := strings.Join(parts, "+")
 	if !strings.HasSuffix(name, ".git") {
 		name += ".git"
 	}
-	if name == ".git" {
+	if name == "" || name == ".git" {
 		name = "repo.git"
 	}
 	return name
+}
+
+// splitHostAndPath extracts the host and path-with-namespace from the
+// supported git URL forms:
+//
+//   - URL form (ssh://user@host[:port]/path, https://host/path) — returns
+//     u.Host verbatim (may include :port) and u.Path without the leading slash.
+//   - scp-style ([user@]host:path) — splits on the first ':' after the
+//     optional 'user@'.
+//   - Anything else (bare repo names, absolute filesystem paths) — returns
+//     an empty host and the raw input as the path.
+func splitHostAndPath(rawURL string) (host, path string) {
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme != "" && u.Host != "" {
+		return u.Host, strings.TrimPrefix(u.Path, "/")
+	}
+	s := rawURL
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[i+1:]
+	}
+	if i := strings.Index(s, ":"); i >= 0 {
+		return s[:i], s[i+1:]
+	}
+	return "", s
 }
 
 // isBareRepo checks if a path looks like a bare git repository.
