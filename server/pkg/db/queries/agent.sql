@@ -130,10 +130,11 @@ ORDER BY completed_at DESC
 LIMIT 1;
 
 -- name: GetLastWorkDirForIssue :one
--- Returns the work_dir from the most recent completed task for a given issue,
--- regardless of agent. Used when a subtask inherits workdir from its parent issue.
+-- Returns the work_dir from the most recent completed or failed task for a given issue,
+-- regardless of agent. Used for workdir sharing across agents on the same issue,
+-- and when a subtask inherits workdir from its parent issue.
 SELECT work_dir FROM agent_task_queue
-WHERE issue_id = $1 AND status = 'completed' AND work_dir IS NOT NULL
+WHERE issue_id = $1 AND status IN ('completed', 'failed') AND work_dir IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1;
 

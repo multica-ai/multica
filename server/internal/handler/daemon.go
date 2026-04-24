@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -109,12 +110,12 @@ type DaemonRegisterRequest struct {
 	// may have registered under before switching to a persistent UUID. The
 	// handler merges any matching runtime rows into the new row so agents
 	// and tasks keep working without manual intervention.
-	LegacyDaemonIDs []string `json:"legacy_daemon_ids"`
-	DeviceName      string   `json:"device_name"`
-	CLIVersion      string   `json:"cli_version"` // multica CLI version
-	CLIInstallSource string  `json:"cli_install_source"` // "homebrew" or "standalone"
-	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes        []struct {
+	LegacyDaemonIDs  []string `json:"legacy_daemon_ids"`
+	DeviceName       string   `json:"device_name"`
+	CLIVersion       string   `json:"cli_version"`        // multica CLI version
+	CLIInstallSource string   `json:"cli_install_source"` // "homebrew" or "standalone"
+	LaunchedBy       string   `json:"launched_by"`        // "desktop" when spawned by the Electron app
+	Runtimes         []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -588,9 +589,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	var (
-		outcome                    = "unauth"
-		authMs, claimMs, buildMs   int64
-		buildStart                 time.Time
+		outcome                  = "unauth"
+		authMs, claimMs, buildMs int64
+		buildStart               time.Time
 	)
 	defer func() {
 		// Emit at function exit so error / unauth paths also carry timing.
@@ -764,19 +765,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context.
+		// can resume the Claude Code conversation context. Session is agent-specific
+		// because session IDs are provider-scoped (e.g. Claude Code session IDs are
+		// not portable across agents).
 		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 			AgentID: task.AgentID,
 			IssueID: task.IssueID,
 		}); err == nil && prior.SessionID.Valid {
 			resp.PriorSessionID = prior.SessionID.String
-			if prior.WorkDir.Valid {
-				resp.PriorWorkDir = prior.WorkDir.String
-			}
 		}
 
-		// If no prior workdir found and the issue requests parent workdir inheritance,
-		// look up the most recent workdir from the parent issue.
+		// Workdir is shared across all agents on the same issue: any agent that
+		// picks up this issue reuses the workdir left by the previous agent,
+		// enabling seamless handoff (e.g. dev → review → fix) without losing work.
+		if workDir, err := h.Queries.GetLastWorkDirForIssue(r.Context(), task.IssueID); err == nil && workDir.Valid {
+			resp.PriorWorkDir = workDir.String
+		}
+
+		// If no prior workdir found, fall back to parent issue workdir when the
+		// issue requests inheritance (subtask behaviour — unchanged).
 		if resp.PriorWorkDir == "" {
 			if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil &&
 				issue.InheritParentWorkdir && issue.ParentIssueID.Valid {
@@ -1433,10 +1440,63 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
+	terminal, err := h.issueTerminalForGC(r.Context(), issue)
+	if err != nil {
+		slog.Warn("gc check terminal lookup failed", "issue_id", issueID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to check issue terminal status")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     issue.Status,
 		"updated_at": issue.UpdatedAt.Time,
+		"terminal":   terminal,
 	})
+}
+
+func (h *Handler) issueTerminalForGC(ctx context.Context, issue db.Issue) (bool, error) {
+	if isBuiltinTerminalIssueStatus(issue.Status) {
+		return true, nil
+	}
+
+	pipelineID := issue.PipelineID
+	if !pipelineID.Valid {
+		pipelines, err := h.Queries.ListPipelinesByWorkspace(ctx, db.ListPipelinesByWorkspaceParams{
+			WorkspaceID:    issue.WorkspaceID,
+			IncludeDeleted: false,
+		})
+		if err != nil {
+			return false, err
+		}
+		for _, p := range pipelines {
+			if p.IsDefault {
+				pipelineID = p.ID
+				break
+			}
+		}
+	}
+	if !pipelineID.Valid {
+		return false, nil
+	}
+
+	columns, err := h.Queries.ListPipelineColumns(ctx, pipelineID)
+	if err != nil {
+		return false, err
+	}
+	for _, col := range columns {
+		if col.StatusKey == issue.Status {
+			return col.IsTerminal, nil
+		}
+	}
+	return false, nil
+}
+
+func isBuiltinTerminalIssueStatus(status string) bool {
+	switch status {
+	case "done", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildPipelineContextMD renders pipeline column context as markdown appended to

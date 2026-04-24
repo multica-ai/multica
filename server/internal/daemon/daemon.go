@@ -1042,7 +1042,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		ChatSessionID:     task.ChatSessionID,
 	}
 
-	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+	// Try to reuse the workdir from a previous task on the same issue (any agent).
+	// Workdir is keyed by issue, not by (agent, issue), so handoffs between agents
+	// preserve all prior work in the directory.
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	if task.PriorWorkDir != "" {
@@ -1068,9 +1070,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
-	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
-	// the same (agent, issue) pair. The work_dir path is stored in DB on
-	// task completion and passed back via PriorWorkDir on the next claim.
+	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on the
+	// same issue. The work_dir path is stored in DB on task completion/failure and
+	// passed back via PriorWorkDir on the next claim (regardless of which agent picks it up).
 
 	prompt := BuildPrompt(task)
 
