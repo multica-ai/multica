@@ -9,7 +9,6 @@ export const workspaceKeys = {
   invitations: (wsId: string) => ["workspaces", wsId, "invitations"] as const,
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
-  agentsMine: (wsId: string) => ["workspaces", wsId, "agents", "mine"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
 };
@@ -36,11 +35,11 @@ export function memberListOptions(wsId: string) {
   });
 }
 
-export function agentListOptions(wsId: string, owner?: "me") {
+export function agentListOptions(wsId: string) {
   return queryOptions({
-    queryKey: owner === "me" ? workspaceKeys.agentsMine(wsId) : workspaceKeys.agents(wsId),
+    queryKey: workspaceKeys.agents(wsId),
     queryFn: () =>
-      api.listAgents({ workspace_id: wsId, include_archived: true, owner }),
+      api.listAgents({ workspace_id: wsId, include_archived: true }),
   });
 }
 

@@ -8,19 +8,6 @@ SELECT * FROM agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
--- name: ListAgentsByOwner :many
-SELECT * FROM agent
-WHERE workspace_id = $1
-  AND owner_id = $2
-  AND archived_at IS NULL
-ORDER BY created_at ASC;
-
--- name: ListAllAgentsByOwner :many
-SELECT * FROM agent
-WHERE workspace_id = $1
-  AND owner_id = $2
-ORDER BY created_at ASC;
-
 -- name: GetAgent :one
 SELECT * FROM agent
 WHERE id = $1;
