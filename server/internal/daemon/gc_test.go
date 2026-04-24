@@ -77,7 +77,7 @@ func TestShouldCleanTaskDir_DoneIssueOverTTL(t *testing.T) {
 	}
 }
 
-func TestShouldCleanTaskDir_CanceledIssueOverTTL(t *testing.T) {
+func TestShouldCleanTaskDir_CancelledIssueOverTTL(t *testing.T) {
 	t.Parallel()
 	issueID := "22222222-2222-2222-2222-222222222222"
 
@@ -85,13 +85,40 @@ func TestShouldCleanTaskDir_CanceledIssueOverTTL(t *testing.T) {
 	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"status":     "canceled",
+			"status":     "cancelled",
 			"updated_at": time.Now().Add(-6 * 24 * time.Hour),
 		})
 	})
 
 	d := newGCTestDaemon(t, mux)
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task2", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now(),
+	})
+
+	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if action != gcActionClean {
+		t.Fatalf("expected gcActionClean, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_TerminalFlagOverTTL(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888888"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "qa_done",
+			"updated_at": time.Now().Add(-6 * 24 * time.Hour),
+			"terminal":   true,
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task-terminal", &execenv.GCMeta{
 		IssueID:     issueID,
 		WorkspaceID: "ws1",
 		CompletedAt: time.Now(),

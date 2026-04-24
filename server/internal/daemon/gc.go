@@ -14,7 +14,7 @@ import (
 )
 
 // gcLoop periodically scans local workspace directories and removes those
-// whose issue is done/canceled and hasn't been updated within the configured TTL.
+// whose issue is terminal and hasn't been updated within the configured TTL.
 func (d *Daemon) gcLoop(ctx context.Context) {
 	if !d.cfg.GCEnabled {
 		d.logger.Info("gc: disabled")
@@ -116,7 +116,7 @@ type gcAction int
 
 const (
 	gcActionSkip   gcAction = iota
-	gcActionClean           // issue is done/canceled and stale
+	gcActionClean           // issue is terminal and stale
 	gcActionOrphan          // no meta or unknown issue and dir is old
 )
 
@@ -154,8 +154,7 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 		return gcActionSkip
 	}
 
-	if (status.Status == "done" || status.Status == "canceled") &&
-		time.Since(status.UpdatedAt) > d.cfg.GCTTL {
+	if issueGCStatusTerminal(status) && time.Since(status.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),
 			"issue", meta.IssueID,
@@ -166,6 +165,21 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 	}
 
 	return gcActionSkip
+}
+
+func issueGCStatusTerminal(status *IssueGCStatus) bool {
+	if status == nil {
+		return false
+	}
+	if status.Terminal != nil {
+		return *status.Terminal
+	}
+	switch strings.ToLower(status.Status) {
+	case "done", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
 }
 
 // cleanTaskDir removes a task directory and logs the result.

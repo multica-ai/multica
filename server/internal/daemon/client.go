@@ -212,9 +212,10 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 type IssueGCStatus struct {
 	Status    string    `json:"status"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Terminal  *bool     `json:"terminal,omitempty"`
 }
 
-// GetIssueGCCheck returns the status and updated_at of an issue for GC decisions.
+// GetIssueGCCheck returns the status, updated_at, and terminal flag of an issue for GC decisions.
 func (c *Client) GetIssueGCCheck(ctx context.Context, issueID string) (*IssueGCStatus, error) {
 	var resp IssueGCStatus
 	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), &resp); err != nil {

@@ -245,6 +245,7 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	var resp struct {
 		Status    string `json:"status"`
 		UpdatedAt string `json:"updated_at"`
+		Terminal  bool   `json:"terminal"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -254,6 +255,70 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 	if resp.UpdatedAt == "" {
 		t.Fatal("expected updated_at to be set")
+	}
+	if !resp.Terminal {
+		t.Fatal("expected done issue to be terminal")
+	}
+}
+
+func TestGetIssueGCCheck_CustomPipelineTerminalColumn(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var pipelineID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO pipeline (workspace_id, name, description, is_default)
+		VALUES ($1, 'gc-terminal-' || gen_random_uuid()::text, '', false)
+		RETURNING id
+	`, testWorkspaceID).Scan(&pipelineID)
+	if err != nil {
+		t.Fatalf("setup: create pipeline: %v", err)
+	}
+	defer testPool.Exec(context.Background(), `DELETE FROM pipeline WHERE id = $1`, pipelineID)
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO pipeline_column (pipeline_id, status_key, label, position, is_terminal)
+		VALUES
+			($1, 'todo', 'Todo', 1, false),
+			($1, 'qa_done', 'QA Done', 2, true)
+	`, pipelineID); err != nil {
+		t.Fatalf("setup: create pipeline columns: %v", err)
+	}
+
+	var issueID string
+	err = testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, pipeline_id)
+		VALUES ($1, 'gc-check-custom-terminal-issue', 'qa_done', 'medium', $2, 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, pipelineID).Scan(&issueID)
+	if err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+issueID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "issueId", issueID)
+
+	testHandler.GetIssueGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueGCCheck with custom terminal column: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Status   string `json:"status"`
+		Terminal bool   `json:"terminal"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "qa_done" {
+		t.Fatalf("expected status %q, got %q", "qa_done", resp.Status)
+	}
+	if !resp.Terminal {
+		t.Fatal("expected custom pipeline terminal column to be terminal")
 	}
 }
 
@@ -713,7 +778,9 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID); err != nil {
 		t.Fatalf("seed legacy task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID)
+	})
 
 	// Register under the new stable UUID, declaring the prior hostname-derived
 	// id as legacy. The handler should merge the legacy row into the new one.
@@ -795,8 +862,8 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 	}
 
 	ctx := context.Background()
-	const legacyDaemonID = "ReverseDotLocalHost"                          // stored without .local
-	const emittedLegacyID = "ReverseDotLocalHost.local"                    // daemon now reports with .local
+	const legacyDaemonID = "ReverseDotLocalHost"        // stored without .local
+	const emittedLegacyID = "ReverseDotLocalHost.local" // daemon now reports with .local
 	const newDaemonID = "0192a7b0-0011-7ee9-9c21-30a5bcf86aa2"
 
 	var legacyRuntimeID string
@@ -853,8 +920,8 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	const storedDaemonID = "Jiayuans-MacBook-Pro.local"     // DB has original mixed case
-	const emittedLegacyID = "jiayuans-macbook-pro.local"    // Daemon now reports lowercased
+	const storedDaemonID = "Jiayuans-MacBook-Pro.local"  // DB has original mixed case
+	const emittedLegacyID = "jiayuans-macbook-pro.local" // Daemon now reports lowercased
 	const newDaemonID = "0192a7b0-0022-7ee9-9c21-30a5bcf86aa3"
 
 	var legacyRuntimeID string

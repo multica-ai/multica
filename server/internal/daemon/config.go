@@ -20,7 +20,7 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
 )
 
@@ -28,7 +28,7 @@ const (
 type Config struct {
 	ServerBaseURL      string
 	DaemonID           string
-	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	LegacyDaemonIDs    []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
 	DeviceName         string
 	RuntimeName        string
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
@@ -41,7 +41,7 @@ type Config struct {
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
 	GCEnabled          bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
+	GCTTL              time.Duration         // clean dirs whose issue is terminal and updated_at < now()-TTL (default: 5d)
 	GCOrphanTTL        time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
