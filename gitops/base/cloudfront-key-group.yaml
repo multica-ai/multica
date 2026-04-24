@@ -28,11 +28,14 @@ kind: PublicKey
 metadata:
   name: agentfarm-cloudfront-signing-key
 spec:
+  # encodedKey is immutable in CloudFront — Crossplane must not attempt updates.
+  # Observe+Create+Delete allows adoption of existing keys and creation of new ones
+  # but never calls UpdatePublicKey (which CloudFront rejects for the key body).
+  managementPolicies: ["Observe", "Create", "Delete"]
   forProvider:
     name: agentfarm-cloudfront-signing-key
     comment: "RSA signing key for agentfarm CloudFront signed cookies"
-    # Crossplane reads the public key PEM from the agentfarm-secret-store Secret,
-    # key CLOUDFRONT_PUBLIC_KEY (synced from SSM /agentfarm/tools/CLOUDFRONT_PUBLIC_KEY).
+    # Required by schema. Used on creation only (managementPolicies excludes Update).
     encodedKeySecretRef:
       name: agentfarm-secret-store
       namespace: agentfarm

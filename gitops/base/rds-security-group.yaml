@@ -8,7 +8,10 @@ spec:
   forProvider:
     region: us-east-1
     description: Security group for agentfarm RDS Aurora Postgres
-    name: agentfarm-postgresql-sg
+    # `name` intentionally omitted — the live SG was created by Terraform with a
+    # name_prefix-generated name (terraform-20260423141724613300000001). AWS SG
+    # name is immutable, so setting a different value here causes a permanent
+    # ReconcileError. Human-readable identity lives on the Name tag below.
     vpcId: vpc-07532d54172d22514
     tags:
       Name: agentfarm-postgresql-sg

@@ -33,9 +33,15 @@ spec:
         cachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
         viewerProtocolPolicy: redirect-to-https
         compress: true
-        # Cross-resource ref: Crossplane resolves the KeyGroup ID from the KeyGroup object.
+        # trustedKeyGroups requires literal CloudFront KeyGroup IDs — there is no
+        # trustedKeyGroupIdRefs/Selector in the upbound Distribution v1beta1 schema.
+        # This is agentfarm-cloudfront-key-group.status.atProvider.id.
+        # If the KeyGroup is ever recreated, update this ID from:
+        #   kubectl get keygroup.cloudfront.aws.upbound.io \
+        #     agentfarm-cloudfront-key-group -n agentfarm \
+        #     -o jsonpath='{.status.atProvider.id}'
         trustedKeyGroups:
-          - agentfarm-cloudfront-key-group
+          - "5de2adc7-873c-4d96-a075-07b22250a306"
 
     restrictions:
       - geoRestriction:
