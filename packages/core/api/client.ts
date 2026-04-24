@@ -493,10 +493,15 @@ export class ApiClient {
   }
 
   // Agents
-  async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
+  async listAgents(params?: {
+    workspace_id?: string;
+    include_archived?: boolean;
+    owner?: "me";
+  }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.owner === "me") search.set("owner", "me");
     return this.fetch(`/api/agents?${search}`);
   }
 
@@ -515,6 +520,13 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async copyAgent(id: string, data?: { name?: string }): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/copy`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
     });
   }
 

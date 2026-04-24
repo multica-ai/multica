@@ -13,6 +13,7 @@ import {
   Settings,
   KeyRound,
   Terminal,
+  Copy,
 } from "lucide-react";
 import type { Agent, RuntimeDevice, MemberWithUser } from "@multica/core/types";
 import {
@@ -62,6 +63,7 @@ export function AgentDetail({
   onUpdate,
   onArchive,
   onRestore,
+  onDuplicate,
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
@@ -70,12 +72,21 @@ export function AgentDetail({
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
+  onDuplicate: () => void | Promise<void>;
 }) {
   const st = statusConfig[agent.status];
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
   const isArchived = !!agent.archived_at;
+  const myMembership = members.find((m) => m.user_id === currentUserId);
+  const canDuplicate =
+    !isArchived &&
+    !!currentUserId &&
+    !!myMembership &&
+    (agent.owner_id === currentUserId ||
+      myMembership.role === "owner" ||
+      myMembership.role === "admin");
 
   return (
     <div className="flex h-full flex-col">
@@ -126,6 +137,12 @@ export function AgentDetail({
               <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto">
+              {canDuplicate && (
+                <DropdownMenuItem onClick={() => void onDuplicate()}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Duplicate agent
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={() => setConfirmArchive(true)}

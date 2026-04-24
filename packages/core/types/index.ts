@@ -7,6 +7,7 @@ export type {
   AgentTask,
   AgentRuntime,
   RuntimeDevice,
+  CopyAgentRequest,
   CreateAgentRequest,
   UpdateAgentRequest,
   Skill,
