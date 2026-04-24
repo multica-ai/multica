@@ -186,13 +186,18 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 		return nil
 	}
 
-	// 3. general signup flag
-	if !h.cfg.AllowSignup {
-		return ErrSignupProhibited
+	// 3. allowlists exist but the caller's email didn't match — this is a
+	// domain/email restriction, not a blanket signup block, so surface the
+	// specific reason. Checked before AllowSignup so restricted-tenant
+	// deployments (e.g. ALLOW_SIGNUP=false + ALLOWED_EMAIL_DOMAINS=g2.com)
+	// tell the user their email is the problem rather than claiming signup
+	// is disabled outright.
+	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
+		return ErrEmailNotAllowed
 	}
 
-	// 4. if allowlists are set but didn't match, block
-	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
+	// 4. no allowlists configured — fall back to the global signup flag
+	if !h.cfg.AllowSignup {
 		return ErrSignupProhibited
 	}
 

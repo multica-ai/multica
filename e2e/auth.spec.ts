@@ -5,12 +5,13 @@ test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(page.locator("h1")).toContainText("Multica");
-    await expect(page.locator('input[placeholder="Email"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="Name"]')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toContainText(
-      "Sign in",
-    );
+    await expect(page.getByText(/sign in to multica/i)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /continue with google/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/sign in with your @g2\.com google account/i),
+    ).toBeVisible();
   });
 
   test("login and redirect to /issues", async ({ page }) => {
