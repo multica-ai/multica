@@ -1037,14 +1037,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:           task.IssueID,
-		TriggerCommentID:  task.TriggerCommentID,
-		AgentID:           agentID,
-		AgentName:         agentName,
-		AgentInstructions: instructions,
-		AgentSkills:       convertSkillsForEnv(skills),
-		Repos:             convertReposForEnv(task.Repos),
-		ChatSessionID:     task.ChatSessionID,
+		IssueID:                 task.IssueID,
+		TriggerCommentID:        task.TriggerCommentID,
+		AgentID:                 agentID,
+		AgentName:               agentName,
+		AgentInstructions:       instructions,
+		AgentSkills:             convertSkillsForEnv(skills),
+		Repos:                   convertReposForEnv(task.Repos),
+		ChatSessionID:           task.ChatSessionID,
+		AutopilotRunID:          task.AutopilotRunID,
+		AutopilotID:             task.AutopilotID,
+		AutopilotTitle:          task.AutopilotTitle,
+		AutopilotDescription:    task.AutopilotDescription,
+		AutopilotSource:         task.AutopilotSource,
+		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -1089,6 +1095,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+	}
+	if task.AutopilotRunID != "" {
+		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
+	}
+	if task.AutopilotID != "" {
+		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not

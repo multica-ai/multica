@@ -31,14 +31,20 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID           string
-	TriggerCommentID  string // comment that triggered this task (empty for on_assign)
-	AgentID           string // unique ID of the dispatched agent
-	AgentName         string
-	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md
-	AgentSkills       []SkillContextForEnv
-	Repos             []RepoContextForEnv // workspace repos available for checkout
-	ChatSessionID     string              // non-empty for chat tasks
+	IssueID                 string
+	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
+	AgentID                 string // unique ID of the dispatched agent
+	AgentName               string
+	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
+	AgentSkills             []SkillContextForEnv
+	Repos                   []RepoContextForEnv // workspace repos available for checkout
+	ChatSessionID           string              // non-empty for chat tasks
+	AutopilotRunID          string              // non-empty for autopilot run_only tasks
+	AutopilotID             string
+	AutopilotTitle          string
+	AutopilotDescription    string
+	AutopilotSource         string
+	AutopilotTriggerPayload string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

@@ -744,15 +744,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Autopilot run_only task: resolve workspace from autopilot_run → autopilot.
-	if task.AutopilotRunID.Valid && resp.WorkspaceID == "" {
+	// Autopilot run_only task: resolve workspace from autopilot_run →
+	// autopilot, and include the autopilot instructions because there is no
+	// issue for the agent to fetch.
+	if task.AutopilotRunID.Valid {
 		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
+			resp.AutopilotID = uuidToString(run.AutopilotID)
+			resp.AutopilotSource = run.Source
+			if run.TriggerPayload != nil {
+				resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
+			}
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
-				resp.WorkspaceID = uuidToString(ap.WorkspaceID)
-				if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-					var repos []RepoData
-					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-						resp.Repos = repos
+				resp.AutopilotTitle = ap.Title
+				if ap.Description.Valid {
+					resp.AutopilotDescription = ap.Description.String
+				}
+				if resp.WorkspaceID == "" {
+					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
+				}
+				if len(resp.Repos) == 0 {
+					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
+						var repos []RepoData
+						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+							resp.Repos = repos
+						}
 					}
 				}
 			}

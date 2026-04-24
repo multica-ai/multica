@@ -124,6 +124,33 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
+	} else if ctx.AutopilotRunID != "" {
+		// Autopilot run_only task: no issue exists, so the agent must not
+		// follow the assignment/comment workflow.
+		b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
+		fmt.Fprintf(&b, "- Autopilot run ID: `%s`\n", ctx.AutopilotRunID)
+		if ctx.AutopilotID != "" {
+			fmt.Fprintf(&b, "- Autopilot ID: `%s`\n", ctx.AutopilotID)
+		}
+		if ctx.AutopilotTitle != "" {
+			fmt.Fprintf(&b, "- Autopilot title: %s\n", ctx.AutopilotTitle)
+		}
+		if ctx.AutopilotSource != "" {
+			fmt.Fprintf(&b, "- Trigger source: %s\n", ctx.AutopilotSource)
+		}
+		if ctx.AutopilotTriggerPayload != "" {
+			fmt.Fprintf(&b, "- Trigger payload:\n\n```json\n%s\n```\n", ctx.AutopilotTriggerPayload)
+		}
+		if strings.TrimSpace(ctx.AutopilotDescription) != "" {
+			b.WriteString("\nAutopilot instructions:\n\n")
+			b.WriteString(ctx.AutopilotDescription)
+			b.WriteString("\n\n")
+		}
+		if ctx.AutopilotID != "" {
+			fmt.Fprintf(&b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
+		}
+		b.WriteString("- Complete the autopilot instructions directly\n")
+		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
@@ -201,11 +228,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
 	b.WriteString("## Output\n\n")
-	b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
-	b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
-	b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
-	b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
-	b.WriteString("When referencing an issue in a comment, use the issue mention format `[MUL-123](mention://issue/<issue-id>)` so it renders as a clickable link. (Issue mentions have no side effect; only member/agent mentions do — see the Mentions section above.)\n")
+	if ctx.AutopilotRunID != "" {
+		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
+	} else {
+		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
+		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
+		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
+		b.WriteString("When referencing an issue in a comment, use the issue mention format `[MUL-123](mention://issue/<issue-id>)` so it renders as a clickable link. (Issue mentions have no side effect; only member/agent mentions do — see the Mentions section above.)\n")
+	}
 
 	return b.String()
 }
