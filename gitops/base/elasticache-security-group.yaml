@@ -1,0 +1,82 @@
+# SecurityGroup + rules for agentfarm ElastiCache Valkey.
+#
+# Provider: ec2.aws.upbound.io/v1beta1 (Upbound).
+# Label app: agentfarm is used by the ReplicationGroup's securityGroupIdSelector.
+# Sync wave 2 — must exist before the ReplicationGroup references it.
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroup
+metadata:
+  name: agentfarm-redis-sg
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app: agentfarm
+spec:
+  deletionPolicy: Delete
+  managementPolicies: ["*"]
+  forProvider:
+    region: us-east-1
+    description: Security group for agentfarm ElastiCache Valkey
+    vpcId: vpc-07532d54172d22514
+    tags:
+      Name: agentfarm-redis-sg
+      Application: agentfarm
+      Owner: DevOps
+      CostCenter: shared
+      Production: "false"
+      Environment: tools
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config
+---
+# Allow Valkey access from tools VPC CIDR + VPN (follows rds-security-group pattern)
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroupRule
+metadata:
+  name: agentfarm-redis-allow-vpc
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app: agentfarm
+spec:
+  deletionPolicy: Delete
+  managementPolicies: ["*"]
+  forProvider:
+    region: us-east-1
+    type: ingress
+    fromPort: 6379
+    toPort: 6379
+    protocol: tcp
+    securityGroupIdRef:
+      name: agentfarm-redis-sg
+    cidrBlocks:
+      - 10.220.0.0/16
+      - 10.219.0.0/16
+    description: Allow Valkey access from tools VPC and VPN
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config
+---
+# Egress rule (all outbound)
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroupRule
+metadata:
+  name: agentfarm-redis-allow-egress
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app: agentfarm
+spec:
+  deletionPolicy: Delete
+  managementPolicies: ["*"]
+  forProvider:
+    region: us-east-1
+    type: egress
+    fromPort: 0
+    toPort: 0
+    protocol: "-1"
+    securityGroupIdRef:
+      name: agentfarm-redis-sg
+    cidrBlocks:
+      - 0.0.0.0/0
+    description: Allow all outbound traffic
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

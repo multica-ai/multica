@@ -1,0 +1,31 @@
+# ElastiCache SubnetGroup for agentfarm Valkey
+#
+# Provider: elasticache.aws.upbound.io/v1beta1 (Upbound).
+# Sync wave 2 — must exist before the ReplicationGroup.
+apiVersion: elasticache.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: agentfarm-cache-subnet-group
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app: agentfarm
+spec:
+  deletionPolicy: Delete
+  managementPolicies: ["*"]
+  forProvider:
+    region: us-east-1
+    description: Subnet group for agentfarm ElastiCache Valkey
+    subnetIds:
+      - subnet-02718d0e0034d6706
+      - subnet-06c0632867c0d494c
+      - subnet-0559498400c1ee808
+    tags:
+      Name: agentfarm-cache-subnet-group
+      Application: agentfarm
+      Owner: DevOps
+      CostCenter: shared
+      Production: "false"
+      Environment: tools
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

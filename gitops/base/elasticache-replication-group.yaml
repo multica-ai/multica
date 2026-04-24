@@ -1,0 +1,87 @@
+# ElastiCache ReplicationGroup (Valkey 7.2) for agentfarm cross-pod WebSocket
+# fanout. Referenced by server/internal/realtime/redis_relay.go — activates
+# when REDIS_URL env var is set. go-redis/v9 speaks RESP2/RESP3 which Valkey
+# is 100% compatible with; no code changes required.
+#
+# Provider: elasticache.aws.upbound.io/v1beta2 (Upbound). We use the Upbound
+# provider only — no legacy *.aws.crossplane.io or *.aws.m.upbound.io.
+#
+# Sizing (tools): single shard, single node, cache.t4g.small. HA is not
+# required at current scale (revisit at ~1k users: flip numCacheClusters to 2,
+# automaticFailoverEnabled: true, multiAzEnabled: true).
+#
+# Security: SG ingress is the security boundary (tools VPC 10.220.0.0/16 +
+# VPN 10.219.0.0/16). transitEncryptionEnabled is intentionally false — the
+# Go relay (server/internal/realtime/redis_relay.go) connects via plain
+# redis:// URLs, not rediss://. If this changes to true in the future, the
+# go-redis client must be configured with TLS.
+#
+# Connection secret: Crossplane writes primary_endpoint_address,
+# reader_endpoint_address, port, and attribute.auth_token into
+# agentfarm-redis-connection once Available. Not consumed directly today —
+# REDIS_URL is pushed to SSM (/agentfarm/tools/REDIS_URL) and surfaced via
+# the existing secret-store.yaml bulk pull.
+#
+# Sync wave 3 — after SG, SubnetGroup.
+apiVersion: elasticache.aws.upbound.io/v1beta2
+kind: ReplicationGroup
+metadata:
+  name: agentfarm-redis
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: agentfarm
+spec:
+  deletionPolicy: Delete
+  managementPolicies: ["*"]
+  forProvider:
+    region: us-east-1
+    description: agentfarm Valkey for WebSocket cross-pod fanout
+
+    # --- Engine ---
+    engine: valkey
+    engineVersion: "7.2"
+    autoMinorVersionUpgrade: "true"
+
+    # --- Cluster topology (tools: single node, no HA) ---
+    numCacheClusters: 1
+    automaticFailoverEnabled: false
+    multiAzEnabled: false
+
+    # --- Instance sizing ---
+    nodeType: cache.t4g.small
+
+    # --- Networking ---
+    port: 6379
+    subnetGroupName: agentfarm-cache-subnet-group
+    securityGroupIdSelector:
+      matchLabels:
+        app: agentfarm
+
+    # --- Security ---
+    # SG is the security boundary; no authToken/TLS (see header).
+    transitEncryptionEnabled: false
+    atRestEncryptionEnabled: "true"
+    applyImmediately: false
+
+    # --- Maintenance & snapshots (ephemeral cache: no snapshots) ---
+    snapshotRetentionLimit: 0
+
+    # --- Tags ---
+    tags:
+      Name: agentfarm-redis
+      Application: agentfarm
+      Owner: DevOps
+      CostCenter: shared
+      Production: "false"
+      Environment: tools
+      Purpose: "WebSocket fanout for multi-pod backend"
+
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config
+
+  # Crossplane writes primary_endpoint_address, reader_endpoint_address, port,
+  # and attribute.auth_token into this Secret once the cluster is Available.
+  writeConnectionSecretToRef:
+    name: agentfarm-redis-connection
+    namespace: agentfarm
