@@ -19,10 +19,14 @@ import (
 // Access policy:
 //   - If token != "": require Authorization: Bearer <token>; reject other
 //     callers with 401.
-//   - If token == "": only allow loopback callers (127.0.0.1 / ::1); reject
-//     remote callers with 404 so the endpoint is not enumerable. This keeps
-//     local development workflows working without configuration while
-//     ensuring the metrics surface is not exposed on a public listener.
+//   - If token == "": only allow direct loopback callers (127.0.0.1 / ::1)
+//     with no forwarding headers; reject anything else with 404 so the
+//     endpoint is not enumerable. This keeps local development workflows
+//     working without configuration while ensuring the metrics surface is
+//     not exposed on a public listener — including when the server sits
+//     behind a reverse proxy (Caddy / Nginx) that terminates TLS on
+//     localhost, in which case all requests would otherwise look like
+//     loopback (see MUL-1342 review).
 func realtimeMetricsHandler(token string) http.HandlerFunc {
 	token = strings.TrimSpace(token)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -32,9 +36,10 @@ func realtimeMetricsHandler(token string) http.HandlerFunc {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-		} else if !isLoopbackRequest(r) {
-			// Hide the endpoint from non-loopback callers when no token
-			// is configured. Returning 404 avoids advertising its
+		} else if !isDirectLoopbackRequest(r) {
+			// Hide the endpoint from non-loopback callers (and from
+			// proxied requests we cannot attribute) when no token is
+			// configured. Returning 404 avoids advertising its
 			// existence to remote scanners.
 			http.NotFound(w, r)
 			return
@@ -59,7 +64,15 @@ func hasBearerToken(r *http.Request, want string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-func isLoopbackRequest(r *http.Request) bool {
+func isDirectLoopbackRequest(r *http.Request) bool {
+	// Any indication that the request was relayed by a proxy disqualifies
+	// the loopback shortcut: behind Caddy/Nginx -> localhost:8080, public
+	// callers would otherwise appear as 127.0.0.1 here. We deliberately do
+	// NOT trust these headers to identify the real client — we only use
+	// their presence as a "this is proxied, fail closed" signal.
+	if hasForwardingHeader(r) {
+		return false
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
@@ -72,4 +85,19 @@ func isLoopbackRequest(r *http.Request) bool {
 		return false
 	}
 	return ip.IsLoopback()
+}
+
+func hasForwardingHeader(r *http.Request) bool {
+	for _, h := range []string{
+		"X-Forwarded-For",
+		"X-Forwarded-Host",
+		"X-Forwarded-Proto",
+		"X-Real-Ip",
+		"Forwarded",
+	} {
+		if strings.TrimSpace(r.Header.Get(h)) != "" {
+			return true
+		}
+	}
+	return false
 }
