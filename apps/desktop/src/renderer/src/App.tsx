@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CoreProvider } from "@multica/core/platform";
+import { CoreProvider, getCurrentSlug } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
@@ -14,6 +14,7 @@ import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
+import { QuickAddIssue } from "./quick-add-issue";
 
 
 function AppContent() {
@@ -43,6 +44,12 @@ function AppContent() {
   useEffect(() => {
     return window.desktopAPI.onInviteOpen((invitationId) => {
       useWindowOverlayStore.getState().open({ type: "invite", invitationId });
+    });
+  }, []);
+
+  useEffect(() => {
+    return window.workspaceAPI.onSendCurrentSlug(() => {
+      window.workspaceAPI.receiveCurrentSlug(getCurrentSlug());
     });
   }, []);
 
@@ -203,6 +210,11 @@ async function handleDaemonLogout() {
 }
 
 export default function App() {
+  const isQuickAdd = new URLSearchParams(window.location.search).has("quickAdd");
+  if (isQuickAdd) {
+    return <QuickAddIssue />;
+  }
+
   const { version, os } = window.desktopAPI.appInfo;
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.

@@ -64,12 +64,24 @@ interface UpdaterAPI {
   >;
 }
 
+interface QuickAddAPI {
+  close: () => void;
+  setSize: (width: number, height: number) => void;
+}
+
+interface WorkspaceAPI {
+  onSendCurrentSlug: (callback: () => void) => () => void;
+  receiveCurrentSlug: (slug: string | null) => void;
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
     updater: UpdaterAPI;
+    quickAddAPI: QuickAddAPI;
+    workspaceAPI: WorkspaceAPI;
   }
 }
 
