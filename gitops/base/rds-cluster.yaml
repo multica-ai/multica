@@ -43,7 +43,7 @@ spec:
 
     # Serverless v2 scaling
     serverlessv2ScalingConfiguration:
-      maxCapacity: 2.0
+      maxCapacity: 8.0
       minCapacity: 0.5
 
     # Tags
