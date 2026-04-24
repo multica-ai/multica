@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -120,10 +119,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	// and per-event-type send QPS counters. Exposed as JSON so it can be
 	// scraped by ops or surfaced in the admin UI without adding a Prometheus
 	// dependency. See MUL-1138 (Phase 0).
-	r.Get("/health/realtime", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(realtime.M.Snapshot())
-	})
+	//
+	// Access is restricted (MUL-1342): when REALTIME_METRICS_TOKEN is set,
+	// callers must present it via Authorization: Bearer <token>. When the
+	// env var is unset the handler only serves loopback callers so local
+	// dev keeps working without exposing the metrics on a public listener.
+	r.Get("/health/realtime", realtimeMetricsHandler(os.Getenv("REALTIME_METRICS_TOKEN")))
 
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
