@@ -1,0 +1,13 @@
+apiVersion: cloudfront.aws.upbound.io/v1beta1
+kind: OriginAccessControl
+metadata:
+  name: agentfarm-uploads-oac
+spec:
+  forProvider:
+    description: "OAC for agentfarm S3 uploads bucket — grants CloudFront read access without making the bucket public"
+    name: agentfarm-uploads-oac
+    originAccessControlOriginType: s3
+    signingBehavior: always
+    signingProtocol: sigv4
+  providerConfigRef:
+    name: provider-aws-config

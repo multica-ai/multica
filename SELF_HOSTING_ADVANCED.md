@@ -56,15 +56,37 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 ### File Storage (Optional)
 
-For file uploads and attachments, configure S3 and CloudFront:
+For file uploads and attachments, configure S3 with one of three access options:
 
 | Variable | Description |
 |----------|-------------|
 | `S3_BUCKET` | S3 bucket name |
 | `S3_REGION` | AWS region (default: `us-west-2`) |
-| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain |
+| `AWS_ACCESS_KEY_ID` | AWS access key (optional; falls back to instance role / env chain) |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key (optional) |
+| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain (see option A below) |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
+| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint, e.g. MinIO (see option B below) |
+
+**Option A — CloudFront (recommended for production)**
+
+Set `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, and `CLOUDFRONT_PRIVATE_KEY`. Multica will issue short-lived CloudFront signed URLs for every attachment download. This keeps the S3 bucket private and serves files via a CDN.
+
+**Option B — Self-hosted S3-compatible storage (MinIO, Garage, R2, etc.)**
+
+Set `AWS_ENDPOINT_URL` to the endpoint of your S3-compatible service. Multica will use path-style URLs pointing at that endpoint. No CloudFront needed; configure your storage service's own access controls.
+
+```
+AWS_ENDPOINT_URL=http://minio.internal:9000
+S3_BUCKET=multica-uploads
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+**Option C — Plain AWS S3 without CloudFront**
+
+Set only `S3_BUCKET` (and optionally `S3_REGION`). Multica will automatically generate short-lived **S3 presigned URLs** for every attachment download, so the bucket can remain private without a CloudFront distribution. This is suitable for development and internal deployments where a CDN is not yet configured.
 
 ### Cookies
 

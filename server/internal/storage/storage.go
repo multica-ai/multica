@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"time"
 )
 
 type Storage interface {
@@ -10,4 +11,10 @@ type Storage interface {
 	DeleteKeys(ctx context.Context, keys []string)
 	KeyFromURL(rawURL string) string
 	CdnDomain() string
+}
+
+// Presigner is implemented by storage backends that can generate short-lived
+// signed download URLs. Used as a fallback when CloudFront is not configured.
+type Presigner interface {
+	PresignDownloadURL(ctx context.Context, rawURL string, expiry time.Duration) (string, error)
 }

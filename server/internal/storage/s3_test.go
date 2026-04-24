@@ -34,6 +34,7 @@ func TestS3StorageUploadedURL(t *testing.T) {
 	cases := []struct {
 		name        string
 		bucket      string
+		region      string
 		cdnDomain   string
 		endpointURL string
 		want        string
@@ -41,7 +42,8 @@ func TestS3StorageUploadedURL(t *testing.T) {
 		{
 			name:   "bucket only",
 			bucket: "test-bucket",
-			want:   "https://test-bucket/uploads/abc/file.png",
+			region: "us-west-2",
+			want:   "https://test-bucket.s3.us-west-2.amazonaws.com/uploads/abc/file.png",
 		},
 		{
 			name:      "cdn only",
@@ -74,6 +76,7 @@ func TestS3StorageUploadedURL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &S3Storage{
 				bucket:      tc.bucket,
+				region:      tc.region,
 				cdnDomain:   tc.cdnDomain,
 				endpointURL: tc.endpointURL,
 			}

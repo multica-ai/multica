@@ -1,0 +1,30 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: BucketPolicy
+metadata:
+  name: g2-agentfarm-tools-uploads-policy
+spec:
+  forProvider:
+    region: us-east-1
+    bucket: g2-agentfarm-tools-uploads
+    policy: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowCloudFrontOACReadAccess",
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "cloudfront.amazonaws.com"
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::g2-agentfarm-tools-uploads/*",
+            "Condition": {
+              "StringLike": {
+                "AWS:SourceArn": "arn:aws:cloudfront::637423279283:distribution/*"
+              }
+            }
+          }
+        ]
+      }
+  providerConfigRef:
+    name: provider-aws-config

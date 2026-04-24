@@ -14,6 +14,10 @@ resources:
   - rds-cluster.yaml
   - rds-instance.yaml
   - s3-uploads-bucket.yaml
+  - s3-bucket-policy-cloudfront.yaml
+  - cloudfront-oac.yaml
+  - cloudfront-key-group.yaml
+  - cloudfront-distribution.yaml
   - iam-resources.yaml
   - iam-backend.yaml
   - pgvector-init-job.yaml

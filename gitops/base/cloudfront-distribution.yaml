@@ -1,0 +1,62 @@
+apiVersion: cloudfront.aws.upbound.io/v1beta1
+kind: Distribution
+metadata:
+  name: agentfarm-uploads-cdn
+  annotations:
+    # After Crossplane creates this distribution, store its domain name in SSM:
+    #   /agentfarm/tools/CLOUDFRONT_DOMAIN  → value from status.atProvider.domainName
+    # The backend reads this env var to generate signed cookie domains.
+spec:
+  forProvider:
+    comment: "CDN for agentfarm user-uploaded attachments (g2-agentfarm-tools-uploads)"
+    enabled: true
+    httpVersion: http2and3
+    isIpv6Enabled: true
+    priceClass: PriceClass_100
+
+    origin:
+      - originId: s3-uploads
+        domainName: "g2-agentfarm-tools-uploads.s3.us-east-1.amazonaws.com"
+        # Reference the OAC created in cloudfront-oac.yaml.
+        # Crossplane resolves this to the OAC ID at sync time.
+        originAccessControlIdRef:
+          name: agentfarm-uploads-oac
+        s3OriginConfig:
+          # Must be empty string when OAC is used (OAI field kept for schema compatibility).
+          - originAccessIdentity: ""
+
+    defaultCacheBehavior:
+      - targetOriginId: s3-uploads
+        allowedMethods:
+          - GET
+          - HEAD
+        cachedMethods:
+          - GET
+          - HEAD
+        # AWS managed CachingOptimized policy — optimises cache for S3 static assets.
+        cachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
+        viewerProtocolPolicy: redirect-to-https
+        compress: true
+        # Restrict access to signed-cookie holders only.
+        trustedKeyGroupsRefs:
+          - name: agentfarm-cloudfront-key-group
+
+    restrictions:
+      - geoRestriction:
+          - restrictionType: none
+
+    viewerCertificate:
+      # Using the default *.cloudfront.net certificate for now.
+      # Replace with a custom ACM certificate once a vanity domain (e.g. cdn.g2.ai) is ready.
+      - cloudfrontDefaultCertificate: true
+        minimumProtocolVersion: TLSv1.2_2021
+
+    tags:
+      Owner: DevOps
+      Application: agentfarm
+      Environment: tools
+      Production: "false"
+      Purpose: "CDN for user-uploaded attachments"
+
+  providerConfigRef:
+    name: provider-aws-config

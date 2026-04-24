@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -18,6 +19,7 @@ import (
 type S3Storage struct {
 	client      *s3.Client
 	bucket      string
+	region      string
 	cdnDomain   string // if set, returned URLs use this instead of bucket name
 	endpointURL string // if set, use path-style URLs (e.g. MinIO)
 }
@@ -74,6 +76,7 @@ func NewS3StorageFromEnv() *S3Storage {
 	return &S3Storage{
 		client:      s3.NewFromConfig(cfg, s3Opts...),
 		bucket:      bucket,
+		region:      region,
 		cdnDomain:   cdnDomain,
 		endpointURL: endpointURL,
 	}
@@ -105,6 +108,7 @@ func (s *S3Storage) KeyFromURL(rawURL string) string {
 	// Strip the "https://domain/" prefix.
 	for _, prefix := range []string{
 		"https://" + s.cdnDomain + "/",
+		fmt.Sprintf("https://%s.s3.%s.amazonaws.com/", s.bucket, s.region),
 		"https://" + s.bucket + "/",
 	} {
 		if strings.HasPrefix(rawURL, prefix) {
@@ -172,5 +176,21 @@ func (s *S3Storage) uploadedURL(key string) string {
 	if s.endpointURL != "" {
 		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
 	}
-	return fmt.Sprintf("https://%s/%s", s.bucket, key)
+	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
+}
+
+// PresignDownloadURL generates a short-lived presigned GET URL for the object
+// identified by rawURL. This is used when CloudFront is not configured — it
+// lets the caller fetch a private S3 object without needing a CDN in front.
+func (s *S3Storage) PresignDownloadURL(ctx context.Context, rawURL string, expiry time.Duration) (string, error) {
+	key := s.KeyFromURL(rawURL)
+	pc := s3.NewPresignClient(s.client)
+	out, err := pc.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return rawURL, fmt.Errorf("s3 presign: %w", err)
+	}
+	return out.URL, nil
 }
