@@ -1,4 +1,4 @@
-apiVersion: cloudfront.aws.upbound.io/v1beta1
+apiVersion: cloudfront.aws.upbound.io/v1beta2
 kind: Distribution
 metadata:
   name: agentfarm-uploads-cdn
@@ -14,6 +14,7 @@ spec:
     isIpv6Enabled: true
     priceClass: PriceClass_100
 
+    # origin remains a list in v1beta2 (one entry per CloudFront origin).
     origin:
       - originId: s3-uploads
         domainName: "g2-agentfarm-tools-uploads.s3.us-east-1.amazonaws.com"
@@ -21,38 +22,42 @@ spec:
         originAccessControlIdRef:
           name: agentfarm-uploads-oac
 
+    # v1beta2: defaultCacheBehavior is an OBJECT (it was a single-item list in v1beta1).
     defaultCacheBehavior:
-      - targetOriginId: s3-uploads
-        allowedMethods:
-          - GET
-          - HEAD
-        cachedMethods:
-          - GET
-          - HEAD
-        # AWS managed CachingOptimized policy — optimises cache for S3 static assets.
-        cachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
-        viewerProtocolPolicy: redirect-to-https
-        compress: true
-        # trustedKeyGroups requires literal CloudFront KeyGroup IDs — there is no
-        # trustedKeyGroupIdRefs/Selector in the upbound Distribution v1beta1 schema.
-        # This is agentfarm-cloudfront-key-group.status.atProvider.id.
-        # If the KeyGroup is ever recreated, update this ID from:
-        #   kubectl get keygroup.cloudfront.aws.upbound.io \
-        #     agentfarm-cloudfront-key-group -n agentfarm \
-        #     -o jsonpath='{.status.atProvider.id}'
-        trustedKeyGroups:
-          - "5de2adc7-873c-4d96-a075-07b22250a306"
+      targetOriginId: s3-uploads
+      allowedMethods:
+        - GET
+        - HEAD
+      cachedMethods:
+        - GET
+        - HEAD
+      # AWS managed CachingOptimized policy — optimises cache for S3 static assets.
+      cachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
+      viewerProtocolPolicy: redirect-to-https
+      compress: true
+      # trustedKeyGroups requires literal CloudFront KeyGroup IDs — there is no
+      # trustedKeyGroupIdRefs/Selector in the upbound Distribution schema.
+      # This is agentfarm-cloudfront-key-group.status.atProvider.id.
+      # If the KeyGroup is ever recreated, update this ID from:
+      #   kubectl get keygroup.cloudfront.aws.upbound.io \
+      #     agentfarm-cloudfront-key-group -n agentfarm \
+      #     -o jsonpath='{.status.atProvider.id}'
+      trustedKeyGroups:
+        - "5de2adc7-873c-4d96-a075-07b22250a306"
 
+    # v1beta2: restrictions is an OBJECT and geoRestriction is also an OBJECT
+    # (both were single-item lists in v1beta1).
     restrictions:
-      - geoRestriction:
-          - restrictionType: none
-            locations: []
+      geoRestriction:
+        restrictionType: none
+        locations: []
 
+    # v1beta2: viewerCertificate is an OBJECT (was a single-item list in v1beta1).
     viewerCertificate:
-      - # Using the default *.cloudfront.net certificate for now.
-        # Replace with a custom ACM certificate once a vanity domain (e.g. cdn.g2.ai) is ready.
-        cloudfrontDefaultCertificate: true
-        minimumProtocolVersion: TLSv1.2_2021
+      # Using the default *.cloudfront.net certificate for now.
+      # Replace with a custom ACM certificate once a vanity domain (e.g. cdn.g2.ai) is ready.
+      cloudfrontDefaultCertificate: true
+      minimumProtocolVersion: TLSv1.2_2021
 
   providerConfigRef:
     name: agentfarm-provider-aws-upbound-config
