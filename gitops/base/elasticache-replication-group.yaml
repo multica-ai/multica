@@ -54,9 +54,15 @@ spec:
     # --- Networking ---
     port: 6379
     subnetGroupName: agentfarm-cache-subnet-group
-    securityGroupIdSelector:
-      matchLabels:
-        app: agentfarm
+    # Reference the SG by name rather than label selector. The environments
+    # kustomization applies a `labels: [{pairs: {app: agentfarm-tools}, includeSelectors: true}]`
+    # transformer which rewrites the SG's label to agentfarm-tools but does NOT
+    # rewrite Crossplane's securityGroupIdSelector.matchLabels (kustomize only
+    # rewrites selectors on known kinds). The mismatch caused
+    # "cannot resolve references ... no resources matched selector" on sync.
+    # The RG is in the same namespace as the SG, so a by-name ref is safe.
+    securityGroupIdRefs:
+      - name: agentfarm-redis-sg
 
     # --- Security ---
     # SG is the security boundary; no authToken/TLS (see header).
