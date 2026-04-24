@@ -17,6 +17,9 @@ func BuildPrompt(task Task) string {
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task)
 	}
+	if task.AutopilotRunID != "" {
+		return buildAutopilotPrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
@@ -60,5 +63,41 @@ func buildChatPrompt(task Task) string {
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	return b.String()
+}
+
+// buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.
+func buildAutopilotPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	b.WriteString("This task was triggered by an Autopilot in run-only mode. There is no assigned Multica issue for this run.\n\n")
+	fmt.Fprintf(&b, "Autopilot run ID: %s\n", task.AutopilotRunID)
+	if task.AutopilotID != "" {
+		fmt.Fprintf(&b, "Autopilot ID: %s\n", task.AutopilotID)
+	}
+	if task.AutopilotTitle != "" {
+		fmt.Fprintf(&b, "Autopilot title: %s\n", task.AutopilotTitle)
+	}
+	if task.AutopilotSource != "" {
+		fmt.Fprintf(&b, "Trigger source: %s\n", task.AutopilotSource)
+	}
+	if strings.TrimSpace(string(task.AutopilotTriggerPayload)) != "" {
+		fmt.Fprintf(&b, "Trigger payload:\n%s\n", strings.TrimSpace(string(task.AutopilotTriggerPayload)))
+	}
+	b.WriteString("\nAutopilot instructions:\n")
+	if strings.TrimSpace(task.AutopilotDescription) != "" {
+		b.WriteString(task.AutopilotDescription)
+		b.WriteString("\n\n")
+	} else if task.AutopilotTitle != "" {
+		fmt.Fprintf(&b, "%s\n\n", task.AutopilotTitle)
+	} else {
+		b.WriteString("No additional autopilot instructions were provided. Inspect the autopilot configuration before proceeding.\n\n")
+	}
+	if task.AutopilotID != "" {
+		fmt.Fprintf(&b, "Start by running `multica autopilot get %s --output json` if you need the full autopilot configuration, then complete the instructions above.\n", task.AutopilotID)
+	} else {
+		b.WriteString("Complete the instructions above.\n")
+	}
+	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
 	return b.String()
 }

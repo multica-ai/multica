@@ -98,6 +98,35 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	}
 }
 
+func TestBuildPromptAutopilotRunOnly(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		AutopilotRunID:       "run-1",
+		AutopilotID:          "autopilot-1",
+		AutopilotTitle:       "Daily dependency check",
+		AutopilotDescription: "Check dependencies and report outdated packages.",
+		AutopilotSource:      "manual",
+	})
+
+	for _, want := range []string{
+		"run-only mode",
+		"Autopilot run ID: run-1",
+		"Daily dependency check",
+		"Check dependencies and report outdated packages.",
+		"multica autopilot get autopilot-1 --output json",
+		"Do not run `multica issue get`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("autopilot prompt missing %q\n---\n%s", want, prompt)
+		}
+	}
+
+	if strings.Contains(prompt, "Your assigned issue ID is:") {
+		t.Fatalf("autopilot prompt should not use issue assignment template\n---\n%s", prompt)
+	}
+}
+
 func TestBuildPromptCommentTriggered(t *testing.T) {
 	t.Parallel()
 
