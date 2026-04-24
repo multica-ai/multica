@@ -9,6 +9,7 @@ import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
+import { SkillDetailPage } from "./pages/skill-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
@@ -118,6 +119,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Runtimes" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
+          {
+            path: "skills/:id",
+            element: <SkillDetailPage />,
+            handle: { title: "Skill" },
+          },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           { path: "chat", element: <ChatPage />, handle: { title: "Chat" } },
