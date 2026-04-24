@@ -887,6 +887,14 @@ func (c *Client) writePump() {
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+			// App-level heartbeat: browsers cannot observe TCP ping/pong frames,
+			// so we send a text message the JS client can use to detect half-open
+			// connections and trigger a force-close → reconnect cycle.
+			heartbeat, _ := json.Marshal(map[string]string{"type": "heartbeat"})
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.TextMessage, heartbeat); err != nil {
+				return
+			}
 		}
 	}
 }

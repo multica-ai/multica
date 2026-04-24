@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiClient } from "../api/client";
 import { setApiInstance } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
@@ -11,8 +12,32 @@ import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import { setWorkspaceUrlHost } from "./workspace-url-host";
+import { getCurrentWsId } from "./workspace-storage";
+import { issueKeys } from "../issues/queries";
+import { inboxKeys } from "../inbox/queries";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
+
+// Invalidates the most critical query keys when the browser tab becomes visible
+// again, catching any WS events that were missed while the connection was
+// half-open (NAT/NLB/sleep silently dropped the TCP session).
+function VisibilityRefetcher() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      queryClient.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [queryClient]);
+  return null;
+}
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
@@ -78,6 +103,7 @@ export function CoreProvider({
 
   return (
     <QueryProvider>
+      <VisibilityRefetcher />
       <AuthInitializer
         onLogin={onLogin}
         onLogout={onLogout}
