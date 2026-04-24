@@ -25,13 +25,12 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica uses email-based magic link authentication via [Mailgun](https://www.mailgun.com/).
+Multica uses email-based magic link authentication via [Resend](https://resend.com/).
 
 | Variable | Description |
 |----------|-------------|
-| `MAILGUN_API_KEY` | Your Mailgun private API key |
-| `MAILGUN_DOMAIN` | Verified Mailgun sending domain (e.g. `mg.example.com`). Required alongside the API key — a half-configured setup falls back to dev mode to avoid 404s at send time. |
-| `MAILGUN_FROM_EMAIL` | Sender email address (default: `noreply@agentfarm.g2.com`). Its domain must be authorized on your Mailgun account. |
+| `RESEND_API_KEY` | Your Resend API key |
+| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`). Its domain must be verified in your Resend account. |
 
 > **Note:** The dev master verification code `888888` is gated by `APP_ENV != "production"`. The Docker self-host stack defaults to `APP_ENV=production` (so `888888` is disabled), which protects publicly reachable instances. For local development without email configured, set `APP_ENV=development` in your `.env` to enable `888888` — never do this on a public instance.
 

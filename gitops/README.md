@@ -56,9 +56,8 @@ gitops/
    | `/agentfarm/tools/POSTGRES_MASTER_PASSWORD` | RDS master password. Seeded pre-deploy. Upbound consumes via `masterPasswordSecretRef`; endpoint/port/username come back in `agentfarm-rds-connection-secret`. |
    | `/agentfarm/tools/JWT_SECRET` | App JWT signing key |
    | `/agentfarm/tools/APP_ENV` | `tools` |
-   | `/agentfarm/tools/MAILGUN_API_KEY` | Mailgun private API key (US region: api.mailgun.net). |
-   | `/agentfarm/tools/MAILGUN_DOMAIN` | Verified Mailgun sending domain (e.g. `mg.agentfarm.g2.com`). Required alongside the API key — a half-configured setup falls back to stdout-print dev mode. |
-   | `/agentfarm/tools/MAILGUN_FROM_EMAIL` | Sender From address (e.g. `noreply@agentfarm.g2.com`). Domain must be authorized on the Mailgun account. |
+   | `/agentfarm/tools/RESEND_API_KEY` | Resend API key. |
+   | `/agentfarm/tools/RESEND_FROM_EMAIL` | Sender From address (default: `noreply@multica.ai`). Domain must be verified in the Resend account. |
    | `/agentfarm/tools/GOOGLE_CLIENT_ID` | OAuth |
    | `/agentfarm/tools/GOOGLE_CLIENT_SECRET` | OAuth |
    | `/agentfarm/tools/GOOGLE_REDIRECT_URI` | `https://agentfarm.g2.com/auth/callback` |
