@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -157,4 +158,15 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 
 	return b.String()
+}
+
+// writePiMcpConfig writes the agent's mcp_config as .pi/mcp.json in the workdir
+// so pi-mcp-adapter picks it up as a project-level MCP config (overrides global).
+// The format {"mcpServers": {...}} is exactly what pi-mcp-adapter expects.
+func writePiMcpConfig(workDir string, mcpConfig json.RawMessage) error {
+	dir := filepath.Join(workDir, ".pi")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "mcp.json"), mcpConfig, 0o644)
 }

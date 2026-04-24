@@ -55,9 +55,11 @@ export interface Agent {
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
+  mcp_config?: Record<string, unknown> | null;
   custom_env: Record<string, string>;
   custom_args: string[];
   custom_env_redacted: boolean;
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -77,6 +79,7 @@ export interface CreateAgentRequest {
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
+  mcp_config?: Record<string, unknown> | null;
   custom_env?: Record<string, string>;
   custom_args?: string[];
   visibility?: AgentVisibility;
@@ -94,6 +97,7 @@ export interface UpdateAgentRequest {
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
+  mcp_config?: Record<string, unknown> | null;
   custom_env?: Record<string, string>;
   custom_args?: string[];
   visibility?: AgentVisibility;

@@ -1,11 +1,13 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
@@ -41,6 +43,9 @@ type CodexHomeOptions struct {
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
 	// both macOS and Linux paths deterministically.
 	GOOS string
+	// McpConfig is the agent's MCP server config JSON. When non-empty,
+	// [mcp_servers.*] sections are written into config.toml.
+	McpConfig json.RawMessage
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -95,6 +100,13 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
+	}
+
+	// Write agent MCP servers into config.toml so Codex discovers them.
+	if len(opts.McpConfig) > 0 {
+		if err := writeMcpServersToConfig(filepath.Join(codexHome, "config.toml"), opts.McpConfig); err != nil {
+			logger.Warn("execenv: codex-home write mcp servers failed", "error", err)
+		}
 	}
 
 	return nil
@@ -207,4 +219,74 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("copy %s → %s: %w", src, dst, err)
 	}
 	return nil
+}
+
+// writeMcpServersToConfig writes [mcp_servers.*] TOML sections to config.toml,
+// replacing any existing mcp_servers entries so updates from the platform take effect.
+func writeMcpServersToConfig(configPath string, mcpConfig json.RawMessage) error {
+	var parsed struct {
+		McpServers map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(mcpConfig, &parsed); err != nil || len(parsed.McpServers) == 0 {
+		return nil
+	}
+
+	// Strip any existing [mcp_servers.*] blocks from the file.
+	existing, _ := os.ReadFile(configPath)
+	base := stripMcpServersFromToml(string(existing))
+
+	// Build new mcp_servers sections.
+	var sb strings.Builder
+	sb.WriteString(strings.TrimRight(base, "\n"))
+	for name, srv := range parsed.McpServers {
+		sb.WriteString("\n\n[mcp_servers." + fmt.Sprintf("%q", name) + "]\n")
+		sb.WriteString("command = " + fmt.Sprintf("%q", srv.Command) + "\n")
+		if len(srv.Args) > 0 {
+			sb.WriteString("args = [")
+			for i, a := range srv.Args {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(fmt.Sprintf("%q", a))
+			}
+			sb.WriteString("]\n")
+		}
+		if len(srv.Env) > 0 {
+			sb.WriteString("env = { ")
+			first := true
+			for k, v := range srv.Env {
+				if !first {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(k + " = " + fmt.Sprintf("%q", v))
+				first = false
+			}
+			sb.WriteString(" }\n")
+		}
+	}
+
+	return os.WriteFile(configPath, []byte(sb.String()), 0o644)
+}
+
+// stripMcpServersFromToml removes all [mcp_servers.*] table sections from a TOML string.
+func stripMcpServersFromToml(content string) string {
+	var out []string
+	inMcp := false
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, "[mcp_servers.") {
+			inMcp = true
+			continue
+		}
+		if inMcp && strings.HasPrefix(line, "[") {
+			inMcp = false
+		}
+		if !inMcp {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }

@@ -6,6 +6,7 @@ import {
   Monitor,
   FileText,
   BookOpenText,
+  Link2,
   ListTodo,
   Trash2,
   AlertCircle,
@@ -38,18 +39,20 @@ import { TasksTab } from "./tabs/tasks-tab";
 import { SettingsTab } from "./tabs/settings-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+import { McpTab } from "./tabs/mcp-tab";
 
 function getRuntimeDevice(agent: Agent, runtimes: RuntimeDevice[]): RuntimeDevice | undefined {
   return runtimes.find((runtime) => runtime.id === agent.runtime_id);
 }
 
-type DetailTab = "instructions" | "skills" | "tasks" | "env" | "custom_args" | "settings";
+type DetailTab = "instructions" | "skills" | "tasks" | "env" | "mcp" | "custom_args" | "settings";
 
 const detailTabs: { id: DetailTab; label: string; icon: typeof FileText }[] = [
   { id: "instructions", label: "Instructions", icon: FileText },
   { id: "skills", label: "Skills", icon: BookOpenText },
   { id: "tasks", label: "Tasks", icon: ListTodo },
   { id: "env", label: "Environment", icon: KeyRound },
+  { id: "mcp", label: "MCP", icon: Link2 },
   { id: "custom_args", label: "Custom Args", icon: Terminal },
   { id: "settings", label: "Settings", icon: Settings },
 ];
@@ -172,6 +175,13 @@ export function AgentDetail({
           <EnvTab
             agent={agent}
             readOnly={agent.custom_env_redacted}
+            onSave={(updates) => onUpdate(agent.id, updates)}
+          />
+        )}
+        {activeTab === "mcp" && (
+          <McpTab
+            agent={agent}
+            readOnly={agent.mcp_config_redacted === true}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
