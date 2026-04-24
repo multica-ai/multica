@@ -25,4 +25,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: 6a56a51c
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: fd36b061
+    newTag: 6a56a51c
