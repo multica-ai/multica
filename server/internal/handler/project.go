@@ -65,6 +65,47 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 	return stats[0].TotalCount, stats[0].DoneCount
 }
 
+type repoEntry struct {
+	URL         string `json:"url"`
+	Description string `json:"description"`
+}
+
+func (h *Handler) validateProjectRepos(ctx context.Context, workspaceID string, repos any) ([]byte, error) {
+	if repos == nil {
+		return []byte("[]"), nil
+	}
+	reposJSON, err := json.Marshal(repos)
+	if err != nil {
+		return nil, fmt.Errorf("invalid repos format")
+	}
+	var projectRepos []repoEntry
+	if err := json.Unmarshal(reposJSON, &projectRepos); err != nil {
+		return nil, fmt.Errorf("invalid repos format")
+	}
+	ws, err := h.Queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil {
+		return nil, fmt.Errorf("workspace not found")
+	}
+	var wsRepos []repoEntry
+	if ws.Repos != nil {
+		json.Unmarshal(ws.Repos, &wsRepos)
+	}
+	wsURLSet := make(map[string]struct{}, len(wsRepos))
+	for _, r := range wsRepos {
+		wsURLSet[strings.TrimSpace(r.URL)] = struct{}{}
+	}
+	for _, r := range projectRepos {
+		url := strings.TrimSpace(r.URL)
+		if url == "" {
+			return nil, fmt.Errorf("repo URL cannot be empty")
+		}
+		if _, ok := wsURLSet[url]; !ok {
+			return nil, fmt.Errorf("repo %s is not configured in this workspace — add it in Settings → Repositories first", url)
+		}
+	}
+	return reposJSON, nil
+}
+
 type CreateProjectRequest struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
@@ -181,7 +222,12 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	var reposJSON []byte
 	if req.Repos != nil {
-		reposJSON, _ = json.Marshal(req.Repos)
+		var validateErr error
+		reposJSON, validateErr = h.validateProjectRepos(r.Context(), workspaceID, req.Repos)
+		if validateErr != nil {
+			writeError(w, http.StatusBadRequest, validateErr.Error())
+			return
+		}
 	}
 	if reposJSON == nil {
 		reposJSON = []byte("[]")
@@ -280,7 +326,11 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["repos"]; ok {
 		if req.Repos != nil {
-			reposJSON, _ := json.Marshal(req.Repos)
+			reposJSON, validateErr := h.validateProjectRepos(r.Context(), workspaceID, req.Repos)
+			if validateErr != nil {
+				writeError(w, http.StatusBadRequest, validateErr.Error())
+				return
+			}
 			params.Repos = reposJSON
 		} else {
 			params.Repos = []byte("[]")

@@ -26,6 +26,7 @@ func gitEnv() []string {
 type RepoInfo struct {
 	URL         string
 	Description string
+	LocalPath   string // non-empty for local-path repos (no bare clone needed)
 }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
@@ -79,6 +80,9 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 
 	var firstErr error
 	for _, repo := range repos {
+		if repo.LocalPath != "" {
+			continue // local-path repos use symlinks at checkout time, no bare clone needed
+		}
 		if repo.URL == "" {
 			continue
 		}
@@ -278,7 +282,8 @@ func setFetchRefspec(barePath, refspec string) error {
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
 	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
+	RepoURL     string // remote URL to look up in the cache (empty for local-path repos)
+	LocalPath   string // absolute local path (non-empty → symlink instead of worktree)
 	WorkDir     string // parent directory for the worktree (e.g. task workdir)
 	AgentName   string // for branch naming
 	TaskID      string // for branch naming uniqueness

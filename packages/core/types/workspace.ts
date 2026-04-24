@@ -1,8 +1,9 @@
 export type MemberRole = "owner" | "admin" | "member";
 
 export interface WorkspaceRepo {
-  url: string;
+  url?: string;
   description: string;
+  local_path?: string;
 }
 
 export interface Workspace {

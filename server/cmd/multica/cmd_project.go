@@ -132,9 +132,6 @@ func init() {
 	// project repo list
 	projectRepoListCmd.Flags().String("output", "table", "Output format: table or json")
 
-	// project repo add
-	projectRepoAddCmd.Flags().String("description", "", "Repository description")
-
 	// project repo remove
 	// no extra flags needed
 }
@@ -444,7 +441,6 @@ func runProjectRepoList(cmd *cobra.Command, args []string) error {
 func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 	projectID := args[0]
 	repoURL := args[1]
-	description, _ := cmd.Flags().GetString("description")
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -453,6 +449,24 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	var ws map[string]any
+	if err := client.GetJSON(ctx, "/api/workspace", &ws); err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+	wsRepos, _ := ws["repos"].([]any)
+	var wsDesc string
+	foundInWs := false
+	for _, raw := range wsRepos {
+		if r, ok := raw.(map[string]any); ok && strVal(r, "url") == repoURL {
+			foundInWs = true
+			wsDesc = strVal(r, "description")
+			break
+		}
+	}
+	if !foundInWs {
+		return fmt.Errorf("repository %s is not configured in this workspace — add it in Settings → Repositories first", repoURL)
+	}
 
 	var project map[string]any
 	if err := client.GetJSON(ctx, "/api/projects/"+projectID, &project); err != nil {
@@ -466,7 +480,7 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	newRepo := map[string]any{"url": repoURL, "description": description}
+	newRepo := map[string]any{"url": repoURL, "description": wsDesc}
 	repos = append(repos, newRepo)
 
 	body := map[string]any{"repos": repos}
