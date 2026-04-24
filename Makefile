@@ -66,7 +66,7 @@ selfhost:
 		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
 		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
 		echo ""; \
-		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
+		echo "Log in: configure MAILGUN_API_KEY + MAILGUN_DOMAIN in .env for email codes,"; \
 		echo "        or set APP_ENV=development in .env (private networks only) to enable code 888888."; \
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \

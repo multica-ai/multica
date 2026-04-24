@@ -317,7 +317,7 @@ function Start-LocalInstall {
     Write-Host ""
     Write-Host "     multica setup self-host  " -NoNewline; Write-Host "# Configure + authenticate + start daemon" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Login: configure RESEND_API_KEY in .env for email codes,"
+    Write-Host "  Login: configure MAILGUN_API_KEY + MAILGUN_DOMAIN in .env for email codes,"
     Write-Host "  or set APP_ENV=development in .env to enable the dev master code 888888."
     Write-Host ""
     Write-Host "  To stop all services:"

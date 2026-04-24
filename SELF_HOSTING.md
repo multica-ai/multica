@@ -26,7 +26,7 @@ multica setup self-host
 
 This clones the repository, starts all services via Docker Compose, installs the `multica` CLI, then configures it for localhost.
 
-Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or set `APP_ENV=development` in `.env` to enable the dev master code **`888888`**. See [Step 2 — Log In](#step-2--log-in) for details.
+Open http://localhost:3000. To log in, configure `MAILGUN_API_KEY` + `MAILGUN_DOMAIN` in `.env` for email-based codes (recommended), or set `APP_ENV=development` in `.env` to enable the dev master code **`888888`**. See [Step 2 — Log In](#step-2--log-in) for details.
 
 > **Prerequisites:** Docker and Docker Compose must be installed. The script checks for this and provides install links if missing.
 >
@@ -65,7 +65,7 @@ Once ready:
 
 Open http://localhost:3000 in your browser. The Docker self-host stack defaults to `APP_ENV=production` (set in `docker-compose.selfhost.yml`), so the dev master code is **disabled by default** for safety on public deployments. Pick one of the following to log in:
 
-- **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
+- **Recommended (production):** configure `MAILGUN_API_KEY` + `MAILGUN_DOMAIN` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Evaluation / private network:** set `APP_ENV=development` in `.env` and restart the backend. Verification code **`888888`** will then work for any email address.
 - **Without configuring either:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
 

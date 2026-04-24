@@ -37,10 +37,10 @@ func TestSanitizeSubjectField(t *testing.T) {
 
 func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
-		name        string
-		inviter     string
-		workspace   string
-		wantInBody  []string
+		name          string
+		inviter       string
+		workspace     string
+		wantInBody    []string
 		wantNotInBody []string
 	}{
 		{
@@ -88,7 +88,7 @@ func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := buildInvitationParams(
-				"noreply@multica.ai",
+				"noreply@agentfarm.g2.com",
 				"invitee@example.com",
 				tt.inviter,
 				tt.workspace,
@@ -110,7 +110,7 @@ func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 
 func TestBuildInvitationParams_SubjectStripsControls(t *testing.T) {
 	p := buildInvitationParams(
-		"noreply@multica.ai",
+		"noreply@agentfarm.g2.com",
 		"invitee@example.com",
 		"Alice\r\n",
 		"Acme\t",
@@ -127,7 +127,7 @@ func TestBuildInvitationParams_SubjectStripsControls(t *testing.T) {
 func TestBuildInvitationParams_SubjectNotHTMLEscaped(t *testing.T) {
 	// Subject is not HTML-rendered; entities would render literally in inboxes.
 	p := buildInvitationParams(
-		"noreply@multica.ai",
+		"noreply@agentfarm.g2.com",
 		"invitee@example.com",
 		"Alice",
 		"Acme & Co.",
@@ -144,7 +144,7 @@ func TestBuildInvitationParams_SubjectNotHTMLEscaped(t *testing.T) {
 func TestBuildInvitationParams_SubjectTruncated(t *testing.T) {
 	longWorkspace := strings.Repeat("A", 200)
 	p := buildInvitationParams(
-		"noreply@multica.ai",
+		"noreply@agentfarm.g2.com",
 		"invitee@example.com",
 		"Alice",
 		longWorkspace,
@@ -163,13 +163,13 @@ func TestBuildInvitationParams_SubjectTruncated(t *testing.T) {
 
 func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
 	p := buildInvitationParams(
-		"noreply@multica.ai",
+		"noreply@agentfarm.g2.com",
 		"invitee@example.com",
 		"Alice",
 		"Acme",
 		"https://app.multica.ai/invite/abc",
 	)
-	if p.From != "noreply@multica.ai" {
+	if p.From != "noreply@agentfarm.g2.com" {
 		t.Errorf("From = %q", p.From)
 	}
 	if len(p.To) != 1 || p.To[0] != "invitee@example.com" {
@@ -177,5 +177,52 @@ func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
 	}
 	if !strings.Contains(p.Html, "https://app.multica.ai/invite/abc") {
 		t.Errorf("body missing invite URL: %s", p.Html)
+	}
+}
+
+// Mailgun's IsValid() check rejects sends where text body is empty even when
+// HTML is set. Both builders must produce a non-empty Text so send() doesn't
+// fail at the SDK boundary. This test is the regression guard against a
+// future "simplification" that strips the plain-text body.
+func TestBuildInvitationParams_TextBodyNonEmpty(t *testing.T) {
+	p := buildInvitationParams(
+		"noreply@agentfarm.g2.com",
+		"invitee@example.com",
+		"Alice",
+		"Acme",
+		"https://app.multica.ai/invite/abc",
+	)
+	if strings.TrimSpace(p.Text) == "" {
+		t.Errorf("Text body must be non-empty for Mailgun; got %q", p.Text)
+	}
+	if !strings.Contains(p.Text, "https://app.multica.ai/invite/abc") {
+		t.Errorf("Text body missing invite URL: %s", p.Text)
+	}
+}
+
+func TestBuildVerificationParams_Shape(t *testing.T) {
+	p := buildVerificationParams(
+		"noreply@agentfarm.g2.com",
+		"user@example.com",
+		"123456",
+	)
+	if p.From != "noreply@agentfarm.g2.com" {
+		t.Errorf("From = %q", p.From)
+	}
+	if len(p.To) != 1 || p.To[0] != "user@example.com" {
+		t.Errorf("To = %v", p.To)
+	}
+	if p.Subject != "Your Multica verification code" {
+		t.Errorf("Subject = %q", p.Subject)
+	}
+	if !strings.Contains(p.Html, "123456") {
+		t.Errorf("HTML body missing code: %s", p.Html)
+	}
+	if !strings.Contains(p.Text, "123456") {
+		t.Errorf("Text body missing code: %s", p.Text)
+	}
+	// Mailgun requires a non-empty text body — same regression guard as above.
+	if strings.TrimSpace(p.Text) == "" {
+		t.Errorf("Text body must be non-empty for Mailgun; got %q", p.Text)
 	}
 }

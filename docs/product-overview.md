@@ -565,7 +565,7 @@ Inbox 是"主动注意力系统"，让用户不必一直盯着看板也知道哪
 
 - Admin 在 **Settings → Members** 输入邮箱邀请
 - Server 生成 `workspace_invitation` 记录（7 天过期）
-- 发送邮件（Resend 集成，未配置时打到 stderr）
+- 发送邮件（Mailgun 集成，未配置时打到 stderr）
 - 被邀请人收到邀请：如果已有账号，会出现在个人 Inbox；如果没账号，邮件里有注册链接
 - 接受 / 拒绝 / 过期
 

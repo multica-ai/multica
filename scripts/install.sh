@@ -338,7 +338,7 @@ run_with_server() {
   printf "\n"
   printf "     ${CYAN}multica setup self-host${RESET}   # Configure + authenticate + start daemon\n"
   printf "\n"
-  printf "  ${BOLD}Login:${RESET} configure ${CYAN}RESEND_API_KEY${RESET} in .env for email codes,\n"
+  printf "  ${BOLD}Login:${RESET} configure ${CYAN}MAILGUN_API_KEY${RESET} + ${CYAN}MAILGUN_DOMAIN${RESET} in .env for email codes,\n"
   printf "  or set ${CYAN}APP_ENV=development${RESET} in .env to enable the dev master code ${BOLD}888888${RESET}.\n"
   printf "\n"
   printf "  ${BOLD}To stop all services:${RESET}\n"
