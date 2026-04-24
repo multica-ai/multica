@@ -639,7 +639,8 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	//   skills/{name}/SKILL.md          (most common)
 	//   .claude/skills/{name}/SKILL.md  (Claude Code native discovery)
 	//   plugin/skills/{name}/SKILL.md   (e.g. microsoft repos)
-	//   {name}/SKILL.md                 (skill at repo root level)
+	//   {name}/SKILL.md                 (e.g. anthropics/skills layout)
+	//   SKILL.md                        (single-skill repo: the repo is the skill)
 	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
 	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
@@ -659,6 +660,20 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 			skillMdBody = body
 			skillDir = dir
 			break
+		}
+	}
+	// Single-skill repos place SKILL.md at the repository root. Try it as a
+	// fast path before the tree-listing fallback to avoid a recursive tree
+	// API call for a common case. Verify the frontmatter name matches so a
+	// stray root SKILL.md in a multi-skill repo can't get picked up for an
+	// unrelated skill URL.
+	if skillMdBody == nil {
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, "SKILL.md"))
+		if err == nil {
+			if name, _ := parseSkillFrontmatter(string(body)); name == skillName {
+				skillMdBody = body
+				skillDir = ""
+			}
 		}
 	}
 	if skillMdBody == nil {
