@@ -14,4 +14,6 @@ export interface CoreProviderProps {
   onLogin?: () => void;
   /** Called after logout (e.g. clear cookie). */
   onLogout?: () => void;
+  /** Host shown in onboarding workspace-URL previews. Display-only; does not affect routing. Default: "multica.ai". */
+  workspaceUrlHost?: string;
 }

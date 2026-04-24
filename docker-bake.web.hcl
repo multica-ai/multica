@@ -33,14 +33,23 @@ variable "NEXT_PUBLIC_GOOGLE_CLIENT_ID" {
   default = "123139273422-1tj8oe3ar270m5k92r4g6pqhivep2j03.apps.googleusercontent.com"
 }
 
+# Host shown in onboarding workspace-URL previews (the `{host}/[slug]` pill
+# in step 2, existing-workspace card, sidebar preview). NEXT_PUBLIC_* — same
+# build-time-inlining constraint as NEXT_PUBLIC_GOOGLE_CLIENT_ID above, so
+# defaulted here rather than in SSM. Non-secret (visible in every browser).
+variable "NEXT_PUBLIC_WORKSPACE_URL_HOST" {
+  default = "agentfarm.g2.com"
+}
+
 target "default" {
   context    = "."
   dockerfile = "Dockerfile.web"
   platforms  = ["linux/arm64"]
   tags       = ["${APP_IMAGE}:${IMG_SHA}"]
   args = {
-    REMOTE_API_URL                = "${REMOTE_API_URL}"
-    NEXT_PUBLIC_GOOGLE_CLIENT_ID = "${NEXT_PUBLIC_GOOGLE_CLIENT_ID}"
+    REMOTE_API_URL                 = "${REMOTE_API_URL}"
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID   = "${NEXT_PUBLIC_GOOGLE_CLIENT_ID}"
+    NEXT_PUBLIC_WORKSPACE_URL_HOST = "${NEXT_PUBLIC_WORKSPACE_URL_HOST}"
   }
   cache-from = ["type=gha,scope=web"]
   cache-to   = ["type=gha,scope=web,mode=max"]

@@ -1,4 +1,5 @@
 export { CoreProvider } from "./core-provider";
+export { getWorkspaceUrlHost } from "./workspace-url-host";
 export type { CoreProviderProps } from "./types";
 export { AuthInitializer } from "./auth-initializer";
 export { defaultStorage } from "./storage";

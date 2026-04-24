@@ -10,6 +10,7 @@ import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
+import { setWorkspaceUrlHost } from "./workspace-url-host";
 import type { CoreProviderProps } from "./types";
 import type { StorageAdapter } from "../types/storage";
 
@@ -62,11 +63,15 @@ export function CoreProvider({
   cookieAuth,
   onLogin,
   onLogout,
+  workspaceUrlHost: workspaceUrlHostProp,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth), []);
+
+  // Assigned every render (not gated on `initialized`) so HMR env changes apply.
+  setWorkspaceUrlHost(workspaceUrlHostProp);
 
   return (
     <QueryProvider>
