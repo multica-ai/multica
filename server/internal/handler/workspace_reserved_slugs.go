@@ -32,6 +32,9 @@ var reservedSlugs = map[string]bool{
 	"multica":   true, // brand name — prevent impersonation workspaces
 	"www":       true, // hostname confusable; never a legitimate workspace slug
 	"new":       true, // ambiguous verb-as-slug; reserved for future global create routes
+	"home":      true, // likely-future marketing/landing entry
+	"homepage":  true, // existing /homepage landing variant in apps/web
+	"dashboard": true, // standard SaaS entry; likely-future global route
 	"help":      true,
 	"about":     true,
 	"pricing":   true,
@@ -49,6 +52,14 @@ var reservedSlugs = map[string]bool{
 	"press":     true,
 	"download":  true,
 
+	// Account / billing (likely-future global routes in the avatar menu)
+	"profile":       true,
+	"account":       true,
+	"billing":       true,
+	"notifications": true,
+	"search":        true,
+	"members":       true,
+
 	// Dashboard / workspace route segments
 	"issues":     true,
 	"projects":   true,
@@ -61,6 +72,28 @@ var reservedSlugs = map[string]bool{
 	"settings":   true,
 	"workspaces": true, // global /workspaces/new workspace creation page
 	"teams":      true, // reserved for future team management routes
+
+	// API / integration prefixes. `api` above already covers /api/*; these
+	// guard against future top-level API alias routes (e.g. /v1, /graphql)
+	// and against accidental workspace slugs that read like API identifiers.
+	"v1":       true,
+	"v2":       true,
+	"graphql":  true,
+	"webhooks": true,
+	"sdk":      true,
+	"tokens":   true,
+	"cli":      true,
+
+	// Backend ops / observability. `/health`, `/readyz`, `/healthz`, and `/ws`
+	// exist on the backend
+	// host; reserving them on the workspace slug space prevents naming
+	// confusion if/when these paths are ever proxied through the web origin.
+	"health":  true,
+	"readyz":  true,
+	"healthz": true,
+	"ws":      true,
+	"metrics": true,
+	"ping":    true,
 
 	// RFC 2142 — privileged email mailboxes
 	"postmaster": true,
@@ -79,7 +112,12 @@ var reservedSlugs = map[string]bool{
 	"files":   true,
 	"uploads": true,
 
-	// Next.js / web standards
+	// Next.js / web standards. These entries contain characters (dots,
+	// underscores) that today's slug regex `^[a-z0-9]+(?:-[a-z0-9]+)*$`
+	// already rejects at the format-validation step — so `isReservedSlug`
+	// never actually matches them. They are kept as defense-in-depth so
+	// that if the slug regex is ever relaxed (e.g. to support dotted
+	// corporate slugs like `acme.io`), these system paths stay protected.
 	"_next":         true,
 	"favicon.ico":   true,
 	"robots.txt":    true,

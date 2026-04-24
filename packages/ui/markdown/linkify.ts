@@ -15,6 +15,15 @@ const linkify = new LinkifyIt()
 const FILE_PATH_REGEX =
   /(?:^|[\s([{<])((\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma|dockerfile|makefile|gitignore))(?=[\s)\]}.,;:!?>]|$)/gi
 
+// CJK full-width punctuation that should terminate a URL.
+// linkify-it only treats ASCII punctuation as URL boundaries, so in Chinese /
+// Japanese text a URL followed by e.g. "。" gets the punctuation and every
+// character up to the next whitespace swallowed into the href. We truncate the
+// detected URL at the first occurrence of any of these characters. Character
+// set mirrors the fix applied in mattermost/marked#22.
+const CJK_URL_TERMINATOR_REGEX =
+  /[！-／：-＠［-｀｛-～、。「-】]/
+
 interface DetectedLink {
   type: 'url' | 'email' | 'file'
   text: string
@@ -117,22 +126,53 @@ function rangesOverlap(
 }
 
 /**
+ * Run linkify-it on `text` and push normalized link records into `out`,
+ * shifted by `offset`. When linkify-it merges multiple URLs into one match
+ * because they are separated only by CJK punctuation (which it doesn't treat
+ * as a URL boundary), we truncate at that punctuation and re-scan the tail.
+ */
+function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]): void {
+  const matches = linkify.match(text)
+  if (!matches) return
+
+  for (const match of matches) {
+    const cjkIdx = match.text.search(CJK_URL_TERMINATOR_REGEX)
+    if (cjkIdx === 0) continue // match starts with CJK punct — skip
+
+    const truncate = cjkIdx > 0
+    const matchText = truncate ? match.text.slice(0, cjkIdx) : match.text
+    // linkify-it may prepend a scheme (e.g. "http://" or "mailto:") to url
+    // while leaving text as the raw substring. Preserve that prefix.
+    const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
+    const matchUrl = truncate ? schemePrefix + matchText : match.url
+    const matchEnd = truncate ? match.index + cjkIdx : match.lastIndex
+
+    out.push({
+      type: match.schema === 'mailto:' ? 'email' : 'url',
+      text: matchText,
+      url: matchUrl,
+      start: match.index + offset,
+      end: matchEnd + offset
+    })
+
+    if (truncate) {
+      // Rescan the tail after the CJK punct — linkify-it had greedily swallowed
+      // it, so any additional URLs after the punct were never emitted.
+      const tailStart = matchEnd + 1
+      collectLinkifyMatches(text.slice(tailStart), offset + tailStart, out)
+      return
+    }
+  }
+}
+
+/**
  * Detect all links (URLs, emails, file paths) in text
  */
 export function detectLinks(text: string): DetectedLink[] {
   const links: DetectedLink[] = []
 
-  // 1. Detect URLs and emails with linkify-it
-  const urlMatches = linkify.match(text) || []
-  for (const match of urlMatches) {
-    links.push({
-      type: match.schema === 'mailto:' ? 'email' : 'url',
-      text: match.text,
-      url: match.url,
-      start: match.index,
-      end: match.lastIndex
-    })
-  }
+  // 1. Detect URLs and emails with linkify-it, applying CJK boundary handling.
+  collectLinkifyMatches(text, 0, links)
 
   // 2. Detect file paths with custom regex
   // Reset regex state

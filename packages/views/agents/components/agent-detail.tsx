@@ -92,7 +92,7 @@ export function AgentDetail({
 
       {/* Header */}
       <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <ActorAvatar actorType="agent" actorId={agent.id} size={28} className={`rounded-md ${isArchived ? "opacity-50" : ""}`} />
+        <ActorAvatar actorType="agent" actorId={agent.id} size={28} className={`rounded-md ${isArchived ? "opacity-50" : ""}`} disableHoverCard />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className={`text-sm font-semibold truncate ${isArchived ? "text-muted-foreground" : ""}`}>{agent.name}</h2>

@@ -1,5 +1,11 @@
 export type PinnedItemType = "issue" | "project";
 
+/**
+ * Pin metadata only. Title / status / identifier / icon are NOT here —
+ * consumers derive them from `issueDetailOptions` / `projectDetailOptions`
+ * so the sidebar reacts to `issue:updated` / `project:updated` events
+ * automatically, without needing a cross-entity invalidate on `pinKeys`.
+ */
 export interface PinnedItem {
   id: string;
   workspace_id: string;
@@ -8,10 +14,6 @@ export interface PinnedItem {
   item_id: string;
   position: number;
   created_at: string;
-  title: string;
-  identifier?: string;
-  icon?: string;
-  status?: string;
 }
 
 export interface CreatePinRequest {

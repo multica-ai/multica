@@ -6,6 +6,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
+import { installContextMenu } from "./context-menu";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -109,6 +110,8 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
+  installContextMenu(mainWindow.webContents);
+
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
@@ -191,6 +194,16 @@ if (!gotTheLock) {
     // false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
+    });
+
+    // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
+    // preload can attach the values to `desktopAPI.appInfo` before any renderer
+    // code reads them, ensuring the very first HTTP request from the renderer
+    // already carries X-Client-Version and X-Client-OS.
+    ipcMain.on("app:get-info", (event) => {
+      const p = process.platform;
+      const os = p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
+      event.returnValue = { version: app.getVersion(), os };
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen

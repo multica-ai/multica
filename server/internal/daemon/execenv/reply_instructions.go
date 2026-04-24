@@ -16,7 +16,7 @@ func BuildCommentReplyInstructions(issueID, triggerCommentID string) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"Reply by running exactly this command — always use the trigger comment ID below, "+
+		"If you decide to reply, post it by running exactly this command — always use the trigger comment ID below, "+
 			"do NOT reuse --parent values from previous turns in this session:\n\n"+
 			"    multica issue comment add %s --parent %s --content \"...\"\n",
 		issueID, triggerCommentID,

@@ -137,7 +137,7 @@ export function StepQuestionnaire({
               Before we start
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-              Three questions. Then we tailor the rest.
+              Three questions to get to know you.
             </h1>
 
             <div className="mt-10 flex flex-col gap-7">
@@ -328,6 +328,15 @@ function WhyWeAsk() {
           />
         </div>
       </section>
+
+      <a
+        href="https://multica.ai/docs/agents"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+      >
+        Learn how agents work →
+      </a>
     </div>
   );
 }

@@ -38,6 +38,15 @@ export function RuntimeAsidePanel() {
           />
         </div>
       </section>
+
+      <a
+        href="https://multica.ai/docs/daemon-runtimes"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+      >
+        Learn about runtimes →
+      </a>
     </div>
   );
 }

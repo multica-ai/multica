@@ -82,7 +82,7 @@ export function SkillsTab({
       <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
         <Info className="h-3.5 w-3.5 shrink-0 text-info mt-0.5" />
         <p className="text-xs text-muted-foreground">
-          Local runtime skills (from your CLI&apos;s skills directory) are always available automatically — no need to add them here.
+          Local runtime skills are always available automatically. Importing creates a workspace copy that your team can edit and reuse.
         </p>
       </div>
 
@@ -180,6 +180,7 @@ export function SkillsTab({
           </DialogContent>
         </Dialog>
       )}
+
     </div>
   );
 }

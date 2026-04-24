@@ -3,13 +3,16 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// PinnedItemResponse carries pin metadata only. Title / status / identifier /
+// icon are intentionally NOT included — clients derive them from their own
+// issue / project query cache so that an `issue:updated` event flows naturally
+// into the sidebar without needing a cross-entity invalidate on `pinKeys`.
 type PinnedItemResponse struct {
 	ID          string  `json:"id"`
 	WorkspaceID string  `json:"workspace_id"`
@@ -18,11 +21,6 @@ type PinnedItemResponse struct {
 	ItemID      string  `json:"item_id"`
 	Position    float64 `json:"position"`
 	CreatedAt   string  `json:"created_at"`
-	// Enriched fields (set by list endpoint)
-	Title      string  `json:"title"`
-	Identifier *string `json:"identifier,omitempty"`
-	Icon       *string `json:"icon,omitempty"`
-	Status     string  `json:"status,omitempty"`
 }
 
 func pinnedItemToResponse(p db.PinnedItem) PinnedItemResponse {
@@ -67,33 +65,10 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enrich with item details
 	resp := make([]PinnedItemResponse, 0, len(pins))
 	for _, p := range pins {
-		pr := pinnedItemToResponse(p)
-		switch p.ItemType {
-		case "issue":
-			issue, err := h.Queries.GetIssue(r.Context(), p.ItemID)
-			if err != nil {
-				continue // Skip deleted items
-			}
-			pr.Title = issue.Title
-			prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
-			identifier := formatIdentifier(prefix, issue.Number)
-			pr.Identifier = &identifier
-			pr.Status = issue.Status
-		case "project":
-			project, err := h.Queries.GetProject(r.Context(), p.ItemID)
-			if err != nil {
-				continue // Skip deleted items
-			}
-			pr.Title = project.Title
-			pr.Icon = textToPtr(project.Icon)
-			pr.Status = project.Status
-		}
-		resp = append(resp, pr)
+		resp = append(resp, pinnedItemToResponse(p))
 	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -219,12 +194,10 @@ func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusNoContent)
-}
+	// Fan out so other sessions (web/desktop, or a second tab) refetch
+	// the pin list and pick up the new order. Without this, reorder is
+	// only consistent on the originating client until a hard refresh.
+	h.publish(protocol.EventPinReordered, workspaceID, "member", userID, map[string]any{"items": req.Items})
 
-func formatIdentifier(prefix string, number int32) string {
-	if prefix == "" {
-		prefix = "ISS"
-	}
-	return prefix + "-" + strconv.Itoa(int(number))
+	w.WriteHeader(http.StatusNoContent)
 }

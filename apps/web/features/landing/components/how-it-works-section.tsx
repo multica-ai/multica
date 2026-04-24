@@ -6,7 +6,7 @@ import { useLocale } from "../i18n";
 import { GitHubMark, githubUrl, heroButtonClassName } from "./shared";
 
 export function HowItWorksSection() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
 
   return (
@@ -43,6 +43,12 @@ export function HowItWorksSection() {
         <div className="mt-14 flex flex-wrap items-center gap-4">
           <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
             {user ? t.header.dashboard : t.howItWorks.cta}
+          </Link>
+          <Link
+            href={locale === "zh" ? "/docs/zh" : "/docs"}
+            className={heroButtonClassName("ghost")}
+          >
+            {t.howItWorks.ctaDocs}
           </Link>
           <Link
             href={githubUrl}

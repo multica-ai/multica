@@ -43,6 +43,7 @@ export type LandingDict = {
     steps: { title: string; description: string }[];
     cta: string;
     ctaGithub: string;
+    ctaDocs: string;
   };
   openSource: {
     label: string;
@@ -86,6 +87,7 @@ export type LandingDict = {
   changelog: {
     title: string;
     subtitle: string;
+    toc: string;
     categories: {
       features: string;
       improvements: string;
@@ -100,5 +102,64 @@ export type LandingDict = {
       improvements?: string[];
       fixes?: string[];
     }[];
+  };
+  download: {
+    hero: {
+      macArm64: {
+        title: string;
+        sub: string;
+        primary: string;
+        altZip: string;
+      };
+      macIntel: {
+        title: string;
+        sub: string;
+        disabledCta: string;
+        intelHint: string;
+      };
+      winX64: { title: string; sub: string; primary: string };
+      winArm64: { title: string; sub: string; primary: string };
+      linux: {
+        title: string;
+        sub: string;
+        primary: string;
+        altFormats: string;
+      };
+      unknown: { title: string; sub: string };
+      safariMacHint: string;
+      archFallbackHint: string;
+    };
+    allPlatforms: {
+      title: string;
+      macLabel: string;
+      winX64Label: string;
+      winArm64Label: string;
+      linuxX64Label: string;
+      linuxArm64Label: string;
+      formatDmg: string;
+      formatZip: string;
+      formatExe: string;
+      formatAppImage: string;
+      formatDeb: string;
+      formatRpm: string;
+      intelNote: string;
+      unavailable: string;
+    };
+    cli: {
+      title: string;
+      sub: string;
+      installLabel: string;
+      startLabel: string;
+      sshNote: string;
+      copyLabel: string;
+      copiedLabel: string;
+    };
+    cloud: { title: string; sub: string };
+    footer: {
+      releaseNotes: string;
+      allReleases: string;
+      currentVersion: string;
+      versionUnavailable: string;
+    };
   };
 };

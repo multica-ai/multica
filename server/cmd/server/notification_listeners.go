@@ -66,11 +66,20 @@ func parseMentions(content string) []mention {
 	return result
 }
 
+// parentBubbleNotifTypes is the allowlist of inbox notification types that
+// bubble up from a sub-issue to subscribers of its parent. Other event types
+// only notify subscribers of the sub-issue itself, to keep parent watchers'
+// inboxes focused on the signal that matters most: status transitions.
+var parentBubbleNotifTypes = map[string]bool{
+	"status_changed": true,
+}
+
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
 // subscriber. Publishes an inbox:new event for each notification.
-// If the issue has a parent, parent issue subscribers are also notified
-// (deduplicated against direct subscribers).
+// If the issue has a parent and the notification type is in the bubble
+// allowlist, parent issue subscribers are also notified (deduplicated
+// against direct subscribers).
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -89,6 +98,11 @@ func notifySubscribers(
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, details)
+
+	// Only a small allowlist of event types bubbles to parent subscribers.
+	if !parentBubbleNotifTypes[notifType] {
+		return
+	}
 
 	// Also notify parent issue subscribers if this is a sub-issue.
 	issue, err := queries.GetIssue(ctx, parseUUID(issueID))

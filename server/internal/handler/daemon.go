@@ -510,11 +510,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{"status": "ok"}
 
-	// Check for pending ping requests for this runtime.
-	if pending := h.PingStore.PopPending(req.RuntimeID); pending != nil {
-		resp["pending_ping"] = map[string]string{"id": pending.ID}
-	}
-
 	// Check for pending update requests for this runtime.
 	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
 		resp["pending_update"] = map[string]string{
@@ -526,6 +521,24 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	// Check for pending model-list requests for this runtime.
 	if pending := h.ModelListStore.PopPending(req.RuntimeID); pending != nil {
 		resp["pending_model_list"] = map[string]string{"id": pending.ID}
+	}
+
+	// Check for pending local-skill list requests for this runtime.
+	if pending, err := h.LocalSkillListStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("local skill list PopPending failed", "error", err, "runtime_id", req.RuntimeID)
+	} else if pending != nil {
+		resp["pending_local_skills"] = map[string]string{"id": pending.ID}
+	}
+
+	// Check for pending local-skill import requests for this runtime.
+	if pending, err := h.LocalSkillImportStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("local skill import PopPending failed", "error", err, "runtime_id", req.RuntimeID)
+	} else if pending != nil {
+		payload := map[string]string{
+			"id":        pending.ID,
+			"skill_key": pending.SkillKey,
+		}
+		resp["pending_local_skill_import"] = payload
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -556,9 +569,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	var (
-		outcome                    = "unauth"
-		authMs, claimMs, buildMs   int64
-		buildStart                 time.Time
+		outcome                  = "unauth"
+		authMs, claimMs, buildMs int64
+		buildStart               time.Time
 	)
 	defer func() {
 		// Emit at function exit so error / unauth paths also carry timing.
@@ -647,10 +660,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 		// Fetch the triggering comment content so the daemon can embed it
 		// directly in the agent prompt (prevents the agent from ignoring comments
-		// when stale output files exist in a reused workdir).
+		// when stale output files exist in a reused workdir). Also surface the
+		// comment author's kind and display name so the agent knows whether it
+		// was triggered by a human or by another agent — a signal used by the
+		// harness instructions to avoid mention loops between agents.
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				resp.TriggerAuthorType = comment.AuthorType
+				switch comment.AuthorType {
+				case "agent":
+					if comment.AuthorID.Valid {
+						if a, err := h.Queries.GetAgent(r.Context(), comment.AuthorID); err == nil {
+							resp.TriggerAuthorName = a.Name
+						}
+					}
+				case "member":
+					// For member-authored comments, AuthorID is a user UUID
+					// (see handler.resolveActor) — look up the user's display name.
+					if comment.AuthorID.Valid {
+						if u, err := h.Queries.GetUser(r.Context(), comment.AuthorID); err == nil {
+							resp.TriggerAuthorName = u.Name
+						}
+					}
+				}
 			}
 		}
 
@@ -711,15 +744,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Autopilot run_only task: resolve workspace from autopilot_run → autopilot.
-	if task.AutopilotRunID.Valid && resp.WorkspaceID == "" {
+	// Autopilot run_only task: resolve workspace from autopilot_run →
+	// autopilot, and include the autopilot instructions because there is no
+	// issue for the agent to fetch.
+	if task.AutopilotRunID.Valid {
 		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
+			resp.AutopilotID = uuidToString(run.AutopilotID)
+			resp.AutopilotSource = run.Source
+			if run.TriggerPayload != nil {
+				resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
+			}
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
-				resp.WorkspaceID = uuidToString(ap.WorkspaceID)
-				if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-					var repos []RepoData
-					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-						resp.Repos = repos
+				resp.AutopilotTitle = ap.Title
+				if ap.Description.Valid {
+					resp.AutopilotDescription = ap.Description.String
+				}
+				if resp.WorkspaceID == "" {
+					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
+				}
+				if len(resp.Repos) == 0 {
+					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
+						var repos []RepoData
+						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+							resp.Repos = repos
+						}
 					}
 				}
 			}
@@ -969,9 +1017,10 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 // FailTask marks a running task as failed.
 type TaskFailRequest struct {
-	Error     string `json:"error"`
-	SessionID string `json:"session_id,omitempty"`
-	WorkDir   string `json:"work_dir,omitempty"`
+	Error         string `json:"error"`
+	SessionID     string `json:"session_id,omitempty"`
+	WorkDir       string `json:"work_dir,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -988,14 +1037,14 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
 	if err != nil {
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error)
+	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 
@@ -1069,7 +1118,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		})
 
 		if workspaceID != "" {
-			h.publish(protocol.EventTaskMessage, workspaceID, "system", "", protocol.TaskMessagePayload{
+			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
 				TaskID:  taskID,
 				IssueID: uuidToString(task.IssueID),
 				Seq:     msg.Seq,

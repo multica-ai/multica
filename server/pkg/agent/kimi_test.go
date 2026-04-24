@@ -103,9 +103,7 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 	t.Parallel()
 
 	fakePath := filepath.Join(t.TempDir(), "kimi")
-	if err := os.WriteFile(fakePath, []byte(fakeKimiACPScript()), 0o755); err != nil {
-		t.Fatalf("write fake kimi: %v", err)
-	}
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPScript()))
 
 	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
@@ -164,9 +162,7 @@ func TestKimiBackendInvokesACPSubcommand(t *testing.T) {
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
 	fakePath := filepath.Join(tempDir, "kimi")
-	if err := os.WriteFile(fakePath, []byte(fakeKimiACPScript()), 0o755); err != nil {
-		t.Fatalf("write fake kimi: %v", err)
-	}
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPScript()))
 
 	backend, err := New("kimi", Config{
 		ExecutablePath: fakePath,

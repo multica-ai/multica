@@ -54,6 +54,7 @@ export type WSEventType =
   | "project:deleted"
   | "pin:created"
   | "pin:deleted"
+  | "pin:reordered"
   | "invitation:created"
   | "invitation:accepted"
   | "invitation:declined"

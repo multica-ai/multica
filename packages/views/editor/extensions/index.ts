@@ -44,6 +44,7 @@ import { createBlurShortcutExtension } from "./blur-shortcut";
 import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
+import { BlockMathExtension, InlineMathExtension } from "./math";
 
 const lowlight = createLowlight(common);
 
@@ -116,7 +117,10 @@ export function createEditorExtensions(
     TableRow,
     TableHeader,
     TableCell,
-    Markdown,
+    BlockMathExtension,
+    InlineMathExtension,
+    // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
+    Markdown.configure({ indentation: { style: "space", size: 3 } }),
     FileCardExtension,
     BaseMentionExtension.configure({
       HTMLAttributes: { class: "mention" },

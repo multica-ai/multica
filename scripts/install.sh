@@ -140,6 +140,55 @@ get_latest_version() {
   curl -sI "$REPO_WEB_URL/releases/latest" 2>/dev/null | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n' || true
 }
 
+get_selfhost_ref() {
+  if [ -n "${MULTICA_SELFHOST_REF:-}" ]; then
+    printf '%s' "$MULTICA_SELFHOST_REF"
+    return
+  fi
+
+  local latest
+  latest=$(get_latest_version)
+  if [ -n "$latest" ]; then
+    printf '%s' "$latest"
+    return
+  fi
+
+  printf '%s' "main"
+}
+
+checkout_server_ref() {
+  local ref="$1"
+
+  if [ "$ref" = "main" ]; then
+    git fetch origin main --depth 1 2>/dev/null || true
+    git checkout --force main 2>/dev/null || true
+    git reset --hard origin/main 2>/dev/null || true
+    return
+  fi
+
+  git fetch origin --tags --force 2>/dev/null || true
+  if git rev-parse --verify --quiet "refs/tags/$ref" >/dev/null; then
+    git checkout --force "$ref" 2>/dev/null || git checkout --force "tags/$ref" 2>/dev/null || true
+    return
+  fi
+
+  git fetch origin "$ref" --depth 1 2>/dev/null || true
+  git checkout --force "$ref" 2>/dev/null || true
+}
+
+pull_official_selfhost_images() {
+  if docker compose -f docker-compose.selfhost.yml pull; then
+    return
+  fi
+
+  echo ""
+  warn "Official images for the selected self-host channel are not published yet."
+  echo "This can happen before the first GHCR release is available."
+  echo "From $INSTALL_DIR, build from source instead:"
+  echo "  docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build"
+  exit 1
+}
+
 upgrade_cli_brew() {
   info "Upgrading Multica CLI via Homebrew..."
   brew update 2>/dev/null || true
@@ -221,12 +270,13 @@ After installing Docker, re-run this script with --with-server."
 # ---------------------------------------------------------------------------
 setup_server() {
   info "Setting up Multica server..."
+  local server_ref
+  server_ref=$(get_selfhost_ref)
+  info "Using self-host assets from ${server_ref}..."
 
   if [ -d "$INSTALL_DIR/.git" ]; then
     info "Updating existing installation at $INSTALL_DIR..."
     cd "$INSTALL_DIR"
-    git fetch origin main --depth 1 2>/dev/null || true
-    git reset --hard origin/main 2>/dev/null || true
   else
     info "Cloning Multica repository..."
     if ! command_exists git; then
@@ -242,7 +292,9 @@ setup_server() {
     cd "$INSTALL_DIR"
   fi
 
-  ok "Repository ready at $INSTALL_DIR"
+  checkout_server_ref "$server_ref"
+
+  ok "Repository ready at $INSTALL_DIR ($server_ref)"
 
   # Generate .env if needed
   if [ ! -f .env ]; then
@@ -261,8 +313,10 @@ setup_server() {
   fi
 
   # Start Docker Compose
+  info "Pulling official Multica images..."
+  pull_official_selfhost_images
   info "Starting Multica services (this may take a few minutes on first run)..."
-  docker compose -f docker-compose.selfhost.yml up -d --build
+  docker compose -f docker-compose.selfhost.yml up -d
 
   # Wait for health check
   info "Waiting for backend to be ready..."

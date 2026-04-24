@@ -5,46 +5,20 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
-  ArrowDown,
-  ArrowUp,
   Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Link2,
   MoreHorizontal,
   PanelRight,
   Pin,
   PinOff,
   Plus,
-  Trash2,
-  UserMinus,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
-import { toast } from "sonner";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-} from "@multica/ui/components/ui/dropdown-menu";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -57,17 +31,17 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, Issue } from "@multica/core/types";
-import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
+import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
+import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker } from ".";
+import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
-import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -75,7 +49,6 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
@@ -86,8 +59,6 @@ import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
-import { pinListOptions } from "@multica/core/pins";
-import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
 import { ProgressRing } from "./progress-ring";
 
@@ -181,132 +152,6 @@ function PropRow({
 
 
 // ---------------------------------------------------------------------------
-// Issue Picker Dialog
-// ---------------------------------------------------------------------------
-
-function IssuePickerDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  excludeIds,
-  onSelect,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description: string;
-  excludeIds: string[];
-  onSelect: (issue: Issue) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Issue[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const abortRef = useRef<AbortController>(undefined);
-
-  // Reset state when dialog opens/closes
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setResults([]);
-      setIsLoading(false);
-    }
-  }, [open]);
-
-  const search = useCallback(
-    (q: string) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
-
-      if (!q.trim()) {
-        setResults([]);
-        setIsLoading(false);
-        return;
-      }
-
-      setIsLoading(true);
-      debounceRef.current = setTimeout(async () => {
-        const controller = new AbortController();
-        abortRef.current = controller;
-        try {
-          const res = await api.searchIssues({
-            q: q.trim(),
-            limit: 20,
-            include_closed: true,
-            signal: controller.signal,
-          });
-          if (!controller.signal.aborted) {
-            setResults(
-              res.issues.filter((i) => !excludeIds.includes(i.id)),
-            );
-            setIsLoading(false);
-          }
-        } catch {
-          if (!controller.signal.aborted) {
-            setIsLoading(false);
-          }
-        }
-      }, 300);
-    },
-    [excludeIds],
-  );
-
-  return (
-    <CommandDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={title}
-      description={description}
-    >
-      <Command shouldFilter={false}>
-        <CommandInput
-          placeholder="Search issues..."
-          value={query}
-          onValueChange={(v) => {
-            setQuery(v);
-            search(v);
-          }}
-        />
-        <CommandList>
-          {isLoading && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              Searching...
-            </div>
-          )}
-          {!isLoading && query.trim() && results.length === 0 && (
-            <CommandEmpty>No issues found.</CommandEmpty>
-          )}
-          {!isLoading && !query.trim() && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              Type to search issues
-            </div>
-          )}
-          {results.length > 0 && (
-            <CommandGroup>
-              {results.map((issue) => (
-                <CommandItem
-                  key={issue.id}
-                  value={issue.id}
-                  onSelect={() => {
-                    onSelect(issue);
-                    onOpenChange(false);
-                  }}
-                >
-                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                  <span className="text-muted-foreground shrink-0">{issue.identifier}</span>
-                  <span className="truncate">{issue.title}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
-        </CommandList>
-      </Command>
-    </CommandDialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -327,7 +172,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
-  const userId = useAuthStore((s) => s.user?.id);
   const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
 
@@ -335,7 +179,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const currentMemberRole = members.find((m) => m.user_id === user?.id)?.role;
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
@@ -352,9 +195,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       sidebarRef.current?.collapse();
     }
   }, [isMobile]);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [backlogHintOpen, setBacklogHintOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
@@ -362,8 +202,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
-  const [parentPickerOpen, setParentPickerOpen] = useState(false);
-  const [childPickerOpen, setChildPickerOpen] = useState(false);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -384,6 +222,30 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     }
   }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fire `onDelete` once when the issue transitions from loaded to missing.
+  // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
+  // be notified directly — instead, the detail page observes its own cache
+  // clearing and runs the callback. We navigate via `onDeletedNavigateTo` on
+  // the actions menu when no callback is supplied (standalone routes).
+  const hadIssueRef = useRef(false);
+  const firedDeleteCallbackRef = useRef(false);
+  useEffect(() => {
+    if (issue) {
+      hadIssueRef.current = true;
+      firedDeleteCallbackRef.current = false;
+      return;
+    }
+    if (
+      hadIssueRef.current &&
+      !issueLoading &&
+      !firedDeleteCallbackRef.current &&
+      onDelete
+    ) {
+      firedDeleteCallbackRef.current = true;
+      onDelete();
+    }
+  }, [issue, issueLoading, onDelete]);
+
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
     timeline, submitComment, submitReply,
@@ -401,15 +263,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
-
-  // Pinned state
-  const { data: pinnedItems = [] } = useQuery({
-    ...pinListOptions(wsId, userId ?? ""),
-    enabled: !!userId,
-  });
-  const isPinned = pinnedItems.some((p) => p.item_type === "issue" && p.item_id === id);
-  const createPin = useCreatePin();
-  const deletePin = useDeletePin();
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -448,29 +301,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     }
   }, [highlightCommentId, timeline.length]);
 
-  // Issue field updates via TQ mutation (optimistic update + rollback in mutation hook)
-  const updateIssueMutation = useUpdateIssue();
-  const handleUpdateField = useCallback(
-    (updates: Partial<UpdateIssueRequest>) => {
-      if (!issue) return;
-      updateIssueMutation.mutate(
-        { id, ...updates },
-        { onError: () => toast.error("Failed to update issue") },
-      );
-      // Hint: assigning an agent to a backlog issue won't trigger execution
-      // until the issue is moved to an active status.
-      if (
-        updates.assignee_type === "agent" &&
-        updates.assignee_id &&
-        issue.status === "backlog" &&
-        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true"
-      ) {
-        setBacklogHintOpen(true);
-      }
-    },
-    [issue, id, updateIssueMutation],
-  );
-
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
@@ -482,19 +312,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     [uploadWithToast],
   );
 
-  const deleteIssueMutation = useDeleteIssue();
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      await deleteIssueMutation.mutateAsync(issue!.id);
-      toast.success("Issue deleted");
-      if (onDelete) onDelete();
-      else router.push(paths.issues());
-    } catch {
-      toast.error("Failed to delete issue");
-      setDeleting(false);
-    }
-  };
+  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
+  // Called before the `if (!issue)` early return so hook order stays stable.
+  const actions = useIssueActions(issue);
+  const handleUpdateField = actions.updateField;
 
   if (loading) {
     return (
@@ -711,203 +532,27 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className={cn("text-muted-foreground", isPinned && "text-foreground")}
-                    onClick={() => {
-                      if (isPinned) {
-                        deletePin.mutate({ itemType: "issue", itemId: issue.id });
-                      } else {
-                        createPin.mutate({ item_type: "issue", item_id: issue.id });
-                      }
-                    }}
+                    className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
+                    onClick={actions.togglePin}
                   >
-                    {isPinned ? <PinOff /> : <Pin />}
+                    {actions.isPinned ? <PinOff /> : <Pin />}
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">{isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
+              <TooltipContent side="bottom">{actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
             </Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                    <MoreHorizontal />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="w-auto">
-                {/* Status */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                    Status
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {ALL_STATUSES.map((s) => (
-                      <DropdownMenuItem
-                        key={s}
-                        onClick={() => handleUpdateField({ status: s })}
-                      >
-                        <StatusIcon status={s} className="h-3.5 w-3.5" />
-                        {STATUS_CONFIG[s].label}
-                        {issue.status === s && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-
-                {/* Priority */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <PriorityIcon priority={issue.priority} />
-                    Priority
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {PRIORITY_ORDER.map((p) => (
-                      <DropdownMenuItem
-                        key={p}
-                        onClick={() => handleUpdateField({ priority: p })}
-                      >
-                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                          <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                          {PRIORITY_CONFIG[p].label}
-                        </span>
-                        {issue.priority === p && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-
-                {/* Assignee */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <UserMinus className="h-3.5 w-3.5" />
-                    Assignee
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem
-                      onClick={() => handleUpdateField({ assignee_type: null, assignee_id: null })}
-                    >
-                      <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                      Unassigned
-                      {!issue.assignee_type && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                    </DropdownMenuItem>
-                    {members.map((m) => (
-                      <DropdownMenuItem
-                        key={m.user_id}
-                        onClick={() => handleUpdateField({ assignee_type: "member", assignee_id: m.user_id })}
-                      >
-                        <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
-                        {m.name}
-                        {issue.assignee_type === "member" && issue.assignee_id === m.user_id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                    {agents.filter((a) => !a.archived_at && canAssignAgent(a, user?.id, currentMemberRole)).map((a) => (
-                      <DropdownMenuItem
-                        key={a.id}
-                        onClick={() => handleUpdateField({ assignee_type: "agent", assignee_id: a.id })}
-                      >
-                        <ActorAvatar actorType="agent" actorId={a.id} size={16} />
-                        {a.name}
-                        {issue.assignee_type === "agent" && issue.assignee_id === a.id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-
-                {/* Due date */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <Calendar className="h-3.5 w-3.5" />
-                    Due date
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem onClick={() => handleUpdateField({ due_date: new Date().toISOString() })}>
-                      Today
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const d = new Date(); d.setDate(d.getDate() + 1);
-                      handleUpdateField({ due_date: d.toISOString() });
-                    }}>
-                      Tomorrow
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const d = new Date(); d.setDate(d.getDate() + 7);
-                      handleUpdateField({ due_date: d.toISOString() });
-                    }}>
-                      Next week
-                    </DropdownMenuItem>
-                    {issue.due_date && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: null })}>
-                          Clear date
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-
-                <DropdownMenuSeparator />
-
-                {/* Create sub-issue */}
-                <DropdownMenuItem onClick={() => {
-                  useModalStore.getState().open("create-issue", {
-                    parent_issue_id: issue.id,
-                    parent_issue_identifier: issue.identifier,
-                  });
-                }}>
-                  <Plus className="h-3.5 w-3.5" />
-                  Create sub-issue
-                </DropdownMenuItem>
-
-                {/* Add as sub-issue of another issue */}
-                <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
-                  <ArrowUp className="h-3.5 w-3.5" />
-                  Set parent issue...
-                </DropdownMenuItem>
-
-                {/* Add another issue as sub-issue */}
-                <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
-                  <ArrowDown className="h-3.5 w-3.5" />
-                  Add sub-issue...
-                </DropdownMenuItem>
-
-                {/* Pin / Unpin */}
-                <DropdownMenuItem onClick={() => {
-                  if (isPinned) {
-                    deletePin.mutate({ itemType: "issue", itemId: issue.id });
-                  } else {
-                    createPin.mutate({ item_type: "issue", item_id: issue.id });
-                  }
-                }}>
-                  {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                  {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-                </DropdownMenuItem>
-
-                {/* Copy link */}
-                <DropdownMenuItem onClick={() => {
-                  const url = router.getShareableUrl
-                    ? router.getShareableUrl(router.pathname)
-                    : window.location.href;
-                  navigator.clipboard.writeText(url);
-                  toast.success("Link copied");
-                }}>
-                  <Link2 className="h-3.5 w-3.5" />
-                  Copy link
-                </DropdownMenuItem>
-
-                <DropdownMenuSeparator />
-
-                {/* Delete */}
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setDeleteDialogOpen(true)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete issue
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <IssueActionsDropdown
+              issue={issue}
+              align="end"
+              // When a parent passes `onDelete`, we detect deletion via effect
+              // above and skip navigation. Otherwise the modal navigates for us.
+              onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+              trigger={
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                  <MoreHorizontal />
+                </Button>
+              }
+            />
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -934,72 +579,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </Tooltip>
           </div>
         </PageHeader>
-
-            {/* Delete confirmation dialog (controlled by state) */}
-            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete issue</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently delete this issue and all its comments. This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="bg-destructive text-white hover:bg-destructive/90"
-                  >
-                    {deleting ? "Deleting..." : "Delete"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-
-            <BacklogAgentHintDialog
-              open={backlogHintOpen}
-              onOpenChange={setBacklogHintOpen}
-              onDismissPermanently={() => {
-                localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
-              }}
-              onMoveToTodo={() => {
-                updateIssueMutation.mutate(
-                  { id, status: "todo" },
-                  { onError: () => toast.error("Failed to update status") },
-                );
-                setBacklogHintOpen(false);
-              }}
-            />
-
-            {/* Set parent issue picker */}
-            <IssuePickerDialog
-              open={parentPickerOpen}
-              onOpenChange={setParentPickerOpen}
-              title="Set parent issue"
-              description="Search for an issue to set as the parent of this issue"
-              excludeIds={[id, ...childIssues.map((c) => c.id)]}
-              onSelect={(selected) => {
-                handleUpdateField({ parent_issue_id: selected.id });
-                toast.success(`Set ${selected.identifier} as parent issue`);
-              }}
-            />
-
-            {/* Add sub-issue picker */}
-            <IssuePickerDialog
-              open={childPickerOpen}
-              onOpenChange={setChildPickerOpen}
-              title="Add sub-issue"
-              description="Search for an issue to add as a sub-issue"
-              excludeIds={[id, ...(parentIssueId ? [parentIssueId] : []), ...childIssues.map((c) => c.id)]}
-              onSelect={(selected) => {
-                updateIssueMutation.mutate(
-                  { id: selected.id, parent_issue_id: id },
-                  { onError: () => toast.error("Failed to add sub-issue") },
-                );
-                toast.success(`Added ${selected.identifier} as sub-issue`);
-              }}
-            />
 
         {/* Content — scrollable */}
         <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">

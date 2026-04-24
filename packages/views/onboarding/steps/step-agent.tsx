@@ -125,6 +125,7 @@ export function StepAgent({
         instructions: template.instructions,
         runtime_id: runtime.id,
         visibility: "workspace",
+        template: templateId,
       };
       const agent = await api.createAgent(req);
       await onCreated(agent);
@@ -326,6 +327,15 @@ function AboutAgentsSide() {
         Add more agents anytime. A small team of specialized agents beats
         one jack-of-all-trades.
       </p>
+
+      <a
+        href="https://multica.ai/docs/agents-create"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+      >
+        Creating your first agent →
+      </a>
     </div>
   );
 }

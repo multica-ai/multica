@@ -3,11 +3,15 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace, paths } from "@multica/core/paths";
 import type { QuestionnaireAnswers } from "@multica/core/onboarding";
+import { pinKeys } from "@multica/core/pins";
+import { projectKeys } from "@multica/core/projects";
+import { issueKeys } from "@multica/core/issues/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -39,6 +43,7 @@ export function StarterContentPrompt() {
   const user = useAuthStore((s) => s.user);
   const refreshMe = useAuthStore((s) => s.refreshMe);
   const { push } = useNavigation();
+  const qc = useQueryClient();
 
   const [submitting, setSubmitting] = useState<"import" | "dismiss" | null>(
     null,
@@ -63,6 +68,17 @@ export function StarterContentPrompt() {
         questionnaire,
       });
       const result = await api.importStarterContent(payload);
+
+      // Mirror the `onSettled` pattern used by other mutations
+      // (useCreatePin / useDeletePin / useReorderPins): the originating
+      // session invalidates locally so the sidebar + board refresh
+      // synchronously, independent of the WS round-trip. The server still
+      // publishes `pin:created` / `project:created` / `issue:created` for
+      // OTHER sessions; on this session both paths run and the second
+      // invalidate is a no-op.
+      qc.invalidateQueries({ queryKey: pinKeys.all(workspace.id, user.id) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(workspace.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) });
 
       // Sync the new starter_content_state into the auth store so this
       // component unmounts cleanly on the next render.
@@ -90,7 +106,7 @@ export function StarterContentPrompt() {
     if (submitting) return;
     setSubmitting("dismiss");
     try {
-      await api.dismissStarterContent();
+      await api.dismissStarterContent({ workspace_id: workspace.id });
       await refreshMe();
     } catch (err) {
       toast.error(

@@ -16,13 +16,17 @@ import (
 // (testPool, testUserID, testWorkspaceID are set in integration_test.go).
 
 // createTestIssue inserts a minimal issue and returns its UUID string.
+// Picks the next per-workspace number to avoid colliding with the
+// uq_issue_workspace_number unique constraint when a single test creates
+// multiple issues.
 func createTestIssue(t *testing.T, workspaceID, creatorID string) string {
 	t.Helper()
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position)
-		VALUES ($1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
+		VALUES ($1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0,
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, workspaceID, creatorID).Scan(&issueID)
 	if err != nil {

@@ -11,7 +11,7 @@ import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import { setWorkspaceUrlHost } from "./workspace-url-host";
-import type { CoreProviderProps } from "./types";
+import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 
 // Module-level singletons — created once at first render, never recreated.
@@ -25,6 +25,7 @@ function initCore(
   onLogin?: () => void,
   onLogout?: () => void,
   cookieAuth?: boolean,
+  identity?: ClientIdentity,
 ) {
   if (initialized) return;
 
@@ -33,6 +34,7 @@ function initCore(
     onUnauthorized: () => {
       storage.removeItem("multica_token");
     },
+    identity,
   });
   setApiInstance(api);
 
@@ -64,23 +66,31 @@ export function CoreProvider({
   onLogin,
   onLogout,
   workspaceUrlHost: workspaceUrlHostProp,
+  identity,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth), []);
+  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
 
   // Assigned every render (not gated on `initialized`) so HMR env changes apply.
   setWorkspaceUrlHost(workspaceUrlHostProp);
 
   return (
     <QueryProvider>
-      <AuthInitializer onLogin={onLogin} onLogout={onLogout} storage={storage} cookieAuth={cookieAuth}>
+      <AuthInitializer
+        onLogin={onLogin}
+        onLogout={onLogout}
+        storage={storage}
+        cookieAuth={cookieAuth}
+        identity={identity}
+      >
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}
           storage={storage}
           cookieAuth={cookieAuth}
+          identity={identity}
         >
           {children}
         </WSProvider>

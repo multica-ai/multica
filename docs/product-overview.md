@@ -715,7 +715,7 @@ multica repo list | add | update | delete
 #### Runtime
 
 ```bash
-multica runtime list | get | ping | delete
+multica runtime list | usage | activity | update
 ```
 
 #### 配置 / 更新

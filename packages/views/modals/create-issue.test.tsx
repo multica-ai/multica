@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
@@ -33,6 +34,17 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
+  }),
+}));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-test",
+}));
+
+vi.mock("@multica/core/issues/queries", () => ({
+  issueDetailOptions: (wsId: string, id: string) => ({
+    queryKey: ["issues", wsId, "detail", id],
+    queryFn: () => Promise.resolve(null),
   }),
 }));
 
@@ -124,6 +136,20 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
   ),
 }));
 
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
+  DropdownMenuSeparator: () => null,
+}));
+
+vi.mock("./issue-picker-modal", () => ({
+  IssuePickerModal: () => null,
+}));
+
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
@@ -170,6 +196,13 @@ vi.mock("sonner", () => ({
 
 import { CreateIssueModal } from "./create-issue";
 
+function renderModal(element: React.ReactElement) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={qc}>{element}</QueryClientProvider>);
+}
+
 describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -185,7 +218,7 @@ describe("CreateIssueModal", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    render(<CreateIssueModal onClose={onClose} />);
+    renderModal(<CreateIssueModal onClose={onClose} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "  Ship create issue regression coverage  ");
     await user.click(screen.getByRole("button", { name: "Create Issue" }));

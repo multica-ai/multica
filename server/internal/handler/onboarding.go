@@ -7,8 +7,10 @@ import (
 	"net/mail"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -34,19 +36,81 @@ const (
 	importStarterContentBodyLimit = 64 * 1024
 )
 
+// completeOnboardingRequest carries the client's view of which exit the
+// user took from the flow. The client is the only place that knows
+// whether Step 3's runtime connect was skipped, whether the cloud
+// waitlist form was submitted, or whether Welcome's "I've done this
+// before" path was used. Unknown/missing → OnboardingPathUnknown so
+// legacy clients still complete the flow cleanly, just without a
+// funnel-ready label.
+type completeOnboardingRequest struct {
+	CompletionPath string `json:"completion_path,omitempty"`
+}
+
+var validCompletionPaths = map[string]struct{}{
+	analytics.OnboardingPathFull:           {},
+	analytics.OnboardingPathRuntimeSkipped: {},
+	analytics.OnboardingPathCloudWaitlist:  {},
+	analytics.OnboardingPathSkipExisting:   {},
+}
+
 // CompleteOnboarding marks the authenticated user as having completed
 // onboarding. Idempotent: the underlying query uses COALESCE so the
 // original timestamp is preserved if called more than once.
+//
+// Emits `onboarding_completed` exactly once — the first call that
+// actually flips `onboarded_at` from NULL. Subsequent calls are still
+// 200 OK (for client-side retries) but skip the event so the funnel
+// counts honest first-completion.
 func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
+
+	// Body is optional — an empty body is a legal legacy call.
+	var req completeOnboardingRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	// Read the prior state so we can detect "was this call the one that
+	// actually completed onboarding?" — MarkUserOnboarded uses COALESCE
+	// and returns the preserved timestamp on repeat calls, which is not
+	// the signal we need for the funnel.
+	before, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	firstCompletion := !before.OnboardedAt.Valid
+
 	user, err := h.Queries.MarkUserOnboarded(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark onboarded")
 		return
 	}
+
+	if firstCompletion {
+		path := req.CompletionPath
+		if _, ok := validCompletionPaths[path]; !ok {
+			path = analytics.OnboardingPathUnknown
+		}
+		onboardedAt := ""
+		if user.OnboardedAt.Valid {
+			onboardedAt = user.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+		}
+		h.Analytics.Capture(analytics.OnboardingCompleted(
+			userID,
+			path,
+			onboardedAt,
+			user.CloudWaitlistEmail.Valid,
+		))
+	}
+
 	writeJSON(w, http.StatusOK, userToResponse(user))
 }
 
@@ -54,10 +118,31 @@ type patchOnboardingRequest struct {
 	Questionnaire *json.RawMessage `json:"questionnaire,omitempty"`
 }
 
+// questionnaireAnswers mirrors the frontend's `QuestionnaireAnswers`
+// shape. Only the first-time submission — every slot filled — is a
+// funnel signal; partial saves are allowed but never emit.
+type questionnaireAnswers struct {
+	TeamSize      string `json:"team_size"`
+	TeamSizeOther string `json:"team_size_other"`
+	Role          string `json:"role"`
+	RoleOther     string `json:"role_other"`
+	UseCase       string `json:"use_case"`
+	UseCaseOther  string `json:"use_case_other"`
+}
+
+func (q questionnaireAnswers) complete() bool {
+	return q.TeamSize != "" && q.Role != "" && q.UseCase != ""
+}
+
 // PatchOnboarding persists the user's questionnaire answers. The
 // field is optional; an omitted questionnaire is preserved. Which
 // step the user is on is deliberately not persisted — every
 // onboarding entry starts at Welcome.
+//
+// Emits `onboarding_questionnaire_submitted` exactly once per user:
+// the first PATCH that transitions the answers from "at least one
+// slot empty" to "all three filled". Revisions past that point don't
+// re-emit — the funnel counts users, not edits.
 func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -72,6 +157,16 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+
+	// Read prior answers so we can detect the NULL/partial → complete
+	// transition after the update. An errored decode on the prior row
+	// is treated as "incomplete" — worst case we emit once more than
+	// we should, never twice for the same transition.
+	var before questionnaireAnswers
+	if beforeUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID)); err == nil {
+		_ = json.Unmarshal(beforeUser.OnboardingQuestionnaire, &before)
+	}
+
 	params := db.PatchUserOnboardingParams{ID: parseUUID(userID)}
 	if req.Questionnaire != nil {
 		params.Questionnaire = []byte(*req.Questionnaire)
@@ -81,6 +176,21 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update onboarding")
 		return
 	}
+
+	var after questionnaireAnswers
+	_ = json.Unmarshal(user.OnboardingQuestionnaire, &after)
+	if after.complete() && !before.complete() {
+		h.Analytics.Capture(analytics.OnboardingQuestionnaireSubmitted(
+			userID,
+			after.TeamSize,
+			after.Role,
+			after.UseCase,
+			after.TeamSizeOther != "",
+			after.RoleOther != "",
+			after.UseCaseOther != "",
+		))
+	}
+
 	writeJSON(w, http.StatusOK, userToResponse(user))
 }
 
@@ -140,6 +250,8 @@ func (h *Handler) JoinCloudWaitlist(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to join waitlist")
 		return
 	}
+
+	h.Analytics.Capture(analytics.CloudWaitlistJoined(userID, reason != ""))
 
 	writeJSON(w, http.StatusOK, userToResponse(user))
 }
@@ -242,6 +354,16 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.WorkspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	// Reject malformed UUIDs up front. Without this, `parseUUID` below
+	// silently returns a zero-UUID and the membership check fails with
+	// a misleading 403 "not a member of this workspace" instead of the
+	// true 400. Defense-in-depth: even if the membership check is ever
+	// refactored, a garbage workspace_id never reaches CreateProject /
+	// CreateIssue.
+	if _, err := uuid.Parse(req.WorkspaceID); err != nil {
+		writeError(w, http.StatusBadRequest, "workspace_id is invalid")
 		return
 	}
 	if req.Project.Title == "" {
@@ -410,26 +532,36 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 
 	// --- Pin project (and welcome issue if present) ---
 	// Non-fatal: a pin failure shouldn't prevent the onboarding bundle
-	// from landing. We warn and move on.
+	// from landing. We warn and move on. Pointers to the created rows
+	// are kept around for post-commit `pin:created` fan-out so the
+	// sidebar refreshes without a manual reload.
 	pinnedProjectPos := float64(1)
-	if _, err := qtx.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
+	var pinProjectForEvent *db.PinnedItem
+	pinProject, err := qtx.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
 		WorkspaceID: parseUUID(req.WorkspaceID),
 		UserID:      parseUUID(userID),
 		ItemType:    "project",
 		ItemID:      project.ID,
 		Position:    pinnedProjectPos,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("import starter content: pin project failed", append(logger.RequestAttrs(r), "error", err)...)
+	} else {
+		pinProjectForEvent = &pinProject
 	}
+	var pinWelcomeIssueForEvent *db.PinnedItem
 	if welcomeIssueForEvent != nil {
-		if _, err := qtx.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
+		pinWelcome, err := qtx.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
 			WorkspaceID: parseUUID(req.WorkspaceID),
 			UserID:      parseUUID(userID),
 			ItemType:    "issue",
 			ItemID:      welcomeIssueForEvent.ID,
 			Position:    pinnedProjectPos + 1,
-		}); err != nil {
+		})
+		if err != nil {
 			slog.Warn("import starter content: pin welcome issue failed", append(logger.RequestAttrs(r), "error", err)...)
+		} else {
+			pinWelcomeIssueForEvent = &pinWelcome
 		}
 	}
 
@@ -467,6 +599,21 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 		subResp := issueToResponse(sub, workspacePrefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": subResp})
 	}
+	// Pin events. Without these, the sidebar's `pinListOptions` query
+	// stays cached on the pre-import snapshot — only a hard refresh
+	// surfaces the new pins. Same payload shape as `POST /pins`.
+	if pinProjectForEvent != nil {
+		h.publish(protocol.EventPinCreated, req.WorkspaceID, "member", userID, map[string]any{"pin": pinnedItemToResponse(*pinProjectForEvent)})
+	}
+	if pinWelcomeIssueForEvent != nil {
+		h.publish(protocol.EventPinCreated, req.WorkspaceID, "member", userID, map[string]any{"pin": pinnedItemToResponse(*pinWelcomeIssueForEvent)})
+	}
+
+	starterBranch := analytics.StarterContentBranchSelfServe
+	if hasAgent {
+		starterBranch = analytics.StarterContentBranchAgentGuided
+	}
+	h.Analytics.Capture(analytics.StarterContentDecided(userID, req.WorkspaceID, "imported", starterBranch))
 
 	writeJSON(w, http.StatusOK, importStarterContentResponse{
 		User:           userToResponse(updatedUser),
@@ -475,14 +622,39 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type dismissStarterContentRequest struct {
+	// WorkspaceID is optional but strongly preferred — when present the
+	// server derives the starter branch (agent_guided / self_serve) by
+	// looking at the workspace's current agent list, so analytics can
+	// split dismiss rate by branch the same way import is split.
+	// Without it, branch defaults to self_serve (the zero-agent case).
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
 // DismissStarterContent records the user's decision to skip starter
 // content. Like Import, this is a NULL -> terminal transition; a
 // second call returns 409 with the current state.
+//
+// Emits `starter_content_decided` with `decision=dismissed`. The
+// `branch` property mirrors what ImportStarterContent would have
+// written for the same workspace, so the two-sided funnel (import vs
+// dismiss by branch) stays directly comparable.
 func (h *Handler) DismissStarterContent(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
+
+	// Body is optional for backward-compat with callers that pre-date
+	// the workspace-id addition. An empty body is a legal dismiss.
+	var req dismissStarterContentRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
 	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load user")
@@ -495,6 +667,27 @@ func (h *Handler) DismissStarterContent(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+
+	// Resolve branch before the update so the analytics event mirrors
+	// the import-side logic exactly. An unresolvable workspace (malformed
+	// UUID, user not a member, or empty body) falls back to self_serve —
+	// the conservative default that matches what Import would emit when
+	// ListAgents returns empty.
+	branch := analytics.StarterContentBranchSelfServe
+	if req.WorkspaceID != "" {
+		if _, err := uuid.Parse(req.WorkspaceID); err == nil {
+			if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+				UserID:      parseUUID(userID),
+				WorkspaceID: parseUUID(req.WorkspaceID),
+			}); err == nil {
+				agents, err := h.Queries.ListAgents(r.Context(), parseUUID(req.WorkspaceID))
+				if err == nil && len(agents) > 0 {
+					branch = analytics.StarterContentBranchAgentGuided
+				}
+			}
+		}
+	}
+
 	updated, err := h.Queries.SetStarterContentState(r.Context(), db.SetStarterContentStateParams{
 		ID:                  parseUUID(userID),
 		StarterContentState: pgtype.Text{String: "dismissed", Valid: true},
@@ -503,6 +696,9 @@ func (h *Handler) DismissStarterContent(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to record dismiss")
 		return
 	}
+
+	h.Analytics.Capture(analytics.StarterContentDecided(userID, req.WorkspaceID, "dismissed", branch))
+
 	writeJSON(w, http.StatusOK, userToResponse(updated))
 }
 

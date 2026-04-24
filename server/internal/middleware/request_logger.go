@@ -12,7 +12,7 @@ import (
 // It replaces Chi's built-in chimw.Logger with colored, structured output.
 func RequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip noisy endpoints.
+		// Skip the hot liveness endpoint to keep logs readable.
 		if r.URL.Path == "/health" {
 			next.ServeHTTP(w, r)
 			return
@@ -37,6 +37,17 @@ func RequestLogger(next http.Handler) http.Handler {
 		}
 		if uid := r.Header.Get("X-User-ID"); uid != "" {
 			attrs = append(attrs, "user_id", uid)
+		}
+		if platform, version, os := ClientMetadataFromContext(r.Context()); platform != "" || version != "" || os != "" {
+			if platform != "" {
+				attrs = append(attrs, "client_platform", platform)
+			}
+			if version != "" {
+				attrs = append(attrs, "client_version", version)
+			}
+			if os != "" {
+				attrs = append(attrs, "client_os", os)
+			}
 		}
 
 		switch {

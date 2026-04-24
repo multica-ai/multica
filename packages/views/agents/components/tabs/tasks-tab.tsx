@@ -106,11 +106,18 @@ export function TasksTab({ agent }: { agent: Agent }) {
           {sortedTasks.map((task) => {
             const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
             const Icon = config.icon;
-            // Tasks without a linked issue (autopilot run_only, chat-spawned,
-            // etc.) carry issue_id = "" — skip the lookup and render them
-            // as non-link rows.
+            // Tasks without a linked issue carry issue_id = "" — skip the
+            // detail lookup and render them as non-link rows. The source
+            // label is picked from chat_session_id / autopilot_run_id,
+            // which the server populates for chat- and autopilot-spawned
+            // tasks respectively.
             const hasIssue = task.issue_id !== "";
             const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
+            const sourcelessLabel = task.chat_session_id
+              ? "Chat session"
+              : task.autopilot_run_id
+                ? "Autopilot run"
+                : "Task without linked issue";
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
             const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
@@ -136,7 +143,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? (hasIssue ? `Issue ${task.issue_id.slice(0, 8)}...` : "Task without linked issue")}
+                      {issue?.title ?? (hasIssue ? `Issue ${task.issue_id.slice(0, 8)}...` : sourcelessLabel)}
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">

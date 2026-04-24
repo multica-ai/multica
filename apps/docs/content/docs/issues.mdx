@@ -1,0 +1,79 @@
+---
+title: Issues and projects
+description: Multica's core unit of work — assignable to a person or to an agent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+An issue is a self-contained unit of work in Multica — a bug, a new feature, a thing that needs doing. Every issue has a **title**, a **description** (Markdown supported), a **status**, a **priority**, an **assignee**, and optionally belongs to a **project**. If you've used Linear or Jira, this is the same shape.
+
+**Multica's defining trait is that an issue's assignee can be a person or an [agent](/agents)** — which is where we'll start.
+
+## Assigning an issue to an agent
+
+[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — executing within seconds, reporting progress in comments, and flipping the status to done when finished. The only difference from handing work to a teammate is that an agent doesn't go offline, doesn't need reminders, and is available 24/7.
+
+<Callout type="info">
+For agent identity, configuration, and where they run, see [Agents](/agents).
+</Callout>
+
+Private agents can only be assigned to issues by workspace owners and admins. For role permissions, see [Members and roles](/members-roles).
+
+## Status
+
+Multica has seven statuses. **Any status can move directly to any other** — Multica doesn't impose a workflow, and won't stop you from jumping from `backlog` straight to `done`.
+
+| Status | Meaning |
+|---|---|
+| `backlog` | Not scheduled yet |
+| `todo` | Scheduled, ready to start |
+| `in_progress` | Being worked on |
+| `in_review` | Awaiting review |
+| `done` | Completed |
+| `blocked` | Stuck on an external factor |
+| `cancelled` | Cancelled |
+
+Once an issue is assigned to an agent, the agent automatically moves the status from `backlog` / `todo` to `in_progress`, then to `done` on completion. You can also change it manually at any time.
+
+## Priority
+
+Priority has five levels, used to order the default issue list:
+
+| Priority | Use |
+|---|---|
+| `No priority` | Not decided yet (default) |
+| `Urgent` | Urgent |
+| `High` | High |
+| `Medium` | Medium |
+| `Low` | Low |
+
+## Issue numbers
+
+Every issue has a workspace-unique number in the format `<prefix>-<digits>` — for example `MUL-123`. The number is assigned by the system at creation time and **never changes**. See [Workspaces → Issue numbers](/workspaces#issue-numbers).
+
+## Comments
+
+The comment thread under an issue is where collaboration happens — reply to a comment, `@` a person or agent, add a reaction.
+
+`@` an agent in a comment and **it triggers automatically** — this is the second way to start an agent, alongside "assign to." See [Comments and mentions](/comments) and [Mentioning agents in comments](/mentioning-agents).
+
+## Deleting an issue
+
+<Callout type="warning">
+Deleting an issue **immediately** clears every comment, reaction, and attachment under it, along with any queued agent tasks (running tasks are cancelled). **It cannot be undone.**
+
+If you just want the issue out of sight, **changing the status to `cancelled` is safer than deleting** — the data stays, and you can pull it back later.
+</Callout>
+
+## Projects
+
+A project is a container that groups multiple issues together. An issue belongs to at most one project, or to no project at all.
+
+Projects have their own **lead** — **just like an issue's assignee, a lead can be a person or an agent**.
+
+Deleting a project **does not delete the issues inside it**: those issues simply detach from the project and remain in the workspace.
+
+## Next
+
+- [Comments and mentions](/comments) — collaborating under an issue
+- [Agents](/agents) — understand how "assign to an agent" actually works

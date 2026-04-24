@@ -1,0 +1,85 @@
+---
+title: Autopilots
+description: 让智能体按 cron 定时自己开工——或通过 UI / CLI 手动触发一次。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Autopilots 让 [智能体](/agents) **按调度自动开工**——配好 cron 和时区，到点 Multica 自己派发 [`task`](/tasks)，不需要你每次触发。适合定期巡检、周期性报告、凌晨跑的清理任务这类"standing order"场景。和前三种触发方式（[分配](/assigning-issues) / [@ 提及](/mentioning-agents) / [对话](/chat) 都是你主动喊一声）相比，Autopilots 的核心差别是**时间驱动**。
+
+## 配置一个 Autopilot
+
+在工作区的 **Autopilot** 页新建一条 autopilot，要定下：
+
+- **名字** — 显示名
+- **执行智能体** — 到点派给谁
+- **优先级** — 继承给它产生的 `task`（语义同 issue 优先级）
+- **描述 / Prompt** — 智能体每次执行拿到的工作说明
+- **执行模式** — 见下节
+- **触发器** — 至少加一条 `schedule`（cron + 时区）
+
+## 选择执行模式
+
+Autopilot 有两种执行模式，**建议从"先建 issue 模式"开始**：
+
+- **先建 issue 模式**（`create_issue`）—— 默认，**推荐**。每次触发先在工作区里建一个 issue（标题支持 `{{date}}` 这样的插值），再按分配流程把 issue 派给智能体。所有工作都落在 issue 看板上，历史、评论、状态和手动分配的 issue 完全一致。
+- **直跑模式**（`run_only`）—— 不建 issue，直接入队一个 `task`。看板上看不到这一次运行——只能在 Autopilot 的运行历史里看到。
+
+<Callout type="warning">
+**直跑模式当前不稳定**——目前在 CLI 里被标注为"not yet supported end-to-end"，派发路径有已知问题。新用户只使用先建 issue 模式，等直跑模式 ship 稳定版再切。
+</Callout>
+
+## 让它按时间跑
+
+每个 Autopilot 至少要一个 `schedule` 触发器。Cron 是**标准 5 字段格式**（分 时 日 月 周），最小粒度 **1 分钟**（没有秒级）。时区用 IANA 格式（例如 `Asia/Shanghai`），决定 cron 表达式按哪个时区解读。
+
+几个例子：
+
+- `0 9 * * 1-5`，`Asia/Shanghai` —— 工作日北京时间早上 9 点
+- `*/30 * * * *`，`UTC` —— 每 30 分钟一次
+- `0 3 * * *`，`UTC` —— 每天 UTC 凌晨 3 点
+
+Multica 服务器每 **30 秒**扫一次到期的触发器——**触发时刻最多延迟 30 秒**，不是秒级精准。服务器重启时如果恰好错过触发点，启动时会补扫漏掉的触发（不会丢触发，但会立刻补跑）。
+
+## 手动触发一次
+
+调试 Autopilot 时不想等 cron，可以手动触发一次：
+
+- UI：在 Autopilot 详情页点"手动运行"
+- CLI：
+
+```bash
+multica autopilot trigger <autopilot-id>
+```
+
+手动触发走和 `schedule` 触发完全相同的执行流程，只是运行记录里 `source` 字段标为 `manual`。
+
+## 看运行历史
+
+每次触发都会产生一条**运行记录**（run），可以在 Autopilot 详情页的"历史"tab 看到：
+
+- 触发源（`schedule` / `manual`）
+- 开始时间、完成时间
+- 状态（`issue_created` / `running` / `completed` / `failed`）
+- 关联的 issue（先建 issue 模式）或 `task`（直跑模式）
+- 失败原因（如果失败）
+
+## Autopilot 失败会怎样
+
+<Callout type="warning">
+**Autopilot 失败不自动重试，也不发 inbox 通知。** 失败后只在运行历史里留一条 `failed` 记录——不会像分配 / @ 提及那样由系统重新排队，也不会给任何人发通知。如果这条 Autopilot 是周期任务，**下一次 cron 到点会重新触发一次**（新的 run），但这一次失败的工作不会被自动补跑。
+
+如果 Autopilot 很重要，要自己设计监控——例如让智能体在成功时给自己发个评论，通过缺失评论来发现失败。
+</Callout>
+
+不自动重试的理由：Autopilot 本身是周期性的，系统层再加自动重试容易和下一次调度叠加，产生重复执行。调度权完全交给 cron 最干净。
+
+## 暂不可用的能力
+
+**Webhook 和 API 触发暂不可用**。Autopilot 的触发器类型在 schema 里预留了 `webhook` 和 `api` 两种，但**还没接入站路由**——UI 可以创建这两类触发器，不会真的触发。目前**只有 `schedule` 和手动触发是端到端可用的**。
+
+## 下一步
+
+- [**分配 issue 给智能体**](/assigning-issues) —— 一次性把 issue 指派给智能体
+- [**在评论里 @ 智能体**](/mentioning-agents) —— 评论里让智能体看一眼
+- [**对话**](/chat) —— 独立于 issue 的一对一聊天

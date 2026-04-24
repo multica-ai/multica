@@ -109,4 +109,71 @@ func TestPostJSON(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+
+	t.Run("client identity headers", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("X-Client-Platform"); got != "cli-test" {
+				t.Errorf("expected X-Client-Platform cli-test, got %s", got)
+			}
+			if got := r.Header.Get("X-Client-Version"); got != "9.9.9" {
+				t.Errorf("expected X-Client-Version 9.9.9, got %s", got)
+			}
+			if got := r.Header.Get("X-Client-OS"); got != "linux" {
+				t.Errorf("expected X-Client-OS linux, got %s", got)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "")
+		client.Platform = "cli-test"
+		client.Version = "9.9.9"
+		client.OS = "linux"
+		if err := client.PostJSON(context.Background(), "/test", reqBody{}, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("client identity headers fall back to package defaults", func(t *testing.T) {
+		origPlatform, origVersion, origOS := ClientPlatform, ClientVersion, ClientOS
+		ClientPlatform = "cli"
+		ClientVersion = "1.2.3-test"
+		ClientOS = "macos"
+		t.Cleanup(func() {
+			ClientPlatform, ClientVersion, ClientOS = origPlatform, origVersion, origOS
+		})
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("X-Client-Platform"); got != "cli" {
+				t.Errorf("expected X-Client-Platform cli, got %s", got)
+			}
+			if got := r.Header.Get("X-Client-Version"); got != "1.2.3-test" {
+				t.Errorf("expected X-Client-Version 1.2.3-test, got %s", got)
+			}
+			if got := r.Header.Get("X-Client-OS"); got != "macos" {
+				t.Errorf("expected X-Client-OS macos, got %s", got)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "")
+		if err := client.PostJSON(context.Background(), "/test", reqBody{}, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestNormalizeGOOS(t *testing.T) {
+	cases := map[string]string{
+		"darwin":  "macos",
+		"windows": "windows",
+		"linux":   "linux",
+		"freebsd": "freebsd",
+	}
+	for in, want := range cases {
+		if got := normalizeGOOS(in); got != want {
+			t.Errorf("normalizeGOOS(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

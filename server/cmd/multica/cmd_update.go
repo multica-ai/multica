@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+var updateDownloadTimeout time.Duration = cli.DefaultUpdateDownloadTimeout
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
@@ -16,7 +19,15 @@ var updateCmd = &cobra.Command{
 	RunE:  runUpdate,
 }
 
+func init() {
+	updateCmd.Flags().DurationVar(&updateDownloadTimeout, "download-timeout", cli.DefaultUpdateDownloadTimeout, "Maximum time to wait for the release archive download")
+}
+
 func runUpdate(_ *cobra.Command, _ []string) error {
+	if updateDownloadTimeout <= 0 {
+		return fmt.Errorf("download timeout must be greater than zero")
+	}
+
 	fmt.Fprintf(os.Stderr, "Current version: %s (commit: %s, built: %s)\n", version, commit, date)
 
 	// Check latest version from GitHub.
@@ -51,7 +62,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 	targetVersion := latest.TagName
 	fmt.Fprintf(os.Stderr, "Downloading %s from GitHub Releases...\n", targetVersion)
-	output, err := cli.UpdateViaDownload(targetVersion)
+	output, err := cli.UpdateViaDownloadWithTimeout(targetVersion, updateDownloadTimeout)
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}

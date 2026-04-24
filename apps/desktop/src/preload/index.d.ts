@@ -1,6 +1,11 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 
 interface DesktopAPI {
+  /** App version + normalized OS, captured synchronously at preload time. */
+  appInfo: {
+    version: string;
+    os: "macos" | "windows" | "linux" | "unknown";
+  };
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */

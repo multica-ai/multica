@@ -85,6 +85,11 @@ type AgentTaskQueue struct {
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
 	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
+	Attempt          int32              `json:"attempt"`
+	MaxAttempts      int32              `json:"max_attempts"`
+	ParentTaskID     pgtype.UUID        `json:"parent_task_id"`
+	FailureReason    pgtype.Text        `json:"failure_reason"`
+	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
 }
 
 type Attachment struct {
@@ -104,11 +109,9 @@ type Attachment struct {
 type Autopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	ProjectID          pgtype.UUID        `json:"project_id"`
 	Title              string             `json:"title"`
 	Description        pgtype.Text        `json:"description"`
 	AssigneeID         pgtype.UUID        `json:"assignee_id"`
-	Priority           string             `json:"priority"`
 	Status             string             `json:"status"`
 	ExecutionMode      string             `json:"execution_mode"`
 	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
@@ -213,6 +216,15 @@ type DaemonToken struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	DaemonID    string             `json:"daemon_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Feedback struct {
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Message     string             `json:"message"`
+	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 

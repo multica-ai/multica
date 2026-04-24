@@ -17,6 +17,8 @@ import (
 	"time"
 )
 
+const DefaultUpdateDownloadTimeout = 120 * time.Second
+
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
 	TagName string               `json:"tag_name"`
@@ -164,9 +166,21 @@ func UpdateViaBrew() (string, error) {
 	return string(out), nil
 }
 
+func updateDownloadTimeoutOrDefault(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return DefaultUpdateDownloadTimeout
+	}
+	return timeout
+}
+
 // UpdateViaDownload downloads the latest release binary from GitHub and replaces
 // the current executable in-place. Returns the combined output message and any error.
 func UpdateViaDownload(targetVersion string) (string, error) {
+	return UpdateViaDownloadWithTimeout(targetVersion, DefaultUpdateDownloadTimeout)
+}
+
+// UpdateViaDownloadWithTimeout downloads the latest release binary with a caller-selected timeout.
+func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Duration) (string, error) {
 	// Determine current binary path.
 	exePath, err := os.Executable()
 	if err != nil {
@@ -190,7 +204,7 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 	assetName := asset.Name
 
 	// Download the archive.
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: updateDownloadTimeoutOrDefault(downloadTimeout)}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)

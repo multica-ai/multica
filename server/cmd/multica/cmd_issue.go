@@ -132,6 +132,13 @@ var issueRunMessagesCmd = &cobra.Command{
 	RunE:  runIssueRunMessages,
 }
 
+var issueRerunCmd = &cobra.Command{
+	Use:   "rerun <id>",
+	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
+	Args:  exactArgs(1),
+	RunE:  runIssueRerun,
+}
+
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search issues by title or description",
@@ -154,6 +161,7 @@ func init() {
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
+	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
@@ -215,6 +223,9 @@ func init() {
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue rerun
+	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
@@ -902,6 +913,28 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 // ---------------------------------------------------------------------------
 // Search command
 // ---------------------------------------------------------------------------
+
+func runIssueRerun(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var task map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/rerun", map[string]any{}, &task); err != nil {
+		return fmt.Errorf("rerun issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, task)
+	}
+	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), strVal(task, "agent_id"))
+	return nil
+}
 
 func runIssueSearch(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)

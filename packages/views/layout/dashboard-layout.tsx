@@ -8,7 +8,7 @@ import { DashboardGuard } from "./dashboard-guard";
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  /** Rendered inside SidebarInset (e.g. ChatWindow, ChatFab — absolute-positioned overlays) */
+  /** Rendered inside SidebarInset — absolute-positioned overlays */
   extra?: ReactNode;
   /** Rendered inside sidebar header as a search trigger */
   searchSlot?: ReactNode;

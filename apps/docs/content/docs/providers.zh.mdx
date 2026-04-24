@@ -1,0 +1,114 @@
+---
+title: AI 编程工具对照
+description: Multica 支持 10 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 内置支持 **10 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+
+创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
+
+## 能力对照矩阵
+
+| 工具 | 厂商 | 会话恢复 | MCP | Skill 注入路径 | 模型选择 |
+|---|---|---|---|---|---|
+| **Claude Code** | Anthropic | ✅ | **✅（唯一真用）** | `.claude/skills/` | 静态 + flag |
+| **Codex** | OpenAI | ⚠️ 代码存在但不可达 | ❌ | `$CODEX_HOME/skills/` | 静态 |
+| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
+| **Cursor** | Anysphere | ⚠️ 代码存在但不可用 | ❌ | `.cursor/skills/` | 动态发现 |
+| **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | 静态 |
+| **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` （fallback）| 动态发现 |
+| **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | 动态发现 |
+| **OpenCode** | SST | ✅ | ❌ | `.config/opencode/skills/` | 动态发现 |
+| **OpenClaw** | 开源项目 | ✅ | ❌ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
+| **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/agent/skills/` | 动态发现 |
+
+## 每款工具的定位
+
+### Claude Code
+
+Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用，是 **10 款里唯一真读 MCP 配置**的工具，支持 `--max-turns`、`--append-system-prompt` 等细调参数。需要一个 Anthropic API 密钥。
+
+### Codex
+
+OpenAI 出品。使用 JSON-RPC 2.0 协议，状态化更强，approve 机制更细（手动批准 `exec_command` 和 `patch_apply`）。**会话恢复代码存在但当前不可达**——如果你需要 resume，选 Claude Code 或 ACP 系列。
+
+### Copilot
+
+GitHub 出品。模型路由走你的 GitHub 账号权益——工具自己不做模型选择，由 GitHub 决定给你用哪个模型。skill 放 `.github/skills/` 是 GitHub CLI 的原生发现机制。
+
+### Cursor
+
+Anysphere 出品，Cursor 编辑器的 CLI 对应物。**会话恢复代码存在但实际不工作**——Cursor CLI 的事件流里不回传 session ID，所以你传的 resume 值永远无效。如果要 resume，选别的。
+
+### Gemini
+
+Google 出品，支持 Gemini 2.5 和 3 系列。**不支持会话恢复也不支持 MCP**——适合一次性、不需要长上下文记忆的任务。
+
+### Hermes
+
+Nous Research 出品。使用 ACP 协议（和 Kimi 共享传输层）。会话恢复真用。但 **skill 注入路径是通用 fallback**（`.agent_context/skills/`），不是专用路径——如果 Hermes CLI 本身不读这路径，skill 对它可能不起作用。需要结合实测再确认。
+
+### Kimi
+
+Moonshot 出品，中国市场向。和 Hermes 共享 ACP 协议，但 skill 路径 `.kimi/skills/` 是 Kimi CLI 的原生发现机制——和 Hermes 的 fallback 不一样。
+
+### OpenCode
+
+SST 出品，开源。动态发现可用模型（扫 CLI 的配置文件）。会话恢复真用。**适合爱折腾、想自定义模型目录**的开发者。
+
+### OpenClaw
+
+开源项目，CLI agent 编排器。**模型绑定在智能体层**（`openclaw agents add --model`）——不能在单次任务里覆盖。配置严格受控：用户不能传 `--model` 或 `--system-prompt`，由智能体注册时的配置决定。
+
+### Pi
+
+Inflection AI 出品，极简主义。**会话恢复机制特殊**——session ID 是磁盘上的文件路径（`~/.pi/...`），而不是字符串 ID。其他工具里，resume id 是 CLI 返回的字符串；Pi 里，resume id 就是会话文件本身。
+
+## 会话恢复：谁真的支持
+
+会话恢复的机制在 [执行任务](/tasks#任务能接着上次的上下文继续吗) 里讲过。这里按工具列**精确现状**：
+
+| 状态 | 工具 | 含义 |
+|---|---|---|
+| ✅ 真用 | Claude Code、Copilot、Hermes、Kimi、OpenCode、OpenClaw、Pi | 传 resume id，会从上次上下文接着继续 |
+| ⚠️ 代码存在但不可达 | Codex、Cursor | 代码里有 resume 路径但实际走不到（Codex 静默回落、Cursor session id 不回传）—— **当作不支持** |
+| ❌ 无 | Gemini | CLI 无 resume 机制 |
+
+**对你的决策**：如果工作流需要智能体在多次任务之间保持上下文（失败重试、手动重跑、对话式迭代），只选 ✅ 那一行的工具。
+
+## MCP 配置：只有 Claude Code 真的读
+
+**10 款工具里只有 Claude Code 实际消费 `mcp_config`**。其他 9 款会接收这个字段但**完全忽略**——不报错、不警告，只是配置不生效。
+
+<Callout type="warning">
+如果你在智能体配置里设置了 `mcp_config`，但选了 Claude Code 之外的工具，你的 MCP server 对这个智能体**没有效果**。目前的 MCP 集成只覆盖 Claude Code。
+</Callout>
+
+## skill 文件该放哪儿
+
+每款工具用**自己**的 skill 发现路径。Multica 的守护进程在执行任务前把 workspace 的 skill 文件复制到对应路径下：
+
+| 工具 | 路径 | 是否原生发现 |
+|---|---|---|
+| Claude Code | `.claude/skills/` | ✅ 原生 |
+| Codex | `$CODEX_HOME/skills/` | ✅ 原生 |
+| Copilot | `.github/skills/` | ✅ 原生 |
+| Cursor | `.cursor/skills/` | ✅ 原生 |
+| Kimi | `.kimi/skills/` | ✅ 原生 |
+| OpenCode | `.config/opencode/skills/` | ✅ 原生 |
+| Pi | `.pi/agent/skills/` | ✅ 原生 |
+| Gemini | `.agent_context/skills/` | ⚠️ 通用 fallback |
+| Hermes | `.agent_context/skills/` | ⚠️ 通用 fallback |
+| OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |
+
+fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 Gemini / Hermes / OpenClaw 没起效，先查这个问题。
+
+skill 的创建和使用详见 [技能](/skills)。
+
+## 下一步
+
+- [创建和配置智能体](/agents-create) —— 给你的智能体挑一款工具
+- [执行任务](/tasks) —— 任务的生命周期和会话恢复机制
+- [守护进程与运行时](/daemon-runtimes) —— 工具跑在哪里、怎么连进 Multica

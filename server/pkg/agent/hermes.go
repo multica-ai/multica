@@ -47,6 +47,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
+	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -180,10 +181,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			sessionID = opts.ResumeSessionID
 			_ = result
 		} else {
-			result, err := c.request(runCtx, "session/new", map[string]any{
-				"cwd":        cwd,
-				"mcpServers": []any{},
-			})
+			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
@@ -973,6 +971,20 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// buildHermesSessionParams constructs the params map for the ACP `session/new`
+// request. The `model` field is only included when non-empty so Hermes falls
+// back to its default only when no explicit model was configured.
+func buildHermesSessionParams(cwd, model string) map[string]any {
+	params := map[string]any{
+		"cwd":        cwd,
+		"mcpServers": []any{},
+	}
+	if model != "" {
+		params["model"] = model
+	}
+	return params
 }
 
 // hermesToolNameFromTitle extracts a tool name from the ACP tool call title.

@@ -52,6 +52,8 @@
     "./pins": "./pins/index.ts",
     "./pins/queries": "./pins/queries.ts",
     "./pins/mutations": "./pins/mutations.ts",
+    "./feedback": "./feedback/index.ts",
+    "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",
     "./navigation": "./navigation/index.ts",
     "./modals": "./modals/index.ts",

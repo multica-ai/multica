@@ -24,6 +24,10 @@
       "cache": false,
       "persistent": true
     },
+    "dev:staging": {
+      "cache": false,
+      "persistent": true
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"]
     },

@@ -1,0 +1,129 @@
+---
+title: CLI 命令速查
+description: Multica CLI 的所有顶级命令一页概览。完整用法查 `multica <命令> --help`。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica CLI 把 Web UI 能做的事几乎全部搬到了命令行上（创建 [issue](/issues)、分配 [智能体](/agents)、启动 [守护进程](/daemon-runtimes) 等等）。这一页把所有顶级命令列出来，每条配一句用途。完整 flag 和示例用 `multica <命令> --help` 查。
+
+## 认证入口
+
+第一次用 CLI 时先登录，拿一个**个人访问令牌（Personal Access Token，PAT）**：
+
+```bash
+multica login
+```
+
+浏览器会自动打开，你在 Web 端同意后，CLI 把 PAT（`mul_` 前缀）保存到 `~/.multica/config.json`。此后所有命令都会自动用这个 PAT 认证。
+
+<Callout type="tip">
+CI / 无浏览器环境跳过浏览器流程：先在 Web 端 **Settings → Personal Access Tokens** 创建一个 PAT，然后 `multica login --token <mul_...>` 直接填入。
+</Callout>
+
+Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
+
+## 认证与初始化
+
+| 命令 | 用途 |
+|---|---|
+| `multica login` | 登录并保存 PAT |
+| `multica auth status` | 查看当前登录状态、用户、工作区 |
+| `multica auth logout` | 清除本地 PAT |
+| `multica setup cloud` | Multica Cloud 一键初始化（登录 + 装 daemon） |
+| `multica setup self-host` | 自部署后端的一键初始化 |
+
+## 工作区和成员
+
+| 命令 | 用途 |
+|---|---|
+| `multica workspace list` | 列出你有权访问的所有工作区 |
+| `multica workspace get <slug>` | 查看一个工作区的详情 |
+| `multica workspace members` | 列出当前工作区的成员 |
+
+## Issue 和 Project
+
+| 命令 | 用途 |
+|---|---|
+| `multica issue list` | 列出 issue |
+| `multica issue get <id>` | 查看单条 issue |
+| `multica issue create --title "..."` | 创建新 issue |
+| `multica issue update <id> ...` | 修改 issue（状态、优先级、分配人等） |
+| `multica issue assign <id> --agent <slug>` | 分配给智能体（立即触发任务） |
+| `multica issue status <id> --set <status>` | 快捷改状态 |
+| `multica issue search <query>` | 关键字搜索 |
+| `multica issue runs <id>` | 查看 issue 上智能体跑过的任务 |
+| `multica issue rerun <id>` | 重跑最近一次智能体任务 |
+| `multica issue comment <id> ...` | 嵌套：看 / 发评论 |
+| `multica issue subscriber <id> ...` | 嵌套：订阅 / 取消订阅 |
+| `multica project list/get/create/update/delete/status` | Project CRUD |
+
+## 智能体和 Skill
+
+| 命令 | 用途 |
+|---|---|
+| `multica agent list` | 列出工作区的智能体 |
+| `multica agent get <slug>` | 查看智能体配置 |
+| `multica agent create ...` | 创建智能体 |
+| `multica agent update <slug> ...` | 修改智能体 |
+| `multica agent archive <slug>` | 归档 |
+| `multica agent restore <slug>` | 恢复归档的智能体 |
+| `multica agent tasks <slug>` | 查看智能体的任务历史 |
+| `multica agent skills ...` | 嵌套：挂载 / 卸载 Skill |
+| `multica skill list/get/create/update/delete` | Skill CRUD |
+| `multica skill import ...` | 从 GitHub / ClawHub / 本机导入 Skill |
+| `multica skill files ...` | 嵌套：管理 Skill 的文件 |
+
+## Autopilots
+
+| 命令 | 用途 |
+|---|---|
+| `multica autopilot list` | 列出工作区所有 autopilot |
+| `multica autopilot get <id>` | 查看单个 autopilot |
+| `multica autopilot create ...` | 创建 autopilot |
+| `multica autopilot update <id> ...` | 修改 |
+| `multica autopilot delete <id>` | 删除 |
+| `multica autopilot runs <id>` | 查看运行历史 |
+| `multica autopilot trigger <id>` | 手动触发一次 |
+
+## 守护进程和运行时
+
+| 命令 | 用途 |
+|---|---|
+| `multica daemon start` | 启动 daemon（默认后台；加 `--foreground` 前台跑）|
+| `multica daemon stop` | 停止 daemon |
+| `multica daemon restart` | 重启 daemon |
+| `multica daemon status` | 查看 daemon 是否在线 + 并发情况 |
+| `multica daemon logs` | 查看 daemon 日志 |
+| `multica runtime list` | 列出当前工作区的 runtime |
+| `multica runtime usage` | 查看资源使用情况 |
+| `multica runtime activity` | 近期活动记录 |
+| `multica runtime ping <id>` | 立即戳一次 runtime 检查在线 |
+| `multica runtime update <id> ...` | 更新 runtime 配置 |
+
+## 杂项
+
+| 命令 | 用途 |
+|---|---|
+| `multica repo checkout <url>` | 把 repo 拉到本地以供智能体使用 |
+| `multica config` | 查看 / 修改 CLI 本地配置 |
+| `multica version` | 显示 CLI 版本 |
+| `multica update` | 升级 CLI 到最新版 |
+| `multica attachment download <id>` | 下载 issue / 评论的附件 |
+
+## 查完整 flag
+
+每条命令都支持 `--help`：
+
+```bash
+multica issue create --help
+multica agent update --help
+```
+
+v2 会给每条命令一个独立的详细 reference 页。
+
+## 下一步
+
+- [认证与令牌](/auth-tokens) —— PAT / JWT / Daemon Token 的区别
+- [守护进程与运行时](/daemon-runtimes) —— `daemon` 命令背后的工作机制
+- [创建和配置智能体](/agents-create) —— `multica agent create` 的完整选项

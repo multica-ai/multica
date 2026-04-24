@@ -82,14 +82,6 @@ describe("StepPlatformFork", () => {
     mocks.joinCloudWaitlist.mockReset();
     resetPicker();
     vi.restoreAllMocks();
-    // Stub navigator so the component's post-hydration isMac check
-    // lands on the macOS branch by default. One test below overrides
-    // this to cover the non-Mac variant.
-    Object.defineProperty(window.navigator, "userAgent", {
-      value:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      configurable: true,
-    });
   });
 
   it("renders the three fork options at rest", () => {
@@ -125,19 +117,23 @@ describe("StepPlatformFork", () => {
     expect(onNext).toHaveBeenCalledWith(null);
   });
 
-  it("opens the download URL and flips the card to a post-click state", async () => {
+  it("opens the download page and flips the card to a post-click state", async () => {
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     const user = userEvent.setup();
     renderFork();
 
     await user.click(screen.getByText(/download the desktop app/i));
 
+    // Routes to the new /download page (not GitHub releases) so the
+    // user lands on the OS auto-detect surface.
     expect(openSpy).toHaveBeenCalledWith(
-      "https://github.com/multica-ai/multica/releases/latest",
+      "/download",
       "_blank",
       "noopener,noreferrer",
     );
-    expect(screen.getByText(/downloading multica/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/continuing on the download page/i),
+    ).toBeInTheDocument();
   });
 
   it("CLI dialog: opens with instructions + 'waiting' and a disabled Connect button", async () => {

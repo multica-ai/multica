@@ -1,0 +1,151 @@
+---
+title: 环境变量
+description: self-host Multica 服务器需要配置的环境变量清单。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量读取配置——数据库、登录、邮件、存储、注册白名单都在这里配。这一页按用途分组给完整清单：每组说清楚**不设会怎样**、**生产必须设哪几个**。Auth 相关那几个怎么真正配见 [登录与注册配置](/auth-setup)。
+
+## 启动必填的五个
+
+这五个是你部署前必须考虑的——有些有默认值能让 server 启动，但生产环境里你应该全部显式配。
+
+| 环境变量 | 默认值 | 生产必须设？ |
+|---|---|---|
+| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **是** |
+| `PORT` | `8080` | 否（除非换端口）|
+| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **是**（默认值不安全）|
+| `APP_ENV` | 空 | **是**（必须 `production`——见下一节陷阱）|
+| `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
+
+<Callout type="warning">
+**`APP_ENV` 不设为 `production`，任何人都能用 `888888` 登录任何账号。** Multica 有一个开发用的主验证码（master code）`888888`——`APP_ENV != "production"` 时**任何邮箱**输 `888888` 都能通过。本地开发时故意留空方便调试；**生产环境一旦不设 `production`，等于 auth 完全失效**。详见 [登录与注册配置 → 888888 陷阱](/auth-setup#888888-陷阱)。
+</Callout>
+
+### 数据库连接池
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `DATABASE_MAX_CONNS` | `25` | pgxpool 最大连接数。守护进程高频轮询（每 3 秒）会占用连接；大规模部署可能需要调高 |
+| `DATABASE_MIN_CONNS` | `5` | 最小常驻连接 |
+
+**不设时**使用上表默认值，**不是** pgx 内置的 4/NumCPU——后者在生产曾引发连接池耗尽。
+
+## 怎么配邮件
+
+Multica 用 [Resend](https://resend.com/) 发验证码和邀请邮件。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `RESEND_API_KEY` | 空 | Resend API key |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名）|
+
+**不设 `RESEND_API_KEY` 时的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发时方便——你从 server 日志里抄验证码；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
+
+## 怎么配 Google OAuth
+
+可选。不设则只有邮箱 + 验证码登录；设了就在登录页出现「用 Google 登录」。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | 空 | Google Cloud OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | 空 | Google Cloud OAuth secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth 回调地址（self-host 换成你的前端域名）|
+
+**热生效**：前端在运行时通过 `/api/config` 拿这些配置，**改了不用重启前端也不用重建镜像**——改完重启 server 即可。
+
+完整配置步骤（含 Google Cloud Console 操作）详见 [登录与注册配置](/auth-setup#怎么配-google-oauth)。
+
+## 怎么配文件存储
+
+Multica 存储用户上传的附件（评论里的图片、文件等）。**优先走 S3**；不配 S3 就回落本地磁盘。
+
+### S3 / S3 兼容存储
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `S3_BUCKET` | 空 | 设了就启用 S3 存储 |
+| `S3_REGION` | `us-west-2` | AWS 区域 |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 空 | 静态凭证。全未设时用 AWS SDK 默认凭证链（IAM role / 环境凭证）|
+| `AWS_ENDPOINT_URL` | 空 | 自定义 S3 兼容端点（例如 [MinIO](https://min.io/)）。设了会切到 path-style URL |
+
+**`S3_BUCKET` 未设时**：server 启动时打 info 日志 `"S3_BUCKET not set, cloud upload disabled"`，所有上传回落到本地磁盘。
+
+### 本地磁盘（S3 未配时）
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | 本地存储目录 |
+| `LOCAL_UPLOAD_BASE_URL` | 空（返回相对路径）| 公开访问的 base URL——不设前端就拿不到附件的完整 URL |
+
+### CloudFront（可选）
+
+如果你用 CloudFront 给 S3 做 CDN，三个相关的环境变量：`CLOUDFRONT_DOMAIN`、`CLOUDFRONT_KEY_PAIR_ID`、`CLOUDFRONT_PRIVATE_KEY`（或从 Secrets Manager 读的 `CLOUDFRONT_PRIVATE_KEY_SECRET`）。不用 CloudFront 就不用管——和配置 S3 不冲突。
+
+### Cookie 域
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `COOKIE_DOMAIN` | 空 | session cookie 的作用域 |
+
+- **空**：cookie 只对访问的那个 host 生效（单主机部署正确）
+- **设成 `.example.com`**：cookie 在所有子域共享（让 `app.example.com` 和 `api.example.com` 共用登录态）
+- ⚠️ 不能是 IP 地址（浏览器会忽略）
+
+## 怎么限制谁能注册
+
+三层白名单按优先级组合。**任何一层白名单一旦设置非空，不匹配的邮箱就会被拒**——即使 `ALLOW_SIGNUP=true` 也挡不住。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `ALLOWED_EMAILS` | 空 | 显式邮箱白名单（逗号分隔）。非空时只有列表里的邮箱能注册 |
+| `ALLOWED_EMAIL_DOMAINS` | 空 | 域名白名单（逗号分隔）。非空时只有列表里的域名能注册 |
+| `ALLOW_SIGNUP` | `true` | 注册总开关。设 `false` 完全关闭注册 |
+
+**不直观的点**：`ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` 的组合**不是**「允许 company.io 或所有人」，而是**只允许 company.io**。白名单的 AND 语义——决策树详见 [登录与注册配置 → Signup 白名单](/auth-setup#怎么限制谁能注册)。
+
+**邀请流程本身不检查 signup 白名单**——但被邀请人必须先能**登录**才能接受邀请。如果对方已经有 Multica 账号（比如在其他工作区注册过），可以直接接受，不受白名单影响；**如果对方还没注册过**，他们登录的第一步（发送验证码）仍然会过白名单检查，被 `ALLOW_SIGNUP=false` 或 `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` 拒绝的邮箱**无法完成注册，也就没法接受邀请**。
+
+## 守护进程的调节参数
+
+守护进程跑在用户本地机器上，配置也是读本地环境变量。常用的几个：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | server 地址（self-host 换成你的域名）|
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳频率 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
+| `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
+| `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
+
+完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+## 前端访问控制
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://app.multica.ai`——self-host 必须显式填 |
+| `CORS_ALLOWED_ORIGINS` | 空 | 额外的 CORS 允许来源（逗号分隔）|
+| `ALLOWED_ORIGINS` | 空 | WebSocket 专用的 origin 白名单（逗号分隔）；不设就按 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` 顺序回落 |
+
+<Callout type="warning">
+**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://app.multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
+</Callout>
+
+## 用量统计
+
+默认上报到 Multica 官方 PostHog 实例。不想上报就把 `ANALYTICS_DISABLED=true`。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `ANALYTICS_DISABLED` | `false` | 设 `true` 完全关闭后端上报 |
+| `POSTHOG_API_KEY` | 内置默认 key | 换成你自己的 PostHog 实例时填 |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | 自建 PostHog 的话改成你自己的地址 |
+
+## 下一步
+
+- [登录与注册配置](/auth-setup) —— 上面 auth 相关的那几个环境变量怎么真的配、陷阱在哪
+- [故障排查](/troubleshooting) —— 配错了常见的症状和修复
+- [守护进程与运行时](/daemon-runtimes) —— `MULTICA_DAEMON_*` 参数的行为含义
