@@ -43,6 +43,10 @@ type IssueResponse struct {
 	UpdatedAt          string                  `json:"updated_at"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	// ProjectRepos is populated on GetIssue when the issue belongs to a project
+	// with repositories configured, so agents can discover repos without a
+	// separate project lookup.
+	ProjectRepos       []RepoData              `json:"project_repos,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -712,6 +716,17 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		resp.Attachments = make([]AttachmentResponse, len(attachments))
 		for i, a := range attachments {
 			resp.Attachments[i] = h.attachmentToResponse(a)
+		}
+	}
+
+	// If the issue belongs to a project, include the project repos so agents
+	// can discover relevant repositories without a separate lookup.
+	if issue.ProjectID.Valid {
+		if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil && proj.Repos != nil {
+			var projectRepos []RepoData
+			if json.Unmarshal(proj.Repos, &projectRepos) == nil && len(projectRepos) > 0 {
+				resp.ProjectRepos = projectRepos
+			}
 		}
 	}
 
