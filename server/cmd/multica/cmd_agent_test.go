@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/spf13/cobra"
 )
 
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
@@ -81,4 +85,63 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 			t.Fatalf("requireWorkspaceID() error = %q, want it to mention agent execution context", err.Error())
 		}
 	})
+}
+
+func TestRunAgentCreateSendsCustomEnv(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agents" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "agent-1",
+			"name": got["name"],
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+
+	cmd := newAgentCreateTestCmd()
+	cmd.Flags().Set("name", "opencode-kimi-k2-6")
+	cmd.Flags().Set("runtime-id", "runtime-1")
+	cmd.Flags().Set("custom-env", `{"OPENCODE_GO_API_KEY":"test-key"}`)
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+
+	customEnv, ok := got["custom_env"].(map[string]any)
+	if !ok {
+		t.Fatalf("custom_env = %#v, want object", got["custom_env"])
+	}
+	if customEnv["OPENCODE_GO_API_KEY"] != "test-key" {
+		t.Fatalf("custom_env OPENCODE_GO_API_KEY = %#v, want test-key", customEnv["OPENCODE_GO_API_KEY"])
+	}
+}
+
+func newAgentCreateTestCmd() *cobra.Command {
+	cmd := testCmd()
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("runtime-config", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("custom-env", "", "")
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("visibility", "private", "")
+	cmd.Flags().Int32("max-concurrent-tasks", 6, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
 }

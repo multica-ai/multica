@@ -182,6 +182,7 @@ Agent-specific overrides:
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `OPENCODE_GO_API_KEY` | OpenCode Go API key for OpenCode Go agents |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
