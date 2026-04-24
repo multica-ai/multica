@@ -211,6 +211,14 @@ cli:
 multica:
 	cd server && go run ./cmd/multica $(MULTICA_ARGS)
 
+daemon-local-install:
+	mkdir -p $(HOME)/.local/bin
+	@VERSION="$$(git describe --tags --always --dirty 2>/dev/null || echo dev)"; \
+	COMMIT="$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"; \
+	DATE="$$(date -u '+%Y-%m-%dT%H:%M:%SZ')"; \
+	cd server && go build -ldflags "-X main.version=$$VERSION -X main.commit=$$COMMIT -X main.date=$$DATE" -o $(HOME)/.local/bin/multica ./cmd/multica; \
+	echo "Installed local daemon CLI to $(HOME)/.local/bin/multica ($$VERSION)"
+
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')

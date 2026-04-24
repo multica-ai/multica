@@ -26,6 +26,7 @@ import type { ChildProgress } from "./list-row";
 export function BoardColumn({
   status,
   label: labelProp,
+  pipelineId,
   issueIds,
   issueMap,
   columnConfig,
@@ -35,6 +36,7 @@ export function BoardColumn({
 }: {
   status: string;
   label?: string;
+  pipelineId?: string | null;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   columnConfig?: WorkspaceColumnConfig;
@@ -144,7 +146,11 @@ export function BoardColumn({
                       variant="ghost"
                       size="icon-sm"
                       className="rounded-full text-muted-foreground"
-                      onClick={() => useModalStore.getState().open("create-issue", { status })}
+                      onClick={() =>
+                        useModalStore.getState().open("create-issue", {
+                          status,
+                          pipeline_id: pipelineId,
+                        })}
                     >
                       <Plus className="size-3.5" />
                     </Button>

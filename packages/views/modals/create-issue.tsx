@@ -103,7 +103,9 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
 
   const wsId = useWorkspaceId();
-  const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
+  const [pipelineId, setPipelineId] = useState<string | undefined>(
+    (data?.pipeline_id as string) || undefined,
+  );
   const { data: rawPipelineColumns = [] } = usePipelineColumns(wsId, pipelineId ?? "");
   const activePipelineColumns = useMemo(
     () =>

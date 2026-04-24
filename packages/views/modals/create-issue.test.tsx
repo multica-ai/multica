@@ -36,6 +36,10 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-123",
+}));
+
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: Object.assign(
     (selector?: (state: typeof mockDraftStore) => unknown) =>
@@ -55,6 +59,10 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
 
 vi.mock("@multica/core/api", () => ({
   api: {},
+}));
+
+vi.mock("@multica/core/pipeline", () => ({
+  usePipelineColumns: () => ({ data: [] }),
 }));
 
 vi.mock("../editor", () => {
@@ -108,6 +116,10 @@ vi.mock("../issues/components", () => ({
   PriorityPicker: () => <div data-testid="priority-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
   DueDatePicker: () => <div data-testid="due-date-picker" />,
+}));
+
+vi.mock("../issues/components/pickers", () => ({
+  IssuePipelinePicker: () => <div data-testid="issue-pipeline-picker" />,
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -202,6 +214,7 @@ describe("CreateIssueModal", () => {
         attachment_ids: undefined,
         parent_issue_id: undefined,
         project_id: undefined,
+        pipeline_id: undefined,
       });
     });
 
@@ -222,5 +235,29 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("uses the incoming pipeline and status when opened from a pipeline column", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{ pipeline_id: "pipe-123", status: "doing" }}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Pipeline-scoped issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Pipeline-scoped issue",
+          status: "doing",
+          pipeline_id: "pipe-123",
+        }),
+      );
+    });
   });
 });

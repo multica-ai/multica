@@ -189,11 +189,18 @@ export function IssuesPage() {
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 columnLabels={columnLabels}
+                activePipelineId={activePipelineId}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} columnLabels={columnLabels} />
+              <ListView
+                issues={issues}
+                visibleStatuses={visibleStatuses}
+                childProgressMap={childProgressMap}
+                columnLabels={columnLabels}
+                activePipelineId={activePipelineId}
+              />
             )}
           </div>
         )}

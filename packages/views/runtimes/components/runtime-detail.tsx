@@ -50,9 +50,24 @@ function getLaunchedBy(metadata: Record<string, unknown>): string | null {
   return null;
 }
 
+function getCliInstallSource(metadata: Record<string, unknown>): string | null {
+  if (
+    metadata &&
+    typeof metadata.cli_install_source === "string" &&
+    metadata.cli_install_source
+  ) {
+    return metadata.cli_install_source;
+  }
+  return null;
+}
+
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
+  const cliInstallSource =
+    runtime.runtime_mode === "local"
+      ? getCliInstallSource(runtime.metadata)
+      : null;
   const launchedBy =
     runtime.runtime_mode === "local" ? getLaunchedBy(runtime.metadata) : null;
 
@@ -150,7 +165,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
 
         {/* CLI Version & Update */}
-        {runtime.runtime_mode === "local" && (
+        {runtime.runtime_mode === "local" && cliInstallSource !== "homebrew" && (
           <div>
             <h3 className="text-xs font-medium text-muted-foreground mb-3">
               CLI Version

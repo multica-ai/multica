@@ -1,0 +1,6 @@
+{"id":"26a1ea88-4c72-42aa-921a-78290a8c5519","ts":"2026-04-22T02:01:03.995Z","severity":"info","message":"Current version: v2.67.0\nChecking npm registry...","source":"notify","read":false}
+{"id":"b257bf0d-a337-4c76-b6db-de455059658c","ts":"2026-04-22T02:01:04.671Z","severity":"info","message":"Updating: v2.67.0 → v2.77.0...","source":"notify","read":false}
+{"id":"18e57bf4-9f65-4d24-920e-ea3c11396339","ts":"2026-04-22T02:01:18.736Z","severity":"info","message":"Updated to v2.77.0. Restart your GSD session to use the new version.","source":"notify","read":false}
+{"id":"d88006a9-a416-4e49-b93b-c2fb719e42f2","ts":"2026-04-22T02:03:21.288Z","severity":"info","message":"No GSD milestones found. Run /gsd to start.","source":"notify","read":false}
+{"id":"b9e7d24d-97a8-4a9f-b96c-1d63708215cd","ts":"2026-04-22T02:05:37.105Z","severity":"info","message":"No GSD milestones found. Run /gsd to start.","source":"notify","read":false}
+{"id":"b729faee-dc46-4751-a8a0-64c58672aff4","ts":"2026-04-22T02:05:47.094Z","severity":"info","message":"No GSD milestones found. Run /gsd to start.","source":"notify","read":false}

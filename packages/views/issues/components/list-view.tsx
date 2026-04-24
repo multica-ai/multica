@@ -24,6 +24,7 @@ export function ListView({
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
   columnLabels,
+  activePipelineId,
   myIssuesScope,
   myIssuesFilter,
 }: {
@@ -31,6 +32,7 @@ export function ListView({
   visibleStatuses: string[];
   childProgressMap?: Map<string, ChildProgress>;
   columnLabels?: Record<string, string>;
+  activePipelineId?: string | null;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -88,6 +90,7 @@ export function ListView({
             label={columnLabels?.[status]}
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
+            pipelineId={activePipelineId}
             myIssuesOpts={myIssuesOpts}
           />
         ))}
@@ -101,12 +104,14 @@ function StatusAccordionItem({
   label,
   issues,
   childProgressMap,
+  pipelineId,
   myIssuesOpts,
 }: {
   status: string;
   label?: string;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
+  pipelineId?: string | null;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
   const cfg = getStatusConfig(status);
@@ -162,7 +167,10 @@ function StatusAccordionItem({
                   onClick={() =>
                     useModalStore
                       .getState()
-                      .open("create-issue", { status })
+                      .open("create-issue", {
+                        status,
+                        pipeline_id: pipelineId,
+                      })
                   }
                 />
               }

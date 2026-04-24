@@ -38,6 +38,7 @@ Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared package
 
 ```bash
 make dev              # Auto-setup + start everything
+make daemon-local-install  # Rebuild/install the local daemon CLI from the current checkout
 pnpm typecheck        # TypeScript check
 pnpm test             # TS unit tests (Vitest)
 make test             # Go tests
@@ -49,6 +50,5 @@ See CLAUDE.md for the complete command reference.
 ### Local Self-Hosted State
 
 - This checkout may be used with a locally modified self-hosted backend/daemon.
-- A CLI version ending with `-dirty` is expected when the self-hosted backend image was built from an uncommitted local checkout.
-- Do not "fix" self-hosted CLI version metadata back to `dev` unless explicitly requested.
-- When validating daemon or CLI behavior, prefer the locally rebuilt self-hosted stack over assumptions based on released artifacts.
+- If the goal is to use the locally modified daemon, do not involve Docker/Homebrew first. Run `make daemon-local-install` and use the resulting `~/.local/bin/multica`.
+- The important thing is that the daemon CLI is rebuilt from the current local checkout; the exact version string is secondary.

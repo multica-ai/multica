@@ -104,6 +104,7 @@ export function BoardView({
   visibleStatuses,
   hiddenStatuses,
   columnLabels,
+  activePipelineId,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
@@ -113,6 +114,7 @@ export function BoardView({
   visibleStatuses: string[];
   hiddenStatuses: string[];
   columnLabels?: Record<string, string>;
+  activePipelineId?: string | null;
   onMoveIssue: (
     issueId: string,
     newStatus: string,
@@ -297,6 +299,7 @@ export function BoardView({
             key={status}
             status={status}
             label={columnLabels?.[status]}
+            pipelineId={activePipelineId}
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             columnConfig={columnConfigMap.get(status as import("@multica/core/types").IssueStatus)}
@@ -327,6 +330,7 @@ export function BoardView({
 function PaginatedBoardColumn({
   status,
   label,
+  pipelineId,
   issueIds,
   issueMap,
   childProgressMap,
@@ -335,6 +339,7 @@ function PaginatedBoardColumn({
 }: {
   status: string;
   label?: string;
+  pipelineId?: string | null;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
@@ -349,6 +354,7 @@ function PaginatedBoardColumn({
     <BoardColumn
       status={status}
       label={label}
+      pipelineId={pipelineId}
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}

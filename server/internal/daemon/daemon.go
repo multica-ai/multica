@@ -231,6 +231,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
+		"cli_install_source": func() string {
+			if cli.IsBrewInstall() {
+				return "homebrew"
+			}
+			return "standalone"
+		}(),
 		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,
 	}
