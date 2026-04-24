@@ -7,7 +7,19 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"testing"
+	"time"
 )
+
+func TestClient_SetTimeout(t *testing.T) {
+	c := NewClient("http://example.com")
+	if c.client.Timeout != 30*time.Second {
+		t.Errorf("expected default 30s, got %v", c.client.Timeout)
+	}
+	c.SetTimeout(90 * time.Second)
+	if c.client.Timeout != 90*time.Second {
+		t.Errorf("expected 90s after SetTimeout, got %v", c.client.Timeout)
+	}
+}
 
 func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
