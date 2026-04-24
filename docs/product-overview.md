@@ -373,7 +373,7 @@ skill
    - Claude Code → `.claude/skills/{name}/SKILL.md`
    - Codex → `CODEX_HOME/skills/{name}/`
    - OpenCode → `.config/opencode/skills/{name}/SKILL.md`
-   - Pi → `.pi/agent/skills/{name}/SKILL.md`
+   - Pi → `.pi/skills/{name}/SKILL.md`
    - Cursor → `.cursor/skills/{name}/SKILL.md`
    - GitHub Copilot → `.github/skills/{name}/SKILL.md`
    - 其他 → `.agent_context/skills/{name}/SKILL.md`
