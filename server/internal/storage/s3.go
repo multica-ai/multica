@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -173,4 +174,72 @@ func (s *S3Storage) uploadedURL(key string) string {
 		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
 	}
 	return fmt.Sprintf("https://%s/%s", s.bucket, key)
+}
+
+// PublicURL is the Storage-interface version of uploadedURL; it returns
+// the stable read-side URL for an object that has already been uploaded
+// (e.g. via a pre-signed PUT).
+func (s *S3Storage) PublicURL(key string) string {
+	return s.uploadedURL(key)
+}
+
+// PresignPut returns a pre-signed PUT URL for key. The returned URL
+// encodes content-type + content-disposition into the signature, so
+// the client MUST send the same Content-Type header on its PUT call.
+// This lets the client stream multi-GB uploads directly to S3 without
+// the server buffering the request body (which would OOM the daemon
+// box for kernel-dump-sized files).
+func (s *S3Storage) PresignPut(ctx context.Context, key string, contentType string, filename string, expiresIn time.Duration) (*PresignedUpload, error) {
+	if expiresIn <= 0 {
+		expiresIn = 15 * time.Minute
+	}
+	safe := sanitizeFilename(filename)
+	disposition := "attachment"
+	if isInlineContentType(contentType) {
+		disposition = "inline"
+	}
+	ps := s3.NewPresignClient(s.client)
+	req, err := ps.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket:             aws.String(s.bucket),
+		Key:                aws.String(key),
+		ContentType:        aws.String(contentType),
+		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
+		StorageClass:       s.storageClass(),
+	}, func(o *s3.PresignOptions) {
+		o.Expires = expiresIn
+	})
+	if err != nil {
+		return nil, fmt.Errorf("presign PutObject: %w", err)
+	}
+	// Caller must echo the signed headers exactly. Per AWS SigV4 rules,
+	// Content-Type is signed; the client MUST set it to the same string
+	// we passed above or S3 rejects the PUT with SignatureDoesNotMatch.
+	// Other headers that went into the signature but are optional for
+	// the client to re-set are not surfaced here.
+	headers := map[string]string{
+		"Content-Type": contentType,
+	}
+	return &PresignedUpload{
+		URL:       req.URL,
+		Method:    req.Method,
+		Headers:   headers,
+		ExpiresAt: time.Now().Add(expiresIn),
+	}, nil
+}
+
+// StatObject returns the byte size of an existing object. The client's
+// /confirm endpoint uses this to verify the pre-signed PUT actually
+// completed before the attachment record flips to "ready".
+func (s *S3Storage) StatObject(ctx context.Context, key string) (int64, error) {
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("s3 HeadObject: %w", err)
+	}
+	if out.ContentLength == nil {
+		return 0, fmt.Errorf("s3 HeadObject: no ContentLength for %s", key)
+	}
+	return *out.ContentLength, nil
 }
