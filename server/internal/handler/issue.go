@@ -870,6 +870,40 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// When status was explicitly provided, validate it against the effective pipeline's columns.
+	// If pipeline_id is null (default pipeline), resolve the workspace default pipeline for validation.
+	// Silently falls back to "todo" when status is not a valid column key, to avoid breaking callers.
+	if req.Status != "" {
+		effectivePipelineID := pipelineID
+		if !effectivePipelineID.Valid {
+			if pipelines, pErr := h.Queries.ListPipelinesByWorkspace(r.Context(), db.ListPipelinesByWorkspaceParams{
+				WorkspaceID:    parseUUID(workspaceID),
+				IncludeDeleted: false,
+			}); pErr == nil {
+				for _, p := range pipelines {
+					if p.IsDefault {
+						effectivePipelineID = p.ID
+						break
+					}
+				}
+			}
+		}
+		if effectivePipelineID.Valid {
+			if cols, cErr := h.Queries.ListPipelineColumns(r.Context(), effectivePipelineID); cErr == nil && len(cols) > 0 {
+				valid := false
+				for _, col := range cols {
+					if col.StatusKey == status {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					status = "todo"
+				}
+			}
+		}
+	}
+
 	var dueDate pgtype.Timestamptz
 	if req.DueDate != nil && *req.DueDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.DueDate)
