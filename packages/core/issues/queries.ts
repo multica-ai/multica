@@ -92,15 +92,15 @@ export function myIssueListOptions(
   });
 }
 
-/** Fetches issues for a specific pipeline, per column status_key. */
-export function pipelineIssueListOptions(wsId: string, pipelineId: string, columnStatusKeys: string[]) {
+/** Fetches issues for a specific pipeline, per column status_key. Optionally scoped to a project. */
+export function pipelineIssueListOptions(wsId: string, pipelineId: string, columnStatusKeys: string[], projectId?: string) {
   return queryOptions({
-    queryKey: [...issueKeys.all(wsId), "pipeline", pipelineId, columnStatusKeys] as const,
+    queryKey: [...issueKeys.all(wsId), "pipeline", pipelineId, columnStatusKeys, projectId ?? null] as const,
     queryFn: async () => {
       if (!columnStatusKeys.length) return [];
       const responses = await Promise.all(
         columnStatusKeys.map((status) =>
-          api.listIssues({ pipeline_id: pipelineId, status, limit: 100, offset: 0 }),
+          api.listIssues({ pipeline_id: pipelineId, status, limit: 100, offset: 0, ...(projectId ? { project_id: projectId } : {}) }),
         ),
       );
       return responses.flatMap((r) => r.issues);

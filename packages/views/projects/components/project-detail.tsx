@@ -12,7 +12,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueListOptions, pipelineIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -113,10 +113,19 @@ function ProjectIssuesContent({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const activePipelineId = useViewStore((s) => s.activePipelineId);
   const { data: activePipelineColumns } = usePipelineColumns(wsId, activePipelineId ?? "");
+  const columnStatusKeys = useMemo(
+    () => activePipelineColumns?.map((c) => c.status_key) ?? [],
+    [activePipelineColumns],
+  );
+  const { data: pipelineProjectIssues = [] } = useQuery(
+    pipelineIssueListOptions(wsId, activePipelineId ?? "", columnStatusKeys, filter.project_id),
+  );
+
+  const sourceIssues = activePipelineId && columnStatusKeys.length > 0 ? pipelineProjectIssues : projectIssues;
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
+    () => filterIssues(sourceIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false }),
+    [sourceIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -160,7 +169,7 @@ function ProjectIssuesContent({
     [updateIssueMutation],
   );
 
-  if (projectIssues.length === 0) {
+  if (sourceIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
