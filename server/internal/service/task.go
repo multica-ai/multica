@@ -140,9 +140,25 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	return task, nil
 }
 
-// CancelTasksForIssue cancels all active tasks for an issue.
+// CancelTasksForIssue cancels every active task on the issue, reconciles each
+// affected agent's status, and broadcasts task:cancelled events so frontends
+// clear their live cards.
+//
+// Before #1587 this path was "cancel rows and return" — issue-status flips
+// (e.g. user marks the issue `done` or `cancelled` while a task is still
+// running) left the agent stuck at status="working" indefinitely, requiring a
+// manual `multica agent update <id> --status idle` to unwedge. Matches the
+// pattern already used by CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
-	return s.Queries.CancelAgentTasksByIssue(ctx, issueID)
+	cancelled, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
+	if err != nil {
+		return err
+	}
+	for _, t := range cancelled {
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	return nil
 }
 
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
