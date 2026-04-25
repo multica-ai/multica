@@ -369,9 +369,9 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if cmd.Flags().Changed("custom-args") {
 		v, _ := cmd.Flags().GetString("custom-args")
-		var ca []string
-		if err := json.Unmarshal([]byte(v), &ca); err != nil {
-			return fmt.Errorf("--custom-args must be a valid JSON array: %w", err)
+		ca, err := parseCustomArgs(v)
+		if err != nil {
+			return err
 		}
 		body["custom_args"] = ca
 	}
@@ -443,9 +443,9 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("custom-args") {
 		v, _ := cmd.Flags().GetString("custom-args")
-		var ca []string
-		if err := json.Unmarshal([]byte(v), &ca); err != nil {
-			return fmt.Errorf("--custom-args must be a valid JSON array: %w", err)
+		ca, err := parseCustomArgs(v)
+		if err != nil {
+			return err
 		}
 		body["custom_args"] = ca
 	}
@@ -654,19 +654,18 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 // ---------------------------------------------------------------------------
 
 // parseCustomEnv parses the --custom-env flag value (a JSON object literal)
-// into a string map suitable for the request body. An empty map is preserved
-// so callers can clear the server-side value; the server treats a non-nil
-// empty map on update as "clear all entries".
+// into a string map suitable for the request body. The clear-all signal is
+// the explicit JSON object "{}"; empty or whitespace-only input is rejected
+// because for the stdin/file channels it almost always means an upstream
+// failure (missing file, unset pipe, set -o pipefail off) rather than a
+// deliberate clear. Treating it as "clear" silently wipes secrets.
 //
 // The payload is treated as secret material: parse errors never wrap the
 // underlying json error, because json.SyntaxError / UnmarshalTypeError can
 // surface short fragments of the input on some malformed inputs.
 func parseCustomEnv(raw string) (map[string]string, error) {
-	// Both "" and "{}" mean "clear the map"; any other value must be a JSON
-	// object of string keys and string values. The server treats a non-nil
-	// empty map on update as "clear all entries" (see UpdateAgentRequest).
 	if strings.TrimSpace(raw) == "" {
-		return map[string]string{}, nil
+		return nil, fmt.Errorf("--custom-env: empty input; pass '{}' to clear")
 	}
 	var ce map[string]string
 	if err := json.Unmarshal([]byte(raw), &ce); err != nil {
@@ -676,6 +675,20 @@ func parseCustomEnv(raw string) (map[string]string, error) {
 		ce = map[string]string{}
 	}
 	return ce, nil
+}
+
+// parseCustomArgs parses the --custom-args flag value (a JSON array of
+// CLI argument strings). The error message is content-free for the same
+// reason as parseCustomEnv: although custom_args is not a dedicated
+// secret channel today, it routinely carries values like "--api-key=…"
+// for runtime providers, and json.Unmarshal errors can echo short
+// fragments of malformed input.
+func parseCustomArgs(raw string) ([]string, error) {
+	var ca []string
+	if err := json.Unmarshal([]byte(raw), &ca); err != nil {
+		return nil, fmt.Errorf("--custom-args must be a valid JSON array of strings")
+	}
+	return ca, nil
 }
 
 // resolveCustomEnv collects the --custom-env, --custom-env-stdin, and
@@ -688,7 +701,10 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 	inline := cmd.Flags().Changed("custom-env")
 	fromStdin, _ := cmd.Flags().GetBool("custom-env-stdin")
 	filePath, _ := cmd.Flags().GetString("custom-env-file")
-	fromFile := cmd.Flags().Changed("custom-env-file") && filePath != ""
+	// Note: an explicit --custom-env-file "" is honored as "the user asked
+	// for this channel with an empty path" and surfaces a real error below,
+	// rather than being silently swallowed.
+	fromFile := cmd.Flags().Changed("custom-env-file")
 
 	count := 0
 	if inline {
@@ -717,7 +733,13 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 			return nil, false, fmt.Errorf("read --custom-env-stdin: %w", err)
 		}
 		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--custom-env-stdin: empty input; pass '{}' to clear")
+		}
 	case fromFile:
+		if filePath == "" {
+			return nil, false, fmt.Errorf("--custom-env-file: path must not be empty")
+		}
 		buf, err := os.ReadFile(filePath)
 		if err != nil {
 			// Filesystem errors may include the path but not the contents —
@@ -725,6 +747,9 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 			return nil, false, fmt.Errorf("read --custom-env-file: %w", err)
 		}
 		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--custom-env-file %q: empty contents; pass '{}' to clear", filePath)
+		}
 	}
 
 	ce, err := parseCustomEnv(raw)

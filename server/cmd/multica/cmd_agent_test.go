@@ -103,9 +103,11 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 
 // TestParseCustomEnv covers the --custom-env flag parser used by both
 // `agent create` and `agent update`. The flag accepts a JSON object of
-// string keys and values; both "" and "{}" mean "clear the map"
-// (server treats a non-nil empty map on update as a clear), and any
-// other input must be a valid JSON object.
+// string keys and values; the only clear signal is the explicit "{}"
+// (server treats a non-nil empty map on update as a clear). Empty or
+// whitespace-only input must error — that path nearly always means an
+// upstream failure rather than a deliberate clear, especially via the
+// stdin/file channels.
 func TestParseCustomEnv(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -124,19 +126,19 @@ func TestParseCustomEnv(t *testing.T) {
 			want: map[string]string{"A": "1", "B": "2"},
 		},
 		{
-			name: "empty object clears",
+			name: "explicit empty object clears",
 			raw:  `{}`,
 			want: map[string]string{},
 		},
 		{
-			name: "empty string clears",
-			raw:  ``,
-			want: map[string]string{},
+			name:    "empty string errors",
+			raw:     ``,
+			wantErr: true,
 		},
 		{
-			name: "whitespace only clears",
-			raw:  `   `,
-			want: map[string]string{},
+			name:    "whitespace only errors",
+			raw:     `   `,
+			wantErr: true,
 		},
 		{
 			name:    "not JSON",
@@ -180,15 +182,51 @@ func TestParseCustomEnv(t *testing.T) {
 	}
 }
 
-// TestAgentUpdateNoFieldsMentionsCustomEnv makes sure the "no fields"
-// usage hint lists --custom-env so discoverability does not silently
-// regress the next time someone touches this error message.
-func TestAgentUpdateNoFieldsMentionsCustomEnv(t *testing.T) {
-	if !strings.Contains(agentUpdateCmd.Flag("custom-env").Usage, "secret") {
-		t.Fatalf("custom-env usage must flag it as secret material; got: %q", agentUpdateCmd.Flag("custom-env").Usage)
+// TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags actually invokes
+// runAgentUpdate with no flags set and asserts the resulting "no fields"
+// error mentions all three --custom-env channels by name. This guards
+// against the discoverability regression we'd see if a future edit
+// dropped one of the flag names from the hint.
+func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "test-ws")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	// Build a fresh command with the same flag surface as agentUpdateCmd
+	// but without the package-level state, so cmd.Flags().Changed(...)
+	// returns false for every field and runAgentUpdate falls into the
+	// "no fields to update" branch.
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("runtime-config", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("custom-env", "", "")
+	cmd.Flags().Bool("custom-env-stdin", false, "")
+	cmd.Flags().String("custom-env-file", "", "")
+	cmd.Flags().String("visibility", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+
+	err := runAgentUpdate(cmd, []string{"agent-id-placeholder"})
+	if err == nil {
+		t.Fatal("runAgentUpdate with no flags: expected 'no fields' error, got nil")
 	}
-	if agentCreateCmd.Flag("custom-env") == nil {
-		t.Fatal("agent create must expose --custom-env")
+	msg := err.Error()
+	// "--custom-env (" matches the bare flag specifically, not its -stdin /
+	// -file siblings, so we can prove all three names are present.
+	for _, want := range []string{"--custom-env (", "--custom-env-stdin", "--custom-env-file"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("no-fields error must mention %q; got: %q", want, msg)
+		}
 	}
 }
 
@@ -209,6 +247,25 @@ func TestParseCustomEnvErrorSanitization(t *testing.T) {
 	for _, leak := range []string{"SECRET_TOKEN", "verySensitiveValue"} {
 		if strings.Contains(msg, leak) {
 			t.Fatalf("parseCustomEnv error leaked input fragment %q: %q", leak, msg)
+		}
+	}
+}
+
+// TestParseCustomArgsErrorSanitization mirrors the parseCustomEnv check
+// for --custom-args. custom_args is not a dedicated secret channel, but
+// callers regularly stuff sensitive values (e.g. "--api-key=…") into the
+// list, so json.Unmarshal errors must never echo input fragments here
+// either.
+func TestParseCustomArgsErrorSanitization(t *testing.T) {
+	secretish := `["--api-key=verySensitiveValue", oops]` // invalid JSON, bare oops
+	_, err := parseCustomArgs(secretish)
+	if err == nil {
+		t.Fatal("expected parse error for invalid JSON")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"--api-key", "verySensitiveValue", "oops"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("parseCustomArgs error leaked input fragment %q: %q", leak, msg)
 		}
 	}
 }
@@ -348,6 +405,88 @@ func TestResolveCustomEnv(t *testing.T) {
 		_, _, err := resolveCustomEnv(cmd)
 		if err == nil || !strings.Contains(err.Error(), "--custom-env-file") {
 			t.Fatalf("expected --custom-env-file error, got %v", err)
+		}
+	})
+
+	// Empty input on stdin/file almost always means an upstream failure
+	// (missing file, set -o pipefail off, etc.), not a deliberate clear.
+	// The resolver must reject it with a channel-specific error so the
+	// secret map is never silently wiped.
+	t.Run("stdin: empty input errors", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(""))
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--custom-env-stdin") || !strings.Contains(err.Error(), "{}") {
+			t.Fatalf("expected --custom-env-stdin empty-input error mentioning '{}', got %v", err)
+		}
+	})
+
+	t.Run("stdin: whitespace-only input errors", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString("   \n\t "))
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--custom-env-stdin") {
+			t.Fatalf("expected --custom-env-stdin empty-input error, got %v", err)
+		}
+	})
+
+	t.Run("stdin: explicit {} still clears", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString("{}"))
+		got, ok, err := resolveCustomEnv(cmd)
+		if err != nil || !ok {
+			t.Fatalf("stdin {}: ok=%v err=%v", ok, err)
+		}
+		if !reflect.DeepEqual(got, map[string]string{}) {
+			t.Fatalf("stdin {}: got %v, want empty map", got)
+		}
+	})
+
+	t.Run("file: empty contents errors", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "empty.json")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-file", path)
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--custom-env-file") || !strings.Contains(err.Error(), "{}") {
+			t.Fatalf("expected --custom-env-file empty-contents error mentioning '{}', got %v", err)
+		}
+	})
+
+	t.Run("file: empty path errors instead of being silently swallowed", func(t *testing.T) {
+		cmd := freshAgentUpdateCmd()
+		// Mark the flag as Changed with an empty value — previously this
+		// was swallowed by the && filePath != "" guard.
+		_ = cmd.Flags().Set("custom-env-file", "")
+		if !cmd.Flags().Changed("custom-env-file") {
+			t.Fatal("setup: expected custom-env-file flag to be marked Changed")
+		}
+		_, _, err := resolveCustomEnv(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--custom-env-file") {
+			t.Fatalf("expected --custom-env-file empty-path error, got %v", err)
+		}
+	})
+
+	t.Run("file: explicit {} still clears", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "clear.json")
+		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentUpdateCmd()
+		_ = cmd.Flags().Set("custom-env-file", path)
+		got, ok, err := resolveCustomEnv(cmd)
+		if err != nil || !ok {
+			t.Fatalf("file {}: ok=%v err=%v", ok, err)
+		}
+		if !reflect.DeepEqual(got, map[string]string{}) {
+			t.Fatalf("file {}: got %v, want empty map", got)
 		}
 	})
 }
