@@ -94,6 +94,7 @@ vi.mock("@multica/core/issues/config", () => ({
     low: { label: "Low", bars: 1, color: "text-info" },
     none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
   },
+  isTerminalStatus: (status: string) => status === "done" || status === "cancelled",
   getStatusConfig: (status: string) => {
     const cfg: Record<string, { label: string; iconColor: string; hoverBg: string; dividerColor?: string; badgeBg?: string; badgeText?: string; columnBg?: string }> = {
       backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
