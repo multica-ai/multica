@@ -1272,6 +1272,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
 		}, nil
+	case "cancelled":
+		// Server cancelled the task (e.g. issue reassignment, user cancel).
+		// handleTask's cancelledByPoll branch already discards this result,
+		// so this case is mainly defensive — and preserves the "cancelled"
+		// status string for the "agent finished" log line so operators can
+		// distinguish "task cancelled by server" from a real timeout.
+		return TaskResult{
+			Status:    "cancelled",
+			Comment:   "task cancelled by server",
+			SessionID: result.SessionID,
+			WorkDir:   env.WorkDir,
+			EnvRoot:   env.RootDir,
+			Usage:     usageEntries,
+		}, nil
 	default:
 		errMsg := result.Error
 		if errMsg == "" {
@@ -1467,6 +1481,17 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	case result := <-session.Result:
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// Distinguish external cancellation (e.g. server-initiated cancel
+		// because the issue was reassigned, or the user invoked CancelTask)
+		// from genuine drain-deadline timeouts. context.Canceled means the
+		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
+		// drain deadline expiring on its own.
+		if errors.Is(drainCtx.Err(), context.Canceled) {
+			return agent.Result{
+				Status: "cancelled",
+				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
+			}, toolCount.Load(), nil
+		}
 		return agent.Result{
 			Status: "timeout",
 			Error:  "agent did not produce result within drain timeout",
