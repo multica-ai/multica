@@ -58,24 +58,28 @@ function dialogContentClassName(
   if (backlogHint) {
     return cn(
       base,
-      "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !max-w-[480px] !w-[calc(100vw-2rem)] !h-auto !transition-none !duration-0",
+      "!top-1/2 !left-1/2",
+      "!-translate-x-1/2 !-translate-y-1/2",
+      "!max-w-[480px] !w-[calc(100vw-2rem)]",
+      "!h-auto !transition-none !duration-0",
     );
   }
 
   if (quickAdd) {
     return cn(
       base,
-      "!top-0 !left-0 !translate-x-0 !translate-y-0 !w-full !h-full !max-w-none !transition-none !duration-0",
+      "!top-0 !left-0 !translate-x-0 !translate-y-0",
+      "!w-full !h-full !max-w-none",
+      "!transition-none !duration-0",
     );
   }
 
-  const position =
-    "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !transition-all !duration-300 !ease-out";
-  const size = expanded
-    ? "!max-w-4xl !w-full !h-5/6"
-    : "!max-w-2xl !w-full !h-96";
-
-  return cn(base, position, size);
+  return cn(
+    base,
+    "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
+    "!transition-all !duration-300 !ease-out",
+    expanded ? "!max-w-4xl !w-full !h-5/6" : "!max-w-2xl !w-full !h-96",
+  );
 }
 
 export function CreateIssueModal({
