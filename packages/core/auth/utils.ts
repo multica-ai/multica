@@ -15,6 +15,7 @@
 export function sanitizeNextUrl(raw: string | null): string | null {
   if (!raw) return null;
   if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  // eslint-disable-next-line no-control-regex -- intentional: reject paths with ASCII control chars (security sanitization)
   if (/[\x00-\x1f\\]/.test(raw)) return null;
   return raw;
 }

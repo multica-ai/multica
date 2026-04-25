@@ -82,7 +82,7 @@ export function CustomArgsTab({
           </Label>
           <p className="text-xs text-muted-foreground mt-0.5">
             Additional CLI arguments appended to the agent command at launch.
-            Supported flags depend on the agent's CLI.
+            Supported flags depend on the agent&apos;s CLI.
           </p>
           {launchHeader && (
             <p className="mt-2 text-xs text-muted-foreground">

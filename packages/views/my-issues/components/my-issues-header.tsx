@@ -48,6 +48,8 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { PipelinePicker } from "../../issues/components/pickers";
 
 // ---------------------------------------------------------------------------
 // HoverCheck
@@ -110,6 +112,7 @@ const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
 // ---------------------------------------------------------------------------
 
 export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
+  const wsId = useWorkspaceId();
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
@@ -128,9 +131,9 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
     SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Manual";
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
       {/* Left: scope buttons */}
-      <div className="flex items-center gap-1">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
         {SCOPES.map((s) => (
           <Tooltip key={s.value}>
             <TooltipTrigger
@@ -152,10 +155,11 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
             <TooltipContent side="bottom">{s.description}</TooltipContent>
           </Tooltip>
         ))}
+        <PipelinePicker wsId={wsId} />
       </div>
 
       {/* Right: filter + display + view toggle */}
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         {/* Filter */}
         <DropdownMenu>
           <Tooltip>

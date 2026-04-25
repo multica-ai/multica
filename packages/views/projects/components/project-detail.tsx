@@ -270,7 +270,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       setSidebarOpen(false);
       sidebarRef.current?.collapse();
     }
-  }, [isMobile]);
+  }, [isMobile, sidebarRef]);
 
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);

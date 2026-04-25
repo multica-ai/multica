@@ -41,7 +41,7 @@ export function ModelDropdown({
   );
 
   const supported = modelsQuery.data?.supported ?? true;
-  const models = modelsQuery.data?.models ?? [];
+  const models = useMemo(() => modelsQuery.data?.models ?? [], [modelsQuery.data?.models]);
   const defaultModel = useMemo(() => models.find((m) => m.default), [models]);
   const grouped = useMemo(() => groupByProvider(models), [models]);
 

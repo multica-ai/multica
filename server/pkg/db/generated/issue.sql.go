@@ -137,7 +137,7 @@ INSERT INTO issue (
     inherit_parent_workdir
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at
 `
 
 type CreateIssueParams struct {
@@ -204,6 +204,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -217,7 +218,7 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
     $15, $16
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at
 `
 
 type CreateIssueWithOriginParams struct {
@@ -284,6 +285,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -298,7 +300,7 @@ func (q *Queries) DeleteIssue(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at FROM issue
 WHERE id = $1
 `
 
@@ -330,12 +332,13 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -372,12 +375,13 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -414,12 +418,13 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC
 `
@@ -472,7 +477,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 const listIssues = `-- name: ListIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id, completed_at
 FROM issue
 WHERE workspace_id = $1
   AND ($4::text IS NULL OR status = $4)
@@ -518,6 +523,7 @@ type ListIssuesRow struct {
 	Number        int32              `json:"number"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 	PipelineID    pgtype.UUID        `json:"pipeline_id"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 }
 
 func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListIssuesRow, error) {
@@ -559,6 +565,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.Number,
 			&i.ProjectID,
 			&i.PipelineID,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -573,7 +580,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id, completed_at
 FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
@@ -613,6 +620,7 @@ type ListOpenIssuesRow struct {
 	Number        int32              `json:"number"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 	PipelineID    pgtype.UUID        `json:"pipeline_id"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 }
 
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
@@ -650,6 +658,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.Number,
 			&i.ProjectID,
 			&i.PipelineID,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -709,9 +718,10 @@ UPDATE issue SET
     project_id = $11,
     pipeline_id = $12,
     inherit_parent_workdir = COALESCE($13, inherit_parent_workdir),
+    completed_at = $14,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at
 `
 
 type UpdateIssueParams struct {
@@ -728,6 +738,7 @@ type UpdateIssueParams struct {
 	ProjectID            pgtype.UUID        `json:"project_id"`
 	PipelineID           pgtype.UUID        `json:"pipeline_id"`
 	InheritParentWorkdir pgtype.Bool        `json:"inherit_parent_workdir"`
+	CompletedAt          pgtype.Timestamptz `json:"completed_at"`
 }
 
 func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue, error) {
@@ -745,6 +756,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.ProjectID,
 		arg.PipelineID,
 		arg.InheritParentWorkdir,
+		arg.CompletedAt,
 	)
 	var i Issue
 	err := row.Scan(
@@ -772,6 +784,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -779,9 +792,13 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
+    completed_at = CASE
+        WHEN $2 IN ('done', 'cancelled') THEN COALESCE(completed_at, now())
+        ELSE NULL
+    END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, pipeline_id, inherit_parent_workdir, completed_at
 `
 
 type UpdateIssueStatusParams struct {
@@ -817,6 +834,7 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.FirstExecutedAt,
 		&i.PipelineID,
 		&i.InheritParentWorkdir,
+		&i.CompletedAt,
 	)
 	return i, err
 }

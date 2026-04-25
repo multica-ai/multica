@@ -51,14 +51,18 @@ export type ToggleIssueReactionVars = {
  */
 export function useLoadMoreByStatus(
   status: string,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
+  myIssues?: {
+    scope: string;
+    filter: MyIssuesFilter;
+    statuses?: readonly string[];
+  },
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
   const queryKey = myIssues
-    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
+    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter, myIssues.statuses)
     : issueKeys.list(wsId);
   const cache = qc.getQueryData<ListIssuesCache>(queryKey);
   const bucket = cache?.byStatus[status];

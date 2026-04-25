@@ -4,6 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "../api";
 import { useWSEvent } from "../realtime";
 
+export function isTaskPayloadForIssue(payload: unknown, issueId: string): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const payloadIssueId = (payload as { issue_id?: unknown }).issue_id;
+  return typeof payloadIssueId === "string" && payloadIssueId.length > 0 && payloadIssueId === issueId;
+}
+
 export function useIssueActiveTask(issueId: string): { isAgentRunning: boolean } {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
 
@@ -19,15 +25,13 @@ export function useIssueActiveTask(issueId: string): { isAgentRunning: boolean }
   useWSEvent(
     "task:dispatch",
     useCallback((payload: unknown) => {
-      const p = payload as { issue_id?: string };
-      if (p.issue_id && p.issue_id !== issueId) return;
+      if (!isTaskPayloadForIssue(payload, issueId)) return;
       setIsAgentRunning(true);
     }, [issueId]),
   );
 
   const handleTaskEnd = useCallback((payload: unknown) => {
-    const p = payload as { issue_id: string };
-    if (p.issue_id !== issueId) return;
+    if (!isTaskPayloadForIssue(payload, issueId)) return;
     api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
       setIsAgentRunning(tasks.some((t) => t.status === "running" || t.status === "dispatched"));
     }).catch(() => {});

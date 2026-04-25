@@ -48,6 +48,7 @@ type IssueResponse struct {
 	// separate project lookup.
 	ProjectRepos           []RepoData              `json:"project_repos,omitempty"`
 	InheritParentWorkdir   bool                    `json:"inherit_parent_workdir"`
+	CompletedAt            *string                 `json:"completed_at"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -73,6 +74,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:            timestampToString(i.CreatedAt),
 		UpdatedAt:            timestampToString(i.UpdatedAt),
 		InheritParentWorkdir: i.InheritParentWorkdir,
+		CompletedAt:          timestampToPtr(i.CompletedAt),
 	}
 }
 
@@ -99,6 +101,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		CompletedAt:   timestampToPtr(i.CompletedAt),
 	}
 }
 
@@ -124,6 +127,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		CompletedAt:   timestampToPtr(i.CompletedAt),
 	}
 }
 
@@ -1053,6 +1057,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
 		PipelineID:    prevIssue.PipelineID,
+		CompletedAt:   prevIssue.CompletedAt,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -1148,6 +1153,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.InheritParentWorkdir != nil {
 		params.InheritParentWorkdir = pgtype.Bool{Bool: *req.InheritParentWorkdir, Valid: true}
+	}
+	if req.Status != nil {
+		isTerminal := *req.Status == "done" || *req.Status == "cancelled"
+		wasTerminal := prevIssue.Status == "done" || prevIssue.Status == "cancelled"
+		if isTerminal && !prevIssue.CompletedAt.Valid {
+			params.CompletedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		} else if !isTerminal && wasTerminal {
+			params.CompletedAt = pgtype.Timestamptz{Valid: false}
+		}
 	}
 
 	// Enforce agent visibility: private agents can only be assigned by owner/admin.
@@ -1396,6 +1410,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ParentIssueID: prevIssue.ParentIssueID,
 			ProjectID:     prevIssue.ProjectID,
 			PipelineID:    prevIssue.PipelineID,
+			CompletedAt:   prevIssue.CompletedAt,
 		}
 
 		if req.Updates.Title != nil {
@@ -1487,6 +1502,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.PipelineID = parseUUID(*req.Updates.PipelineID)
 			} else {
 				params.PipelineID = pgtype.UUID{Valid: false}
+			}
+		}
+		if req.Updates.Status != nil {
+			isTerminal := *req.Updates.Status == "done" || *req.Updates.Status == "cancelled"
+			wasTerminal := prevIssue.Status == "done" || prevIssue.Status == "cancelled"
+			if isTerminal && !prevIssue.CompletedAt.Valid {
+				params.CompletedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+			} else if !isTerminal && wasTerminal {
+				params.CompletedAt = pgtype.Timestamptz{Valid: false}
 			}
 		}
 

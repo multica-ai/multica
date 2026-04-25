@@ -9,8 +9,12 @@ export const issueKeys = {
   /** All "my issues" queries — use for bulk invalidation. */
   myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
   /** Per-scope "my issues" list with filter identity baked into the key. */
-  myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
-    [...issueKeys.myAll(wsId), scope, filter] as const,
+  myList: (
+    wsId: string,
+    scope: string,
+    filter: MyIssuesFilter,
+    statuses: readonly string[] = PAGINATED_STATUSES,
+  ) => [...issueKeys.myAll(wsId), scope, filter, [...statuses]] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -26,7 +30,7 @@ export const issueKeys = {
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "pipeline_id"
 >;
 
 /** Page size per status column. */
@@ -38,21 +42,25 @@ export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
   const out = [];
-  for (const status of PAGINATED_STATUSES) {
-    const bucket = data.byStatus[status];
-    if (bucket) out.push(...bucket.issues);
+  for (const bucket of Object.values(data.byStatus)) {
+    if (bucket) {
+      out.push(...bucket.issues);
+    }
   }
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+async function fetchFirstPages(
+  filter: MyIssuesFilter = {},
+  statuses: readonly string[] = PAGINATED_STATUSES,
+): Promise<ListIssuesCache> {
   const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
+    statuses.map((status) =>
       api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_STATUSES.forEach((status, i) => {
+  statuses.forEach((status, i) => {
     const res = responses[i]!;
     byStatus[status] = { issues: res.issues, total: res.total };
   });
@@ -84,11 +92,14 @@ export function myIssueListOptions(
   wsId: string,
   scope: string,
   filter: MyIssuesFilter,
+  statuses: readonly string[] = PAGINATED_STATUSES,
+  enabled = true,
 ) {
   return queryOptions({
-    queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: () => fetchFirstPages(filter),
+    queryKey: issueKeys.myList(wsId, scope, filter, statuses),
+    queryFn: () => fetchFirstPages(filter, statuses),
     select: flattenIssueBuckets,
+    enabled: Boolean(wsId) && statuses.length > 0 && enabled,
   });
 }
 

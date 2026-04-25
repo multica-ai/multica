@@ -259,6 +259,7 @@ type Issue struct {
 	FirstExecutedAt        pgtype.Timestamptz `json:"first_executed_at"`
 	PipelineID             pgtype.UUID        `json:"pipeline_id"`
 	InheritParentWorkdir   bool               `json:"inherit_parent_workdir"`
+	CompletedAt            pgtype.Timestamptz `json:"completed_at"`
 }
 
 type IssueDependency struct {

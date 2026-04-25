@@ -64,3 +64,9 @@ const FALLBACK_STATUS_CONFIG = {
 export function getStatusConfig(status: string) {
   return STATUS_CONFIG[status as IssueStatus] ?? FALLBACK_STATUS_CONFIG;
 }
+
+export const TERMINAL_STATUSES: IssueStatus[] = ["done", "cancelled"];
+
+export function isTerminalStatus(status: string): boolean {
+  return TERMINAL_STATUSES.includes(status as IssueStatus);
+}
