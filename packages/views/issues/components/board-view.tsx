@@ -32,6 +32,7 @@ import { getStatusConfig } from "@multica/core/issues/config";
 import { useViewStoreApi, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { SortField, SortDirection } from "@multica/core/issues/stores/view-store";
 import { sortIssues } from "../utils/sort";
+import { isAutoHidden } from "../utils/auto-hide";
 import { StatusIcon } from "./status-icon";
 import { BoardColumn } from "./board-column";
 import { BoardCardContent } from "./board-card";
@@ -54,23 +55,37 @@ function makeKanbanCollision(columnIds: Set<string>): CollisionDetection {
   };
 }
 
-/** Build column ID arrays from TQ issue data, respecting current sort. */
+/** Build column ID arrays from TQ issue data, respecting current sort and auto-hide. */
 function buildColumns(
   issues: Issue[],
   visibleStatuses: string[],
   sortBy: SortField,
   sortDirection: SortDirection,
+  showHiddenPerStatus: Record<string, boolean> = {},
 ): Record<string, string[]> {
   const cols = {} as Record<string, string[]>;
   for (const status of visibleStatuses) {
+    const showHidden = showHiddenPerStatus[status] ?? false;
     const sorted = sortIssues(
-      issues.filter((i) => i.status === status),
+      issues.filter((i) => i.status === status && (showHidden || !isAutoHidden(i))),
       sortBy,
       sortDirection,
     );
     cols[status] = sorted.map((i) => i.id);
   }
   return cols;
+}
+
+/** Count auto-hidden issues per status. */
+function countHiddenByStatus(
+  issues: Issue[],
+  visibleStatuses: string[],
+): Record<string, number> {
+  const counts = {} as Record<string, number>;
+  for (const status of visibleStatuses) {
+    counts[status] = issues.filter((i) => i.status === status && isAutoHidden(i)).length;
+  }
+  return counts;
 }
 
 /** Compute a float position for `activeId` based on its neighbors in `ids`. */
@@ -133,6 +148,8 @@ export function BoardView({
   const { data: columnConfigs = [] } = useColumnConfigs(wsId);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
+  const showHiddenPerStatus = useViewStore((s) => s.showHiddenPerStatus);
+  const viewStoreApi = useViewStoreApi();
   const columnIdSet = useMemo(() => new Set<string>(visibleStatuses), [visibleStatuses]);
   const kanbanCollision = useMemo(() => makeKanbanCollision(columnIdSet), [columnIdSet]);
   const myIssuesOpts = myIssuesScope
@@ -151,20 +168,26 @@ export function BoardView({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const isDraggingRef = useRef(false);
 
+  // --- Auto-hide counts ---
+  const hiddenCounts = useMemo(
+    () => countHiddenByStatus(issues, visibleStatuses),
+    [issues, visibleStatuses],
+  );
+
   // --- Local columns state ---
   // Between drags: follows TQ via useEffect.
   // During drag: local-only, driven by onDragOver/onDragEnd.
   const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(issues, visibleStatuses, sortBy, sortDirection),
+    buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus),
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
   useEffect(() => {
     if (!isDraggingRef.current) {
-      setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection));
+      setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus));
     }
-  }, [issues, visibleStatuses, sortBy, sortDirection]);
+  }, [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus]);
 
   // After a cross-column move, lock for one animation frame so dnd-kit's
   // collision detection can stabilize before processing the next move.
@@ -238,7 +261,7 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection));
+        setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus));
 
       if (!over) {
         resetColumns();
@@ -290,7 +313,7 @@ export function BoardView({
 
       onMoveIssue(activeId, finalCol, newPosition);
     },
-    [issues, visibleStatuses, sortBy, sortDirection, onMoveIssue],
+    [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, onMoveIssue],
   );
 
   return (
@@ -314,6 +337,9 @@ export function BoardView({
             columnConfig={columnConfigMap.get(status as import("@multica/core/types").IssueStatus)}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
+            hiddenCount={hiddenCounts[status] ?? 0}
+            showHidden={showHiddenPerStatus[status] ?? false}
+            onToggleShowHidden={() => viewStoreApi.getState().toggleShowHidden(status)}
           />
         ))}
 
@@ -346,6 +372,9 @@ function PaginatedBoardColumn({
   childProgressMap,
   columnConfig,
   myIssuesOpts,
+  hiddenCount,
+  showHidden,
+  onToggleShowHidden,
 }: {
   status: string;
   isTerminal?: boolean;
@@ -356,6 +385,9 @@ function PaginatedBoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   columnConfig?: WorkspaceColumnConfig;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  hiddenCount?: number;
+  showHidden?: boolean;
+  onToggleShowHidden?: () => void;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
@@ -377,6 +409,9 @@ function PaginatedBoardColumn({
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
         ) : undefined
       }
+      hiddenCount={hiddenCount}
+      showHidden={showHidden}
+      onToggleShowHidden={onToggleShowHidden}
     />
   );
 }

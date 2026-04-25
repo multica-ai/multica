@@ -34,6 +34,9 @@ export function BoardColumn({
   childProgressMap,
   totalCount,
   footer,
+  hiddenCount = 0,
+  showHidden = false,
+  onToggleShowHidden,
 }: {
   status: string;
   isTerminal?: boolean;
@@ -45,6 +48,9 @@ export function BoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   totalCount?: number;
   footer?: ReactNode;
+  hiddenCount?: number;
+  showHidden?: boolean;
+  onToggleShowHidden?: () => void;
 }) {
   const cfg = getStatusConfig(status);
   const label = labelProp ?? cfg.label;
@@ -75,7 +81,7 @@ export function BoardColumn({
                   {label}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {totalCount ?? issueIds.length}
+                  {(totalCount ?? issueIds.length) + hiddenCount}
                 </span>
               </div>
 
@@ -175,13 +181,22 @@ export function BoardColumn({
               <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} />
             ))}
           </SortableContext>
-          {issueIds.length === 0 && (
+          {issueIds.length === 0 && hiddenCount === 0 && (
             <p className="py-8 text-center text-xs text-muted-foreground">
               No issues
             </p>
           )}
           {footer}
         </div>
+
+        {hiddenCount > 0 && onToggleShowHidden && (
+          <button
+            onClick={onToggleShowHidden}
+            className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          >
+            {showHidden ? `Hide ${hiddenCount} closed` : `Show ${hiddenCount} closed`}
+          </button>
+        )}
       </div>
     </>
   );
