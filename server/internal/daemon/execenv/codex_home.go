@@ -89,6 +89,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
+		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
+	}
+
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
 	// need to fall back to danger-full-access because of openai/codex#10390;
 	// see codex_sandbox.go for the full rationale.
@@ -114,6 +118,42 @@ func resolveSharedCodexHome() string {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
+	src := filepath.Join(sharedHome, "plugins", "cache")
+	dst := filepath.Join(codexHome, "plugins", "cache")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		return fmt.Errorf("create shared plugin cache dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create codex plugin dir: %w", err)
+	}
+
+	if fi, err := os.Lstat(dst); err == nil {
+		target, readlinkErr := os.Readlink(dst)
+		if readlinkErr == nil {
+			if target == src {
+				return nil
+			}
+			if err := os.Remove(dst); err != nil {
+				return fmt.Errorf("remove stale plugin cache link: %w", err)
+			}
+		} else if fi.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(dst); err != nil {
+				return fmt.Errorf("remove stale plugin cache symlink: %w", err)
+			}
+		} else {
+			if err := os.RemoveAll(dst); err != nil {
+				return fmt.Errorf("remove stale plugin cache path: %w", err)
+			}
+		}
+	}
+
+	if err := createDirLink(src, dst); err != nil {
+		return fmt.Errorf("expose shared plugin cache: %w", err)
+	}
+	return nil
 }
 
 // ensureDirSymlink creates a symlink dst → src for a directory.
