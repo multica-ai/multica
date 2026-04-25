@@ -1,0 +1,1 @@
+-- Backfill is not reversible; leave completed_at values as-is on rollback.
