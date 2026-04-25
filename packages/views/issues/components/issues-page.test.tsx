@@ -94,6 +94,7 @@ vi.mock("@multica/core/issues/config", () => ({
     low: { label: "Low", bars: 1, color: "text-info" },
     none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
   },
+  isTerminalStatus: (status: string) => status === "done" || status === "cancelled",
   getStatusConfig: (status: string) => {
     const cfg: Record<string, { label: string; iconColor: string; hoverBg: string; dividerColor?: string; badgeBg?: string; badgeText?: string; columnBg?: string }> = {
       backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -122,6 +123,8 @@ const mockViewState = {
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true },
   listCollapsedStatuses: [] as string[],
+  activePipelineId: null,
+  showHiddenPerStatus: {} as Record<string, boolean>,
   setViewMode: vi.fn(),
   toggleStatusFilter: vi.fn(),
   togglePriorityFilter: vi.fn(),
@@ -137,6 +140,8 @@ const mockViewState = {
   setSortDirection: vi.fn(),
   toggleCardProperty: vi.fn(),
   toggleListCollapsed: vi.fn(),
+  setActivePipeline: vi.fn(),
+  toggleShowHidden: vi.fn(),
 };
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
@@ -273,6 +278,7 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  completed_at: null,
 };
 
 const mockIssues: Issue[] = [

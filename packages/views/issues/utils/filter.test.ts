@@ -33,6 +33,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     pipeline_id: null,
+    completed_at: null,
     inherit_parent_workdir: true,
     ...overrides,
   };

@@ -58,6 +58,7 @@ export interface IssueViewState {
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
   activePipelineId: string | null;
+  showHiddenPerStatus: Record<string, boolean>;
   setViewMode: (mode: ViewMode) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
@@ -74,6 +75,7 @@ export interface IssueViewState {
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
   setActivePipeline: (id: string | null) => void;
+  toggleShowHidden: (status: string) => void;
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
@@ -97,6 +99,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   },
   listCollapsedStatuses: [],
   activePipelineId: null,
+  showHiddenPerStatus: {},
 
   setViewMode: (mode) => set({ viewMode: mode }),
   toggleStatusFilter: (status) =>
@@ -190,6 +193,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         : [...state.listCollapsedStatuses, status],
     })),
   setActivePipeline: (id) => set({ activePipelineId: id }),
+  toggleShowHidden: (status) =>
+    set((state) => ({
+      showHiddenPerStatus: {
+        ...state.showHiddenPerStatus,
+        [status]: !state.showHiddenPerStatus[status],
+      },
+    })),
 });
 
 export const viewStorePersistOptions = (name: string) => ({
@@ -209,6 +219,7 @@ export const viewStorePersistOptions = (name: string) => ({
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
     activePipelineId: state.activePipelineId,
+    showHiddenPerStatus: state.showHiddenPerStatus,
   }),
 });
 

@@ -10,9 +10,10 @@ import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import { getStatusConfig } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
-import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { sortIssues } from "../utils/sort";
+import { isAutoHidden } from "../utils/auto-hide";
 import { StatusIcon } from "./status-icon";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
@@ -49,15 +50,28 @@ export function ListView({
   const toggleListCollapsed = useViewStore(
     (s) => s.toggleListCollapsed
   );
+  const showHiddenPerStatus = useViewStore((s) => s.showHiddenPerStatus);
+  const viewStoreApi = useViewStoreApi();
 
   const issuesByStatus = useMemo(() => {
     const map = new Map<string, Issue[]>();
     for (const status of visibleStatuses) {
-      const filtered = issues.filter((i) => i.status === status);
+      const showHidden = showHiddenPerStatus[status] ?? false;
+      const filtered = issues.filter(
+        (i) => i.status === status && (showHidden || !isAutoHidden(i))
+      );
       map.set(status, sortIssues(filtered, sortBy, sortDirection));
     }
     return map;
-  }, [issues, visibleStatuses, sortBy, sortDirection]);
+  }, [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus]);
+
+  const hiddenCountsByStatus = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const status of visibleStatuses) {
+      map.set(status, issues.filter((i) => i.status === status && isAutoHidden(i)).length);
+    }
+    return map;
+  }, [issues, visibleStatuses]);
 
   const expandedStatuses = useMemo(
     () =>
@@ -101,6 +115,9 @@ export function ListView({
             childProgressMap={childProgressMap}
             pipelineId={activePipelineId}
             myIssuesOpts={myIssuesOpts}
+            hiddenCount={hiddenCountsByStatus.get(status) ?? 0}
+            showHidden={showHiddenPerStatus[status] ?? false}
+            onToggleShowHidden={() => viewStoreApi.getState().toggleShowHidden(status)}
           />
         ))}
       </Accordion.Root>
@@ -116,6 +133,9 @@ function StatusAccordionItem({
   childProgressMap,
   pipelineId,
   myIssuesOpts,
+  hiddenCount = 0,
+  showHidden = false,
+  onToggleShowHidden,
 }: {
   status: string;
   isTerminal?: boolean;
@@ -124,6 +144,9 @@ function StatusAccordionItem({
   childProgressMap: Map<string, ChildProgress>;
   pipelineId?: string | null;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  hiddenCount?: number;
+  showHidden?: boolean;
+  onToggleShowHidden?: () => void;
 }) {
   const cfg = getStatusConfig(status);
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -165,7 +188,7 @@ function StatusAccordionItem({
             <StatusIcon status={status} isTerminal={isTerminal} className="h-3 w-3" inheritColor />
             {label ?? cfg.label}
           </span>
-          <span className="text-xs text-muted-foreground">{total}</span>
+          <span className="text-xs text-muted-foreground">{(total ?? 0) + hiddenCount}</span>
         </Accordion.Trigger>
         <div className="pr-2">
           <Tooltip>
@@ -202,10 +225,18 @@ function StatusAccordionItem({
               <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
             )}
           </>
-        ) : (
+        ) : hiddenCount === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
             No issues
           </p>
+        ) : null}
+        {hiddenCount > 0 && onToggleShowHidden && (
+          <button
+            onClick={onToggleShowHidden}
+            className="w-full rounded-lg px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          >
+            {showHidden ? `Hide ${hiddenCount} closed` : `Show ${hiddenCount} closed`}
+          </button>
         )}
       </Accordion.Panel>
     </Accordion.Item>
