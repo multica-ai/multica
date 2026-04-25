@@ -13,6 +13,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
+import { LabelChip } from "./label-chip";
 
 export interface ChildProgress {
   done: number;
@@ -48,6 +49,8 @@ export const ListRow = memo(function ListRow({
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
+  const labels = issue.labels ?? [];
+  const showLabels = storeProperties.labels && labels.length > 0;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -88,6 +91,16 @@ export const ListRow = memo(function ListRow({
               </span>
             )}
           </span>
+          {showLabels && (
+            <span className="flex shrink-0 items-center gap-1">
+              {labels.slice(0, 3).map((l) => (
+                <LabelChip key={l.id} label={l} size="xs" />
+              ))}
+              {labels.length > 3 && (
+                <span className="text-[11px] text-muted-foreground">+{labels.length - 3}</span>
+              )}
+            </span>
+          )}
           {showProject && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
               <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
@@ -111,3 +124,4 @@ export const ListRow = memo(function ListRow({
     </IssueActionsContextMenu>
   );
 });
+

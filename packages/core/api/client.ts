@@ -61,6 +61,8 @@ import type {
   Invitation,
   Autopilot,
   AutopilotTrigger,
+  IssueLabel,
+  LabelColor,
   AutopilotRun,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
@@ -1085,5 +1087,57 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Labels (workspace-scoped). Any workspace member may CRUD; agents may only
+  // attach/detach (the server returns 403 on POST/PATCH/DELETE to workspace
+  // label endpoints when the caller is an agent).
+  async listLabels(workspaceId: string): Promise<IssueLabel[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/labels`);
+  }
+
+  async createLabel(workspaceId: string, data: { name: string; color: LabelColor }): Promise<IssueLabel> {
+    return this.fetch(`/api/workspaces/${workspaceId}/labels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLabel(
+    workspaceId: string,
+    labelId: string,
+    data: { name?: string; color?: LabelColor },
+  ): Promise<IssueLabel> {
+    return this.fetch(`/api/workspaces/${workspaceId}/labels/${labelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLabel(workspaceId: string, labelId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/labels/${labelId}`, { method: "DELETE" });
+  }
+
+  /** Attach a label to an issue. Server returns the updated full label list. */
+  async attachIssueLabel(
+    issueId: string,
+    labelId: string,
+    workspaceId: string,
+  ): Promise<{ issue_id: string; labels: IssueLabel[] }> {
+    return this.fetch(`/api/issues/${issueId}/labels?workspace_id=${workspaceId}`, {
+      method: "POST",
+      body: JSON.stringify({ label_id: labelId }),
+    });
+  }
+
+  /** Detach a label from an issue. */
+  async detachIssueLabel(
+    issueId: string,
+    labelId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/labels/${labelId}?workspace_id=${workspaceId}`, {
+      method: "DELETE",
+    });
   }
 }

@@ -37,6 +37,8 @@ export function IssuesPage() {
   const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
+  const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const includeNoLabels = useIssueViewStore((s) => s.includeNoLabels);
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(useIssueViewStore, wsId);
@@ -55,8 +57,8 @@ export function IssuesPage() {
   }, [allIssues, scope]);
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject],
+    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, includeNoLabels }),
+    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, includeNoLabels],
   );
 
   // Fetch sub-issue progress from the backend so counts are accurate

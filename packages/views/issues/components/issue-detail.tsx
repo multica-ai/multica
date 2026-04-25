@@ -37,8 +37,9 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker, RemovableLabelChip } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
+import { useDetachIssueLabel } from "@multica/core/labels/mutations";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -146,6 +147,41 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+// ---------------------------------------------------------------------------
+// Labels row (in detail sidebar)
+// ---------------------------------------------------------------------------
+
+function LabelsRow({
+  issueId,
+  labels,
+}: {
+  issueId: string;
+  labels: import("@multica/core/types").IssueLabel[];
+}) {
+  const detach = useDetachIssueLabel();
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {labels.map((l) => (
+        <RemovableLabelChip
+          key={l.id}
+          label={l}
+          onRemove={() => detach.mutate({ issueId, labelId: l.id })}
+        />
+      ))}
+      <LabelPicker
+        issueId={issueId}
+        attached={labels}
+        align="start"
+        trigger={
+          <span className="text-muted-foreground hover:text-foreground">
+            {labels.length === 0 ? "Add labels" : "+"}
+          </span>
+        }
+      />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -704,6 +740,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </PropRow>
           <PropRow label="Project">
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label="Labels">
+            <LabelsRow issueId={issue.id} labels={issue.labels ?? []} />
           </PropRow>
         </div>}
       </div>
@@ -1337,4 +1376,5 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     </ResizablePanelGroup>
   );
 }
+
 

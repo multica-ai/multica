@@ -1,4 +1,5 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction, IssueLabel, LabelColor } from "./issue";
+export { LABEL_COLORS, MAX_LABEL_NAME_LEN, MAX_LABELS_PER_WORKSPACE, MAX_LABELS_PER_ISSUE } from "./issue";
 export type {
   Agent,
   AgentStatus,

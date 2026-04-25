@@ -16,6 +16,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
+import { LabelChip } from "./label-chip";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
@@ -77,6 +78,8 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
+  const labels = issue.labels ?? [];
+  const showLabels = storeProperties.labels && labels.length > 0;
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
@@ -104,6 +107,18 @@ export const BoardCardContent = memo(function BoardCardContent({
               <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
               <span className="truncate">{project!.title}</span>
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Labels */}
+      {showLabels && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {labels.slice(0, 4).map((l) => (
+            <LabelChip key={l.id} label={l} size="xs" />
+          ))}
+          {labels.length > 4 && (
+            <span className="text-[11px] text-muted-foreground">+{labels.length - 4}</span>
           )}
         </div>
       )}

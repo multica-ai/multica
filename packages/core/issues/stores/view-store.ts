@@ -11,6 +11,7 @@ import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list";
 export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
+export type GroupByField = "status" | "label";
 export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
@@ -20,6 +21,7 @@ export interface CardProperties {
   dueDate: boolean;
   project: boolean;
   childProgress: boolean;
+  labels: boolean;
 }
 
 export interface ActorFilterValue {
@@ -41,6 +43,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "assignee", label: "Assignee" },
   { key: "dueDate", label: "Due date" },
   { key: "project", label: "Project" },
+  { key: "labels", label: "Labels" },
   { key: "childProgress", label: "Sub-issue progress" },
 ];
 
@@ -53,8 +56,11 @@ export interface IssueViewState {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
+  includeNoLabels: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
+  groupBy: GroupByField;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
   setViewMode: (mode: ViewMode) => void;
@@ -65,11 +71,14 @@ export interface IssueViewState {
   toggleCreatorFilter: (value: ActorFilterValue) => void;
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
+  toggleLabelFilter: (labelId: string) => void;
+  toggleNoLabels: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
+  setGroupBy: (field: GroupByField) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
 }
@@ -83,8 +92,11 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   creatorFilters: [],
   projectFilters: [],
   includeNoProject: false,
+  labelFilters: [],
+  includeNoLabels: false,
   sortBy: "position",
   sortDirection: "asc",
+  groupBy: "status",
   cardProperties: {
     priority: true,
     description: true,
@@ -92,6 +104,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     dueDate: true,
     project: true,
     childProgress: true,
+    labels: true,
   },
   listCollapsedStatuses: [],
 
@@ -144,6 +157,14 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     })),
   toggleNoProject: () =>
     set((state) => ({ includeNoProject: !state.includeNoProject })),
+  toggleLabelFilter: (labelId) =>
+    set((state) => ({
+      labelFilters: state.labelFilters.includes(labelId)
+        ? state.labelFilters.filter((id) => id !== labelId)
+        : [...state.labelFilters, labelId],
+    })),
+  toggleNoLabels: () =>
+    set((state) => ({ includeNoLabels: !state.includeNoLabels })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -169,9 +190,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       creatorFilters: [],
       projectFilters: [],
       includeNoProject: false,
+      labelFilters: [],
+      includeNoLabels: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
+  setGroupBy: (field) => set({ groupBy: field }),
   toggleCardProperty: (key) =>
     set((state) => ({
       cardProperties: {
@@ -199,8 +223,11 @@ export const viewStorePersistOptions = (name: string) => ({
     creatorFilters: state.creatorFilters,
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
+    labelFilters: state.labelFilters,
+    includeNoLabels: state.includeNoLabels,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
+    groupBy: state.groupBy,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
   }),
