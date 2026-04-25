@@ -312,6 +312,7 @@ const mockIssue: Issue = {
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
   pipeline_id: null,
+  completed_at: null,
   inherit_parent_workdir: true,
 };
 
