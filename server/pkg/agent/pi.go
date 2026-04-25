@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // piBackend implements Backend by spawning the Pi CLI in non-interactive
@@ -69,7 +71,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start pi: %w", err)
 	}
@@ -87,6 +90,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap any grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 

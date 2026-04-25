@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // hermesBlockedArgs are flags hardcoded by the daemon that must not be
@@ -78,7 +80,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	providerErr := newACPProviderErrorSniffer("hermes")
 	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr)
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
@@ -133,6 +136,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap any grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 		defer func() {

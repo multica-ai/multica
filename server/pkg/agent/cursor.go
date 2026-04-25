@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // cursorBackend implements Backend by spawning the Cursor Agent CLI
@@ -53,7 +55,8 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[cursor:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
@@ -65,6 +68,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap any grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 
