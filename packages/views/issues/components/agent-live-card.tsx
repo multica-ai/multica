@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2 } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
+import { isTaskPayloadForIssue } from "@multica/core/issues/use-issue-active-task";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
 import type { AgentTask } from "@multica/core/types/agent";
 import { cn } from "@multica/ui/lib/utils";
@@ -209,8 +210,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   useWSEvent(
     "task:dispatch",
     useCallback((payload: unknown) => {
-      const p = payload as { issue_id?: string };
-      if (p.issue_id && p.issue_id !== issueId) return;
+      if (!isTaskPayloadForIssue(payload, issueId)) return;
       api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
         setTaskStates((prev) => {
           const next = new Map(prev);

@@ -33,7 +33,7 @@ export function TabContent() {
     if (!group) return;
     const tab = group.tabs.find((t) => t.id === group.activeTabId);
     if (tab) document.title = tab.title;
-  }, [group?.activeTabId, group?.tabs]);
+  }, [group, group?.activeTabId, group?.tabs]);
 
   if (!group) return null;
 

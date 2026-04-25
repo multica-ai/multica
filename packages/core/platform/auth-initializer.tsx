@@ -111,6 +111,7 @@ export function AuthInitializer({
         storage.removeItem("multica_token");
         onAuthFailure();
       });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only auth init; re-running on prop changes would re-trigger login/logout flows unexpectedly
   }, []);
 
   return <>{children}</>;

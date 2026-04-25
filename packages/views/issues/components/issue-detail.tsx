@@ -353,7 +353,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       setSidebarOpen(false);
       sidebarRef.current?.collapse();
     }
-  }, [isMobile]);
+  }, [isMobile, sidebarRef]);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [backlogHintOpen, setBacklogHintOpen] = useState(false);

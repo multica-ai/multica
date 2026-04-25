@@ -282,7 +282,7 @@ function PipelineRow({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete pipeline?</AlertDialogTitle>
             <AlertDialogDescription>
-              "{pipeline.name}" and all its columns will be permanently deleted.
+              &quot;{pipeline.name}&quot; and all its columns will be permanently deleted.
               {pipeline.is_default && (
                 <span className="block mt-2 font-medium text-destructive">
                   This is your default pipeline. Deleting it will leave no default.

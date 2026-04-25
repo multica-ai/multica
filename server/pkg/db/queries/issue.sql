@@ -1,7 +1,7 @@
 -- name: ListIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id, completed_at
 FROM issue
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
@@ -51,6 +51,7 @@ UPDATE issue SET
     project_id = sqlc.narg('project_id'),
     pipeline_id = sqlc.narg('pipeline_id'),
     inherit_parent_workdir = COALESCE(sqlc.narg('inherit_parent_workdir'), inherit_parent_workdir),
+    completed_at = sqlc.narg('completed_at'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -58,6 +59,10 @@ RETURNING *;
 -- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
+    completed_at = CASE
+        WHEN $2 IN ('done', 'cancelled') THEN COALESCE(completed_at, now())
+        ELSE NULL
+    END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -79,7 +84,7 @@ DELETE FROM issue WHERE id = $1;
 -- name: ListOpenIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, pipeline_id, completed_at
 FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
