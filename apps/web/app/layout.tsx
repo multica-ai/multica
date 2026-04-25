@@ -5,6 +5,8 @@ import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { LocaleSync } from "@/components/locale-sync";
+import { ServiceWorkerRegister } from "@/components/sw-register";
+import { InstallPwaButton } from "@/components/install-pwa-button";
 import "./globals.css";
 
 // Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
@@ -75,8 +77,18 @@ export const metadata: Metadata = {
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
     shortcut: ["/favicon.svg"],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: {
+    capable: true,
+    title: "Multica",
+    statusBarStyle: "default",
   },
   openGraph: {
     type: "website",
@@ -110,6 +122,8 @@ export default function RootLayout({
     >
       <body className="h-full overflow-hidden">
         <LocaleSync />
+        <ServiceWorkerRegister />
+        <InstallPwaButton />
         <ThemeProvider>
           <WebProviders>
             {children}
