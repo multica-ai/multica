@@ -95,6 +95,11 @@ export function IssuesPage() {
     return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.label]));
   }, [activePipelineId, activePipelineColumns]);
 
+  const columnTerminals = useMemo((): Record<string, boolean> | undefined => {
+    if (!activePipelineId || !activePipelineColumns?.length) return undefined;
+    return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.is_terminal]));
+  }, [activePipelineId, activePipelineColumns]);
+
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: string, newPosition?: number) => {
@@ -189,6 +194,7 @@ export function IssuesPage() {
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 columnLabels={columnLabels}
+                columnTerminals={columnTerminals}
                 activePipelineId={activePipelineId}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
@@ -199,6 +205,7 @@ export function IssuesPage() {
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
                 columnLabels={columnLabels}
+                columnTerminals={columnTerminals}
                 activePipelineId={activePipelineId}
               />
             )}

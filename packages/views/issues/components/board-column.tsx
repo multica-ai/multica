@@ -25,6 +25,7 @@ import type { ChildProgress } from "./list-row";
 
 export function BoardColumn({
   status,
+  isTerminal,
   label: labelProp,
   pipelineId,
   issueIds,
@@ -35,6 +36,7 @@ export function BoardColumn({
   footer,
 }: {
   status: string;
+  isTerminal?: boolean;
   label?: string;
   pipelineId?: string | null;
   issueIds: string[];
@@ -69,7 +71,7 @@ export function BoardColumn({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
-                  <StatusIcon status={status} className="h-3 w-3" inheritColor />
+                  <StatusIcon status={status} isTerminal={isTerminal} className="h-3 w-3" inheritColor />
                   {label}
                 </span>
                 <span className="text-xs text-muted-foreground">

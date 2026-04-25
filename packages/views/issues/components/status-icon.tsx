@@ -159,15 +159,17 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
 
 export function StatusIcon({
   status,
+  isTerminal,
   className = "h-4 w-4",
   inheritColor = false,
 }: {
   status: string;
+  isTerminal?: boolean;
   className?: string;
   inheritColor?: boolean;
 }) {
   const cfg = getStatusConfig(status);
-  const Renderer = STATUS_RENDERERS[status as IssueStatus] ?? TodoIcon;
+  const Renderer = STATUS_RENDERERS[status as IssueStatus] ?? (isTerminal ? DoneIcon : TodoIcon);
 
   return (
     <svg

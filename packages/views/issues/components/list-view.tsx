@@ -24,18 +24,22 @@ export function ListView({
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
   columnLabels,
+  columnTerminals,
   activePipelineId,
   myIssuesScope,
   myIssuesFilter,
+  myIssuesStatuses,
 }: {
   issues: Issue[];
   visibleStatuses: string[];
   childProgressMap?: Map<string, ChildProgress>;
   columnLabels?: Record<string, string>;
+  columnTerminals?: Record<string, boolean>;
   activePipelineId?: string | null;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  myIssuesStatuses?: readonly string[];
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -64,7 +68,11 @@ export function ListView({
   );
 
   const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
+    ? {
+        scope: myIssuesScope,
+        filter: myIssuesFilter ?? {},
+        ...(myIssuesStatuses ? { statuses: myIssuesStatuses } : {}),
+      }
     : undefined;
 
   return (
@@ -87,6 +95,7 @@ export function ListView({
           <StatusAccordionItem
             key={status}
             status={status}
+            isTerminal={columnTerminals?.[status]}
             label={columnLabels?.[status]}
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
@@ -101,6 +110,7 @@ export function ListView({
 
 function StatusAccordionItem({
   status,
+  isTerminal,
   label,
   issues,
   childProgressMap,
@@ -108,6 +118,7 @@ function StatusAccordionItem({
   myIssuesOpts,
 }: {
   status: string;
+  isTerminal?: boolean;
   label?: string;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
@@ -151,7 +162,7 @@ function StatusAccordionItem({
         <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
           <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
-            <StatusIcon status={status} className="h-3 w-3" inheritColor />
+            <StatusIcon status={status} isTerminal={isTerminal} className="h-3 w-3" inheritColor />
             {label ?? cfg.label}
           </span>
           <span className="text-xs text-muted-foreground">{total}</span>

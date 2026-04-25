@@ -23,19 +23,31 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
+import { usePipelineColumns } from "@multica/core/pipeline";
+import type { Issue } from "@multica/core/types";
 import { PageHeader } from "../../layout/page-header";
 import { MyIssuesHeader } from "./my-issues-header";
+
+const EMPTY_ISSUES: Issue[] = [];
 
 export function MyIssuesPage() {
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: agents = [], isLoading: agentsLoading } = useQuery(agentListOptions(wsId));
 
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
+  const activePipelineId = useStore(myIssuesViewStore, (s) => s.activePipelineId);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
+  const { data: activePipelineColumns, isLoading: pipelineColumnsLoading } =
+    usePipelineColumns(wsId, activePipelineId ?? "");
+  const columnStatusKeys = useMemo(
+    () => activePipelineColumns?.map((c) => c.status_key) ?? [],
+    [activePipelineColumns],
+  );
+  const myIssuesStatuses = activePipelineId ? columnStatusKeys : undefined;
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(myIssuesViewStore, wsId);
@@ -55,21 +67,32 @@ export function MyIssuesPage() {
 
   const filter: MyIssuesFilter = useMemo(() => {
     if (!user) return {};
+    const pipelineFilter = activePipelineId ? { pipeline_id: activePipelineId } : {};
     switch (scope) {
       case "assigned":
-        return { assignee_id: user.id };
+        return { assignee_id: user.id, ...pipelineFilter };
       case "created":
-        return { creator_id: user.id };
+        return { creator_id: user.id, ...pipelineFilter };
       case "agents":
-        return { assignee_ids: myAgentIds };
+        return { assignee_ids: myAgentIds, ...pipelineFilter };
       default:
-        return { assignee_id: user.id };
+        return { assignee_id: user.id, ...pipelineFilter };
     }
-  }, [scope, user, myAgentIds]);
+  }, [scope, user, myAgentIds, activePipelineId]);
 
-  const { data: myIssues = [], isLoading: loading } = useQuery(
-    myIssueListOptions(wsId, scope, filter),
+  const isEmptyAgentsScope =
+    scope === "agents" && !agentsLoading && myAgentIds.length === 0;
+  const shouldLoadMyIssues =
+    Boolean(user) &&
+    !isEmptyAgentsScope &&
+    (!activePipelineId || columnStatusKeys.length > 0);
+  const { data: loadedMyIssues = [], isLoading: issuesLoading } = useQuery(
+    myIssueListOptions(wsId, scope, filter, myIssuesStatuses, shouldLoadMyIssues),
   );
+  const myIssues = isEmptyAgentsScope ? EMPTY_ISSUES : loadedMyIssues;
+  const loading = activePipelineId
+    ? pipelineColumnsLoading || issuesLoading || (scope === "agents" && agentsLoading)
+    : issuesLoading || (scope === "agents" && agentsLoading);
 
   // Apply status/priority filters from view store
   const issues = useMemo(
@@ -89,14 +112,31 @@ export function MyIssuesPage() {
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
+    if (activePipelineId && activePipelineColumns?.length) {
+      return [...activePipelineColumns]
+        .sort((a, b) => a.position - b.position)
+        .map((c) => c.status_key);
+    }
+    if (activePipelineId) return [];
     if (statusFilters.length > 0)
       return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
     return BOARD_STATUSES;
-  }, [statusFilters]);
+  }, [activePipelineId, activePipelineColumns, statusFilters]);
 
   const hiddenStatuses = useMemo(() => {
+    if (activePipelineId) return [];
     return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));
-  }, [visibleStatuses]);
+  }, [activePipelineId, visibleStatuses]);
+
+  const columnLabels = useMemo((): Record<string, string> | undefined => {
+    if (!activePipelineId || !activePipelineColumns?.length) return undefined;
+    return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.label]));
+  }, [activePipelineId, activePipelineColumns]);
+
+  const columnTerminals = useMemo((): Record<string, boolean> | undefined => {
+    if (!activePipelineId || !activePipelineColumns?.length) return undefined;
+    return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.is_terminal]));
+  }, [activePipelineId, activePipelineColumns]);
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
@@ -172,11 +212,11 @@ export function MyIssuesPage() {
         <span className="text-sm font-medium">My Issues</span>
       </PageHeader>
 
-      {/* Header: scope tabs (left) + controls (right) */}
-      <MyIssuesHeader allIssues={myIssues} />
-
-      {/* Content: scrollable */}
       <ViewStoreProvider store={myIssuesViewStore}>
+        {/* Header: scope tabs (left) + controls (right) */}
+        <MyIssuesHeader allIssues={myIssues} />
+
+        {/* Content: scrollable */}
         {myIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -190,18 +230,26 @@ export function MyIssuesPage() {
                 issues={issues}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
+                columnLabels={columnLabels}
+                columnTerminals={columnTerminals}
+                activePipelineId={activePipelineId}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
+                myIssuesStatuses={myIssuesStatuses}
               />
             ) : (
               <ListView
                 issues={issues}
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
+                columnLabels={columnLabels}
+                columnTerminals={columnTerminals}
+                activePipelineId={activePipelineId}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
+                myIssuesStatuses={myIssuesStatuses}
               />
             )}
           </div>

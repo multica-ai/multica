@@ -104,16 +104,19 @@ export function BoardView({
   visibleStatuses,
   hiddenStatuses,
   columnLabels,
+  columnTerminals,
   activePipelineId,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  myIssuesStatuses,
 }: {
   issues: Issue[];
   visibleStatuses: string[];
   hiddenStatuses: string[];
   columnLabels?: Record<string, string>;
+  columnTerminals?: Record<string, boolean>;
   activePipelineId?: string | null;
   onMoveIssue: (
     issueId: string,
@@ -124,6 +127,7 @@ export function BoardView({
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  myIssuesStatuses?: readonly string[];
 }) {
   const wsId = useWorkspaceId();
   const { data: columnConfigs = [] } = useColumnConfigs(wsId);
@@ -132,7 +136,11 @@ export function BoardView({
   const columnIdSet = useMemo(() => new Set<string>(visibleStatuses), [visibleStatuses]);
   const kanbanCollision = useMemo(() => makeKanbanCollision(columnIdSet), [columnIdSet]);
   const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
+    ? {
+        scope: myIssuesScope,
+        filter: myIssuesFilter ?? {},
+        ...(myIssuesStatuses ? { statuses: myIssuesStatuses } : {}),
+      }
     : undefined;
   const columnConfigMap = useMemo(
     () => new Map(columnConfigs.map((config) => [config.status, config])),
@@ -298,6 +306,7 @@ export function BoardView({
           <PaginatedBoardColumn
             key={status}
             status={status}
+            isTerminal={columnTerminals?.[status]}
             label={columnLabels?.[status]}
             pipelineId={activePipelineId}
             issueIds={columns[status] ?? []}
@@ -329,6 +338,7 @@ export function BoardView({
 
 function PaginatedBoardColumn({
   status,
+  isTerminal,
   label,
   pipelineId,
   issueIds,
@@ -338,6 +348,7 @@ function PaginatedBoardColumn({
   myIssuesOpts,
 }: {
   status: string;
+  isTerminal?: boolean;
   label?: string;
   pipelineId?: string | null;
   issueIds: string[];
@@ -353,6 +364,7 @@ function PaginatedBoardColumn({
   return (
     <BoardColumn
       status={status}
+      isTerminal={isTerminal}
       label={label}
       pipelineId={pipelineId}
       issueIds={issueIds}

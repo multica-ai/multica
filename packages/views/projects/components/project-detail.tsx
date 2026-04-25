@@ -151,6 +151,11 @@ function ProjectIssuesContent({
     return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.label]));
   }, [activePipelineId, activePipelineColumns]);
 
+  const columnTerminals = useMemo((): Record<string, boolean> | undefined => {
+    if (!activePipelineId || !activePipelineColumns?.length) return undefined;
+    return Object.fromEntries(activePipelineColumns.map((c) => [c.status_key, c.is_terminal]));
+  }, [activePipelineId, activePipelineColumns]);
+
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: string, newPosition?: number) => {
@@ -187,6 +192,7 @@ function ProjectIssuesContent({
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           columnLabels={columnLabels}
+          columnTerminals={columnTerminals}
           activePipelineId={activePipelineId}
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
@@ -198,6 +204,7 @@ function ProjectIssuesContent({
           issues={issues}
           visibleStatuses={visibleStatuses}
           columnLabels={columnLabels}
+          columnTerminals={columnTerminals}
           activePipelineId={activePipelineId}
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
