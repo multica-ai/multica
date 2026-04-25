@@ -126,15 +126,19 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 				identifier = repo.URL
 			}
 			if repo.SourceBranch != "" {
-				fmt.Fprintf(&b, "⚠️ MANDATORY: When checking out `%s`, you MUST use branch `%s` as the starting point.\n", identifier, repo.SourceBranch)
+				fmt.Fprintf(&b, "⚠️ MANDATORY: When checking out `%s`, you MUST use branch `%s` as the starting point. Do NOT use any other branch.\n", identifier, repo.SourceBranch)
 			}
 			if repo.TargetBranch != "" {
-				fmt.Fprintf(&b, "⚠️ MANDATORY: You MUST commit ALL changes to `%s` on branch `%s`. Create the branch if it does not exist.\n", identifier, repo.TargetBranch)
-				sourceRef := repo.SourceBranch
-				if sourceRef == "" {
-					sourceRef = "the default branch"
+				if repo.SourceBranch == repo.TargetBranch {
+					// Same branch: commit and push directly — no PR needed.
+					fmt.Fprintf(&b, "⚠️ MANDATORY: Commit and push ALL changes directly to branch `%s` on `%s`. Create the branch if it does not exist. Do NOT create a Pull Request.\n", repo.TargetBranch, identifier)
+				} else if repo.SourceBranch != "" {
+					// source = base branch (checkout origin, PR target); target = dev branch (where agent commits).
+					fmt.Fprintf(&b, "⚠️ MANDATORY: Commit ALL changes to branch `%s` on `%s`. Create the branch if it does not exist. Then open a Pull Request from `%s` targeting `%s` and post the PR link as a comment on the task. Do NOT commit directly to `%s`.\n", repo.TargetBranch, identifier, repo.TargetBranch, repo.SourceBranch, repo.SourceBranch)
+				} else {
+					// Only target configured: commit to target, open PR to default branch.
+					fmt.Fprintf(&b, "⚠️ MANDATORY: Commit ALL changes to branch `%s` on `%s`. Create the branch if it does not exist. Then open a Pull Request targeting the repository's default branch and post the PR link as a comment on the task.\n", repo.TargetBranch, identifier)
 				}
-				fmt.Fprintf(&b, "⚠️ MANDATORY: After committing, open a pull request from `%s` to `%s` and post the PR link as a comment on the task.\n", repo.TargetBranch, sourceRef)
 			}
 		}
 		b.WriteString("\n")
