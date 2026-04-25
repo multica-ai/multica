@@ -12,13 +12,17 @@ export interface ProjectRepo extends WorkspaceRepo {
   target_branch?: string;
 }
 
+export interface WorkspaceSettings {
+  auto_hide_days?: number;
+}
+
 export interface Workspace {
   id: string;
   name: string;
   slug: string;
   description: string | null;
   context: string | null;
-  settings: Record<string, unknown>;
+  settings: WorkspaceSettings;
   repos: WorkspaceRepo[];
   issue_prefix: string;
   custom_env: Record<string, string>;

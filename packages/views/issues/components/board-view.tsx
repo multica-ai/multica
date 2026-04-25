@@ -18,6 +18,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useColumnConfigs } from "@multica/core/issues";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import type { Issue, IssueStatus, WorkspaceColumnConfig } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
@@ -32,7 +33,7 @@ import { getStatusConfig } from "@multica/core/issues/config";
 import { useViewStoreApi, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { SortField, SortDirection } from "@multica/core/issues/stores/view-store";
 import { sortIssues } from "../utils/sort";
-import { isAutoHidden } from "../utils/auto-hide";
+import { isAutoHidden, DEFAULT_AUTO_HIDE_DAYS } from "../utils/auto-hide";
 import { StatusIcon } from "./status-icon";
 import { BoardColumn } from "./board-column";
 import { BoardCardContent } from "./board-card";
@@ -62,12 +63,13 @@ function buildColumns(
   sortBy: SortField,
   sortDirection: SortDirection,
   showHiddenPerStatus: Record<string, boolean> = {},
+  autoHideDays = DEFAULT_AUTO_HIDE_DAYS,
 ): Record<string, string[]> {
   const cols = {} as Record<string, string[]>;
   for (const status of visibleStatuses) {
     const showHidden = showHiddenPerStatus[status] ?? false;
     const sorted = sortIssues(
-      issues.filter((i) => i.status === status && (showHidden || !isAutoHidden(i))),
+      issues.filter((i) => i.status === status && (showHidden || !isAutoHidden(i, autoHideDays))),
       sortBy,
       sortDirection,
     );
@@ -80,10 +82,11 @@ function buildColumns(
 function countHiddenByStatus(
   issues: Issue[],
   visibleStatuses: string[],
+  autoHideDays = DEFAULT_AUTO_HIDE_DAYS,
 ): Record<string, number> {
   const counts = {} as Record<string, number>;
   for (const status of visibleStatuses) {
-    counts[status] = issues.filter((i) => i.status === status && isAutoHidden(i)).length;
+    counts[status] = issues.filter((i) => i.status === status && isAutoHidden(i, autoHideDays)).length;
   }
   return counts;
 }
@@ -146,6 +149,8 @@ export function BoardView({
 }) {
   const wsId = useWorkspaceId();
   const { data: columnConfigs = [] } = useColumnConfigs(wsId);
+  const workspace = useCurrentWorkspace();
+  const autoHideDays = (workspace?.settings?.auto_hide_days ?? DEFAULT_AUTO_HIDE_DAYS);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const showHiddenPerStatus = useViewStore((s) => s.showHiddenPerStatus);
@@ -170,24 +175,24 @@ export function BoardView({
 
   // --- Auto-hide counts ---
   const hiddenCounts = useMemo(
-    () => countHiddenByStatus(issues, visibleStatuses),
-    [issues, visibleStatuses],
+    () => countHiddenByStatus(issues, visibleStatuses, autoHideDays),
+    [issues, visibleStatuses, autoHideDays],
   );
 
   // --- Local columns state ---
   // Between drags: follows TQ via useEffect.
   // During drag: local-only, driven by onDragOver/onDragEnd.
   const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus),
+    buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, autoHideDays),
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
   useEffect(() => {
     if (!isDraggingRef.current) {
-      setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus));
+      setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, autoHideDays));
     }
-  }, [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus]);
+  }, [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, autoHideDays]);
 
   // After a cross-column move, lock for one animation frame so dnd-kit's
   // collision detection can stabilize before processing the next move.
@@ -261,7 +266,7 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus));
+        setColumns(buildColumns(issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, autoHideDays));
 
       if (!over) {
         resetColumns();
@@ -313,7 +318,7 @@ export function BoardView({
 
       onMoveIssue(activeId, finalCol, newPosition);
     },
-    [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, onMoveIssue],
+    [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, autoHideDays, onMoveIssue],
   );
 
   return (

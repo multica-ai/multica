@@ -12,8 +12,9 @@ import { getStatusConfig } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { sortIssues } from "../utils/sort";
-import { isAutoHidden } from "../utils/auto-hide";
+import { isAutoHidden, DEFAULT_AUTO_HIDE_DAYS } from "../utils/auto-hide";
 import { StatusIcon } from "./status-icon";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
@@ -52,26 +53,28 @@ export function ListView({
   );
   const showHiddenPerStatus = useViewStore((s) => s.showHiddenPerStatus);
   const viewStoreApi = useViewStoreApi();
+  const workspace = useCurrentWorkspace();
+  const autoHideDays = workspace?.settings?.auto_hide_days ?? DEFAULT_AUTO_HIDE_DAYS;
 
   const issuesByStatus = useMemo(() => {
     const map = new Map<string, Issue[]>();
     for (const status of visibleStatuses) {
       const showHidden = showHiddenPerStatus[status] ?? false;
       const filtered = issues.filter(
-        (i) => i.status === status && (showHidden || !isAutoHidden(i))
+        (i) => i.status === status && (showHidden || !isAutoHidden(i, autoHideDays))
       );
       map.set(status, sortIssues(filtered, sortBy, sortDirection));
     }
     return map;
-  }, [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus]);
+  }, [issues, visibleStatuses, sortBy, sortDirection, showHiddenPerStatus, autoHideDays]);
 
   const hiddenCountsByStatus = useMemo(() => {
     const map = new Map<string, number>();
     for (const status of visibleStatuses) {
-      map.set(status, issues.filter((i) => i.status === status && isAutoHidden(i)).length);
+      map.set(status, issues.filter((i) => i.status === status && isAutoHidden(i, autoHideDays)).length);
     }
     return map;
-  }, [issues, visibleStatuses]);
+  }, [issues, visibleStatuses, autoHideDays]);
 
   const expandedStatuses = useMemo(
     () =>
