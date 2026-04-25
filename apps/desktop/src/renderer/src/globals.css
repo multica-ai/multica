@@ -40,15 +40,3 @@
 [data-slot="sidebar-container"] {
   padding: 0 !important;
 }
-
-/* Quick-add popup: transparent background for the frameless window */
-html[data-quick-add],
-html[data-quick-add] body {
-  background: transparent !important;
-}
-
-/* Quick-add popup: hide dialog overlay backdrop (the window itself IS the modal) */
-html[data-quick-add] [data-slot="dialog-overlay"] {
-  background: transparent !important;
-  backdrop-filter: none !important;
-}
