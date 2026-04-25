@@ -123,6 +123,8 @@ const mockViewState = {
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true },
   listCollapsedStatuses: [] as string[],
+  activePipelineId: null,
+  showHiddenPerStatus: {} as Record<string, boolean>,
   setViewMode: vi.fn(),
   toggleStatusFilter: vi.fn(),
   togglePriorityFilter: vi.fn(),
@@ -138,6 +140,8 @@ const mockViewState = {
   setSortDirection: vi.fn(),
   toggleCardProperty: vi.fn(),
   toggleListCollapsed: vi.fn(),
+  setActivePipeline: vi.fn(),
+  toggleShowHidden: vi.fn(),
 };
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
