@@ -126,10 +126,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 				identifier = repo.URL
 			}
 			if repo.SourceBranch != "" {
-				fmt.Fprintf(&b, "⚠️ MANDATORY: When checking out `%s`, you MUST use branch `%s`. Do NOT use any other branch as the starting point.\n", identifier, repo.SourceBranch)
+				fmt.Fprintf(&b, "⚠️ MANDATORY: When checking out `%s`, you MUST use branch `%s` as the starting point.\n", identifier, repo.SourceBranch)
 			}
 			if repo.TargetBranch != "" {
-				fmt.Fprintf(&b, "⚠️ MANDATORY: You MUST commit ALL changes to `%s` on branch `%s`. Do NOT commit to main, master, or any other branch. Create the branch if it does not exist.\n", identifier, repo.TargetBranch)
+				fmt.Fprintf(&b, "⚠️ MANDATORY: You MUST commit ALL changes to `%s` on branch `%s`. Create the branch if it does not exist.\n", identifier, repo.TargetBranch)
 			}
 		}
 		b.WriteString("\n")
