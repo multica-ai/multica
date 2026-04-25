@@ -29,6 +29,12 @@ type PATResolver interface {
 	ResolveToken(ctx context.Context, token string) (userID string, ok bool)
 }
 
+// UserLoginChecker verifies the user account may open a session (e.g. not suspended).
+// If nil, suspended-user checks are skipped (tests only; production should pass a non-nil checker).
+type UserLoginChecker interface {
+	MayLogin(ctx context.Context, userID string) bool
+}
+
 // ScopeAuthorizer decides whether a connection (identified by userID +
 // workspaceID) is allowed to subscribe to a given scope. Implementations
 // typically perform a DB lookup on the underlying resource (task / chat
@@ -567,16 +573,20 @@ func (h *Hub) Snapshot() map[string]any {
 }
 
 // authenticateToken validates a JWT or PAT string and returns the user ID.
-func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (string, string) {
+// On failure it returns a JSON errBody and a non-zero HTTP status (401 or 403).
+func authenticateToken(tokenStr string, pr PATResolver, login UserLoginChecker, ctx context.Context) (uid string, errBody string, httpStatus int) {
 	if strings.HasPrefix(tokenStr, "mul_") {
 		if pr == nil {
-			return "", `{"error":"invalid token"}`
+			return "", `{"error":"invalid token"}`, http.StatusUnauthorized
 		}
 		uid, ok := pr.ResolveToken(ctx, tokenStr)
 		if !ok {
-			return "", `{"error":"invalid token"}`
+			return "", `{"error":"invalid token"}`, http.StatusUnauthorized
 		}
-		return uid, ""
+		if login != nil && !login.MayLogin(ctx, uid) {
+			return "", string(auth.SuspendedResponseJSON()), http.StatusForbidden
+		}
+		return uid, "", 0
 	}
 
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
@@ -586,19 +596,22 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 		return auth.JWTSecret(), nil
 	})
 	if err != nil || !token.Valid {
-		return "", `{"error":"invalid token"}`
+		return "", `{"error":"invalid token"}`, http.StatusUnauthorized
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", `{"error":"invalid claims"}`
+		return "", `{"error":"invalid claims"}`, http.StatusUnauthorized
 	}
 
-	uid, ok := claims["sub"].(string)
-	if !ok || strings.TrimSpace(uid) == "" {
-		return "", `{"error":"invalid claims"}`
+	sub, ok := claims["sub"].(string)
+	if !ok || strings.TrimSpace(sub) == "" {
+		return "", `{"error":"invalid claims"}`, http.StatusUnauthorized
 	}
-	return uid, ""
+	if login != nil && !login.MayLogin(ctx, sub) {
+		return "", string(auth.SuspendedResponseJSON()), http.StatusForbidden
+	}
+	return sub, "", 0
 }
 
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
@@ -626,7 +639,7 @@ func firstMessageAuth(conn *websocket.Conn) (string, string) {
 
 // HandleWebSocket upgrades an HTTP connection to WebSocket with cookie or
 // first-message auth.
-func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, w http.ResponseWriter, r *http.Request) {
+func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, login UserLoginChecker, w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		if slug := r.URL.Query().Get("workspace_slug"); slug != "" && resolveSlug != nil {
@@ -645,9 +658,11 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 
 	var userID string
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
-		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
-		if errMsg != "" {
-			http.Error(w, errMsg, http.StatusUnauthorized)
+		uid, errBody, st := authenticateToken(cookie.Value, pr, login, r.Context())
+		if st != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(st)
+			_, _ = w.Write([]byte(errBody))
 			return
 		}
 		if !mc.IsMember(r.Context(), uid, workspaceID) {
@@ -670,9 +685,9 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			conn.Close()
 			return
 		}
-		uid, errMsg := authenticateToken(tokenStr, pr, r.Context())
-		if errMsg != "" {
-			conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
+		uid, errBody, st := authenticateToken(tokenStr, pr, login, r.Context())
+		if st != 0 {
+			conn.WriteMessage(websocket.TextMessage, []byte(errBody))
 			conn.Close()
 			return
 		}

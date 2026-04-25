@@ -13,6 +13,29 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// requireActiveUser loads the user row and rejects suspended accounts (403) or missing users (401).
+func requireActiveUser(ctx context.Context, q *db.Queries, userID pgtype.UUID, w http.ResponseWriter, logTag string) bool {
+	if q == nil {
+		return true
+	}
+	if !userID.Valid {
+		slog.Warn(logTag+": invalid user id in token")
+		http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
+		return false
+	}
+	u, err := q.GetUser(ctx, userID)
+	if err != nil {
+		slog.Warn(logTag+": user lookup failed", "error", err)
+		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+		return false
+	}
+	if !auth.UserMayAuthenticate(u) {
+		auth.WriteAccountSuspendedResponse(w)
+		return false
+	}
+	return true
+}
+
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
 // Auth middleware validates JWT tokens or Personal Access Tokens.
@@ -52,6 +75,10 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 					return
 				}
 
+				if !requireActiveUser(r.Context(), queries, pat.UserID, w, "auth") {
+					return
+				}
+
 				r.Header.Set("X-User-ID", uuidToString(pat.UserID))
 
 				// Best-effort: update last_used_at
@@ -85,6 +112,9 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 			if !ok || strings.TrimSpace(sub) == "" {
 				slog.Warn("auth: invalid claims", "path", r.URL.Path)
 				http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
+				return
+			}
+			if !requireActiveUser(r.Context(), queries, util.ParseUUID(sub), w, "auth") {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)

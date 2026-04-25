@@ -136,8 +136,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		}
 		return util.UUIDToString(ws.ID), nil
 	})
+	wsLogin := &wsUserLoginChecker{queries: queries}
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
+		realtime.HandleWebSocket(hub, mc, pr, slugResolver, wsLogin, w, r)
 	})
 
 	// Local file serving (when using local storage)
@@ -422,6 +423,19 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	})
 
 	return r
+}
+
+// wsUserLoginChecker implements realtime.UserLoginChecker for suspended-account enforcement.
+type wsUserLoginChecker struct {
+	queries *db.Queries
+}
+
+func (c *wsUserLoginChecker) MayLogin(ctx context.Context, userID string) bool {
+	u, err := c.queries.GetUser(ctx, parseUUID(userID))
+	if err != nil {
+		return false
+	}
+	return auth.UserMayAuthenticate(u)
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

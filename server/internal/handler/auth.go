@@ -44,6 +44,7 @@ type UserResponse struct {
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
+	AccountStatus           string          `json:"account_status"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
 }
@@ -56,6 +57,10 @@ func userToResponse(u db.User) UserResponse {
 	if len(q) == 0 {
 		q = []byte("{}")
 	}
+	status := u.AccountStatus
+	if status == "" {
+		status = auth.AccountStatusActive
+	}
 	return UserResponse{
 		ID:                      uuidToString(u.ID),
 		Name:                    u.Name,
@@ -64,6 +69,7 @@ func userToResponse(u db.User) UserResponse {
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
+		AccountStatus:           status,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -119,6 +125,9 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	}
 
 	if !isNew {
+		if !auth.UserMayAuthenticate(user) {
+			return db.User{}, false, auth.ErrAccountSuspended
+		}
 		return user, false, nil
 	}
 
@@ -167,7 +176,8 @@ func signupSourceFromRequest(r *http.Request) string {
 
 func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 	if !isNewUser {
-		return nil // existing users always allowed to log in
+		// Returning users bypass signup allowlists; account suspension is enforced separately.
+		return nil
 	}
 
 	email = strings.ToLower(email)
@@ -222,7 +232,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check signup restrictions before sending magic link
-	_, err := h.Queries.GetUserByEmail(r.Context(), email)
+	existingUser, err := h.Queries.GetUserByEmail(r.Context(), email)
 	if err != nil {
 		if !isNotFound(err) {
 			// Real database/query error → return 500
@@ -241,7 +251,11 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// User already exists → always allowed to login
+		if !auth.UserMayAuthenticate(existingUser) {
+			auth.WriteAccountSuspendedResponse(w)
+			return
+		}
+		// User already exists → allowed to request login code
 		isNewUser := false
 		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
 			// This should rarely happen, but handle it anyway
@@ -325,6 +339,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		if errors.Is(err, auth.ErrAccountSuspended) {
+			auth.WriteAccountSuspendedResponse(w)
+			return
+		}
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
@@ -372,6 +390,10 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if !auth.UserMayAuthenticate(user) {
+		auth.WriteAccountSuspendedResponse(w)
 		return
 	}
 
@@ -489,6 +511,10 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		if errors.Is(err, auth.ErrAccountSuspended) {
+			auth.WriteAccountSuspendedResponse(w)
+			return
+		}
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
@@ -565,6 +591,10 @@ func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if !auth.UserMayAuthenticate(user) {
+		auth.WriteAccountSuspendedResponse(w)
 		return
 	}
 

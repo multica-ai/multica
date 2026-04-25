@@ -55,3 +55,10 @@ UPDATE "user" SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetUserAccountStatus :one
+UPDATE "user" SET
+    account_status = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
