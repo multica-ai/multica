@@ -89,15 +89,10 @@ export function AgentDetail({
       myMembership.role === "owner" ||
       myMembership.role === "admin");
 
-  // Non-owners cannot see the Environment tab (sensitive credentials)
-  const visibleTabs = isOwner
-    ? detailTabs
-    : detailTabs.filter((t) => t.id !== "env");
-
-  // Reset to a visible tab if the current tab became hidden
-  const effectiveTab = visibleTabs.some((t) => t.id === activeTab)
+  // All tabs visible for everyone; non-owners get read-only mode
+  const effectiveTab = detailTabs.some((t) => t.id === activeTab)
     ? activeTab
-    : visibleTabs[0]?.id ?? "instructions";
+    : "instructions";
 
   return (
     <div className="flex h-full flex-col">
@@ -172,7 +167,7 @@ export function AgentDetail({
 
       {/* Tabs */}
       <div className="flex border-b px-6">
-        {visibleTabs.map((tab) => (
+        {detailTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -201,10 +196,10 @@ export function AgentDetail({
           <SkillsTab agent={agent} readOnly={!isOwner} />
         )}
         {effectiveTab === "tasks" && <TasksTab agent={agent} />}
-        {effectiveTab === "env" && isOwner && (
+        {effectiveTab === "env" && (
           <EnvTab
             agent={agent}
-            readOnly={agent.custom_env_redacted}
+            readOnly={!isOwner}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
