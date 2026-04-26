@@ -32,6 +32,7 @@ func BuildPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n", task.IssueID)
+	appendLabelInstructions(&b, task)
 	return b.String()
 }
 
@@ -148,6 +149,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n\n", task.IssueID)
+	appendLabelInstructions(&b, task)
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
@@ -212,4 +214,19 @@ func buildAutopilotPrompt(task Task) string {
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
 	return b.String()
+}
+
+// appendLabelInstructions appends label-linked instructions to the prompt.
+// Each label on the issue can carry optional agent instructions (configured
+// in the Manage Labels dialog). When present, they're injected here so the
+// agent is context-aware of the label's intent without changing the
+// assignment model. Multiple labels stack additively.
+func appendLabelInstructions(b *strings.Builder, task Task) {
+	if len(task.LabelInstructions) == 0 {
+		return
+	}
+	b.WriteString("\n\nLabel-linked instructions (respect ALL of these while working on this issue):\n\n")
+	for _, li := range task.LabelInstructions {
+		fmt.Fprintf(b, "[%s] %s\n\n", li.Name, li.Instructions)
+	}
 }
