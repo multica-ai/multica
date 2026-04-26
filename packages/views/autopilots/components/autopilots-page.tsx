@@ -5,7 +5,7 @@ import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, Ba
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useCreateAutopilot, useCreateAutopilotTrigger } from "@multica/core/autopilots/mutations";
+import { useCreateAutopilot, useCreateAutopilotTrigger, useTriggerAutopilot } from "@multica/core/autopilots/mutations";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -147,8 +147,20 @@ const EXECUTION_MODE_LABELS: Record<string, string> = {
 function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const { getActorName } = useActorName();
   const wsPaths = useWorkspacePaths();
+  const triggerAutopilot = useTriggerAutopilot();
   const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
   const StatusIcon = statusCfg.icon;
+
+  const handleRunNow = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await triggerAutopilot.mutateAsync(autopilot.id);
+      toast.success("Autopilot triggered");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to trigger autopilot");
+    }
+  };
 
   return (
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
@@ -183,6 +195,18 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
       <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
       </span>
+
+      {/* Run now — visible on row hover */}
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0"
+        onClick={handleRunNow}
+        disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+      >
+        <Play className="h-3 w-3 mr-1" />
+        {triggerAutopilot.isPending ? "..." : "Run now"}
+      </Button>
     </div>
   );
 }
