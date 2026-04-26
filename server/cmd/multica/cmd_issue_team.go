@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -260,7 +261,7 @@ func runIssueTeam(ctx context.Context, client *cli.APIClient, opts issueTeamRunO
 		if _, err := postIssueTeamRoleComment(ctx, client, opts.IssueID, "lead", resolved.Lead, leadPrompt()); err != nil {
 			return err
 		}
-		if _, err := postIssueTeamRoleComment(ctx, client, opts.IssueID, "implementer", resolved.Implementer, implementerPrompt(1, "")); err != nil {
+		if _, err := postIssueTeamRoleComment(ctx, client, opts.IssueID, "implementer", resolved.Implementer, implementerPrompt(1, "", nil)); err != nil {
 			return err
 		}
 		if _, err := postIssueTeamRoleComment(ctx, client, opts.IssueID, "reviewer", resolved.Reviewer, reviewerPrompt(1)); err != nil {
@@ -270,22 +271,55 @@ func runIssueTeam(ctx context.Context, client *cli.APIClient, opts issueTeamRunO
 		return nil
 	}
 
-	if _, err := postAndWaitForRole(ctx, client, opts, "lead", resolved.Lead, leadPrompt()); err != nil {
+	// Load existing state for idempotent resume after crash.
+	state, err := loadTeamRunState(ctx, client, opts.IssueID)
+	if err != nil {
 		return err
 	}
+	if state == nil {
+		state = &teamRunState{}
+	}
 
-	var reviewerFeedback string
+	if !state.LeadDone {
+		if _, err := postAndWaitForRole(ctx, client, opts, "lead", resolved.Lead, leadPrompt()); err != nil {
+			return blockOnRoleFailure(ctx, client, opts.IssueID, "lead", err)
+		}
+		state.LeadDone = true
+		if err := saveTeamRunState(ctx, client, opts.IssueID, state); err != nil {
+			return err
+		}
+	}
+
 	for round := 1; round <= opts.MaxRounds; round++ {
-		if _, err := postAndWaitForRole(ctx, client, opts, "implementer", resolved.Implementer, implementerPrompt(round, reviewerFeedback)); err != nil {
-			return err
+		if state.ImplementerDoneRound < round {
+			if _, err := postAndWaitForRole(ctx, client, opts, "implementer", resolved.Implementer, implementerPrompt(round, state.ReviewerFeedback, state.ReviewerChanges)); err != nil {
+				return blockOnRoleFailure(ctx, client, opts.IssueID, "implementer", err)
+			}
+			state.ImplementerDoneRound = round
+			if err := saveTeamRunState(ctx, client, opts.IssueID, state); err != nil {
+				return err
+			}
 		}
 
-		comment, err := postAndWaitForRole(ctx, client, opts, "reviewer", resolved.Reviewer, reviewerPrompt(round))
-		if err != nil {
-			return err
+		if state.ReviewerDoneRound < round {
+			comment, err := postAndWaitForRole(ctx, client, opts, "reviewer", resolved.Reviewer, reviewerPrompt(round))
+			if err != nil {
+				return blockOnRoleFailure(ctx, client, opts.IssueID, "reviewer", err)
+			}
+			state.ReviewerFeedback = strVal(comment, "content")
+			verdict, verdictOK := parseReviewerVerdict(state.ReviewerFeedback)
+			if verdictOK {
+				state.ReviewerChanges = verdict.RequiredChanges
+			} else {
+				state.ReviewerChanges = nil
+			}
+			state.ReviewerDoneRound = round
+			if err := saveTeamRunState(ctx, client, opts.IssueID, state); err != nil {
+				return err
+			}
 		}
-		reviewerFeedback = strVal(comment, "content")
-		if reviewerApproved(reviewerFeedback) {
+
+		if reviewerApproved(state.ReviewerFeedback) {
 			if err := updateIssueStatus(ctx, client, opts.IssueID, "in_review"); err != nil {
 				return err
 			}
@@ -428,17 +462,26 @@ func printIssueTeamDryRun(out io.Writer, issueID string, resolved issueTeamResol
 }
 
 func postAndWaitForRole(ctx context.Context, client *cli.APIClient, opts issueTeamRunOptions, role string, agent issueTeamAgent, prompt string) (map[string]any, error) {
-	startedAt := time.Now().UTC().Add(-2 * time.Second)
 	roleComment, err := postIssueTeamRoleComment(ctx, client, opts.IssueID, role, agent, prompt)
 	if err != nil {
 		return nil, err
 	}
+	triggerCommentID := strVal(roleComment, "id")
+	triggerCreatedAt := time.Now().UTC()
 	if createdAt, err := time.Parse(time.RFC3339, strVal(roleComment, "created_at")); err == nil {
-		startedAt = createdAt
+		triggerCreatedAt = createdAt
 	}
-	comment, err := waitForAgentComment(ctx, client, opts.IssueID, agent.ID, startedAt, opts.PollInterval)
+
+	if err := waitForRunComplete(ctx, client, opts.IssueID, triggerCommentID, agent.ID, opts.PollInterval); err != nil {
+		return nil, fmt.Errorf("wait for %s run: %w", role, err)
+	}
+
+	comment, err := fetchAgentCommentSince(ctx, client, opts.IssueID, agent.ID, triggerCreatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("wait for %s: %w", role, err)
+		return nil, fmt.Errorf("fetch %s response: %w", role, err)
+	}
+	if comment == nil {
+		return nil, fmt.Errorf("no response comment from %s after run completed", role)
 	}
 	return comment, nil
 }
@@ -453,31 +496,67 @@ func postIssueTeamRoleComment(ctx context.Context, client *cli.APIClient, issueI
 	return result, nil
 }
 
-func waitForAgentComment(ctx context.Context, client *cli.APIClient, issueID, agentID string, after time.Time, pollInterval time.Duration) (map[string]any, error) {
+// agentRunFailedError is returned by waitForRunComplete when the agent run
+// for a role transitions to "failed" status. The runner uses this to
+// distinguish fast-detected agent crashes from ordinary context timeouts.
+type agentRunFailedError struct {
+	Reason string
+}
+
+func (e *agentRunFailedError) Error() string {
+	if e.Reason == "" {
+		return "agent run failed"
+	}
+	return "agent run failed: " + e.Reason
+}
+
+// waitForRunComplete polls /task-runs until the task triggered by
+// triggerCommentID and owned by agentID reaches a terminal status.
+// It returns *agentRunFailedError immediately when the run fails.
+// It does not touch the comments endpoint, making it efficient for busy issues.
+func waitForRunComplete(ctx context.Context, client *cli.APIClient, issueID, triggerCommentID, agentID string, pollInterval time.Duration) error {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
-		comment, err := latestAgentCommentSince(ctx, client, issueID, agentID, after)
-		if err != nil {
-			return nil, err
+		var runs []map[string]any
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/task-runs", &runs); err != nil {
+			return fmt.Errorf("list task runs: %w", err)
 		}
-		if comment != nil {
-			return comment, nil
+		for _, run := range runs {
+			if strVal(run, "trigger_comment_id") != triggerCommentID {
+				continue
+			}
+			if strVal(run, "agent_id") != agentID {
+				continue
+			}
+			switch strVal(run, "status") {
+			case "completed":
+				return nil
+			case "failed", "cancelled":
+				reason := strVal(run, "failure_reason")
+				if reason == "" {
+					reason = strVal(run, "error")
+				}
+				return &agentRunFailedError{Reason: reason}
+			}
 		}
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-ticker.C:
 		}
 	}
 }
 
-func latestAgentCommentSince(ctx context.Context, client *cli.APIClient, issueID, agentID string, after time.Time) (map[string]any, error) {
+// fetchAgentCommentSince retrieves the latest comment from agentID posted after
+// the given time, using the ?since= query param to avoid scanning old comments.
+func fetchAgentCommentSince(ctx context.Context, client *cli.APIClient, issueID, agentID string, after time.Time) (map[string]any, error) {
+	path := "/api/issues/" + url.PathEscape(issueID) + "/comments?since=" + url.QueryEscape(after.Format(time.RFC3339))
 	var comments []map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", &comments); err != nil {
-		return nil, fmt.Errorf("list comments: %w", err)
+	if err := client.GetJSON(ctx, path, &comments); err != nil {
+		return nil, fmt.Errorf("list comments since: %w", err)
 	}
 
 	var latest map[string]any
@@ -490,15 +569,28 @@ func latestAgentCommentSince(ctx context.Context, client *cli.APIClient, issueID
 		if err != nil {
 			continue
 		}
-		if createdAt.Before(after) {
-			continue
-		}
 		if latest == nil || createdAt.After(latestAt) {
 			latest = comment
 			latestAt = createdAt
 		}
 	}
 	return latest, nil
+}
+
+// blockOnRoleFailure checks whether err is an *agentRunFailedError. If it is,
+// it sets the issue to blocked and posts a comment explaining which role failed
+// and why, so the human can investigate without hunting through run logs.
+// It always returns the original error unchanged.
+func blockOnRoleFailure(ctx context.Context, client *cli.APIClient, issueID, role string, err error) error {
+	var runErr *agentRunFailedError
+	if !errors.As(err, &runErr) {
+		return err
+	}
+	_ = updateIssueStatus(ctx, client, issueID, "blocked")
+	content := fmt.Sprintf("Role `%s` agent run failed: %s", role, runErr.Reason)
+	var result map[string]any
+	_ = client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", map[string]any{"content": content}, &result)
+	return err
 }
 
 func updateIssueStatus(ctx context.Context, client *cli.APIClient, issueID, status string) error {
@@ -521,23 +613,143 @@ func leadPrompt() string {
 	return "Please create a short plan for this issue. Keep the conversation and follow-up work on this same issue. Do not @mention other agents; the team runner will trigger each next role."
 }
 
-func implementerPrompt(round int, feedback string) string {
+func implementerPrompt(round int, feedback string, requiredChanges []string) string {
 	if strings.TrimSpace(feedback) == "" {
 		return fmt.Sprintf("Please implement the current plan for this issue. This is round %d. Post a concise delivery note here when complete.", round)
 	}
-	return fmt.Sprintf("Please address the reviewer feedback below for round %d, then post a concise delivery note here.\n\nReviewer feedback:\n%s", round, feedback)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Please address the reviewer feedback below for round %d, then post a concise delivery note here.\n\nReviewer feedback:\n%s", round, feedback)
+	if len(requiredChanges) > 0 {
+		b.WriteString("\n\nRequired changes:\n")
+		for _, c := range requiredChanges {
+			fmt.Fprintf(&b, "- %s\n", c)
+		}
+	}
+	return b.String()
 }
 
-func reviewerPrompt(round int) string {
-	return fmt.Sprintf("Please review the latest work for round %d. Reply with `reviewer_approved` if acceptable. Otherwise list the required changes.", round)
+type reviewerVerdict struct {
+	Verdict         string   `json:"verdict"`
+	Summary         string   `json:"summary"`
+	RequiredChanges []string `json:"required_changes"`
+}
+
+var jsonFenceRe = regexp.MustCompile("(?s)```(?:json)?[ \t]*\n([^`]+)```")
+
+func parseReviewerVerdict(text string) (reviewerVerdict, bool) {
+	// 1. Try ```json ... ``` fenced blocks
+	if matches := jsonFenceRe.FindAllStringSubmatch(text, -1); len(matches) > 0 {
+		for _, m := range matches {
+			var v reviewerVerdict
+			if err := json.Unmarshal([]byte(strings.TrimSpace(m[1])), &v); err == nil {
+				if v.Verdict == "approved" || v.Verdict == "changes_requested" {
+					return v, true
+				}
+			}
+		}
+	}
+
+	// 2. Try the whole text as raw JSON
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "{") {
+		var v reviewerVerdict
+		if err := json.Unmarshal([]byte(trimmed), &v); err == nil {
+			if v.Verdict == "approved" || v.Verdict == "changes_requested" {
+				return v, true
+			}
+		}
+	}
+
+	return reviewerVerdict{}, false
 }
 
 func reviewerApproved(text string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(text))
-	if strings.Contains(normalized, "not approved") || strings.Contains(normalized, "changes requested") || strings.Contains(normalized, "needs changes") {
-		return false
+	v, ok := parseReviewerVerdict(text)
+	return ok && v.Verdict == "approved"
+}
+
+func reviewerPrompt(round int) string {
+	return fmt.Sprintf("Please review the latest work for round %d.\n\nRespond with a JSON verdict in a fenced code block:\n\n```json\n{\n  \"verdict\": \"approved\",\n  \"summary\": \"brief summary\",\n  \"required_changes\": []\n}\n```\n\nUse `\"verdict\": \"approved\"` if the work is acceptable. Use `\"verdict\": \"changes_requested\"` and list each required change in `required_changes` otherwise.", round)
+}
+
+// --- durable team-run state (KOR-896) ---
+
+const teamStateMarkerPrefix = "<!-- multica-team-state: "
+const teamStateMarkerSuffix = " -->"
+
+// teamRunState tracks the progress of a waiting team run so it can be resumed
+// after the CLI process is killed. Persisted as an invisible HTML comment on
+// the issue.
+type teamRunState struct {
+	LeadDone             bool     `json:"lead_done"`
+	ImplementerDoneRound int      `json:"implementer_done_round"` // 0 = not started; N = completed through round N
+	ReviewerDoneRound    int      `json:"reviewer_done_round"`    // 0 = not started; N = completed through round N
+	ReviewerFeedback     string   `json:"reviewer_feedback"`
+	ReviewerChanges      []string `json:"reviewer_changes,omitempty"`
+	StateCommentID       string   `json:"state_comment_id"` // ID of the persisted state comment
+}
+
+// parseTeamRunState extracts runner state from a comment body that contains the
+// <!-- multica-team-state: {...} --> marker. Returns nil (no error) when the
+// marker is absent or when the JSON is corrupt -- both cases mean start fresh.
+func parseTeamRunState(text string) (*teamRunState, error) {
+	start := strings.Index(text, teamStateMarkerPrefix)
+	if start < 0 {
+		return nil, nil
 	}
-	return strings.Contains(normalized, "reviewer_approved") ||
-		strings.Contains(normalized, "approved") ||
-		strings.Contains(normalized, "approve")
+	jsonStart := start + len(teamStateMarkerPrefix)
+	end := strings.Index(text[jsonStart:], teamStateMarkerSuffix)
+	if end < 0 {
+		return nil, nil
+	}
+	jsonStr := strings.TrimSpace(text[jsonStart : jsonStart+end])
+	var state teamRunState
+	if err := json.Unmarshal([]byte(jsonStr), &state); err != nil {
+		// Corrupt JSON: treat as no state so the runner starts fresh.
+		return nil, nil
+	}
+	return &state, nil
+}
+
+// loadTeamRunState scans the issue's comments for a state marker and returns
+// the decoded state. Returns nil when no valid state is found (fresh run).
+func loadTeamRunState(ctx context.Context, client *cli.APIClient, issueID string) (*teamRunState, error) {
+	var comments []map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", &comments); err != nil {
+		return nil, fmt.Errorf("load team state: %w", err)
+	}
+	for _, comment := range comments {
+		content := strVal(comment, "content")
+		if !strings.Contains(content, teamStateMarkerPrefix) {
+			continue
+		}
+		state, _ := parseTeamRunState(content)
+		if state != nil {
+			// Prefer the actual comment ID over what's encoded in the JSON,
+			// in case an earlier run saved a stale ID.
+			state.StateCommentID = strVal(comment, "id")
+			return state, nil
+		}
+	}
+	return nil, nil
+}
+
+// saveTeamRunState deletes the previous state comment (best-effort) and posts
+// a new one with the updated state JSON.
+func saveTeamRunState(ctx context.Context, client *cli.APIClient, issueID string, state *teamRunState) error {
+	if state.StateCommentID != "" {
+		_ = client.DeleteJSON(ctx, "/api/comments/"+url.PathEscape(state.StateCommentID))
+		state.StateCommentID = ""
+	}
+	jsonBytes, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal team state: %w", err)
+	}
+	content := teamStateMarkerPrefix + string(jsonBytes) + teamStateMarkerSuffix
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", map[string]any{"content": content}, &result); err != nil {
+		return fmt.Errorf("save team state: %w", err)
+	}
+	state.StateCommentID = strVal(result, "id")
+	return nil
 }
