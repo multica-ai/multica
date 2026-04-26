@@ -1,10 +1,16 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/spf13/cobra"
 )
 
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
@@ -82,3 +88,99 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		}
 	})
 }
+
+// newUpdateCmd returns a fresh cobra.Command with all flags that runAgentUpdate
+// reads. The serverURL env var must be set by the caller via t.Setenv.
+func newUpdateCmd() *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.PersistentFlags().String("profile", "", "")
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("instructions-file", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("runtime-config", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("visibility", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestAgentUpdate_InstructionsFile(t *testing.T) {
+	wantContent := "You are a helpful orchestrator agent.\nHandle all incoming tasks carefully."
+
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-1", "name": "Orchestrator"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-test")
+
+	// Write instructions to a temp file.
+	dir := t.TempDir()
+	instrFile := filepath.Join(dir, "orchestrator.md")
+	if err := os.WriteFile(instrFile, []byte(wantContent), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	if err := cmd.Flags().Set("instructions-file", instrFile); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	if err := runAgentUpdate(cmd, []string{"agent-1"}); err != nil {
+		t.Fatalf("runAgentUpdate: %v", err)
+	}
+
+	if got, ok := gotBody["instructions"].(string); !ok || got != wantContent {
+		t.Errorf("instructions = %q, want %q", gotBody["instructions"], wantContent)
+	}
+}
+
+func TestAgentUpdate_InstructionsFileMutuallyExclusive(t *testing.T) {
+	cmd := newUpdateCmd()
+	if err := cmd.Flags().Set("instructions", "inline text"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+	if err := cmd.Flags().Set("instructions-file", "/tmp/some-file.md"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	err := runAgentUpdate(cmd, []string{"agent-1"})
+	if err == nil {
+		t.Fatal("expected error for mutually exclusive flags, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %q, want it to mention mutually exclusive", err.Error())
+	}
+}
+
+func TestAgentUpdate_InstructionsFileMissing(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://localhost:9999")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-test")
+
+	cmd := newUpdateCmd()
+	if err := cmd.Flags().Set("instructions-file", "/nonexistent/path/to/file.md"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	err := runAgentUpdate(cmd, []string{"agent-1"})
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+	if !strings.Contains(err.Error(), "--instructions-file") {
+		t.Errorf("error = %q, want it to mention --instructions-file", err.Error())
+	}
+}
+
