@@ -649,11 +649,7 @@ func (h *Handler) GetUserEnv(w http.ResponseWriter, r *http.Request) {
 	if customEnv == nil {
 		customEnv = map[string]string{}
 	}
-	masked := make(map[string]string, len(customEnv))
-	for k := range customEnv {
-		masked[k] = "***"
-	}
-	writeJSON(w, http.StatusOK, UserEnvResponse{CustomEnv: masked, CustomEnvRedacted: true})
+	writeJSON(w, http.StatusOK, UserEnvResponse{CustomEnv: customEnv, CustomEnvRedacted: false})
 }
 
 type UpdateUserEnvRequest struct {
@@ -686,9 +682,5 @@ func (h *Handler) UpdateUserEnv(w http.ResponseWriter, r *http.Request) {
 	if customEnv == nil {
 		customEnv = map[string]string{}
 	}
-	masked := make(map[string]string, len(customEnv))
-	for k := range customEnv {
-		masked[k] = "***"
-	}
-	writeJSON(w, http.StatusOK, UserEnvResponse{CustomEnv: masked, CustomEnvRedacted: true})
+	writeJSON(w, http.StatusOK, UserEnvResponse{CustomEnv: customEnv, CustomEnvRedacted: false})
 }

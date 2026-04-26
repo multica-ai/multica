@@ -328,6 +328,17 @@ export class ApiClient {
     });
   }
 
+  async getUserEnv(): Promise<{ custom_env: Record<string, string>; custom_env_redacted: boolean }> {
+    return this.fetch("/api/me/env");
+  }
+
+  async updateUserEnv(custom_env: Record<string, string>): Promise<{ custom_env: Record<string, string>; custom_env_redacted: boolean }> {
+    return this.fetch("/api/me/env", {
+      method: "PUT",
+      body: JSON.stringify({ custom_env }),
+    });
+  }
+
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();

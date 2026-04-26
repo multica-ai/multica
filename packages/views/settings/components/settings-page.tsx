@@ -12,12 +12,14 @@ import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { PipelinesTab } from "./pipelines-tab";
 import { WorkspaceEnvTab } from "./workspace-env-tab";
+import { UserEnvTab } from "./user-env-tab";
 import { PreferencesTab } from "./preferences-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
   { value: "appearance", label: "Appearance", icon: Palette },
   { value: "tokens", label: "API Tokens", icon: Key },
+  { value: "my-env", label: "My Env Vars", icon: KeyRound },
 ];
 
 const workspaceTabs = [
@@ -86,6 +88,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="appearance"><AppearanceTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>
+          <TabsContent value="my-env"><UserEnvTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
