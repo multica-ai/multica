@@ -447,7 +447,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <DropdownMenuTrigger
                   render={
                     <SidebarMenuButton>
-                      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                      <span className="relative">
+                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                        {myInvitations.length > 0 && (
+                          <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
+                        )}
+                      </span>
                       <span className="flex-1 truncate font-medium">
                         {workspace?.name ?? "Multica"}
                       </span>
