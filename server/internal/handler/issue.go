@@ -806,14 +806,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AssigneeID != nil {
 		assigneeID = parseUUID(*req.AssigneeID)
-	}
-
-	// Enforce agent visibility: private agents can only be assigned by owner/admin.
-	if req.AssigneeType != nil && *req.AssigneeType == "agent" && req.AssigneeID != nil {
-		if ok, msg := h.canAssignAgent(r.Context(), r, *req.AssigneeID, workspaceID); !ok {
-			writeError(w, http.StatusForbidden, msg)
+		// parseUUID silently returns an invalid pgtype.UUID for malformed input.
+		// Reject explicitly so the validator below cannot mistake "type unset
+		// + id unparseable" for "no assignee" and accept the request.
+		if !assigneeID.Valid {
+			writeError(w, http.StatusBadRequest, "assignee_id is not a valid UUID")
 			return
 		}
+	}
+
+	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
+		writeError(w, status, msg)
+		return
 	}
 
 	var parentIssueID pgtype.UUID
@@ -1005,6 +1009,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if _, ok := rawFields["assignee_id"]; ok {
 		if req.AssigneeID != nil {
 			params.AssigneeID = parseUUID(*req.AssigneeID)
+			if !params.AssigneeID.Valid {
+				writeError(w, http.StatusBadRequest, "assignee_id is not a valid UUID")
+				return
+			}
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
 		}
@@ -1063,10 +1071,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enforce agent visibility: private agents can only be assigned by owner/admin.
-	if req.AssigneeType != nil && *req.AssigneeType == "agent" && req.AssigneeID != nil {
-		if ok, msg := h.canAssignAgent(r.Context(), r, *req.AssigneeID, workspaceID); !ok {
-			writeError(w, http.StatusForbidden, msg)
+	// Validate the resulting (assignee_type, assignee_id) pair when the caller
+	// touches either field. Existing data on the issue is left alone if the
+	// caller is not changing it.
+	_, touchedType := rawFields["assignee_type"]
+	_, touchedID := rawFields["assignee_id"]
+	if touchedType || touchedID {
+		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+			writeError(w, status, msg)
 			return
 		}
 	}
@@ -1143,35 +1155,56 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// canAssignAgent checks whether the requesting user is allowed to assign issues
-// to the given agent. Private agents can only be assigned by their owner or
-// workspace admins/owners.
-func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, workspaceID string) (bool, string) {
-	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-		ID:          parseUUID(agentID),
-		WorkspaceID: parseUUID(workspaceID),
-	})
-	if err != nil {
-		return false, "agent not found"
+// validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
+// to an existing entity in the workspace. For agent assignees it also enforces
+// visibility (private agents are only assignable by their owner or by
+// workspace admins/owners) and rejects archived agents.
+//
+// Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
+// callers should treat any non-zero status as a rejection and surface it back
+// to the client.
+func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID) (int, string) {
+	// Both unset → unassigned issue, valid.
+	if !assigneeType.Valid && !assigneeID.Valid {
+		return 0, ""
 	}
-	if agent.ArchivedAt.Valid {
-		return false, "cannot assign to archived agent"
+	// Exactly one of type/id provided → callers must always pair them.
+	if assigneeType.Valid != assigneeID.Valid {
+		return http.StatusBadRequest, "assignee_type and assignee_id must be provided together"
 	}
-	if agent.Visibility != "private" {
-		return true, ""
+	switch assigneeType.String {
+	case "member":
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      assigneeID,
+			WorkspaceID: parseUUID(workspaceID),
+		}); err != nil {
+			return http.StatusBadRequest, "assignee_id does not refer to a member of this workspace"
+		}
+		return 0, ""
+	case "agent":
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          assigneeID,
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			return http.StatusBadRequest, "assignee_id does not refer to an agent of this workspace"
+		}
+		if agent.ArchivedAt.Valid {
+			return http.StatusBadRequest, "cannot assign to archived agent"
+		}
+		if agent.Visibility == "private" {
+			userID := requestUserID(r)
+			if uuidToString(agent.OwnerID) != userID {
+				member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
+				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
+					return http.StatusForbidden, "cannot assign to private agent"
+				}
+			}
+		}
+		return 0, ""
+	default:
+		return http.StatusBadRequest, "assignee_type must be 'member' or 'agent'"
 	}
-	userID := requestUserID(r)
-	if uuidToString(agent.OwnerID) == userID {
-		return true, ""
-	}
-	member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
-	if err != nil {
-		return false, "cannot assign to private agent"
-	}
-	if roleAllowed(member.Role, "owner", "admin") {
-		return true, ""
-	}
-	return false, "cannot assign to private agent"
 }
 
 // shouldEnqueueAgentTask returns true when an issue creation or assignment
@@ -1236,7 +1269,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-	err := h.Queries.DeleteIssue(r.Context(), parseUUID(id))
+	err := h.Queries.DeleteIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
@@ -1335,6 +1368,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, ok := rawUpdates["assignee_id"]; ok {
 			if req.Updates.AssigneeID != nil {
 				params.AssigneeID = parseUUID(*req.Updates.AssigneeID)
+				if !params.AssigneeID.Valid {
+					continue
+				}
 			} else {
 				params.AssigneeID = pgtype.UUID{Valid: false}
 			}
@@ -1395,9 +1431,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Enforce agent visibility for batch assignment.
-		if req.Updates.AssigneeType != nil && *req.Updates.AssigneeType == "agent" && req.Updates.AssigneeID != nil {
-			if ok, _ := h.canAssignAgent(r.Context(), r, *req.Updates.AssigneeID, workspaceID); !ok {
+		// Validate the resulting assignee pair when this batch update touches
+		// either assignee field. Skip the issue silently on failure.
+		_, batchTouchedType := rawUpdates["assignee_type"]
+		_, batchTouchedID := rawUpdates["assignee_id"]
+		if batchTouchedType || batchTouchedID {
+			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 				continue
 			}
 		}

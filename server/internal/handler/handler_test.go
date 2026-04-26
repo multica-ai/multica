@@ -530,6 +530,218 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	}
 }
 
+// TestCreateIssueRejectsNonexistentMemberAssignee covers the bug where any
+// well-formed UUID was accepted as assignee_id without checking workspace
+// membership.
+func TestCreateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Ghost member assignee",
+		"assignee_type": "member",
+		"assignee_id":   "00000000-0000-0000-0000-000000000000",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for nonexistent member, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssueRejectsNonexistentAgentAssignee verifies the same check on
+// the agent branch — previously rejected with 403 "agent not found"; we want a
+// consistent 400 from the new validator.
+func TestCreateIssueRejectsNonexistentAgentAssignee(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Ghost agent assignee",
+		"assignee_type": "agent",
+		"assignee_id":   "00000000-0000-0000-0000-000000000000",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for nonexistent agent, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssueRejectsAssigneeTypeWithoutID rejects requests where only one
+// of the two fields was supplied — historically this would create an issue
+// with an inconsistent state.
+func TestCreateIssueRejectsAssigneeTypeWithoutID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Lone assignee_type",
+		"assignee_type": "member",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 when only assignee_type is set, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssueRejectsAssigneeIDWithoutType is the symmetric case.
+func TestCreateIssueRejectsAssigneeIDWithoutType(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Lone assignee_id",
+		"assignee_id": testUserID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 when only assignee_id is set, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssueRejectsUnknownAssigneeType guards against typos like
+// "members" or "user" that previously sneaked through.
+func TestCreateIssueRejectsUnknownAssigneeType(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Bogus assignee_type",
+		"assignee_type": "user",
+		"assignee_id":   testUserID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for unknown assignee_type, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssueAcceptsValidMemberAssignee is the positive control — the
+// validator must not block legitimate workspace members.
+func TestCreateIssueAcceptsValidMemberAssignee(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Valid member assignee",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201 for valid member assignee, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+}
+
+// TestCreateIssueRejectsMalformedAssigneeID covers the case where parseUUID
+// silently produces an invalid pgtype.UUID and the validator would otherwise
+// treat (no type + unparseable id) as "no assignee" and accept the request.
+func TestCreateIssueRejectsMalformedAssigneeID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Malformed assignee_id only",
+		"assignee_id": "not-a-uuid",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for malformed assignee_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateIssueRejectsMalformedAssigneeID is the equivalent for the update
+// path, where the same parseUUID-shaped gap existed on a previously-unassigned
+// issue.
+func TestUpdateIssueRejectsMalformedAssigneeID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Update malformed assignee target",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"assignee_id": "not-a-uuid",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateIssue: expected 400 for malformed assignee_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateIssueRejectsNonexistentMemberAssignee verifies the same gap is
+// closed on the update path — UpdateIssue previously only validated agents.
+func TestUpdateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Update assignee target",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"assignee_type": "member",
+		"assignee_id":   "00000000-0000-0000-0000-000000000000",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateIssue: expected 400 for nonexistent member, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateIssueAllowsExplicitUnassign verifies that sending null for both
+// fields still works after the new validator landed — clearing the assignee
+// must not be misclassified as a mismatched pair.
+func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Issue to unassign",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"assignee_type": nil,
+		"assignee_id":   nil,
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200 for unassign, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated IssueResponse
+	json.NewDecoder(w.Body).Decode(&updated)
+	if updated.AssigneeType != nil || updated.AssigneeID != nil {
+		t.Fatalf("UpdateIssue: expected assignee cleared, got type=%v id=%v", updated.AssigneeType, updated.AssigneeID)
+	}
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	w := httptest.NewRecorder()

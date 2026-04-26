@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -24,58 +23,9 @@ var codexBlockedArgs = map[string]blockedArgMode{
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
 // error messages when codex exits before the JSON-RPC handshake (e.g. the
 // user supplied a custom_args flag that the `app-server` subcommand
-// rejects). Large enough to contain typical CLI error lines, small enough
-// to stay sensible inside a task-level Result.Error string.
+// rejects). Kept as its own constant so bumping codex independently of
+// other agents stays easy if codex starts shipping longer failure traces.
 const codexStderrTailBytes = 2048
-
-// stderrTail forwards writes to an inner writer (typically the daemon's
-// log) while also retaining a bounded tail of the bytes written. Consumers
-// call Tail() to include that context in error messages when the codex
-// process exits before we can read a structured JSON-RPC error — otherwise
-// all the user sees is "codex process exited", with the real reason stuck
-// in daemon logs.
-type stderrTail struct {
-	inner io.Writer
-	max   int
-
-	mu  sync.Mutex
-	buf []byte
-}
-
-func newStderrTail(inner io.Writer, max int) *stderrTail {
-	return &stderrTail{inner: inner, max: max}
-}
-
-func (s *stderrTail) Write(p []byte) (int, error) {
-	if _, err := s.inner.Write(p); err != nil {
-		return 0, err
-	}
-	s.mu.Lock()
-	s.buf = append(s.buf, p...)
-	if len(s.buf) > s.max {
-		s.buf = s.buf[len(s.buf)-s.max:]
-	}
-	s.mu.Unlock()
-	return len(p), nil
-}
-
-// Tail returns the captured stderr with leading/trailing whitespace
-// trimmed; empty string means nothing was written or everything was
-// whitespace.
-func (s *stderrTail) Tail() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return strings.TrimSpace(string(s.buf))
-}
-
-// withCodexStderr appends a stderr tail hint to an error message when
-// non-empty, otherwise returns msg unchanged.
-func withCodexStderr(msg, tail string) string {
-	if tail == "" {
-		return msg
-	}
-	return msg + "; codex stderr: " + tail
-}
 
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
@@ -218,7 +168,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withCodexStderr(fmt.Sprintf("codex initialize failed: %v", err), stderrBuf.Tail())
+			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -231,7 +181,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withCodexStderr(err.Error(), stderrBuf.Tail())
+			finalError = withAgentStderr(err.Error(), "codex", stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -252,7 +202,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withCodexStderr(fmt.Sprintf("codex turn/start failed: %v", err), stderrBuf.Tail())
+			finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}

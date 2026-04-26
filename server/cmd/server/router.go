@@ -57,8 +57,10 @@ func allowedOrigins() []string {
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
 // rdb is optional: when non-nil the runtime local-skill request stores are
 // swapped for Redis-backed implementations so multiple API nodes share the
-// same pending queue (required for multi-node prod). A nil rdb keeps the
-// default in-memory stores which are fine for single-node dev and tests.
+// same pending queue (required for multi-node prod). This should be a request
+// path Redis client, not the realtime relay's blocking read client. A nil rdb
+// keeps the default in-memory stores which are fine for single-node dev and
+// tests.
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()

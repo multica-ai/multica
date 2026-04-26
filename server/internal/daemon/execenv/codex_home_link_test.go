@@ -3,8 +3,28 @@ package execenv
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func assertDirLinkTarget(t *testing.T, dst, src string) {
+	t.Helper()
+
+	target, err := os.Readlink(dst)
+	if err == nil {
+		if target != src {
+			t.Errorf("link target = %q, want %q", target, src)
+		}
+		return
+	}
+	if runtime.GOOS == "windows" {
+		if fi, statErr := os.Stat(dst); statErr != nil || !fi.IsDir() {
+			t.Fatalf("expected accessible linked directory, stat err: %v", statErr)
+		}
+		return
+	}
+	t.Fatalf("Readlink: %v", err)
+}
 
 func TestEnsureDirSymlink_CreatesLink(t *testing.T) {
 	t.Parallel()
@@ -22,14 +42,8 @@ func TestEnsureDirSymlink_CreatesLink(t *testing.T) {
 		t.Fatal("expected source directory to be created")
 	}
 
-	// dst should resolve to src.
-	target, err := os.Readlink(dst)
-	if err != nil {
-		t.Fatalf("Readlink: %v", err)
-	}
-	if target != src {
-		t.Errorf("link target = %q, want %q", target, src)
-	}
+	// dst should resolve to src, or be an accessible junction on Windows.
+	assertDirLinkTarget(t, dst, src)
 }
 
 func TestEnsureDirSymlink_Idempotent(t *testing.T) {
@@ -46,10 +60,7 @@ func TestEnsureDirSymlink_Idempotent(t *testing.T) {
 		t.Fatalf("second call: %v", err)
 	}
 
-	target, _ := os.Readlink(dst)
-	if target != src {
-		t.Errorf("link target = %q, want %q", target, src)
-	}
+	assertDirLinkTarget(t, dst, src)
 }
 
 func TestEnsureDirSymlink_ReplacesWrongTarget(t *testing.T) {
@@ -61,16 +72,18 @@ func TestEnsureDirSymlink_ReplacesWrongTarget(t *testing.T) {
 	dst := filepath.Join(dir, "link")
 
 	os.MkdirAll(oldSrc, 0o755)
-	os.Symlink(oldSrc, dst)
+	if err := os.Symlink(oldSrc, dst); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("directory symlink unavailable on this Windows session: %v", err)
+		}
+		t.Fatalf("seed wrong symlink: %v", err)
+	}
 
 	if err := ensureDirSymlink(newSrc, dst); err != nil {
 		t.Fatalf("ensureDirSymlink: %v", err)
 	}
 
-	target, _ := os.Readlink(dst)
-	if target != newSrc {
-		t.Errorf("link target = %q, want %q", target, newSrc)
-	}
+	assertDirLinkTarget(t, dst, newSrc)
 }
 
 func TestEnsureDirSymlink_SkipsExistingRegularDir(t *testing.T) {
