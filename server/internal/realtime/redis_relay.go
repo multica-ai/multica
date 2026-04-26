@@ -58,6 +58,8 @@ type RedisRelay struct {
 
 	mu        sync.Mutex
 	consumers map[scopeKey]*scopeConsumer
+	stopping  bool
+	wg        sync.WaitGroup
 }
 
 type scopeConsumer struct {
@@ -91,6 +93,26 @@ func NewRedisRelayWithClients(hub *Hub, writeRDB, readRDB *redis.Client) *RedisR
 // NodeID returns this relay's randomly-assigned node identifier.
 func (r *RedisRelay) NodeID() string { return r.nodeID }
 
+// Wait blocks until all relay-owned goroutines have exited after the Start
+// context is canceled.
+func (r *RedisRelay) Wait() {
+	r.wg.Wait()
+}
+
+// Stop prevents new scope consumers from being started and cancels any active
+// consumers. The Start context still controls heartbeat and sweeper shutdown;
+// callers should cancel it before calling Wait.
+func (r *RedisRelay) Stop() {
+	r.hub.SetSubscriptionCallbacks(nil, nil)
+
+	r.mu.Lock()
+	r.stopping = true
+	for _, c := range r.consumers {
+		c.cancel()
+	}
+	r.mu.Unlock()
+}
+
 // Start wires the hub→relay subscription callbacks, kicks off the heartbeat
 // goroutine, and spins up consumers for any scopes the hub already knows
 // about. ctx controls all background goroutines: cancelling it shuts the
@@ -122,8 +144,15 @@ func (r *RedisRelay) Start(ctx context.Context) {
 		r.startConsumer(ctx, key.Type, key.ID)
 	}
 
-	go r.heartbeatLoop(ctx)
-	go r.consumerSweeper(ctx)
+	r.wg.Add(2)
+	go func() {
+		defer r.wg.Done()
+		r.heartbeatLoop(ctx)
+	}()
+	go func() {
+		defer r.wg.Done()
+		r.consumerSweeper(ctx)
+	}()
 }
 
 // BroadcastToScope publishes message into the scope's Redis stream. The
@@ -204,6 +233,10 @@ func (r *RedisRelay) publish(scopeType, scopeID, exclude string, frame []byte) {
 func (r *RedisRelay) startConsumer(parent context.Context, scopeType, scopeID string) {
 	key := sk(scopeType, scopeID)
 	r.mu.Lock()
+	if r.stopping || parent.Err() != nil {
+		r.mu.Unlock()
+		return
+	}
 	if _, exists := r.consumers[key]; exists {
 		r.mu.Unlock()
 		return
@@ -211,9 +244,13 @@ func (r *RedisRelay) startConsumer(parent context.Context, scopeType, scopeID st
 	ctx, cancel := context.WithCancel(parent)
 	c := &scopeConsumer{cancel: cancel, done: make(chan struct{})}
 	r.consumers[key] = c
+	r.wg.Add(1)
 	r.mu.Unlock()
 
-	go r.runConsumer(ctx, c, scopeType, scopeID)
+	go func() {
+		defer r.wg.Done()
+		r.runConsumer(ctx, c, scopeType, scopeID)
+	}()
 }
 
 func (r *RedisRelay) stopConsumer(scopeType, scopeID string) {

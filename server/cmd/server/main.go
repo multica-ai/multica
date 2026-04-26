@@ -91,22 +91,33 @@ func main() {
 	// clients so blocking stream consumers cannot starve request-path Redis
 	// operations.
 	relayCtx, relayCancel := context.WithCancel(context.Background())
-	defer relayCancel()
 	var broadcaster realtime.Broadcaster = hub
 	var storeRedis *redis.Client
+	var relayWriteRedis *redis.Client
+	var relayReadRedis *redis.Client
+	var relay *realtime.RedisRelay
+	defer func() {
+		if relay != nil {
+			relay.Stop()
+		}
+		relayCancel()
+		if relay != nil {
+			relay.Wait()
+		}
+		closeRedisClient("realtime-read", relayReadRedis)
+		closeRedisClient("realtime-write", relayWriteRedis)
+		closeRedisClient("store", storeRedis)
+	}()
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
 		opts, err := redis.ParseURL(redisURL)
 		if err != nil {
 			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
 		} else {
 			storeRedis = newNamedRedisClient(opts, "store")
-			relayWriteRedis := newNamedRedisClient(opts, "realtime-write")
-			relayReadRedis := newNamedRedisClient(opts, "realtime-read")
-			defer closeRedisClient("store", storeRedis)
-			defer closeRedisClient("realtime-write", relayWriteRedis)
-			defer closeRedisClient("realtime-read", relayReadRedis)
+			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
+			relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 
-			relay := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+			relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
 			relay.Start(relayCtx)
 			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
 			slog.Info(

@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -25,6 +26,24 @@ func TestNewRedisRelayWithClientsSeparatesBlockingReadPool(t *testing.T) {
 	if relay.readRDB != readClient {
 		t.Fatal("expected relay to reserve the read client for blocking XREADGROUP calls")
 	}
+}
+
+func TestRedisRelayStopPreventsNewConsumers(t *testing.T) {
+	hub := NewHub()
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})
+	t.Cleanup(func() { client.Close() })
+
+	relay := NewRedisRelay(hub, client)
+	relay.Stop()
+	relay.startConsumer(context.Background(), ScopeWorkspace, "workspace-1")
+
+	relay.mu.Lock()
+	consumerCount := len(relay.consumers)
+	relay.mu.Unlock()
+	if consumerCount != 0 {
+		t.Fatalf("expected no consumers after Stop, got %d", consumerCount)
+	}
+	relay.Wait()
 }
 
 func TestDualWriteBroadcasterFansOutLocallyBeforePublishing(t *testing.T) {
