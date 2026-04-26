@@ -9,7 +9,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle, Copy, Check } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle, Copy, Check, Clock } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
@@ -37,6 +37,7 @@ export function ChatMessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
   useAutoScroll(scrollRef);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   // While a task is in flight and its assistant message hasn't landed yet,
   // inject a synthetic placeholder carrying the same task_id. AssistantMessage
@@ -59,23 +60,78 @@ export function ChatMessageList({
       }]
     : messages;
 
+  const userMessages = displayMessages.filter(m => m.role === "user");
+
+  const scrollToMessage = (messageId: string) => {
+    const element = document.getElementById(`msg-${messageId}`);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Add highlight effect
+      element.classList.add("ring-2", "ring-primary", "ring-offset-2", "rounded-lg");
+      setTimeout(() => {
+        element.classList.remove("ring-2", "ring-primary", "ring-offset-2", "rounded-lg");
+      }, 2000);
+    }
+  };
+
   return (
-    <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
-      {/* Inner container matches issue / project detail width convention
-       *  (max-w-4xl + mx-auto) so switching between chat and content
-       *  views doesn't jolt the reading width. px-5 is a touch tighter
-       *  than issue-detail's px-8 because the chat window can be narrow. */}
-      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {displayMessages.map((msg) => (
-          <MessageBubble
-            key={msg.role === "assistant" && msg.task_id ? `task-${msg.task_id}` : msg.id}
-            message={msg}
-            isPending={!!pendingTaskId && msg.task_id === pendingTaskId && !pendingAlreadyPersisted}
-          />
-        ))}
-        {isWaiting && !pendingTaskId && (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        )}
+    <div className="relative flex-1 flex">
+      {/* Timeline sidebar */}
+      <div
+        className="absolute left-0 top-0 bottom-0 z-10 transition-all duration-300"
+        onMouseEnter={() => setShowTimeline(true)}
+        onMouseLeave={() => setShowTimeline(false)}
+      >
+        <div className={cn(
+          "h-full bg-background/95 backdrop-blur-sm border-r transition-all duration-300",
+          showTimeline ? "w-64" : "w-8"
+        )}>
+          {showTimeline ? (
+            <div className="p-3 space-y-2 overflow-y-auto h-full">
+              <div className="text-xs font-medium text-muted-foreground mb-2">Timeline</div>
+              {userMessages.map((msg) => (
+                <button
+                  key={msg.id}
+                  onClick={() => scrollToMessage(msg.id)}
+                  className="w-full text-left p-2 rounded hover:bg-accent transition-colors group"
+                >
+                  <div className="text-xs text-muted-foreground mb-1">
+                    {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  <div className="text-xs line-clamp-2 group-hover:text-foreground">
+                    {msg.content.slice(0, 60)}{msg.content.length > 60 ? '...' : ''}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <Clock className="size-4 text-muted-foreground" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div ref={scrollRef} style={fadeStyle} className={cn(
+        "flex-1 overflow-y-auto transition-all duration-300",
+        showTimeline ? "ml-64" : "ml-8"
+      )}>
+        {/* Inner container matches issue / project detail width convention
+         *  (max-w-4xl + mx-auto) so switching between chat and content
+         *  views doesn't jolt the reading width. px-5 is a touch tighter
+         *  than issue-detail's px-8 because the chat window can be narrow. */}
+        <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
+          {displayMessages.map((msg) => (
+            <MessageBubble
+              key={msg.role === "assistant" && msg.task_id ? `task-${msg.task_id}` : msg.id}
+              message={msg}
+              isPending={!!pendingTaskId && msg.task_id === pendingTaskId && !pendingAlreadyPersisted}
+            />
+          ))}
+          {isWaiting && !pendingTaskId && (
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -124,7 +180,7 @@ function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
 function MessageBubble({ message, isPending }: { message: ChatMessage; isPending?: boolean }) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end">
+      <div id={`msg-${message.id}`} className="flex justify-end scroll-mt-4">
         <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
           {/* User messages are authored as markdown in ContentEditor, so
            * render them through the same pipeline as assistant replies.
@@ -178,6 +234,11 @@ function AssistantMessage({
     }
   };
 
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div className="group relative w-full space-y-1.5">
       {timeline.length > 0 ? (
@@ -190,8 +251,8 @@ function AssistantMessage({
         <Loader2 className="size-4 animate-spin text-muted-foreground" />
       ) : null}
 
-      {/* Copy button - hover on desktop, always visible on mobile */}
-      <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
+      {/* Action bar with copy button and timestamp */}
+      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
         <Tooltip>
           <TooltipTrigger>
             <Button
@@ -212,6 +273,10 @@ function AssistantMessage({
             {copied ? "Copied!" : "Copy"}
           </TooltipContent>
         </Tooltip>
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Clock className="size-3" />
+          {formatTime(message.created_at)}
+        </span>
       </div>
     </div>
   );
