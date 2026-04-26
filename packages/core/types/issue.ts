@@ -10,7 +10,6 @@ export type IssueStatus =
   | "fixing"
   | "testing"
   | "in_review"
-  | "checkpoint"
   | "staged"
   | "done"
   | "blocked"

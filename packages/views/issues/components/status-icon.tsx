@@ -116,10 +116,6 @@ function InReviewIcon() {
   return <ProgressCircle progress={0.75} />;
 }
 
-function CheckpointIcon() {
-  return <ProgressCircle progress={0.85} />;
-}
-
 function StagedIcon() {
   return <ProgressCircle progress={0.95} />;
 }
@@ -181,7 +177,6 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   fixing: FixingIcon,
   testing: TestingIcon,
   in_review: InReviewIcon,
-  checkpoint: CheckpointIcon,
   staged: StagedIcon,
   done: DoneIcon,
   blocked: BlockedIcon,
