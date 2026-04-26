@@ -17,10 +17,28 @@ func BuildPrompt(task Task) string {
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task)
 	}
+	if task.AutopilotDescription != "" {
+		return buildAutopilotPrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+	return b.String()
+}
+
+// buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.
+// No issue exists — the agent's context comes directly from the autopilot description.
+func buildAutopilotPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	b.WriteString("This task was triggered by an autopilot (scheduled automation). There is no issue associated with this run.\n\n")
+	if task.AutopilotTitle != "" {
+		fmt.Fprintf(&b, "**Autopilot**: %s\n\n", task.AutopilotTitle)
+	}
+	b.WriteString("**Your task** (from the autopilot description):\n\n")
+	b.WriteString(task.AutopilotDescription)
+	b.WriteString("\n\nExecute the task above. When done, report what you accomplished.\n")
 	return b.String()
 }
 

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil, FileText, Square } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
+import { autopilotDetailOptions, autopilotRunsOptions, autopilotKeys } from "@multica/core/autopilots/queries";
 import { projectListOptions, isOpenProject } from "@multica/core/projects/queries";
 import {
   useUpdateAutopilot,
@@ -43,6 +44,25 @@ import {
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
 import type { AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import { api } from "@multica/core/api";
+import type { TaskMessagePayload } from "@multica/core/types/events";
+import type { AgentTask } from "@multica/core/types/agent";
+import { AgentTranscriptDialog } from "../../issues/components/agent-transcript-dialog";
+
+interface TimelineItem {
+  seq: number;
+  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  tool?: string;
+  content?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+}
+
+function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
+  return msgs
+    .map((m) => ({ seq: m.seq, type: m.type, tool: m.tool, content: m.content, input: m.input, output: m.output }))
+    .sort((a, b) => a.seq - b.seq);
+}
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleString(undefined, {
@@ -60,40 +80,150 @@ const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: ty
   failed: { label: "Failed", color: "text-destructive", icon: XCircle },
 };
 
-function RunRow({ run }: { run: AutopilotRun }) {
+function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: string; autopilotId: string }) {
   const wsPaths = useWorkspacePaths();
+  const wsId = useWorkspaceId();
+  const { getActorName } = useActorName();
+  const queryClient = useQueryClient();
   const cfg = (RUN_STATUS_CONFIG[run.status] ?? RUN_STATUS_CONFIG["issue_created"])!;
   const StatusIcon = cfg.icon;
+  const [logOpen, setLogOpen] = useState(false);
+  const [logItems, setLogItems] = useState<TimelineItem[] | null>(null);
+  const [logLoading, setLogLoading] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
-  const content = (
-    <>
-      <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color, cfg.spin && "animate-spin")} />
-      <span className={cn("w-24 shrink-0 text-xs font-medium", cfg.color)}>{cfg.label}</span>
-      <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
-      <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
-        {run.issue_id ? (
-          "Issue linked"
-        ) : run.failure_reason ? (
-          <span className="text-destructive">{run.failure_reason}</span>
-        ) : null}
-      </span>
-      <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {formatDate(run.triggered_at || run.created_at)}
-      </span>
-    </>
+  const handleStop = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!run.task_id || stopping) return;
+    setStopping(true);
+    try {
+      await api.cancelTaskById(run.task_id);
+      await queryClient.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, autopilotId) });
+      toast.success("Run cancelled");
+    } catch {
+      toast.error("Failed to cancel run");
+    } finally {
+      setStopping(false);
+    }
+  }, [run.task_id, stopping, queryClient, wsId, autopilotId]);
+
+  const handleViewLog = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!run.task_id) return;
+    if (logItems !== null) {
+      setLogOpen(true);
+      return;
+    }
+    setLogLoading(true);
+    try {
+      const msgs = await api.listTaskMessages(run.task_id);
+      setLogItems(buildTimeline(msgs));
+      setLogOpen(true);
+    } catch {
+      toast.error("Failed to load execution log");
+    } finally {
+      setLogLoading(false);
+    }
+  }, [run.task_id, logItems]);
+
+  const taskStatus: AgentTask["status"] =
+    run.status === "completed" ? "completed" :
+    run.status === "failed" ? "failed" :
+    run.status === "running" ? "running" : "completed";
+
+  const syntheticTask: AgentTask = {
+    id: run.task_id ?? "",
+    agent_id: agentId,
+    runtime_id: "",
+    issue_id: "",
+    status: taskStatus,
+    priority: 0,
+    dispatched_at: run.triggered_at,
+    started_at: run.triggered_at,
+    completed_at: run.completed_at,
+    result: run.result,
+    error: run.failure_reason,
+    created_at: run.triggered_at,
+  };
+
+  const actions = (
+    <div className="flex items-center gap-1 shrink-0">
+      {run.task_id && run.status === "running" && (
+        <button
+          onClick={handleStop}
+          disabled={stopping}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+          title="Stop this run"
+        >
+          {stopping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          <span>Stop</span>
+        </button>
+      )}
+      {run.task_id && (
+        <button
+          onClick={handleViewLog}
+          disabled={logLoading}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
+          title="View execution log"
+        >
+          {logLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+          <span>Log</span>
+        </button>
+      )}
+    </div>
   );
 
-  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+  const content = (
+    <div className="flex flex-col gap-0.5 min-w-0 flex-1 sm:flex-row sm:items-center sm:gap-3">
+      {/* Top row (always visible): status icon + label + actions */}
+      <div className="flex items-center gap-2 min-w-0">
+        <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color, cfg.spin && "animate-spin")} />
+        <span className={cn("shrink-0 text-xs font-medium", cfg.color)}>{cfg.label}</span>
+        <span className="hidden sm:inline shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
+        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+          {run.issue_id ? (
+            "Issue linked"
+          ) : run.failure_reason ? (
+            <span className="text-destructive truncate">{run.failure_reason}</span>
+          ) : null}
+        </span>
+        <div className="sm:hidden">{actions}</div>
+      </div>
+      {/* Bottom row on mobile: source + date */}
+      <div className="flex items-center justify-between gap-2 sm:contents">
+        <span className="sm:hidden text-xs text-muted-foreground capitalize">{run.source}</span>
+        <span className="sm:ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+          {formatDate(run.triggered_at || run.created_at)}
+        </span>
+        <div className="hidden sm:flex">{actions}</div>
+      </div>
+    </div>
+  );
 
-  if (run.issue_id) {
-    return (
-      <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
-        {content}
-      </AppLink>
-    );
-  }
+  const rowClass = "flex items-start gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
 
-  return <div className={rowClass}>{content}</div>;
+  return (
+    <>
+      {run.issue_id ? (
+        <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
+          {content}
+        </AppLink>
+      ) : (
+        <div className={rowClass}>{content}</div>
+      )}
+      {logOpen && logItems !== null && (
+        <AgentTranscriptDialog
+          open={logOpen}
+          onOpenChange={setLogOpen}
+          task={syntheticTask}
+          items={logItems}
+          agentName={getActorName("agent", agentId)}
+        />
+      )}
+    </>
+  );
 }
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
@@ -600,7 +730,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             ) : (
               <div className="rounded-md border overflow-hidden">
                 {runs.map((run) => (
-                  <RunRow key={run.id} run={run} />
+                  <RunRow key={run.id} run={run} agentId={autopilot.assignee_id} autopilotId={autopilotId} />
                 ))}
               </div>
             )}

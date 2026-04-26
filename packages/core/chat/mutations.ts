@@ -12,7 +12,7 @@ export function useCreateChatSession() {
   const wsId = useWorkspaceId();
 
   return useMutation({
-    mutationFn: (data: { agent_id: string; title?: string }) => {
+    mutationFn: (data: { agent_id: string; title?: string; selected_repo_urls?: string[] }) => {
       logger.info("createChatSession.start", { agent_id: data.agent_id, titleLength: data.title?.length ?? 0 });
       return api.createChatSession(data);
     },
@@ -62,6 +62,28 @@ export function useMarkChatSessionRead() {
       logger.error("markChatSessionRead.error.rollback", { sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
       if (ctx?.prevAll) qc.setQueryData(chatKeys.allSessions(wsId), ctx.prevAll);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+      qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+    },
+  });
+}
+
+export function useUpdateChatSessionRepos() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, selectedRepoUrls }: { sessionId: string; selectedRepoUrls: string[] }) => {
+      logger.info("updateChatSessionRepos.start", { sessionId });
+      return api.updateChatSessionRepos(sessionId, selectedRepoUrls);
+    },
+    onSuccess: (_data, { sessionId }) => {
+      logger.info("updateChatSessionRepos.success", { sessionId });
+    },
+    onError: (err) => {
+      logger.error("updateChatSessionRepos.error", err);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -66,6 +67,13 @@ var autopilotRunsCmd = &cobra.Command{
 	RunE:  runAutopilotRuns,
 }
 
+var autopilotRunMessagesCmd = &cobra.Command{
+	Use:   "run-messages <run-id>",
+	Short: "List messages for an autopilot execution run",
+	Args:  exactArgs(1),
+	RunE:  runAutopilotRunMessages,
+}
+
 var autopilotTriggerAddCmd = &cobra.Command{
 	Use:   "trigger-add <autopilot-id>",
 	Short: "Add a schedule trigger to an autopilot",
@@ -95,6 +103,7 @@ func init() {
 	autopilotCmd.AddCommand(autopilotDeleteCmd)
 	autopilotCmd.AddCommand(autopilotTriggerCmd)
 	autopilotCmd.AddCommand(autopilotRunsCmd)
+	autopilotCmd.AddCommand(autopilotRunMessagesCmd)
 	autopilotCmd.AddCommand(autopilotTriggerAddCmd)
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
 	autopilotCmd.AddCommand(autopilotTriggerDeleteCmd)
@@ -137,6 +146,10 @@ func init() {
 	autopilotRunsCmd.Flags().Int("limit", 20, "Max number of runs to return")
 	autopilotRunsCmd.Flags().Int("offset", 0, "Pagination offset")
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// run-messages
+	autopilotRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
+	autopilotRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
 
 	// trigger-add — only schedule triggers are supported end-to-end today
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required)")
@@ -611,4 +624,66 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		}
 		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
 	}
+}
+
+func runAutopilotRunMessages(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Fetch the run to get its task_id.
+	var run map[string]any
+	if err := client.GetJSON(ctx, "/api/autopilots/runs/"+args[0], &run); err != nil {
+		return fmt.Errorf("get run: %w", err)
+	}
+
+	taskID := strVal(run, "task_id")
+	if taskID == "" {
+		return fmt.Errorf("run %s has no associated task (may still be pending)", args[0])
+	}
+
+	// Fetch messages via the task messages endpoint.
+	path := "/api/daemon/tasks/" + taskID + "/messages"
+	if since, _ := cmd.Flags().GetInt("since"); since > 0 {
+		path += fmt.Sprintf("?since=%d", since)
+	}
+
+	var messages []map[string]any
+	if err := client.GetJSON(ctx, path, &messages); err != nil {
+		return fmt.Errorf("list run messages: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, messages)
+	}
+
+	headers := []string{"SEQ", "TYPE", "TOOL", "CONTENT"}
+	rows := make([][]string, 0, len(messages))
+	for _, m := range messages {
+		content := strVal(m, "content")
+		if content == "" {
+			content = strVal(m, "output")
+		}
+		if utf8.RuneCountInString(content) > 80 {
+			runes := []rune(content)
+			content = string(runes[:77]) + "..."
+		}
+		seq := ""
+		if v, ok := m["seq"]; ok {
+			seq = fmt.Sprintf("%v", v)
+		}
+		rows = append(rows, []string{
+			seq,
+			strVal(m, "type"),
+			strVal(m, "tool"),
+			content,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
 }

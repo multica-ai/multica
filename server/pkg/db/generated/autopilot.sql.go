@@ -423,6 +423,32 @@ func (q *Queries) GetAutopilotRun(ctx context.Context, id pgtype.UUID) (Autopilo
 	return i, err
 }
 
+const getAutopilotRunByTaskID = `-- name: GetAutopilotRunByTaskID :one
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at FROM autopilot_run
+WHERE task_id = $1
+`
+
+func (q *Queries) GetAutopilotRunByTaskID(ctx context.Context, taskID pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getAutopilotRunByTaskID, taskID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAutopilotRunByIssue = `-- name: GetAutopilotRunByIssue :one
 
 SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at FROM autopilot_run

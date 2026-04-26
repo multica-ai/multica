@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Minus, Maximize2, Minimize2, ChevronDown, Bot, Plus, Check } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Bot, Plus, Check, GitBranch } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -18,6 +18,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
 import {
@@ -27,7 +28,7 @@ import {
   pendingChatTaskOptions,
   chatKeys,
 } from "@multica/core/chat/queries";
-import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat/mutations";
+import { useCreateChatSession, useMarkChatSessionRead, useUpdateChatSessionRepos } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
@@ -41,12 +42,15 @@ const apiLogger = createLogger("chat.api");
 
 export function ChatWindow() {
   const wsId = useWorkspaceId();
+  const workspace = useCurrentWorkspace();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const selectedRepoUrls = useChatStore((s) => s.selectedRepoUrls);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const setSelectedRepoUrls = useChatStore((s) => s.setSelectedRepoUrls);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -81,6 +85,7 @@ export function ChatWindow() {
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
+  const updateRepos = useUpdateChatSessionRepos();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -175,6 +180,7 @@ export function ChatWindow() {
         const session = await createSession.mutateAsync({
           agent_id: activeAgent.id,
           title: content.slice(0, 50),
+          selected_repo_urls: selectedRepoUrls.length > 0 ? selectedRepoUrls : undefined,
         });
         sessionId = session.id;
         setActiveSession(sessionId);
@@ -212,10 +218,21 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
+      selectedRepoUrls,
       createSession,
       setActiveSession,
       qc,
     ],
+  );
+
+  const handleRepoChange = useCallback(
+    (urls: string[]) => {
+      setSelectedRepoUrls(urls);
+      if (activeSessionId) {
+        updateRepos.mutate({ sessionId: activeSessionId, selectedRepoUrls: urls });
+      }
+    },
+    [activeSessionId, setSelectedRepoUrls, updateRepos],
   );
 
   const handleStop = useCallback(async () => {
@@ -402,12 +419,19 @@ export function ChatWindow() {
         disabled={isSessionArchived}
         agentName={activeAgent?.name}
         leftAdornment={
-          <AgentDropdown
-            agents={availableAgents}
-            activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
-          />
+          <div className="flex items-center gap-1">
+            <AgentDropdown
+              agents={availableAgents}
+              activeAgent={activeAgent}
+              userId={user?.id}
+              onSelect={handleSelectAgent}
+            />
+            <RepoMultiSelectDropdown
+              repos={workspace?.repos ?? []}
+              selectedUrls={selectedRepoUrls}
+              onChangeUrls={handleRepoChange}
+            />
+          </div>
         }
       />
     </div>
@@ -581,6 +605,66 @@ function AgentAvatarSmall({ agent }: { agent: Agent }) {
         <Bot className="size-3.5" />
       </AvatarFallback>
     </Avatar>
+  );
+}
+
+/**
+ * Multi-select dropdown for workspace repositories.
+ * Empty selection = "all repos" (default behaviour).
+ */
+function RepoMultiSelectDropdown({
+  repos,
+  selectedUrls,
+  onChangeUrls,
+}: {
+  repos: { url?: string; description: string }[];
+  selectedUrls: string[];
+  onChangeUrls: (urls: string[]) => void;
+}) {
+  if (repos.length === 0) return null;
+
+  const selectedCount = selectedUrls.length;
+
+  function toggleRepo(url: string) {
+    if (selectedUrls.includes(url)) {
+      onChangeUrls(selectedUrls.filter((u) => u !== url));
+    } else {
+      onChangeUrls([...selectedUrls, url]);
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex items-center gap-1 rounded-md px-1.5 py-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
+        <GitBranch className="size-3.5 text-muted-foreground shrink-0" />
+        {selectedCount > 0 ? (
+          <span className="text-xs font-medium tabular-nums">{selectedCount}</span>
+        ) : null}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-auto max-w-72">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs">Repos (empty = all)</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {repos.map((repo) => {
+            const url = repo.url ?? "";
+            if (!url) return null;
+            const isSelected = selectedUrls.includes(url);
+            const label = url.split("/").pop()?.replace(/\.git$/, "") || repo.description || url;
+            return (
+              <DropdownMenuItem
+                key={url}
+                closeOnClick={false}
+                onClick={() => toggleRepo(url)}
+                className="flex items-center gap-2"
+              >
+                <Check className={`size-3.5 shrink-0 ${isSelected ? "text-foreground" : "text-transparent"}`} />
+                <span className="truncate flex-1 text-xs">{label}</span>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

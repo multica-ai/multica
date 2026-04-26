@@ -97,7 +97,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
-		b.WriteString("The following code repositories are available in this workspace.\n")
+		if ctx.ChatSessionID != "" {
+			b.WriteString("The user has selected the following repositories for this chat session. Prioritize these when working with code.\n")
+		} else {
+			b.WriteString("The following code repositories are available in this workspace.\n")
+		}
 		b.WriteString("Use `multica repo checkout <identifier>` to check out a repository into your working directory.\n\n")
 		b.WriteString("| Identifier | Type | Description |\n")
 		b.WriteString("|------------|------|-------------|\n")
@@ -146,7 +150,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("### Workflow\n\n")
 
-	if ctx.ChatSessionID != "" {
+	if ctx.AutopilotDescription != "" {
+		// Autopilot run_only task: no issue exists — execute description directly.
+		b.WriteString("**This is an autopilot run_only task. There is NO issue associated with this run.**\n\n")
+		if ctx.AutopilotTitle != "" {
+			fmt.Fprintf(&b, "**Autopilot**: %s\n\n", ctx.AutopilotTitle)
+		}
+		b.WriteString("**Your task** (from the autopilot description):\n\n")
+		b.WriteString(ctx.AutopilotDescription)
+		b.WriteString("\n\n")
+		b.WriteString("- Do NOT search for issues or try to fetch an issue context — there is no issue\n")
+		b.WriteString("- Execute the task described above directly\n")
+		b.WriteString("- Use the `multica` CLI only if the task description requires platform interaction\n")
+		b.WriteString("- When done, report what you accomplished in your final output\n\n")
+	} else if ctx.ChatSessionID != "" {
 		// Chat task: interactive assistant mode
 		b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 		b.WriteString("- Respond conversationally and helpfully to the user's message\n")
@@ -222,11 +239,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
 	b.WriteString("## Output\n\n")
-	b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
-	b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
-	b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
-	b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
-	b.WriteString("When referencing issues in comments, **always** use the mention format `[MUL-123](mention://issue/<issue-id>)` so they render as clickable links.\n")
+	if ctx.AutopilotDescription != "" {
+		b.WriteString("For autopilot tasks, your output is captured in the run log — no comment posting is required.\n")
+		b.WriteString("Simply complete the task and report what you did in your final message.\n")
+	} else {
+		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
+		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
+		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
+		b.WriteString("When referencing issues in comments, **always** use the mention format `[MUL-123](mention://issue/<issue-id>)` so they render as clickable links.\n")
+	}
 
 	return b.String()
 }

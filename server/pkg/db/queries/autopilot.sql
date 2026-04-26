@@ -106,6 +106,10 @@ INSERT INTO autopilot_run (
 SELECT * FROM autopilot_run
 WHERE id = $1;
 
+-- name: GetAutopilotRunByTaskID :one
+SELECT ar.* FROM autopilot_run ar
+WHERE ar.task_id = $1;
+
 -- name: ListAutopilotRuns :many
 SELECT * FROM autopilot_run
 WHERE autopilot_id = $1

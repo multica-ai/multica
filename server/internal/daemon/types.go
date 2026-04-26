@@ -42,6 +42,8 @@ type Task struct {
 	TriggerCommentContent string     `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string     `json:"chat_message,omitempty"`            // user message content for chat tasks
+	AutopilotTitle        string     `json:"autopilot_title,omitempty"`         // set for run_only autopilot tasks
+	AutopilotDescription  string     `json:"autopilot_description,omitempty"`   // prompt/description from the autopilot
 }
 
 // AgentData holds agent details returned by the claim endpoint.

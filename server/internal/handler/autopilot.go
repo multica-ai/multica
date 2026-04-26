@@ -689,3 +689,25 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, runToResponse(*run))
 }
+
+// GetAutopilotRunByID returns a single autopilot run by its UUID.
+// Used by the CLI to look up task_id for fetching execution logs.
+func (h *Handler) GetAutopilotRunByID(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "runId")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	run, err := h.Queries.GetAutopilotRun(r.Context(), parseUUID(runID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	// Verify the run belongs to the requested workspace.
+	ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID)
+	if err != nil || uuidToString(ap.WorkspaceID) != workspaceID {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, runToResponse(run))
+}

@@ -139,6 +139,8 @@ type AgentTaskResponse struct {
 	ChatSessionID         string               `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string               `json:"chat_message,omitempty"`            // user message for chat tasks
 	PipelineContext       *PipelineContextData `json:"pipeline_context,omitempty"`        // pipeline column context for the issue
+	AutopilotTitle        string               `json:"autopilot_title,omitempty"`        // set for run_only autopilot tasks
+	AutopilotDescription  string               `json:"autopilot_description,omitempty"`  // prompt/description from the autopilot
 }
 
 // PipelineContextData provides pipeline column metadata to the agent so it can
