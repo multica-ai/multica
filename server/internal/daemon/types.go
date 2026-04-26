@@ -56,8 +56,18 @@ type Task struct {
 	AutopilotTitle          string          `json:"autopilot_title,omitempty"`           // autopilot title used as task context
 	AutopilotDescription    string          `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	AutopilotTriggerPayload json.RawMessage    `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string             `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	LabelInstructions       []LabelInstruction `json:"label_instructions,omitempty"`        // per-label instructions injected into the agent prompt
+}
+
+// LabelInstruction carries a single label's agent-facing instructions.
+// The daemon appends all non-empty entries to the system prompt so the
+// agent is context-aware of the label's intent (e.g. "security-check"
+// → "Run OWASP top 10 checks").
+type LabelInstruction struct {
+	Name         string `json:"name"`
+	Instructions string `json:"instructions"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

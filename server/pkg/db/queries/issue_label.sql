@@ -8,14 +8,15 @@ SELECT * FROM issue_label
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateLabel :one
-INSERT INTO issue_label (workspace_id, name, color)
-VALUES ($1, $2, $3)
+INSERT INTO issue_label (workspace_id, name, color, instructions)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: UpdateLabel :one
 UPDATE issue_label SET
     name = COALESCE(sqlc.narg('name'), name),
     color = COALESCE(sqlc.narg('color'), color),
+    instructions = COALESCE(sqlc.narg('instructions'), instructions),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;

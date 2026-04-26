@@ -412,6 +412,160 @@ func TestColorCaseNormalization(t *testing.T) {
 	}
 }
 
+// TestLabelNameRejectsControlChars — label names land verbatim in the
+// agent's system prompt as `[name] instructions`. Any control character
+// (newline, tab, anything < 0x20) would break out of the [name] bracket
+// and inject an arbitrary directive. Reject at the validation layer so
+// even a crafted API client can't poison a workspace's prompts.
+func TestLabelNameRejectsControlChars(t *testing.T) {
+	cases := []struct {
+		desc string
+		name string
+	}{
+		{"newline", "evil\nbug"},
+		{"carriage_return", "evil\rbug"},
+		{"tab", "evil\tbug"},
+		{"null", "evil\x00bug"},
+		{"vertical_tab", "evil\x0bbug"},
+		{"del", "evil\x7fbug"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/labels", map[string]any{
+				"name":  tc.name,
+				"color": "#123456",
+			})
+			testHandler.CreateLabel(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("CreateLabel name=%q: expected 400, got %d: %s", tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// TestUpdateLabelRejectsControlChars — the same rejection path on Update.
+// Mirrors TestUpdateLabelCrossWorkspace's pattern of explicitly covering
+// both verbs for security-relevant validation, not just Create.
+func TestUpdateLabelRejectsControlChars(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "rename-target",
+		"color": "#222222",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d", w.Code)
+	}
+	var label LabelResponse
+	json.NewDecoder(w.Body).Decode(&label)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/labels/"+label.ID, map[string]any{
+		"name": "evil\nrenamed",
+	})
+	req = withURLParam(req, "id", label.ID)
+	testHandler.UpdateLabel(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateLabel control-char name: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Sanity: original name preserved.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/labels/"+label.ID, nil)
+	req = withURLParam(req, "id", label.ID)
+	testHandler.GetLabel(w, req)
+	var after LabelResponse
+	json.NewDecoder(w.Body).Decode(&after)
+	if after.Name != "rename-target" {
+		t.Fatalf("name changed despite rejected update: got %q", after.Name)
+	}
+}
+
+// TestLabelInstructionsAllowMultiline — newlines are explicitly allowed
+// in instructions (multi-line agent directives are the whole point). The
+// control-char rejection only applies to names, where newlines would
+// break the "[name] instructions" prompt template.
+func TestLabelInstructionsAllowMultiline(t *testing.T) {
+	multiline := "Line 1: do thing X\nLine 2: do thing Y\n\nFinal note."
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":         "multiline-instr",
+		"color":        "#333333",
+		"instructions": multiline,
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel multiline instructions: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var got LabelResponse
+	json.NewDecoder(w.Body).Decode(&got)
+	if got.Instructions != multiline {
+		t.Fatalf("instructions roundtrip mismatch: got %q want %q", got.Instructions, multiline)
+	}
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+got.ID, nil)
+		req = withURLParam(req, "id", got.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+}
+
+// TestLabelInstructionsTooLong — instructions are appended verbatim to
+// the agent's prompt on every claim. Cap at 2000 chars to keep claim
+// payloads bounded and avoid runaway prompt growth.
+func TestLabelInstructionsTooLong(t *testing.T) {
+	tooLong := strings.Repeat("x", 2001)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":         "instr-too-long",
+		"color":        "#123456",
+		"instructions": tooLong,
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateLabel too-long instructions: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Exactly 2000 chars is fine.
+	atLimit := strings.Repeat("y", 2000)
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/labels", map[string]any{
+		"name":         "instr-at-limit",
+		"color":        "#123456",
+		"instructions": atLimit,
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel 2000-char instructions: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created LabelResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+created.ID, nil)
+		req = withURLParam(req, "id", created.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	// PUT with too-long instructions also rejected.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/labels/"+created.ID, map[string]any{
+		"instructions": tooLong,
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateLabel(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateLabel too-long instructions: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // createOtherTestWorkspace inserts a second workspace + owner membership for
 // cross-workspace tests. Returns the new workspace id; cleanup registered.
 func createOtherTestWorkspace(t *testing.T) string {

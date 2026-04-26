@@ -169,10 +169,18 @@ type AgentTaskResponse struct {
 	AutopilotID             string          `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string          `json:"autopilot_title,omitempty"`           // autopilot title used as task context
 	AutopilotDescription    string          `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	AutopilotSource         string                 `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage        `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string                 `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	Kind                    string                 `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	LabelInstructions       []TaskLabelInstruction `json:"label_instructions,omitempty"`        // per-label instructions appended to the agent prompt
+}
+
+// TaskLabelInstruction carries a single label's agent-facing instructions.
+// Populated at claim time from the issue's attached labels.
+type TaskLabelInstruction struct {
+	Name         string `json:"name"`
+	Instructions string `json:"instructions"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
