@@ -594,6 +594,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const { autopilot, triggers } = data;
 
+  const hasRunningRun = runs.some((r) => r.status === "running");
+
   const handleRunNow = async () => {
     try {
       await triggerAutopilot.mutateAsync(autopilotId);
@@ -650,8 +652,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             <Pencil className="h-3.5 w-3.5 mr-1" />
             <span className="hidden sm:inline">Edit</span>
           </Button>
-          <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
-            <Play className="h-3.5 w-3.5" />
+          <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || hasRunningRun || triggerAutopilot.isPending}>
+            {hasRunningRun ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
       </PageHeader>
