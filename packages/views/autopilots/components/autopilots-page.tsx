@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
+import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { projectListOpenOptions } from "@multica/core/projects/queries";
@@ -150,6 +150,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const triggerAutopilot = useTriggerAutopilot();
   const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
   const StatusIcon = statusCfg.icon;
+  const isRunning = autopilot.has_running_run ?? false;
 
   const handleRunNow = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -202,10 +203,14 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         variant="outline"
         className="h-7 opacity-0 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity shrink-0"
         onClick={handleRunNow}
-        disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+        disabled={autopilot.status !== "active" || isRunning || triggerAutopilot.isPending}
       >
-        <Play className="h-3 w-3 sm:mr-1" />
-        <span className="hidden sm:inline">{triggerAutopilot.isPending ? "..." : "Run now"}</span>
+        {isRunning ? (
+          <Loader2 className="h-3 w-3 sm:mr-1 animate-spin" />
+        ) : (
+          <Play className="h-3 w-3 sm:mr-1" />
+        )}
+        <span className="hidden sm:inline">{isRunning ? "Running..." : "Run now"}</span>
       </Button>
     </div>
   );

@@ -8,6 +8,17 @@ WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
 ORDER BY created_at DESC;
 
+-- name: ListAutopilotsWithRunStatus :many
+SELECT a.id, a.workspace_id, a.project_id, a.title, a.description, a.assignee_id, a.priority, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at,
+  EXISTS(
+    SELECT 1 FROM autopilot_run ar
+    WHERE ar.autopilot_id = a.id AND ar.status = 'running'
+  ) AS has_running_run
+FROM autopilot a
+WHERE a.workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+ORDER BY a.created_at DESC;
+
 -- name: GetAutopilot :one
 SELECT * FROM autopilot
 WHERE id = $1;

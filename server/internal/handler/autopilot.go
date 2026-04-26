@@ -37,6 +37,7 @@ type AutopilotResponse struct {
 	LastRunAt          *string `json:"last_run_at"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
+	HasRunningRun      bool    `json:"has_running_run"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -89,6 +90,27 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		LastRunAt:          timestampToPtr(a.LastRunAt),
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
+	}
+}
+
+func autopilotWithRunStatusToResponse(a db.ListAutopilotsWithRunStatusRow) AutopilotResponse {
+	return AutopilotResponse{
+		ID:                 uuidToString(a.ID),
+		WorkspaceID:        uuidToString(a.WorkspaceID),
+		ProjectID:          uuidToPtr(a.ProjectID),
+		Title:              a.Title,
+		Description:        textToPtr(a.Description),
+		AssigneeID:         uuidToString(a.AssigneeID),
+		Priority:           a.Priority,
+		Status:             a.Status,
+		ExecutionMode:      a.ExecutionMode,
+		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
+		CreatedByType:      a.CreatedByType,
+		CreatedByID:        uuidToString(a.CreatedByID),
+		LastRunAt:          timestampToPtr(a.LastRunAt),
+		CreatedAt:          timestampToString(a.CreatedAt),
+		UpdatedAt:          timestampToString(a.UpdatedAt),
+		HasRunningRun:      a.HasRunningRun,
 	}
 }
 
@@ -182,7 +204,7 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
-	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
+	autopilots, err := h.Queries.ListAutopilotsWithRunStatus(r.Context(), db.ListAutopilotsParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Status:      statusFilter,
 	})
@@ -193,7 +215,7 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AutopilotResponse, len(autopilots))
 	for i, a := range autopilots {
-		resp[i] = autopilotToResponse(a)
+		resp[i] = autopilotWithRunStatusToResponse(a)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"autopilots": resp, "total": len(resp)})
 }
