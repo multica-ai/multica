@@ -620,8 +620,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <PageHeader className="justify-between px-5 flex-wrap gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+      <PageHeader className="justify-between px-5">
+        <div className="flex items-center gap-2 overflow-hidden min-w-0 flex-1">
           <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
             <Zap className="h-4 w-4" />
           </AppLink>
@@ -645,7 +645,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 ml-4">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
             <span className="hidden sm:inline">Edit</span>
