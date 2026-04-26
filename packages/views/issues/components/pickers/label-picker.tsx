@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Tag, Plus, Settings2 } from "lucide-react";
+import { Tag, Plus, Settings2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -186,6 +186,7 @@ export function LabelPicker({
       >
         {filtered.map((label) => {
           const selected = attachedIds.has(label.id);
+          const hasInstructions = Boolean(label.instructions && label.instructions.trim());
           return (
             <PickerItem
               key={label.id}
@@ -198,6 +199,22 @@ export function LabelPicker({
                 aria-hidden
               />
               <span className="truncate">{label.name}</span>
+              {hasInstructions && (
+                // Wrapper carries the native title tooltip (lucide icons don't
+                // surface a real `title` attribute), so users can hover the ✨
+                // to peek at instructions before attaching the label.
+                <span
+                  className="ml-auto inline-flex shrink-0"
+                  title={`Agent instructions:\n${label.instructions}`}
+                  aria-label="Has agent instructions"
+                >
+                  <Sparkles
+                    className="h-3 w-3 text-muted-foreground"
+                    strokeWidth={2.5}
+                    aria-hidden
+                  />
+                </span>
+              )}
             </PickerItem>
           );
         })}
