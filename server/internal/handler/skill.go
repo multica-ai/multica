@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -388,6 +389,14 @@ type importedFile struct {
 	content string
 }
 
+func appendImportedTextFile(files []importedFile, path string, body []byte) []importedFile {
+	if !utf8.Valid(body) {
+		slog.Warn("skill import: skipping non-UTF-8 supporting file", "path", path)
+		return files
+	}
+	return append(files, importedFile{path: path, content: string(body)})
+}
+
 // --- ClawHub types ---
 
 type clawhubGetSkillResponse struct {
@@ -606,7 +615,7 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 		if fp == "SKILL.md" {
 			result.content = string(body)
 		} else {
-			result.files = append(result.files, importedFile{path: fp, content: string(body)})
+			result.files = appendImportedTextFile(result.files, fp, body)
 		}
 	}
 
@@ -735,7 +744,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 		// Convert absolute GitHub path to relative path within skill
 		relPath := strings.TrimPrefix(entry.Path, basePath)
-		result.files = append(result.files, importedFile{path: relPath, content: string(body)})
+		result.files = appendImportedTextFile(result.files, relPath, body)
 	}
 
 	return result, nil

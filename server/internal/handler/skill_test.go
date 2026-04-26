@@ -108,6 +108,59 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 	}
 }
 
+func TestFetchFromSkillsSh_SkipsNonUTF8SupportingFiles(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/contents/skills/pptx":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "guide.md",
+						Path:        "skills/pptx/guide.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/pptx/guide.md",
+					},
+					{
+						Name:        "preview.png",
+						Path:        "skills/pptx/preview.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/pptx/preview.png",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/pptx/SKILL.md":
+				w.Write([]byte("---\nname: PPTX\n---\ncontent"))
+			case "/acme/skills/main/skills/pptx/guide.md":
+				w.Write([]byte("guide"))
+			case "/acme/skills/main/skills/pptx/preview.png":
+				w.Write([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/pptx")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+
+	gotPaths := importedFilePaths(result.files)
+	wantPaths := []string{"guide.md"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
+	}
+}
+
 func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.T) {
 	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
