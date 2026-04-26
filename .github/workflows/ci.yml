@@ -60,6 +60,9 @@ jobs:
           go-version: "1.26.1"
           cache-dependency-path: server/go.sum
 
+      - name: Verify team-app integration event contract
+        run: bash scripts/check_team_app_events.sh
+
       - name: Build
         run: cd server && go build ./...
 

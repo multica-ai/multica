@@ -8,13 +8,14 @@ const (
 	EventIssueDeleted = "issue:deleted"
 
 	// Comment events
+	// TEAM_APP_INTEGRATION: do not rename or change value — consumed by team.multica.uittai.com WebSocket subscriber. See M-PR#2 / scripts/check_team_app_events.sh.
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
-	EventReactionAdded          = "reaction:added"
-	EventReactionRemoved        = "reaction:removed"
-	EventIssueReactionAdded     = "issue_reaction:added"
-	EventIssueReactionRemoved   = "issue_reaction:removed"
+	EventReactionAdded        = "reaction:added"
+	EventReactionRemoved      = "reaction:removed"
+	EventIssueReactionAdded   = "issue_reaction:added"
+	EventIssueReactionRemoved = "issue_reaction:removed"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"
@@ -38,12 +39,16 @@ const (
 	EventInboxBatchArchived = "inbox:batch-archived"
 
 	// Workspace events
+	// TEAM_APP_INTEGRATION: do not rename or change value — consumed by team.multica.uittai.com WebSocket subscriber. See M-PR#2 / scripts/check_team_app_events.sh.
 	EventWorkspaceUpdated = "workspace:updated"
 	EventWorkspaceDeleted = "workspace:deleted"
 
 	// Member events
-	EventMemberAdded   = "member:added"
+	// TEAM_APP_INTEGRATION: do not rename or change value — consumed by team.multica.uittai.com WebSocket subscriber. See M-PR#2 / scripts/check_team_app_events.sh.
+	EventMemberAdded = "member:added"
+	// TEAM_APP_INTEGRATION: do not rename or change value — consumed by team.multica.uittai.com WebSocket subscriber. See M-PR#2 / scripts/check_team_app_events.sh.
 	EventMemberUpdated = "member:updated"
+	// TEAM_APP_INTEGRATION: do not rename or change value — consumed by team.multica.uittai.com WebSocket subscriber. See M-PR#2 / scripts/check_team_app_events.sh.
 	EventMemberRemoved = "member:removed"
 
 	// Subscriber events
