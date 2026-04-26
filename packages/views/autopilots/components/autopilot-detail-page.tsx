@@ -90,15 +90,16 @@ function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: str
   const [logOpen, setLogOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
 
+  const isLive = run.status === "running";
+
   const { data: rawMessages, isFetching: logLoading } = useQuery({
     queryKey: ["task-messages", run.task_id ?? ""],
     queryFn: () => api.listTaskMessages(run.task_id!),
     enabled: logOpen && !!run.task_id,
-    staleTime: Infinity,
+    staleTime: isLive ? 0 : Infinity,
+    refetchInterval: isLive && logOpen ? 3000 : false,
   });
   const logItems = rawMessages ? buildTimeline(rawMessages) : null;
-
-  const isLive = run.status === "running";
 
   const handleStop = useCallback(async (e: React.MouseEvent) => {
     e.preventDefault();
