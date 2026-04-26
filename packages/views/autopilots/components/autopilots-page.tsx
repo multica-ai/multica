@@ -200,7 +200,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
       <Button
         size="sm"
         variant="outline"
-        className="h-7 opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0"
+        className="h-7 opacity-0 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity shrink-0"
         onClick={handleRunNow}
         disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
       >
