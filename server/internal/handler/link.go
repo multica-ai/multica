@@ -456,3 +456,77 @@ func identifierString(v interface{}) string {
 	}
 	return ""
 }
+
+
+// --- Enrich helpers for embedding links on issues -------------------------
+// Mirrors the pattern in label.go (enrichIssuesWithLabels / enrichIssueWithLabels).
+
+// enrichIssuesWithLinks bulk-fetches links for every issue in resp and
+// populates resp[i].Links. Issues with no links keep the empty slice the
+// converter initialised. Cross-workspace targets are returned with their
+// foreign workspace metadata so the frontend can render an inline workspace
+// chip without additional round-trips.
+//
+// Errors are logged but not returned: a missing Links field should never
+// fail an issue list. The frontend treats an absent links array as "unknown"
+// and shows nothing.
+func (h *Handler) enrichIssuesWithLinks(ctx context.Context, resp []IssueResponse) {
+	if len(resp) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(resp))
+	idxByID := make(map[string]int, len(resp))
+	for i, r := range resp {
+		ids = append(ids, parseUUID(r.ID))
+		idxByID[r.ID] = i
+	}
+
+	rows, err := h.Queries.ListLinksForIssues(ctx, ids)
+	if err != nil {
+		slog.Debug("bulk fetch links failed", "error", err, "count", len(ids))
+		return
+	}
+
+	for _, row := range rows {
+		idx, ok := idxByID[uuidToString(row.SourceIssueID)]
+		if !ok {
+			continue
+		}
+		resp[idx].Links = append(resp[idx].Links, IssueLinkResponse{
+			ID:                  uuidToString(row.ID),
+			PairID:              uuidToString(row.PairID),
+			LinkType:            row.LinkType,
+			Direction:           row.Direction,
+			CreatorType:         row.CreatorType,
+			CreatorID:           uuidToPtr(row.CreatorID),
+			CreatedAt:           timestampToString(row.CreatedAt),
+			TargetIssueID:       uuidToString(row.TargetIssueID),
+			TargetIdentifier:    identifierString(row.TargetIdentifier),
+			TargetTitle:         row.TargetTitle,
+			TargetStatus:        row.TargetStatus,
+			TargetNumber:        row.TargetNumber,
+			TargetWorkspaceID:   uuidToString(row.TargetWorkspaceID),
+			TargetWorkspaceName: row.TargetWorkspaceName,
+			TargetWorkspaceSlug: row.TargetWorkspaceSlug,
+		})
+	}
+}
+
+// enrichIssueWithLinks is the single-issue variant for GetIssue / CreateIssue
+// / UpdateIssue paths. Returns shape identical to the per-issue /links
+// endpoint (same converter), so the frontend can rely on a single shape.
+func (h *Handler) enrichIssueWithLinks(ctx context.Context, resp *IssueResponse) {
+	if resp == nil || resp.ID == "" {
+		return
+	}
+	rows, err := h.Queries.ListLinksForIssue(ctx, parseUUID(resp.ID))
+	if err != nil {
+		slog.Debug("fetch links for single issue failed", "error", err, "issue_id", resp.ID)
+		return
+	}
+	out := make([]IssueLinkResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, issueLinkRowToResponse(row))
+	}
+	resp.Links = out
+}

@@ -49,6 +49,7 @@ type IssueResponse struct {
 	PrNumber           *int32                  `json:"pr_number"`
 	PrRepo             *string                 `json:"pr_repo"`
 	Labels             []IssueLabelResponse    `json:"labels"`
+	Links              []IssueLinkResponse     `json:"links"`
 }
 
 
@@ -86,6 +87,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		PrNumber:      int4ToPtr(i.PrNumber),
 		PrRepo:        textToPtr(i.PrRepo),
 		Labels:        []IssueLabelResponse{},
+		Links:         []IssueLinkResponse{},
 	}
 }
 
@@ -112,6 +114,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Labels:        []IssueLabelResponse{},
+		Links:         []IssueLinkResponse{},
 	}
 }
 
@@ -137,6 +140,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Labels:        []IssueLabelResponse{},
+		Links:         []IssueLinkResponse{},
 	}
 }
 
@@ -578,6 +582,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			base[i] = sir.IssueResponse
 		}
 		h.enrichIssuesWithLabels(ctx, base)
+		h.enrichIssuesWithLinks(ctx, base)
 		for i := range resp {
 			resp[i].IssueResponse = base[i]
 		}
@@ -643,6 +648,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			resp[i] = openIssueRowToResponse(issue, prefix)
 		}
 		h.enrichIssuesWithLabels(ctx, resp)
+		h.enrichIssuesWithLinks(ctx, resp)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issues": resp,
@@ -705,6 +711,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = issueListRowToResponse(issue, prefix)
 	}
 	h.enrichIssuesWithLabels(ctx, resp)
+		h.enrichIssuesWithLinks(ctx, resp)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -743,6 +750,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.enrichIssueWithLabels(r.Context(), &resp)
+	h.enrichIssueWithLinks(r.Context(), &resp)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -764,6 +772,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = issueToResponse(child, prefix)
 	}
 	h.enrichIssuesWithLabels(r.Context(), resp)
+	h.enrichIssuesWithLinks(r.Context(), resp)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -971,6 +980,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.enrichIssueWithLabels(r.Context(), &resp)
+	h.enrichIssueWithLinks(r.Context(), &resp)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -1210,6 +1220,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.enrichIssueWithLabels(r.Context(), &resp)
+	h.enrichIssueWithLinks(r.Context(), &resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
