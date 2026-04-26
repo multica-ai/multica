@@ -180,8 +180,18 @@ function AssistantMessage({
 
   return (
     <div className="group relative w-full space-y-1.5">
+      {timeline.length > 0 ? (
+        <TimelineView items={timeline} />
+      ) : message.content ? (
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+          <Markdown>{message.content}</Markdown>
+        </div>
+      ) : isPending ? (
+        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+      ) : null}
+
       {/* Copy button - hover on desktop, always visible on mobile */}
-      <div className="absolute -top-1 right-0 opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
+      <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
         <Tooltip>
           <TooltipTrigger>
             <Button
@@ -203,16 +213,6 @@ function AssistantMessage({
           </TooltipContent>
         </Tooltip>
       </div>
-
-      {timeline.length > 0 ? (
-        <TimelineView items={timeline} />
-      ) : message.content ? (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{message.content}</Markdown>
-        </div>
-      ) : isPending ? (
-        <Loader2 className="size-4 animate-spin text-muted-foreground" />
-      ) : null}
     </div>
   );
 }
