@@ -37,6 +37,9 @@ services:
       - "${PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      # GitHub App private key for the CodeRabbit / PR-driven status integration.
+      # Mounted read-only; the host file is mode 600 owned by root.
+      - ./secrets:/app/secrets:ro
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
@@ -56,6 +59,11 @@ services:
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      # GitHub App credentials for the CodeRabbit / PR-driven status integration.
+      # Webhook stays disabled if any of these are blank — see router.go.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-/app/secrets/github-app.pem}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
     restart: unless-stopped
 
   frontend:

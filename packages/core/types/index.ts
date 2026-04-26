@@ -33,7 +33,7 @@ export type {
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation, WorkspaceRepoBinding, CreateRepoBindingRequest, UpdateRepoBindingRequest } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";

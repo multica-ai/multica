@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Workspace } from "../types";
+import type { Workspace, CreateRepoBindingRequest, UpdateRepoBindingRequest } from "../types";
 import { api } from "../api";
 import { workspaceKeys } from "./queries";
 
@@ -41,6 +41,37 @@ export function useDeleteWorkspace() {
     mutationFn: (workspaceId: string) => api.deleteWorkspace(workspaceId),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+    },
+  });
+}
+
+export function useCreateRepoBinding(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateRepoBindingRequest) => api.createRepoBinding(workspaceId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.repoBindings(workspaceId) });
+    },
+  });
+}
+
+export function useUpdateRepoBinding(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bindingId, data }: { bindingId: string; data: UpdateRepoBindingRequest }) =>
+      api.updateRepoBinding(workspaceId, bindingId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.repoBindings(workspaceId) });
+    },
+  });
+}
+
+export function useDeleteRepoBinding(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (bindingId: string) => api.deleteRepoBinding(workspaceId, bindingId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.repoBindings(workspaceId) });
     },
   });
 }

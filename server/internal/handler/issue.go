@@ -43,6 +43,20 @@ type IssueResponse struct {
 	PhaseState         json.RawMessage         `json:"phase_state,omitempty"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	// CodeRabbit / GitHub PR linkage. Set by the GitHub webhook handler when
+	// a PR is opened referencing this issue's identifier (e.g. "MUL-50").
+	PrURL              *string                 `json:"pr_url"`
+	PrNumber           *int32                  `json:"pr_number"`
+	PrRepo             *string                 `json:"pr_repo"`
+}
+
+
+// int4ToPtr converts a pgtype.Int4 to *int32 (nil when invalid).
+func int4ToPtr(v pgtype.Int4) *int32 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int32
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -67,6 +81,9 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		PhaseState:    bytesToRawJSON(i.PhaseState),
+		PrURL:         textToPtr(i.PrUrl),
+		PrNumber:      int4ToPtr(i.PrNumber),
+		PrRepo:        textToPtr(i.PrRepo),
 	}
 }
 

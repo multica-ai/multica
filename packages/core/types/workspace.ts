@@ -80,3 +80,34 @@ export interface Invitation {
   inviter_email?: string;
   workspace_name?: string;
 }
+
+/**
+ * Workspace ↔ GitHub repository binding for the CodeRabbit / PR-driven
+ * status automation. Mirrors the `workspace_repo_binding` Postgres table.
+ *
+ * One row links a workspace to a GitHub repo + the GitHub App installation
+ * that grants the backend access to issues/PRs/checks. `cr_bot_username`
+ * is the GitHub login the webhook handler treats as the CodeRabbit reviewer
+ * (defaults server-side to "coderabbitai[bot]").
+ */
+export interface WorkspaceRepoBinding {
+  id: string;
+  workspace_id: string;
+  repo_full_name: string;
+  installation_id: number;
+  cr_bot_username: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRepoBindingRequest {
+  repo_full_name: string;
+  installation_id: number;
+  cr_bot_username?: string;
+}
+
+export interface UpdateRepoBindingRequest {
+  installation_id?: number;
+  active?: boolean;
+}

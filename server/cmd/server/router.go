@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
+	ghintegration "github.com/multica-ai/multica/server/internal/integrations/github"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -137,6 +139,19 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 
+	// GitHub webhook (HMAC-authenticated, no user session required).
+	// Skips registration silently if GITHUB_APP_* env vars are unset — useful
+	// for local dev / fresh installs.
+	if os.Getenv("GITHUB_APP_ID") != "" && os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH") != "" && os.Getenv("GITHUB_APP_WEBHOOK_SECRET") != "" {
+		if gh, err := ghintegration.NewWebhookHandlerFromEnv(queries, bus); err != nil {
+			// Fail open: log but don't crash the server. The webhook just
+			// won't be available until the operator fixes the config.
+			slog.Warn("github webhook handler init failed", "error", err)
+		} else {
+			r.Post("/api/webhooks/github", gh.ServeHTTP)
+		}
+	}
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries))
@@ -196,6 +211,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					r.Get("/repo-bindings", h.ListRepoBindings)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -208,6 +224,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Post("/repo-bindings", h.CreateRepoBinding)
+					r.Patch("/repo-bindings/{bindingId}", h.UpdateRepoBinding)
+					r.Delete("/repo-bindings/{bindingId}", h.DeleteRepoBinding)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)

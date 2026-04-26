@@ -17,6 +17,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  GitPullRequest,
   Trash2,
   UserMinus,
   Users,
@@ -142,6 +143,24 @@ function formatActivity(
       return "completed the task";
     case "task_failed":
       return "task failed";
+    // PR-driven status automation (CodeRabbit / GitHub webhook).
+    // \ and \ are populated by the webhook handler.
+    case "pr_opened": {
+      const num = details.pr_number ? "#" + details.pr_number : "a PR";
+      return "opened " + num;
+    }
+    case "pr_updated":
+      return details.pr_number ? "updated PR #" + details.pr_number : "updated the PR";
+    case "pr_merged":
+      return details.pr_number ? "merged PR #" + details.pr_number : "merged the PR";
+    case "pr_closed_unmerged":
+      return details.pr_number ? "closed PR #" + details.pr_number + " without merging" : "closed the PR without merging";
+    case "pr_reopened":
+      return details.pr_number ? "re-opened PR #" + details.pr_number : "re-opened the PR";
+    case "review_changes_requested":
+      return "CodeRabbit requested changes";
+    case "review_passed":
+      return "CodeRabbit approved the PR";
     default:
       return entry.action ?? "";
   }
@@ -910,6 +929,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
         {detailsOpen && <div className="space-y-0.5 pl-2">
+          {issue.pr_url && (
+            <PropRow label="PR">
+              <GitPullRequest className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <a
+                href={issue.pr_url}
+                target="_blank"
+                rel="noreferrer"
+                className="truncate text-foreground hover:underline"
+              >
+                {issue.pr_repo ? issue.pr_repo + "#" + issue.pr_number : "#" + issue.pr_number}
+              </a>
+            </PropRow>
+          )}
           <PropRow label="Created by">
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} />
             <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>

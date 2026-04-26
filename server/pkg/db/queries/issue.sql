@@ -135,3 +135,39 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- Append-to-issue.sql: PR linkage + identifier-based lookup for the GitHub
+-- webhook handler. These rows live alongside the existing issue queries.
+
+-- name: GetIssueByIdentifier :one
+-- Resolves a workspace-scoped identifier like "TIM-42" by joining workspace
+-- to read its issue_prefix and matching number from the suffix.
+SELECT i.*
+FROM issue i
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.workspace_id = $1
+  AND w.issue_prefix = $2
+  AND i.number = $3;
+
+-- name: GetIssueByPR :one
+SELECT * FROM issue
+WHERE pr_repo = $1 AND pr_number = $2
+LIMIT 1;
+
+-- name: SetIssuePR :one
+UPDATE issue SET
+    pr_url     = $2,
+    pr_number  = $3,
+    pr_repo    = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearIssuePR :one
+UPDATE issue SET
+    pr_url     = NULL,
+    pr_number  = NULL,
+    pr_repo    = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
