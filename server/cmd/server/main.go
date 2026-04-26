@@ -160,6 +160,8 @@ func main() {
 	var storeRedis *redis.Client
 	var relayWriteRedis *redis.Client
 	var relayReadRedis *redis.Client
+	var shardedReadRedis *redis.Client
+	var legacyReadRedis *redis.Client
 	var relay realtime.ManagedRelay
 	defer func() {
 		if relay != nil {
@@ -169,6 +171,8 @@ func main() {
 		if relay != nil {
 			relay.Wait()
 		}
+		closeRedisClient("realtime-read-legacy", legacyReadRedis)
+		closeRedisClient("realtime-read-sharded", shardedReadRedis)
 		closeRedisClient("realtime-read", relayReadRedis)
 		closeRedisClient("realtime-write", relayWriteRedis)
 		closeRedisClient("store", storeRedis)
@@ -180,18 +184,21 @@ func main() {
 		} else {
 			storeRedis = newNamedRedisClient(opts, "store")
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
-			relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 
 			relayMode := realtimeRelayModeFromEnv()
 			relayConfig := shardedRelayConfigFromEnv()
 			switch relayMode {
 			case "legacy":
+				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 				relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
 			case "dual":
-				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
-				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+				shardedReadRedis = newNamedRedisClient(opts, "realtime-read-sharded")
+				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
+				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
+				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, legacyReadRedis)
 				relay = realtime.NewMirroredRelay(sharded, legacy)
 			default:
+				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 				relay = realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
 			}
 			relay.Start(relayCtx)
