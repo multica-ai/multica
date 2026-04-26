@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -17,6 +20,120 @@ func TestNewReturnsOpencodeBackend(t *testing.T) {
 	if _, ok := b.(*opencodeBackend); !ok {
 		t.Fatalf("expected *opencodeBackend, got %T", b)
 	}
+}
+
+func TestResolveOpenCodeWindowsNativeBinaryPrefersNativeExe(t *testing.T) {
+	t.Parallel()
+
+	shimDir := t.TempDir()
+	native := filepath.Join(shimDir, "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("fake exe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveOpenCodeWindowsNativeBinary(filepath.Join(shimDir, "opencode.cmd"))
+	if got != native {
+		t.Fatalf("native path: got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeWindowsNativeBinaryFallsBackToBaseline(t *testing.T) {
+	t.Parallel()
+
+	shimDir := t.TempDir()
+	native := filepath.Join(shimDir, "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64-baseline", "bin", "opencode.exe")
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("fake exe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveOpenCodeWindowsNativeBinary(filepath.Join(shimDir, "opencode.cmd"))
+	if got != native {
+		t.Fatalf("native path: got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeWindowsNativeBinaryFromPackageBin(t *testing.T) {
+	t.Parallel()
+
+	packageRoot := filepath.Join(t.TempDir(), "node_modules", "opencode-ai")
+	native := filepath.Join(packageRoot, "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("fake exe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveOpenCodeWindowsNativeBinary(filepath.Join(packageRoot, "bin", "opencode"))
+	if got != native {
+		t.Fatalf("native path: got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeExecPathWindowsPrefersNativeBinary(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific executable substitution")
+	}
+
+	shimDir := t.TempDir()
+	shim := filepath.Join(shimDir, "opencode.cmd")
+	if err := os.WriteFile(shim, []byte("@echo off\r\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(shimDir, "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("fake exe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveOpenCodeExecPath(shim)
+	if err != nil {
+		t.Fatalf("resolve executable: %v", err)
+	}
+	if got != native {
+		t.Fatalf("exec path: got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeExecPathFallsBackToResolvedExecutable(t *testing.T) {
+	t.Parallel()
+
+	execPath := writeOpenCodeTestExecutable(t)
+	got, err := resolveOpenCodeExecPath(execPath)
+	if err != nil {
+		t.Fatalf("resolve executable: %v", err)
+	}
+	if got != execPath {
+		t.Fatalf("exec path: got %q, want %q", got, execPath)
+	}
+}
+
+func writeOpenCodeTestExecutable(tb testing.TB) string {
+	tb.Helper()
+
+	dir := tb.TempDir()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "opencode.cmd")
+		if err := os.WriteFile(path, []byte("@echo off\r\n"), 0o755); err != nil {
+			tb.Fatal(err)
+		}
+		return path
+	}
+
+	path := filepath.Join(dir, "opencode")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		tb.Fatal(err)
+	}
+	return path
 }
 
 // ── Text event tests ──

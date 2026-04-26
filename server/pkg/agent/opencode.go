@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -24,12 +27,9 @@ type opencodeBackend struct {
 }
 
 func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "opencode"
-	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("opencode executable not found at %q: %w", execPath, err)
+	execPath, err := resolveOpenCodeExecPath(b.cfg.ExecutablePath)
+	if err != nil {
+		return nil, err
 	}
 
 	timeout := opts.Timeout
@@ -138,6 +138,52 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func resolveOpenCodeExecPath(execPath string) (string, error) {
+	if execPath == "" {
+		execPath = "opencode"
+	}
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
+		return "", fmt.Errorf("opencode executable not found at %q: %w", execPath, err)
+	}
+	if runtime.GOOS == "windows" {
+		if native := resolveOpenCodeWindowsNativeBinary(resolved); native != "" {
+			return native, nil
+		}
+	}
+	return resolved, nil
+}
+
+func resolveOpenCodeWindowsNativeBinary(shimPath string) string {
+	for _, packageRoot := range openCodePackageRoots(shimPath) {
+		for _, pkg := range openCodeWindowsPackageCandidates() {
+			candidate := filepath.Join(packageRoot, "node_modules", pkg, "bin", "opencode.exe")
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func openCodePackageRoots(shimPath string) []string {
+	dir := filepath.Dir(shimPath)
+	roots := []string{filepath.Join(dir, "node_modules", "opencode-ai")}
+	if filepath.Base(dir) == "bin" && filepath.Base(filepath.Dir(dir)) == "opencode-ai" {
+		roots = append(roots, filepath.Dir(dir))
+	}
+	return roots
+}
+
+func openCodeWindowsPackageCandidates() []string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return []string{"opencode-windows-arm64", "opencode-windows-x64", "opencode-windows-x64-baseline"}
+	default:
+		return []string{"opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"}
+	}
 }
 
 // ── Event handlers ──
@@ -328,8 +374,8 @@ type opencodeEventPart struct {
 
 // opencodeTokens represents token usage in a step_finish event.
 type opencodeTokens struct {
-	Input  int64              `json:"input"`
-	Output int64              `json:"output"`
+	Input  int64                `json:"input"`
+	Output int64                `json:"output"`
 	Cache  *opencodeCacheTokens `json:"cache,omitempty"`
 }
 
