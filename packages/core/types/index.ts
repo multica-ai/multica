@@ -1,5 +1,7 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction, IssueLabel, LabelColor } from "./issue";
 export { LABEL_COLORS, MAX_LABEL_NAME_LEN, MAX_LABELS_PER_WORKSPACE, MAX_LABELS_PER_ISSUE } from "./issue";
+export type { IssueLink, IssueBlocker, LinkType, LinkDirection } from "./link";
+export { LINK_TYPES, LINK_LABEL, LINK_LABEL_SHORT, OPEN_STATUSES, MAX_LINKS_PER_ISSUE } from "./link";
 export type {
   Agent,
   AgentStatus,

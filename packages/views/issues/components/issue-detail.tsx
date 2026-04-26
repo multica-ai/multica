@@ -19,6 +19,11 @@ import {
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { LinkRow } from "./link-row";
+import { BlockedWarning } from "./blocked-warning";
+import { OPEN_STATUSES, LINK_LABEL } from "@multica/core/types";
+import type { LinkType } from "@multica/core/types";
+import type { IssueBlocker } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
@@ -80,6 +85,21 @@ function priorityLabel(priority: string): string {
   return PRIORITY_CONFIG[priority as IssuePriority]?.label ?? priority;
 }
 
+/** Pick the direction-aware verb for a link activity entry. The activity
+ *  details record stores the canonical (link_type, direction) pair from
+ *  the perspective of the issue the entry was logged on, so an outgoing
+ *  blocks on issue A reads "blocks", while the mirror on issue B reads
+ *  "blocked by". Falls back to the raw link_type if either field is
+ *  missing or unknown. */
+function linkVerb(linkType: string | undefined, direction: string | undefined): string {
+  const t = linkType as LinkType | undefined;
+  const d = (direction === "incoming" ? "incoming" : "outgoing") as "outgoing" | "incoming";
+  if (t && LINK_LABEL[t]) {
+    return LINK_LABEL[t][d];
+  }
+  return linkType ?? "linked to";
+}
+
 function formatActivity(
   entry: TimelineEntry,
   resolveActorName?: (type: string, id: string) => string,
@@ -137,6 +157,16 @@ function formatActivity(
       return `added label "${details.label_name ?? "?"}"`;
     case "label_detached":
       return `removed label "${details.label_name ?? "?"}"`;
+    case "link_added": {
+      const verb = linkVerb(details.link_type, details.direction);
+      const tgt = details.target_identifier ?? "?";
+      return `${verb} ${tgt}`;
+    }
+    case "link_removed": {
+      const verb = linkVerb(details.link_type, details.direction);
+      const tgt = details.target_identifier ?? "?";
+      return `removed link: ${verb} ${tgt}`;
+    }
     default:
       return entry.action ?? "";
   }
@@ -638,6 +668,37 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     }
   }, [highlightCommentId, timeline.length]);
 
+  // Soft-warning state for the "blocked" dialog. When the user attempts to
+  // move this issue to an active status while it has open incoming `blocks`
+  // links, we stash the pending update here and pop the warning. The user
+  // can confirm to proceed (soft enforcement, per design) or cancel.
+  const [pendingBlockedUpdate, setPendingBlockedUpdate] = useState<
+    Parameters<typeof actions.updateField>[0] | null
+  >(null);
+
+  // Compute open incoming blockers from the embedded `links`. A blocker is
+  // an *incoming* `blocks` row pointing at a target whose status is open.
+  // (The L-PR#2 enrichment guarantees `issue.links` is present on the
+  // detail-cache copy of the issue.)
+  const openBlockers: IssueBlocker[] = (issue?.links ?? [])
+    .filter(
+      (l) =>
+        l.direction === "incoming" &&
+        l.link_type === "blocks" &&
+        OPEN_STATUSES.has(l.target_status),
+    )
+    .map((l) => ({
+      blocker_issue_id: l.target_issue_id,
+      blocker_identifier: l.target_identifier,
+      blocker_title: l.target_title,
+      blocker_status: l.target_status,
+      blocker_number: l.target_number,
+      blocker_workspace_id: l.target_workspace_id,
+      blocker_workspace_name: l.target_workspace_name,
+      blocker_workspace_slug: l.target_workspace_slug,
+    }));
+
+
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
@@ -652,7 +713,24 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
-  const handleUpdateField = actions.updateField;
+  // Wrap actions.updateField with soft-block intercept: when moving to an
+  // active status with open blockers, route through the BlockedWarning dialog.
+  const baseUpdateField = actions.updateField;
+  const handleUpdateField = useCallback(
+    (updates: Parameters<typeof baseUpdateField>[0]) => {
+      if (!issue) return;
+      const movingToActive =
+        updates.status &&
+        updates.status !== issue.status &&
+        OPEN_STATUSES.has(updates.status as typeof issue.status);
+      if (movingToActive && openBlockers.length > 0) {
+        setPendingBlockedUpdate(updates);
+        return;
+      }
+      baseUpdateField(updates);
+    },
+    [issue, openBlockers.length, baseUpdateField],
+  );
 
   if (loading) {
     return (
@@ -747,6 +825,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </PropRow>
           <PropRow label="Labels">
             <LabelsRow issueId={issue.id} labels={issue.labels ?? []} />
+          </PropRow>
+          <PropRow label="Links">
+            <LinkRow issueId={issue.id} links={issue.links ?? []} />
           </PropRow>
         </div>}
       </div>
@@ -941,6 +1022,23 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </Tooltip>
           </div>
         </PageHeader>
+
+        <BlockedWarning
+          open={pendingBlockedUpdate !== null}
+          onOpenChange={(v) => { if (!v) setPendingBlockedUpdate(null); }}
+          blockers={openBlockers}
+          targetStatusLabel={
+            pendingBlockedUpdate?.status
+              ? STATUS_CONFIG[pendingBlockedUpdate.status as IssueStatus].label
+              : ""
+          }
+          onConfirm={() => {
+            if (pendingBlockedUpdate) {
+              baseUpdateField(pendingBlockedUpdate);
+              setPendingBlockedUpdate(null);
+            }
+          }}
+        />
 
         {/* Content — scrollable */}
         <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
@@ -1380,6 +1478,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     </ResizablePanelGroup>
   );
 }
+
 
 
 

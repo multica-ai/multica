@@ -301,6 +301,20 @@ type IssueLabel struct {
 	CreatorID   pgtype.UUID        `json:"creator_id"`
 }
 
+type IssueLink struct {
+	ID                pgtype.UUID        `json:"id"`
+	PairID            pgtype.UUID        `json:"pair_id"`
+	SourceIssueID     pgtype.UUID        `json:"source_issue_id"`
+	SourceWorkspaceID pgtype.UUID        `json:"source_workspace_id"`
+	TargetIssueID     pgtype.UUID        `json:"target_issue_id"`
+	TargetWorkspaceID pgtype.UUID        `json:"target_workspace_id"`
+	LinkType          string             `json:"link_type"`
+	Direction         string             `json:"direction"`
+	CreatorType       string             `json:"creator_type"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueReaction struct {
 	ID          pgtype.UUID        `json:"id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`

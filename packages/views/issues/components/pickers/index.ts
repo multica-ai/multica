@@ -4,3 +4,4 @@ export { PriorityPicker } from "./priority-picker";
 export { AssigneePicker, canAssignAgent } from "./assignee-picker";
 export { DueDatePicker } from "./due-date-picker";
 export { LabelPicker } from "./label-picker";
+export { LinkPicker } from "./link-picker";

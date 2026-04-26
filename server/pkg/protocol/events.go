@@ -48,6 +48,7 @@ const (
 	EventLabelUpdated       = "label:updated"
 	EventLabelDeleted       = "label:deleted"
 	EventIssueLabelsChanged = "issue:labels_changed"
+	EventIssueLinksChanged  = "issue:links_changed"
 
 
 	// Member events

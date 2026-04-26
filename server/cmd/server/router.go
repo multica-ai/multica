@@ -308,6 +308,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/children", h.ListChildIssues)
 					r.Post("/labels", h.AttachLabelToIssue)
 					r.Delete("/labels/{labelId}", h.DetachLabelFromIssue)
+					r.Post("/links", h.CreateIssueLink)
+					r.Delete("/links/{linkId}", h.DeleteIssueLink)
+					r.Get("/links", h.ListIssueLinks)
+					r.Get("/blockers", h.ListIssueBlockers)
 				})
 			})
 

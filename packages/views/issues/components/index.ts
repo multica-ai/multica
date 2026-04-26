@@ -1,7 +1,9 @@
 export { StatusIcon } from "./status-icon";
 export { PriorityIcon } from "./priority-icon";
-export { StatusPicker, PriorityPicker, AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker } from "./pickers";
+export { StatusPicker, PriorityPicker, AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, LinkPicker } from "./pickers";
 export { LabelChip, RemovableLabelChip, LabelColorDot } from "./label-chip";
+export { LinkRow } from "./link-row";
+export { BlockedWarning } from "./blocked-warning";
 export { IssueDetail } from "./issue-detail";
 export { IssuesPage } from "./issues-page";
 export { CommentCard } from "./comment-card";

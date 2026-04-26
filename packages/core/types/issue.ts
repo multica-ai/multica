@@ -1,3 +1,5 @@
+import type { IssueLink } from "./link";
+
 export type IssueStatus =
   | "backlog"
   | "todo"
@@ -95,6 +97,11 @@ export interface Issue {
   /** Attached labels for this issue. Server always serialises this as an array
    *  (empty when no labels), never null. Ordered by label name ascending. */
   labels: IssueLabel[];
+  /** Attached issue-to-issue links (both outgoing and incoming directions are
+   *  embedded). Server always serialises this as an array (empty when no links).
+   *  Optional in the type so legacy test fixtures (and pre-L-PR#2 cached issues)
+   *  remain valid; consumers should default to []. */
+  links?: IssueLink[];
   phase_state?: Record<string, unknown> | null;
   pr_url?: string | null;
   pr_number?: number | null;
