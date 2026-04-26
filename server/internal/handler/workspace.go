@@ -334,8 +334,12 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateMemberRequest struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	Shareable bool   `json:"shareable"`
+	// MaxUses caps the redemption count for shareable links. nil = unlimited.
+	// Ignored for email-targeted invitations.
+	MaxUses *int32 `json:"max_uses"`
 }
 
 func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Clock, X, Mail } from "lucide-react";
+import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Clock, X, Mail, Link2, Copy, Check } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
@@ -144,27 +144,53 @@ function InvitationRow({
   invitation,
   canManage,
   onRevoke,
+  onCopy,
   busy,
 }: {
   invitation: Invitation;
   canManage: boolean;
   onRevoke: () => void;
+  onCopy: () => void;
   busy: boolean;
 }) {
   const rc = roleConfig[invitation.role];
+  const isShareable = invitation.shareable;
+
+  const title = isShareable
+    ? "Shareable link"
+    : invitation.invitee_email ?? "";
+  const subtitle = isShareable
+    ? invitation.max_uses != null
+      ? `Used ${invitation.use_count}/${invitation.max_uses}`
+      : `Used ${invitation.use_count} ${invitation.use_count === 1 ? "time" : "times"}`
+    : "Pending";
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-        <Mail className="h-4 w-4 text-muted-foreground" />
+        {isShareable ? (
+          <Link2 className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <Mail className="h-4 w-4 text-muted-foreground" />
+        )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{invitation.invitee_email}</div>
+        <div className="text-sm font-medium truncate">{title}</div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="h-3 w-3" />
-          <span>Pending</span>
+          <span>{subtitle}</span>
         </div>
       </div>
+      {isShareable && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onCopy}
+          title="Copy invitation link"
+        >
+          <Copy className="h-4 w-4 text-muted-foreground" />
+        </Button>
+      )}
       {canManage && (
         <Button
           variant="ghost"
@@ -194,6 +220,12 @@ export function MembersTab() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteMode, setInviteMode] = useState<"email" | "link">("email");
+  // Freshly created shareable link URL, shown in a copy-able banner until
+  // the admin dismisses it. Not persisted — refreshing the page clears it
+  // (the invitation is still in the list below).
+  const [freshLinkUrl, setFreshLinkUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -207,22 +239,48 @@ export function MembersTab() {
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
 
+  const inviteLinkUrl = (invitationId: string) =>
+    `${window.location.origin}/invite/${invitationId}`;
+
   const handleInviteMember = async () => {
     if (!workspace) return;
     setInviteLoading(true);
     try {
-      await api.createMember(workspace.id, {
-        email: inviteEmail,
-        role: inviteRole,
-      });
-      setInviteEmail("");
-      setInviteRole("member");
-      qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-      toast.success("Invitation sent");
+      if (inviteMode === "link") {
+        const inv = await api.createMember(workspace.id, {
+          role: inviteRole,
+          shareable: true,
+        });
+        setFreshLinkUrl(inviteLinkUrl(inv.id));
+        setCopied(false);
+        setInviteRole("member");
+        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+        toast.success("Invitation link created");
+      } else {
+        await api.createMember(workspace.id, {
+          email: inviteEmail,
+          role: inviteRole,
+        });
+        setInviteEmail("");
+        setInviteRole("member");
+        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+        toast.success("Invitation sent");
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to send invitation");
+      toast.error(e instanceof Error ? e.message : "Failed to create invitation");
     } finally {
       setInviteLoading(false);
+    }
+  };
+
+  const handleCopy = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success("Link copied");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Failed to copy link");
     }
   };
 
@@ -230,7 +288,9 @@ export function MembersTab() {
     if (!workspace) return;
     setConfirmAction({
       title: "Revoke invitation",
-      description: `Revoke the invitation to ${invitation.invitee_email}? They will no longer be able to join this workspace.`,
+      description: invitation.shareable
+        ? "Revoke this shareable link? Anyone still holding it will no longer be able to join."
+        : `Revoke the invitation to ${invitation.invitee_email}? They will no longer be able to join this workspace.`,
       variant: "destructive",
       onConfirm: async () => {
         setInvitationActionId(invitation.id);
@@ -299,30 +359,102 @@ export function MembersTab() {
                 <Plus className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-sm font-medium">Invite member</h3>
               </div>
-              <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
-                <Input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="user@company.com"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
-                  }}
-                />
-                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
-                  <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleInviteMember}
-                  disabled={inviteLoading || !inviteEmail.trim()}
+
+              <div className="inline-flex rounded-md ring-1 ring-border p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setInviteMode("email")}
+                  className={`px-3 py-1 text-xs rounded-sm transition-colors ${
+                    inviteMode === "email"
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  {inviteLoading ? "Inviting..." : "Invite"}
-                </Button>
+                  <Mail className="inline h-3 w-3 mr-1" /> By email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInviteMode("link")}
+                  className={`px-3 py-1 text-xs rounded-sm transition-colors ${
+                    inviteMode === "link"
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Link2 className="inline h-3 w-3 mr-1" /> Shareable link
+                </button>
               </div>
+
+              {inviteMode === "email" ? (
+                <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+                  <Input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="user@company.com"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
+                    }}
+                  />
+                  <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                    <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">Member</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    onClick={handleInviteMember}
+                    disabled={inviteLoading || !inviteEmail.trim()}
+                  >
+                    {inviteLoading ? "Inviting..." : "Invite"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+                  <div className="flex items-center text-xs text-muted-foreground">
+                    Generates a URL you can share in Feishu / Slack. Anyone with the link who signs in can join.
+                  </div>
+                  <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                    <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">Member</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleInviteMember} disabled={inviteLoading}>
+                    {inviteLoading ? "Creating..." : "Generate link"}
+                  </Button>
+                </div>
+              )}
+
+              {freshLinkUrl && (
+                <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2">
+                  <div className="flex-1 min-w-0 text-xs font-mono truncate">
+                    {freshLinkUrl}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleCopy(freshLinkUrl)}
+                    title="Copy link"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-primary" />
+                    ) : (
+                      <Copy className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setFreshLinkUrl(null)}
+                    title="Dismiss"
+                  >
+                    <X className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -361,6 +493,7 @@ export function MembersTab() {
                   invitation={inv}
                   canManage={canManageWorkspace}
                   onRevoke={() => handleRevokeInvitation(inv)}
+                  onCopy={() => handleCopy(inviteLinkUrl(inv.id))}
                   busy={invitationActionId === inv.id}
                 />
               </div>

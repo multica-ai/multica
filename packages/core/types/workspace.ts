@@ -69,13 +69,20 @@ export interface Invitation {
   id: string;
   workspace_id: string;
   inviter_id: string;
-  invitee_email: string;
+  /** null for shareable links (`shareable=true`). */
+  invitee_email: string | null;
   invitee_user_id: string | null;
   role: MemberRole;
   status: "pending" | "accepted" | "declined" | "expired";
   created_at: string;
   updated_at: string;
   expires_at: string;
+  /** true when this invitation is a shareable link (no specific recipient). */
+  shareable: boolean;
+  /** Max redemption count for shareable links. null = unlimited. */
+  max_uses: number | null;
+  /** How many times a shareable link has been redeemed. 0 for targeted invites. */
+  use_count: number;
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;

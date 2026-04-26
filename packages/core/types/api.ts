@@ -89,8 +89,13 @@ export interface UpdateMeRequest {
 }
 
 export interface CreateMemberRequest {
-  email: string;
+  /** Required when shareable is false (or omitted); ignored for shareable links. */
+  email?: string;
   role?: MemberRole;
+  /** Generate a shareable link (no recipient email) instead of a targeted invite. */
+  shareable?: boolean;
+  /** Cap redemption count for shareable links. Omit or null for unlimited. */
+  max_uses?: number | null;
 }
 
 export interface UpdateMemberRequest {

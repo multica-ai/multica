@@ -167,7 +167,11 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
 
   const isExpired = invitation.status !== "pending";
   const isAlreadyHandled = invitation.status === "accepted" || invitation.status === "declined";
+  const isShareable = invitation.shareable;
 
+  // Shareable links are capability URLs — no specific recipient to decline
+  // on behalf of, and the "already accepted/declined" state only reaches
+  // pending → accepted when max_uses is hit. Show a simple Join CTA.
   return (
     <InviteShell onBack={onBack}>
       <Card className="w-full max-w-md">
@@ -181,19 +185,38 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
               Join {invitation.workspace_name ?? "workspace"}
             </h2>
             <p className="text-sm text-muted-foreground">
-              <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
-              invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
+              {isShareable ? (
+                <>
+                  You&apos;ve been invited to join as{" "}
+                  {invitation.role === "admin" ? "an admin" : "a member"}.
+                </>
+              ) : (
+                <>
+                  <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
+                  invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
+                </>
+              )}
             </p>
           </div>
 
           {isAlreadyHandled ? (
             <div className="text-sm text-muted-foreground">
-              This invitation has already been {invitation.status}.
+              {isShareable
+                ? "This invitation link has been used up."
+                : `This invitation has already been ${invitation.status}.`}
             </div>
           ) : isExpired ? (
             <div className="text-sm text-muted-foreground">
               This invitation has expired.
             </div>
+          ) : isShareable ? (
+            <Button
+              className="w-full"
+              onClick={handleAccept}
+              disabled={accepting}
+            >
+              {accepting ? "Joining..." : "Join workspace"}
+            </Button>
           ) : (
             <div className="flex gap-3 w-full">
               <Button

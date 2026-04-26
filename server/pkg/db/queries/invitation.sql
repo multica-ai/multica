@@ -1,6 +1,6 @@
 -- name: CreateInvitation :one
-INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role, max_uses)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetInvitation :one
@@ -33,6 +33,24 @@ ORDER BY wi.created_at DESC;
 UPDATE workspace_invitation
 SET status = 'accepted', updated_at = now()
 WHERE id = $1 AND status = 'pending'
+RETURNING *;
+
+-- name: RedeemShareableInvitation :one
+-- Atomic redeem step for shareable links: bump use_count; if max_uses is
+-- reached the row transitions to 'accepted' so it can no longer be used.
+-- Matches only pending, non-expired links that have remaining capacity.
+UPDATE workspace_invitation
+SET use_count  = use_count + 1,
+    status     = CASE
+                   WHEN max_uses IS NOT NULL AND use_count + 1 >= max_uses THEN 'accepted'
+                   ELSE status
+                 END,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'pending'
+  AND invitee_email IS NULL
+  AND expires_at > now()
+  AND (max_uses IS NULL OR use_count < max_uses)
 RETURNING *;
 
 -- name: DeclineInvitation :one
