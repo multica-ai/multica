@@ -18,6 +18,53 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent";
 
+/** Canonical label color palette. Keep in sync with:
+ *  - server: migration 101 CHECK constraint + AllowedLabelColors map in label.go
+ *  - client: LABEL_COLORS below
+ */
+export type LabelColor =
+  | "slate"
+  | "gray"
+  | "red"
+  | "orange"
+  | "amber"
+  | "green"
+  | "teal"
+  | "blue"
+  | "indigo"
+  | "purple"
+  | "pink";
+
+export const LABEL_COLORS: readonly LabelColor[] = [
+  "slate",
+  "gray",
+  "red",
+  "orange",
+  "amber",
+  "green",
+  "teal",
+  "blue",
+  "indigo",
+  "purple",
+  "pink",
+] as const;
+
+export const MAX_LABEL_NAME_LEN = 32;
+export const MAX_LABELS_PER_WORKSPACE = 100;
+export const MAX_LABELS_PER_ISSUE = 8;
+
+/** A workspace-scoped label that can be attached to issues. */
+export interface IssueLabel {
+  id: string;
+  workspace_id: string;
+  name: string;
+  color: LabelColor;
+  creator_type: IssueAssigneeType;
+  creator_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface IssueReaction {
   id: string;
   issue_id: string;
@@ -45,6 +92,9 @@ export interface Issue {
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];
+  /** Attached labels for this issue. Server always serialises this as an array
+   *  (empty when no labels), never null. Ordered by label name ascending. */
+  labels: IssueLabel[];
   phase_state?: Record<string, unknown> | null;
   pr_url?: string | null;
   pr_number?: number | null;

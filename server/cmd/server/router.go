@@ -234,6 +234,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					r.Get("/repo-bindings", h.ListRepoBindings)
+					// Labels: any workspace member can curate
+					r.Get("/labels", h.ListWorkspaceLabels)
+					r.Post("/labels", h.CreateWorkspaceLabel)
+					r.Patch("/labels/{labelId}", h.UpdateWorkspaceLabel)
+					r.Delete("/labels/{labelId}", h.DeleteWorkspaceLabel)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -301,6 +306,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
+					r.Post("/labels", h.AttachLabelToIssue)
+					r.Delete("/labels/{labelId}", h.DetachLabelFromIssue)
 				})
 			})
 
@@ -496,3 +503,4 @@ func splitAndTrim(s string) []string {
 	}
 	return res
 }
+

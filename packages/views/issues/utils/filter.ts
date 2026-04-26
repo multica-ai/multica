@@ -9,6 +9,8 @@ export interface IssueFilters {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
+  includeNoLabels: boolean;
 }
 
 /**
@@ -21,9 +23,10 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, includeNoLabels } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  const hasLabelFilter = labelFilters.length > 0 || includeNoLabels;
 
   return issues.filter((issue) => {
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
@@ -63,6 +66,20 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
         if (!projectFilters.includes(issue.project_id)) return false;
       } else {
         // Only "No project" is checked → hide issues that have a project
+        return false;
+      }
+    }
+
+    if (hasLabelFilter) {
+      const issueLabelIds = (issue.labels ?? []).map((l) => l.id);
+      if (issueLabelIds.length === 0) {
+        // Issue has no labels → show only if "No labels" is checked.
+        if (!includeNoLabels) return false;
+      } else if (labelFilters.length > 0) {
+        // OR-match: issue passes if any of its labels is selected.
+        if (!labelFilters.some((id) => issueLabelIds.includes(id))) return false;
+      } else {
+        // Only "No labels" is checked → hide labelled issues.
         return false;
       }
     }

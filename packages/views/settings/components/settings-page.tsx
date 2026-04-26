@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { User, Palette, Key, Settings, Users, FolderGit2, GitPullRequest } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, GitPullRequest, Tag } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { AccountTab } from "./account-tab";
@@ -11,6 +11,7 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { PRAutomationTab } from "./pr-automation-tab";
+import { LabelsTab } from "./labels-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -23,6 +24,7 @@ const workspaceTabs = [
   { value: "repositories", label: "Repositories", icon: FolderGit2 },
   { value: "pr-automation", label: "PR Automation", icon: GitPullRequest },
   { value: "members", label: "Members", icon: Users },
+  { value: "labels", label: "Labels", icon: Tag },
 ];
 
 export interface ExtraSettingsTab {
@@ -86,6 +88,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="pr-automation"><PRAutomationTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          <TabsContent value="labels"><LabelsTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}
@@ -94,3 +97,4 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
     </Tabs>
   );
 }
+

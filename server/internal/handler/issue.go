@@ -48,6 +48,7 @@ type IssueResponse struct {
 	PrURL              *string                 `json:"pr_url"`
 	PrNumber           *int32                  `json:"pr_number"`
 	PrRepo             *string                 `json:"pr_repo"`
+	Labels             []IssueLabelResponse    `json:"labels"`
 }
 
 
@@ -84,6 +85,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		PrURL:         textToPtr(i.PrUrl),
 		PrNumber:      int4ToPtr(i.PrNumber),
 		PrRepo:        textToPtr(i.PrRepo),
+		Labels:        []IssueLabelResponse{},
 	}
 }
 
@@ -109,6 +111,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		Labels:        []IssueLabelResponse{},
 	}
 }
 
@@ -133,6 +136,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		Labels:        []IssueLabelResponse{},
 	}
 }
 
@@ -567,6 +571,18 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = sir
 	}
 
+	// Bulk-enrich with labels. Unwrap into []IssueResponse so we can reuse the helper.
+	if len(resp) > 0 {
+		base := make([]IssueResponse, len(resp))
+		for i, sir := range resp {
+			base[i] = sir.IssueResponse
+		}
+		h.enrichIssuesWithLabels(ctx, base)
+		for i := range resp {
+			resp[i].IssueResponse = base[i]
+		}
+	}
+
 	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -626,6 +642,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
 		}
+		h.enrichIssuesWithLabels(ctx, resp)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issues": resp,
@@ -687,6 +704,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
 	}
+	h.enrichIssuesWithLabels(ctx, resp)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -724,6 +742,8 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.enrichIssueWithLabels(r.Context(), &resp)
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -743,6 +763,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
 	}
+	h.enrichIssuesWithLabels(r.Context(), resp)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -949,6 +970,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.enrichIssueWithLabels(r.Context(), &resp)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -1187,6 +1209,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
+	h.enrichIssueWithLabels(r.Context(), &resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1588,3 +1611,4 @@ func bytesToRawJSON(b []byte) json.RawMessage {
 	}
 	return json.RawMessage(b)
 }
+

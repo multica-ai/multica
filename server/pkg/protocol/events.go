@@ -43,6 +43,13 @@ const (
 	EventWorkspaceUpdated = "workspace:updated"
 	EventWorkspaceDeleted = "workspace:deleted"
 
+	// Label events
+	EventLabelCreated       = "label:created"
+	EventLabelUpdated       = "label:updated"
+	EventLabelDeleted       = "label:deleted"
+	EventIssueLabelsChanged = "issue:labels_changed"
+
+
 	// Member events
 	// TEAM_APP_INTEGRATION: do not rename or change value — consumed by team.multica.uittai.com WebSocket subscriber. See M-PR#2 / scripts/check_team_app_events.sh.
 	EventMemberAdded = "member:added"

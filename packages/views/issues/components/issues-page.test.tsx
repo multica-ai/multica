@@ -113,9 +113,11 @@ const mockViewState = {
   creatorFilters: [] as { type: string; id: string }[],
   projectFilters: [] as string[],
   includeNoProject: false,
+  labelFilters: [] as string[],
+  includeNoLabels: false,
   sortBy: "position" as const,
   sortDirection: "asc" as const,
-  cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true },
+  cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
   listCollapsedStatuses: [] as string[],
   setViewMode: vi.fn(),
   toggleStatusFilter: vi.fn(),
@@ -125,6 +127,10 @@ const mockViewState = {
   toggleCreatorFilter: vi.fn(),
   toggleProjectFilter: vi.fn(),
   toggleNoProject: vi.fn(),
+  toggleLabelFilter: vi.fn(),
+  toggleNoLabels: vi.fn(),
+  setGroupBy: vi.fn(),
+  groupBy: "none" as const,
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -264,6 +270,7 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  labels: [],
 };
 
 const mockIssues: Issue[] = [
