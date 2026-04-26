@@ -18,13 +18,13 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
-    workspace_id, project_id, title, description, assignee_id,
-    priority, status, execution_mode, issue_title_template,
+    workspace_id, title, description, assignee_id,
+    status, execution_mode, issue_title_template,
     created_by_type, created_by_id
 ) VALUES (
-    $1, sqlc.narg('project_id'), $2, sqlc.narg('description'), $3,
-    $4, $5, $6, sqlc.narg('issue_title_template'),
-    $7, $8
+    $1, $2, sqlc.narg('description'), $3,
+    $4, $5, sqlc.narg('issue_title_template'),
+    $6, $7
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
@@ -32,8 +32,6 @@ UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
-    project_id = sqlc.narg('project_id'),
-    priority = COALESCE(sqlc.narg('priority'), priority),
     status = COALESCE(sqlc.narg('status'), status),
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),

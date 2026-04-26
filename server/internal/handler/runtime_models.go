@@ -15,8 +15,8 @@ import (
 // ---------------------------------------------------------------------------
 //
 // The server cannot call the daemon directly (the daemon is behind the user's
-// NAT and only polls the server). So "list models for this runtime" uses the
-// same pattern as PingStore: server creates a pending request, daemon pops it
+// NAT and only polls the server). So "list models for this runtime" uses a
+// pending-request pattern: server creates a pending request, daemon pops it
 // on the next heartbeat, executes locally, and reports the result back.
 
 // ModelListStatus represents the lifecycle of a model list request.
@@ -56,6 +56,20 @@ type ModelEntry struct {
 	Provider string `json:"provider,omitempty"`
 	Default  bool   `json:"default,omitempty"`
 }
+
+const (
+	// modelListPendingTimeout bounds how long a pending request can sit in
+	// the store before the UI is told "daemon didn't pick this up".
+	modelListPendingTimeout = 30 * time.Second
+	// modelListRunningTimeout bounds how long a claimed (running) request
+	// can stay claimed before the UI is told "daemon picked this up but
+	// never reported a result". This matters when the heartbeat response
+	// carrying `pending_model_list` is lost in transit (e.g. HTTP client
+	// timeout after PopPending already mutated store state): without this
+	// transition the UI would keep polling a record that is stuck in
+	// `running` until the 2-minute memory GC sweeps it.
+	modelListRunningTimeout = 60 * time.Second
+)
 
 // ModelListStore is a thread-safe in-memory store. Entries expire after 2 min
 // to bound memory use; the UI polls /requests/:id until status is terminal.
@@ -101,12 +115,31 @@ func (s *ModelListStore) Get(id string) *ModelListRequest {
 	if !ok {
 		return nil
 	}
-	if req.Status == ModelListPending && time.Since(req.CreatedAt) > 30*time.Second {
-		req.Status = ModelListTimeout
-		req.Error = "daemon did not respond within 30 seconds"
-		req.UpdatedAt = time.Now()
-	}
+	applyModelListTimeout(req, time.Now())
 	return req
+}
+
+// applyModelListTimeout transitions a request to ModelListTimeout when it has
+// been stuck in a non-terminal state past its threshold. The pending threshold
+// catches "daemon never picked this up"; the running threshold catches
+// "daemon picked it up but the result report was lost" — previously the only
+// escape from running was the 2-minute memory GC, which exceeded the UI's
+// polling window and surfaced as a silent discovery failure.
+func applyModelListTimeout(req *ModelListRequest, now time.Time) {
+	switch req.Status {
+	case ModelListPending:
+		if now.Sub(req.CreatedAt) > modelListPendingTimeout {
+			req.Status = ModelListTimeout
+			req.Error = "daemon did not respond within 30 seconds"
+			req.UpdatedAt = now
+		}
+	case ModelListRunning:
+		if now.Sub(req.UpdatedAt) > modelListRunningTimeout {
+			req.Status = ModelListTimeout
+			req.Error = "daemon did not finish within 60 seconds"
+			req.UpdatedAt = now
+		}
+	}
 }
 
 // PopPending returns and marks-running the oldest pending request for a runtime.

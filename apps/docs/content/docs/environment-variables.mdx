@@ -1,0 +1,151 @@
+---
+title: Environment variables
+description: The full list of environment variables for running a self-hosted Multica server.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A self-hosted Multica [server](/self-host-quickstart) reads its configuration from environment variables at startup — database, sign-in, email, storage, signup allowlists all live here. This page groups every variable by purpose: each section spells out **what happens if you leave it unset** and **which ones you must set in production**. For how to actually configure the auth-related ones, see [Sign-in and signup configuration](/auth-setup).
+
+## The five required at startup
+
+These are the five you must think about before deploying — some have defaults that let the server start, but in production you should set all of them explicitly.
+
+| Variable | Default | Required in production? |
+|---|---|---|
+| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **Yes** |
+| `PORT` | `8080` | No (unless you change the port) |
+| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **Yes** (the default is unsafe) |
+| `APP_ENV` | empty | **Yes** (must be `production` — see the next section for the trap) |
+| `FRONTEND_ORIGIN` | empty | **Yes** (self-host must set its own domain) |
+
+<Callout type="warning">
+**If `APP_ENV` is not set to `production`, anyone can sign in to any account using the code `888888`.** Multica has a development-only master code, `888888` — when `APP_ENV != "production"`, **any email** plus `888888` passes verification. The behavior is intentional for local development (no Resend dependency); **in production, failing to set `production` is equivalent to disabling auth entirely**. See [Sign-in and signup configuration → The 888888 trap](/auth-setup#the-888888-trap).
+</Callout>
+
+### Database connection pool
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_MAX_CONNS` | `25` | pgxpool max connections. The daemon polls frequently (every 3s) and uses connections; larger deployments may need a higher value |
+| `DATABASE_MIN_CONNS` | `5` | Minimum idle connections |
+
+**When unset**, the values above are used — **not** pgx's built-in 4/NumCPU defaults, which previously caused pool exhaustion in production.
+
+## Email configuration
+
+Multica uses [Resend](https://resend.com/) to send verification codes and invite emails.
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESEND_API_KEY` | empty | Resend API key |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address (must be a domain verified in your Resend account) |
+
+**Behavior when `RESEND_API_KEY` is unset**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
+
+## Google OAuth configuration
+
+Optional. Leave unset for email + verification code only; configure it to add "Sign in with Google" on the sign-in page.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | empty | Google Cloud OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | empty | Google Cloud OAuth secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth callback URL (self-host: replace with your frontend domain) |
+
+**Takes effect at runtime**: the frontend reads these settings via `/api/config` at runtime, so **changing them requires no frontend rebuild or redeploy** — restart the server and they apply.
+
+Full setup (including Google Cloud Console steps) is in [Sign-in and signup configuration](/auth-setup#google-oauth-configuration).
+
+## File storage configuration
+
+Multica stores user-uploaded attachments (images and files in comments). **S3 is preferred**; if S3 is not configured, it falls back to local disk.
+
+### S3 / S3-compatible storage
+
+| Variable | Default | Description |
+|---|---|---|
+| `S3_BUCKET` | empty | Setting this enables S3 storage |
+| `S3_REGION` | `us-west-2` | AWS region |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Static credentials. When both are unset, the AWS SDK default credential chain is used (IAM role / environment credentials) |
+| `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/)). Setting this switches to path-style URLs |
+
+**When `S3_BUCKET` is unset**: the server logs `"S3_BUCKET not set, cloud upload disabled"` at startup, and all uploads fall back to local disk.
+
+### Local disk (when S3 is not configured)
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | Local storage directory |
+| `LOCAL_UPLOAD_BASE_URL` | empty (returns relative paths) | Public base URL — leave unset and the frontend can't resolve a full URL for attachments |
+
+### CloudFront (optional)
+
+If you front S3 with CloudFront, three variables apply: `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, `CLOUDFRONT_PRIVATE_KEY` (or `CLOUDFRONT_PRIVATE_KEY_SECRET` to read from Secrets Manager). Skip them if you don't use CloudFront — they don't conflict with S3 configuration.
+
+### Cookie domain
+
+| Variable | Default | Description |
+|---|---|---|
+| `COOKIE_DOMAIN` | empty | Scope of the session cookie |
+
+- **Empty**: the cookie is valid only on the exact host visited (correct for single-host deployments)
+- **Set to `.example.com`**: the cookie is shared across subdomains (so `app.example.com` and `api.example.com` share a sign-in session)
+- Warning: it cannot be an IP address (browsers ignore it)
+
+## Restricting who can sign up
+
+Three allowlist layers combine by priority. **If any layer is set to a non-empty value, emails that don't match are rejected** — even `ALLOW_SIGNUP=true` won't override that.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ALLOWED_EMAILS` | empty | Explicit email allowlist (comma-separated). When non-empty, only listed emails can sign up |
+| `ALLOWED_EMAIL_DOMAINS` | empty | Domain allowlist (comma-separated). When non-empty, only listed domains can sign up |
+| `ALLOW_SIGNUP` | `true` | Signup master switch. Set `false` to disable signup entirely |
+
+**The counterintuitive part**: `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` does **not** mean "allow company.io or everyone" — it means **only allow company.io**. The allowlist layers are AND semantics — the full decision tree is in [Sign-in and signup configuration → Signup allowlists](/auth-setup#restricting-who-can-sign-up).
+
+**Invite flows themselves do not check the signup allowlist** — but the invitee must still be able to **sign in** before accepting the invite. If they already have a Multica account (for example from another workspace), they can accept directly, unaffected by the allowlist; **if they have never signed up**, the first step of sign-in (requesting a verification code) still passes through the allowlist check, and an email rejected by `ALLOW_SIGNUP=false` or by `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` **cannot finish signup, and therefore cannot accept the invite**.
+
+## Daemon tuning parameters
+
+The daemon runs on the user's local machine, and its config is read from local environment variables too. The common ones:
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Server address (self-host: replace with your domain) |
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Task polling interval |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
+| `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |
+| `MULTICA_<PROVIDER>_MODEL` | empty | Default model for each AI coding tool |
+
+For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
+
+## Frontend access control
+
+| Variable | Default | Description |
+|---|---|---|
+| `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://app.multica.ai` — self-host must set this explicitly |
+| `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
+| `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
+
+<Callout type="warning">
+**Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://app.multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
+</Callout>
+
+## Usage analytics
+
+By default, the server reports to Multica's official PostHog instance. To opt out, set `ANALYTICS_DISABLED=true`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ANALYTICS_DISABLED` | `false` | Set `true` to disable backend analytics entirely |
+| `POSTHOG_API_KEY` | built-in default key | Set when pointing at your own PostHog instance |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | Change to your own host if you self-host PostHog |
+
+## Next
+
+- [Sign-in and signup configuration](/auth-setup) — how to actually configure the auth-related variables above and where the traps are
+- [Troubleshooting](/troubleshooting) — symptoms and fixes for common misconfigurations
+- [Daemon and runtimes](/daemon-runtimes) — what the `MULTICA_DAEMON_*` parameters actually do

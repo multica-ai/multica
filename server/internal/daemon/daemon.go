@@ -498,14 +498,6 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 					continue
 				}
 
-				// Handle pending ping requests.
-				if resp.PendingPing != nil {
-					rt := d.findRuntime(rid)
-					if rt != nil {
-						go d.handlePing(ctx, *rt, resp.PendingPing.ID)
-					}
-				}
-
 				// Handle pending update requests.
 				if resp.PendingUpdate != nil {
 					go d.handleUpdate(ctx, rid, resp.PendingUpdate)
@@ -595,14 +587,14 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 
 	skills, supported, err := listRuntimeLocalSkills(rt.Provider)
 	if err != nil {
-		d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, map[string]any{
+		d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
 		return
 	}
 
-	d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, map[string]any{
+	d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
 		"skills":    skills,
 		"supported": supported,
@@ -614,109 +606,102 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 
 	skill, supported, err := loadRuntimeLocalSkillBundle(rt.Provider, pending.SkillKey)
 	if err != nil {
-		d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+		d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
 		return
 	}
 	if !supported {
-		d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+		d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
 			"status": "failed",
 			"error":  fmt.Sprintf("provider %q does not expose runtime local skills", rt.Provider),
 		})
 		return
 	}
 
-	d.client.ReportLocalSkillImportResult(ctx, rt.ID, pending.ID, map[string]any{
+	d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
 		"status": "completed",
 		"skill":  skill,
 	})
 }
 
-func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
-	d.logger.Info("ping requested", "runtime_id", rt.ID, "ping_id", pingID, "provider", rt.Provider)
+// localSkillReportBackoffs defines the retry schedule for delivering a
+// local-skill result to the server. First attempt runs immediately, then we
+// back off. The sum (≈6.5s) stays well under the server-side running timeout
+// (60s) so a report that eventually lands still updates the request instead
+// of racing a timeout transition.
+//
+// Overridable for tests to avoid real sleeps.
+var localSkillReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
-	start := time.Now()
-
-	entry, ok := d.cfg.Agents[rt.Provider]
-	if !ok {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       fmt.Sprintf("no agent configured for provider %q", rt.Provider),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-
-	backend, err := agent.New(rt.Provider, agent.Config{
-		ExecutablePath: entry.Path,
-		Logger:         d.logger,
+// reportLocalSkillListResult delivers a list-report to the server with retry
+// on transient failures. See reportLocalSkillResultWithRetry for semantics.
+func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportLocalSkillResultWithRetry(ctx, "list", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, payload)
 	})
-	if err != nil {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       err.Error(),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
+}
 
-	pingCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(pingCtx, "Respond with exactly one word: pong", agent.ExecOptions{
-		MaxTurns: 1,
-		Timeout:  60 * time.Second,
+// reportLocalSkillImportResult delivers an import-report to the server with
+// retry on transient failures.
+func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportLocalSkillResultWithRetry(ctx, "import", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportLocalSkillImportResult(ctx, rt.ID, requestID, payload)
 	})
-	if err != nil {
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       err.Error(),
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
+}
 
-	// Drain messages
-	go func() {
-		for range session.Messages {
+// reportLocalSkillResultWithRetry retries `fn` on 5xx / network errors and
+// stops on success, 4xx, or after exhausting localSkillReportBackoffs.
+//
+// Why this exists: the server persists the report through a Redis / DB
+// write; on a transient store failure it now correctly returns 500 (see
+// PR #1557). Without a client-side retry the daemon would fire once,
+// swallow the error, and the pending request stays in "running" on the
+// server until the 60s timeout — which is exactly the "daemon did not
+// respond" failure mode the whole store refactor was meant to fix. 4xx is
+// treated as permanent (request-not-found, cross-workspace token rejected,
+// bad body) — retrying those just wastes heartbeat cycles.
+func (d *Daemon) reportLocalSkillResultWithRetry(ctx context.Context, kind, runtimeID, requestID string, fn func(context.Context) error) {
+	var lastErr error
+	for attempt, wait := range localSkillReportBackoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				d.logger.Error("local skill report cancelled",
+					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
+					"attempt", attempt, "error", ctx.Err())
+				return
+			case <-time.After(wait):
+			}
 		}
-	}()
-
-	var result agent.Result
-	select {
-	case result = <-session.Result:
-	case <-pingCtx.Done():
-		d.logger.Warn("ping timed out waiting for result", "runtime_id", rt.ID, "ping_id", pingID)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       "ping context cancelled while waiting for result",
-			"duration_ms": time.Since(start).Milliseconds(),
-		})
-		return
-	}
-	durationMs := time.Since(start).Milliseconds()
-
-	if result.Status == "completed" {
-		d.logger.Info("ping completed", "runtime_id", rt.ID, "ping_id", pingID, "duration_ms", durationMs)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "completed",
-			"output":      result.Output,
-			"duration_ms": durationMs,
-		})
-	} else {
-		errMsg := result.Error
-		if errMsg == "" {
-			errMsg = fmt.Sprintf("agent returned status: %s", result.Status)
+		err := fn(ctx)
+		if err == nil {
+			if attempt > 0 {
+				d.logger.Info("local skill report succeeded after retry",
+					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
+					"attempt", attempt+1)
+			}
+			return
 		}
-		d.logger.Warn("ping failed", "runtime_id", rt.ID, "ping_id", pingID, "error", errMsg)
-		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
-			"status":      "failed",
-			"error":       errMsg,
-			"duration_ms": durationMs,
-		})
+		lastErr = err
+
+		// 4xx is permanent (request expired, workspace mismatch, malformed
+		// body). No amount of retrying will make it succeed.
+		var reqErr *requestError
+		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
+			d.logger.Error("local skill report rejected — not retrying",
+				"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
+				"status", reqErr.StatusCode, "error", err)
+			return
+		}
+
+		d.logger.Warn("local skill report failed — will retry",
+			"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
+			"attempt", attempt+1, "error", err)
 	}
+	d.logger.Error("local skill report exhausted retries",
+		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -1052,14 +1037,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:           task.IssueID,
-		TriggerCommentID:  task.TriggerCommentID,
-		AgentID:           agentID,
-		AgentName:         agentName,
-		AgentInstructions: instructions,
-		AgentSkills:       convertSkillsForEnv(skills),
-		Repos:             convertReposForEnv(task.Repos),
-		ChatSessionID:     task.ChatSessionID,
+		IssueID:                 task.IssueID,
+		TriggerCommentID:        task.TriggerCommentID,
+		AgentID:                 agentID,
+		AgentName:               agentName,
+		AgentInstructions:       instructions,
+		AgentSkills:             convertSkillsForEnv(skills),
+		Repos:                   convertReposForEnv(task.Repos),
+		ChatSessionID:           task.ChatSessionID,
+		AutopilotRunID:          task.AutopilotRunID,
+		AutopilotID:             task.AutopilotID,
+		AutopilotTitle:          task.AutopilotTitle,
+		AutopilotDescription:    task.AutopilotDescription,
+		AutopilotSource:         task.AutopilotSource,
+		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -1104,6 +1095,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+	}
+	if task.AutopilotRunID != "" {
+		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
+	}
+	if task.AutopilotID != "" {
+		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
@@ -1270,6 +1267,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{
 			Status:    "blocked",
 			Comment:   fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout),
+			SessionID: result.SessionID,
+			WorkDir:   env.WorkDir,
+			EnvRoot:   env.RootDir,
+			Usage:     usageEntries,
+		}, nil
+	case "cancelled":
+		// Server cancelled the task (e.g. issue reassignment, user cancel).
+		// handleTask's cancelledByPoll branch already discards this result,
+		// so this case is mainly defensive — and preserves the "cancelled"
+		// status string for the "agent finished" log line so operators can
+		// distinguish "task cancelled by server" from a real timeout.
+		return TaskResult{
+			Status:    "cancelled",
+			Comment:   "task cancelled by server",
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
@@ -1470,6 +1481,17 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	case result := <-session.Result:
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// Distinguish external cancellation (e.g. server-initiated cancel
+		// because the issue was reassigned, or the user invoked CancelTask)
+		// from genuine drain-deadline timeouts. context.Canceled means the
+		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
+		// drain deadline expiring on its own.
+		if errors.Is(drainCtx.Err(), context.Canceled) {
+			return agent.Result{
+				Status: "cancelled",
+				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
+			}, toolCount.Load(), nil
+		}
 		return agent.Result{
 			Status: "timeout",
 			Error:  "agent did not produce result within drain timeout",

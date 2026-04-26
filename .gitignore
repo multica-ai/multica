@@ -58,3 +58,10 @@ server/server
 data/
 .kilo
 .idea
+
+# BMAD agent workspace (local only)
+.agents/
+_bmad/
+_bmad-output/
+secrets/
+multica-team-management-spec*.md

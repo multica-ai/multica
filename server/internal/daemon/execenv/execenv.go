@@ -31,14 +31,20 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID           string
-	TriggerCommentID  string // comment that triggered this task (empty for on_assign)
-	AgentID           string // unique ID of the dispatched agent
-	AgentName         string
-	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md
-	AgentSkills       []SkillContextForEnv
-	Repos             []RepoContextForEnv // workspace repos available for checkout
-	ChatSessionID     string              // non-empty for chat tasks
+	IssueID                 string
+	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
+	AgentID                 string // unique ID of the dispatched agent
+	AgentName               string
+	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
+	AgentSkills             []SkillContextForEnv
+	Repos                   []RepoContextForEnv // workspace repos available for checkout
+	ChatSessionID           string              // non-empty for chat tasks
+	AutopilotRunID          string              // non-empty for autopilot run_only tasks
+	AutopilotID             string
+	AutopilotTitle          string
+	AutopilotDescription    string
+	AutopilotSource         string
+	AutopilotTriggerPayload string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -114,10 +120,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if len(params.Task.AgentSkills) > 0 {
-			if err := writeSkillFiles(filepath.Join(codexHome, "skills"), params.Task.AgentSkills); err != nil {
-				return nil, fmt.Errorf("execenv: write codex skills: %w", err)
-			}
+		if err := writeCodexWorkspaceSkills(codexHome, params.Task.AgentSkills); err != nil {
+			return nil, fmt.Errorf("execenv: write codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
 	}
@@ -157,11 +161,21 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
+			if err := writeCodexWorkspaceSkills(codexHome, task.AgentSkills); err != nil {
+				logger.Warn("execenv: refresh codex skills failed", "error", err)
+			}
 		}
 	}
 
 	logger.Info("execenv: reusing env", "workdir", workDir)
 	return env
+}
+
+func writeCodexWorkspaceSkills(codexHome string, skills []SkillContextForEnv) error {
+	if len(skills) == 0 {
+		return nil
+	}
+	return writeSkillFiles(filepath.Join(codexHome, "skills"), skills)
 }
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop

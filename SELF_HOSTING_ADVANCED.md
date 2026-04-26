@@ -268,20 +268,45 @@ Then restart the stack:
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-The frontend automatically derives the WebSocket URL from the page address, so real-time features (chat streaming, live issue updates, notifications) work over LAN without extra configuration.
+### WebSocket for LAN / Non-localhost Access
 
-> **Note:** If you need to hard-code a different public API / WebSocket endpoint into the web image, use the source-build override: `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+HTTP requests (issues, comments, uploads) work on LAN out of the box — Next.js rewrites proxy `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
+
+1. **Put a reverse proxy in front of the stack (recommended).** Nginx or Caddy terminates the WebSocket upgrade and forwards it to the backend on port 8080. See the [Reverse Proxy](#reverse-proxy) section above — the Nginx example already includes a `location /ws { ... }` block with the correct `Upgrade` / `Connection` headers. Once a proxy is in place the browser connects directly through it, so no frontend rebuild is needed.
+
+2. **Bake a WebSocket URL into the web image.** If you are not running a reverse proxy, rebuild the web image with `NEXT_PUBLIC_WS_URL` pointing straight at the backend (port 8080 must be reachable from the browser):
+
+   ```bash
+   # In .env
+   NEXT_PUBLIC_WS_URL=ws://<lan-ip>:8080/ws
+
+   # Rebuild the web image so the build-time value is baked in
+   docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+   ```
+
+   `NEXT_PUBLIC_WS_URL` is a build-time variable (see `Dockerfile.web`), so setting it only in `environment:` on the pre-built image has no effect — you must use the `selfhost.build.yml` override that rebuilds the image.
+
+> **Note:** If you need to hard-code a different public API / WebSocket endpoint into the web image for any other reason, use the same source-build override: `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 ## Health Check
 
-The backend exposes a health check endpoint:
+The backend exposes public health endpoints:
 
-```
+```text
 GET /health
 → {"status":"ok"}
+
+GET /readyz
+→ {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+
+GET /healthz
+→ same response as /readyz
 ```
 
-Use this for load balancer health checks or monitoring.
+Use `/health` for basic liveness / reachability checks. Use `/readyz` for
+dependency-aware readiness probes and external monitoring that should fail when
+the database is unavailable or migrations are not fully applied. `/healthz` is
+kept as an alias for operator familiarity.
 
 ## Upgrading
 

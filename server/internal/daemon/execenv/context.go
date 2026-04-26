@@ -15,7 +15,7 @@ import (
 // Codex:    skills → handled separately in Prepare via codex-home
 // Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode: skills → {workDir}/.config/opencode/skills/{name}/SKILL.md  (native discovery)
-// Pi:       skills → {workDir}/.pi/agent/skills/{name}/SKILL.md  (native discovery)
+// Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
@@ -65,8 +65,8 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// OpenCode natively discovers skills from .config/opencode/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".config", "opencode", "skills")
 	case "pi":
-		// Pi natively discovers skills from .pi/agent/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".pi", "agent", "skills")
+		// Pi natively discovers skills from .pi/skills/ in the workdir.
+		skillsDir = filepath.Join(workDir, ".pi", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".cursor", "skills")
@@ -132,6 +132,10 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv) error {
 
 // renderIssueContext builds the markdown content for issue_context.md.
 func renderIssueContext(provider string, ctx TaskContextForEnv) string {
+	if ctx.AutopilotRunID != "" {
+		return renderAutopilotContext(ctx)
+	}
+
 	var b strings.Builder
 
 	b.WriteString("# Task Assignment\n\n")
@@ -146,6 +150,47 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		b.WriteString("The following skills are available to you:\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func renderAutopilotContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+
+	b.WriteString("# Autopilot Run\n\n")
+	fmt.Fprintf(&b, "**Autopilot run ID:** %s\n\n", ctx.AutopilotRunID)
+	if ctx.AutopilotID != "" {
+		fmt.Fprintf(&b, "**Autopilot ID:** %s\n\n", ctx.AutopilotID)
+	}
+	if ctx.AutopilotTitle != "" {
+		fmt.Fprintf(&b, "**Title:** %s\n\n", ctx.AutopilotTitle)
+	}
+	if ctx.AutopilotSource != "" {
+		fmt.Fprintf(&b, "**Trigger source:** %s\n\n", ctx.AutopilotSource)
+	}
+	if ctx.AutopilotTriggerPayload != "" {
+		fmt.Fprintf(&b, "## Trigger Payload\n\n```json\n%s\n```\n\n", ctx.AutopilotTriggerPayload)
+	}
+
+	b.WriteString("## Quick Start\n\n")
+	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `multica issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
+	if ctx.AutopilotID != "" {
+		fmt.Fprintf(&b, "Run `multica autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
+	}
+	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
+		b.WriteString("## Autopilot Instructions\n\n")
+		b.WriteString(ctx.AutopilotDescription)
+		b.WriteString("\n\n")
+	}
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

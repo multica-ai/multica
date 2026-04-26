@@ -17,7 +17,7 @@ import { api } from "@multica/core/api";
 import type { RuntimeHourlyActivity } from "@multica/core/types";
 
 const hourlyChartConfig = {
-  count: { label: "Tasks", color: "hsl(var(--chart-2))" },
+  count: { label: "Tasks", color: "var(--color-chart-2)" },
 } satisfies ChartConfig;
 
 export function HourlyActivityChart({ runtimeId }: { runtimeId: string }) {

@@ -8,14 +8,9 @@ const CELL_GAP = 2;
 const DAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""];
 
 function getHeatmapColor(level: number): string {
-  const colors = [
-    "var(--color-muted, hsl(var(--muted)))",
-    "hsl(var(--chart-3) / 0.3)",
-    "hsl(var(--chart-3) / 0.5)",
-    "hsl(var(--chart-3) / 0.75)",
-    "hsl(var(--chart-3) / 1)",
-  ];
-  return colors[level] ?? colors[0]!;
+  if (level === 0) return "var(--color-muted)";
+  const opacities = ["25%", "45%", "68%", "90%"];
+  return `color-mix(in oklch, var(--color-foreground) ${opacities[level - 1]}, transparent)`;
 }
 
 export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {

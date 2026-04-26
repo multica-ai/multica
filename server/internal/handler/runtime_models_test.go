@@ -6,7 +6,41 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+// TestModelListStore_RunningRequestTimesOut pins the escape hatch for
+// requests that were claimed (PopPending → Running) but whose result was
+// never reported — usually because the heartbeat response carrying the
+// `pending_model_list` field was lost in transit. Before this, the only
+// way out of Running was the 2-minute memory GC, which exceeded the UI
+// polling window and surfaced as a silent "discovery failed" (MUL-1397).
+func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
+	store := NewModelListStore()
+	req := store.Create("runtime-xyz")
+	claimed := store.PopPending("runtime-xyz")
+	if claimed == nil {
+		t.Fatal("expected PopPending to claim the pending request")
+	}
+	if claimed.Status != ModelListRunning {
+		t.Fatalf("expected Running after PopPending, got %s", claimed.Status)
+	}
+
+	// Age the running record past the threshold without the daemon ever
+	// reporting a result. Get() must flip it to Timeout so the UI can
+	// terminate polling instead of waiting for the 2-minute GC.
+	claimed.UpdatedAt = time.Now().Add(-(modelListRunningTimeout + time.Second))
+	got := store.Get(req.ID)
+	if got == nil {
+		t.Fatal("expected stored request")
+	}
+	if got.Status != ModelListTimeout {
+		t.Fatalf("expected Timeout after running threshold, got %s", got.Status)
+	}
+	if got.Error == "" {
+		t.Fatal("expected timeout error message")
+	}
+}
 
 // TestReportModelListResult_PreservesDefault guards the daemon → server
 // → UI wire format for the model-discovery result. The `default` bool

@@ -28,6 +28,16 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import {
   TriggerConfigSection,
   getDefaultTriggerConfig,
   toCronExpression,
@@ -91,6 +101,21 @@ function RunRow({ run }: { run: AutopilotRun }) {
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
   const deleteTrigger = useDeleteAutopilotTrigger();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteTrigger.mutateAsync({ autopilotId, triggerId: trigger.id });
+      toast.success("Trigger deleted");
+      setConfirmOpen(false);
+    } catch {
+      toast.error("Failed to delete trigger");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="flex items-center gap-3 rounded-md border px-3 py-2">
@@ -121,13 +146,30 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         size="icon"
         variant="ghost"
         className="h-7 w-7 shrink-0"
-        onClick={() => {
-          deleteTrigger.mutate({ autopilotId, triggerId: trigger.id });
-          toast.success("Trigger deleted");
-        }}
+        onClick={() => setConfirmOpen(true)}
       >
         <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
       </Button>
+      <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete trigger</AlertDialogTitle>
+            <AlertDialogDescription>
+              This trigger will be removed and the autopilot will stop firing on this schedule. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -211,6 +253,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (isLoading) {
     return (
@@ -271,12 +315,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   };
 
   const handleDelete = async () => {
+    setDeleting(true);
     try {
       await deleteAutopilot.mutateAsync(autopilotId);
       toast.success("Autopilot deleted");
       router.push(wsPaths.autopilots());
     } catch {
       toast.error("Failed to delete autopilot");
+      setDeleting(false);
     }
   };
 
@@ -338,11 +384,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">Priority</label>
-                <div className="mt-1 capitalize">{autopilot.priority}</div>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Execution Mode</label>
+                <label className="text-xs text-muted-foreground">Output Mode</label>
                 <div className="mt-1">
                   {autopilot.execution_mode === "create_issue" ? "Create Issue" : "Run Only"}
                 </div>
@@ -405,7 +447,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           {/* Danger zone */}
           <section className="space-y-3 pt-4 border-t">
             <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">Danger Zone</h2>
-            <Button size="sm" variant="destructive" onClick={handleDelete}>
+            <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
               <Trash2 className="h-3.5 w-3.5 mr-1" />
               Delete autopilot
             </Button>
@@ -428,12 +470,34 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             title: autopilot.title,
             description: autopilot.description ?? "",
             assignee_id: autopilot.assignee_id,
-            priority: autopilot.priority,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
           }}
           triggers={triggers}
         />
       )}
+      <AlertDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(v) => { if (!v && !deleting) setDeleteConfirmOpen(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete autopilot</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete &ldquo;{autopilot.title}&rdquo;, along with its triggers and run history. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -15,7 +15,7 @@ import type { DailyTokenData } from "../../utils";
 import { formatTokens } from "../../utils";
 
 const tokenChartConfig = {
-  total: { label: "Total", color: "hsl(var(--chart-1))" },
+  total: { label: "Total", color: "var(--color-chart-1)" },
 } satisfies ChartConfig;
 
 type DailyTokenRow = DailyTokenData & { total: number };

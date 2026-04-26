@@ -84,10 +84,13 @@ var reservedSlugs = map[string]bool{
 	"tokens":   true,
 	"cli":      true,
 
-	// Backend ops / observability. `/health` and `/ws` exist on the backend
+	// Backend ops / observability. `/health`, `/readyz`, `/healthz`, and `/ws`
+	// exist on the backend
 	// host; reserving them on the workspace slug space prevents naming
 	// confusion if/when these paths are ever proxied through the web origin.
 	"health":  true,
+	"readyz":  true,
+	"healthz": true,
 	"ws":      true,
 	"metrics": true,
 	"ping":    true,

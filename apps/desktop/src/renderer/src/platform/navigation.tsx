@@ -114,18 +114,32 @@ export function DesktopNavigationProvider({
   // resolve the active router here only to subscribe once per tab switch.
   const { tabId: activeTabId } = useActiveTabIdentity();
   const router = useActiveTabRouter();
-  const [pathname, setPathname] = useState(
-    router?.state.location.pathname ?? "/",
+  // Mirror the active tab router's full location (pathname + search) so
+  // shell-level consumers of useNavigation() can read URL search params.
+  // Must stay in sync with TabNavigationProvider below; a partial shape
+  // here (just pathname) silently broke focus-mode anchor resolution on
+  // `/inbox?issue=…`.
+  const [location, setLocation] = useState<{ pathname: string; search: string }>(
+    () => ({
+      pathname: router?.state.location.pathname ?? "/",
+      search: router?.state.location.search ?? "",
+    }),
   );
 
   useEffect(() => {
     if (!router) {
-      setPathname("/");
+      setLocation({ pathname: "/", search: "" });
       return;
     }
-    setPathname(router.state.location.pathname);
+    setLocation({
+      pathname: router.state.location.pathname,
+      search: router.state.location.search,
+    });
     return router.subscribe((state) => {
-      setPathname(state.location.pathname);
+      setLocation({
+        pathname: state.location.pathname,
+        search: state.location.search,
+      });
     });
   }, [activeTabId, router]);
 
@@ -150,8 +164,8 @@ export function DesktopNavigationProvider({
       back: () => {
         currentActiveTab()?.router.navigate(-1);
       },
-      pathname,
-      searchParams: new URLSearchParams(),
+      pathname: location.pathname,
+      searchParams: new URLSearchParams(location.search),
       openInNewTab: (path: string, title?: string) => {
         // Cross-workspace "open in new tab" switches workspace and opens
         // the path there; same-workspace just adds a tab in the current group.
@@ -167,7 +181,7 @@ export function DesktopNavigationProvider({
       },
       getShareableUrl: (path: string) => `${APP_URL}${path}`,
     }),
-    [pathname],
+    [location],
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
