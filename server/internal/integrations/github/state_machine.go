@@ -7,18 +7,17 @@ package github
 // Decision. The webhook handler is responsible for I/O (loading the issue,
 // querying review state from GitHub) and for applying the Decision.
 //
-// Status vocabulary (already permitted by the issue.status CHECK constraint
-// since migration 1000): backlog, todo, in_progress, in_review, done, blocked,
-// cancelled, planning, ready_for_dev, code_review, fixing, testing, checkpoint,
-// staged.
+// Status vocabulary (after migration 1002): backlog, todo, in_progress,
+// in_review, done, blocked, cancelled, planning, ready_for_dev, code_review,
+// fixing, testing, staged.
 //
-// Status transition table (matches the design doc agreed in CR-PR planning):
+// Status transition table (BMAD spec):
 //
 //   Event                                              From            To
 //   ---------------------------------------------------------------- ------------
-//   pull_request.opened                                any             in_review
-//   pull_request.synchronize                           matched         in_review
-//   review.submitted state=changes_requested (CR bot)  any             in_progress
+//   pull_request.opened                                pre-in_review   in_review
+//   pull_request.synchronize                           in_review       fixing
+//   review.submitted state=changes_requested (CR bot)  in_review       fixing
 //   review.submitted (any other CR signal) +
 //     no open CHANGES_REQUESTED + no unresolved
 //     CR threads                                       in_review       staged
@@ -50,6 +49,7 @@ const (
 const (
 	StatusInProgress = "in_progress"
 	StatusInReview   = "in_review"
+	StatusFixing     = "fixing"
 	StatusStaged     = "staged"
 	StatusBlocked    = "blocked"
 	StatusDone       = "done"
@@ -151,13 +151,14 @@ func decidePR(in Input) Decision {
 		}
 
 	case PRActionSynchronize:
-		// Agent pushed a fix after CHANGES_REQUESTED. Move back to in_review
-		// so a clean CR pass can flip to staged on the next event. If we're
-		// already at in_review or past it, leave alone.
-		if in.IssueStatus == StatusInProgress {
+		// Agent pushed a new commit while on in_review. Per the BMAD spec
+		// this means a fixing iteration is in flight — move to `fixing`.
+		// CodeRabbit will re-review automatically; on a clean pass the
+		// review handler flips back through in_review -> staged.
+		if in.IssueStatus == StatusInReview {
 			return Decision{
 				Action:       ActionSetStatus,
-				NewStatus:    StatusInReview,
+				NewStatus:    StatusFixing,
 				ActivityKind: "pr_updated",
 			}
 		}
@@ -202,14 +203,15 @@ func decideReview(in Input) Decision {
 	}
 
 	if in.ReviewState == ReviewChangesRequested {
-		// Bounce back to in_progress regardless of current state, except
-		// when we're already in_progress (avoid duplicate activity).
-		if in.IssueStatus == StatusInProgress {
+		// CodeRabbit asked for changes — bounce to `fixing` so Amelia
+		// addresses the feedback. The PR-loop counter (sidecar) handles
+		// the cap-2 escalation to `blocked` after repeated cycles.
+		if in.IssueStatus == StatusFixing {
 			return Decision{Action: ActionNoop}
 		}
 		return Decision{
 			Action:       ActionSetStatus,
-			NewStatus:    StatusInProgress,
+			NewStatus:    StatusFixing,
 			ActivityKind: "review_changes_requested",
 		}
 	}

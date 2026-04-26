@@ -416,8 +416,8 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 }
 
 func TestValidIssueStatuses(t *testing.T) {
-	// BMAD lifecycle adds 7 additional statuses to the original 7 upstream statuses
-	// (planning, ready_for_dev, code_review, fixing, testing, checkpoint, staged).
+	// BMAD lifecycle adds 6 additional statuses to the original 7 upstream statuses
+	// (planning, ready_for_dev, code_review, fixing, testing, staged).
 	// Keep this list in sync with validIssueStatuses in cmd_issue.go.
 	expected := map[string]bool{
 		"backlog":       true,
@@ -429,7 +429,6 @@ func TestValidIssueStatuses(t *testing.T) {
 		"fixing":        true,
 		"testing":       true,
 		"in_review":     true,
-		"checkpoint":    true,
 		"staged":        true,
 		"done":          true,
 		"blocked":       true,

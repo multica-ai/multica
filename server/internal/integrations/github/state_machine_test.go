@@ -44,18 +44,26 @@ func TestDecide_PROpened(t *testing.T) {
 }
 
 func TestDecide_PRSynchronize(t *testing.T) {
-	t.Run("from in_progress flips to in_review", func(t *testing.T) {
+	t.Run("from in_review flips to fixing", func(t *testing.T) {
 		got := Decide(Input{
-			Kind: EventKindPR, IssueStatus: StatusInProgress, PRAction: PRActionSynchronize,
+			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
 		})
-		want := Decision{Action: ActionSetStatus, NewStatus: StatusInReview, ActivityKind: "pr_updated"}
+		want := Decision{Action: ActionSetStatus, NewStatus: StatusFixing, ActivityKind: "pr_updated"}
 		if got != want {
 			t.Fatalf("got %+v; want %+v", got, want)
 		}
 	})
-	t.Run("from in_review is a noop", func(t *testing.T) {
+	t.Run("from in_progress is a noop", func(t *testing.T) {
 		got := Decide(Input{
-			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
+			Kind: EventKindPR, IssueStatus: StatusInProgress, PRAction: PRActionSynchronize,
+		})
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop", got)
+		}
+	})
+	t.Run("from fixing is a noop (already there)", func(t *testing.T) {
+		got := Decide(Input{
+			Kind: EventKindPR, IssueStatus: StatusFixing, PRAction: PRActionSynchronize,
 		})
 		if got.Action != ActionNoop {
 			t.Fatalf("got %+v; want noop", got)
@@ -130,23 +138,23 @@ func TestDecide_PRReopened(t *testing.T) {
 }
 
 func TestDecide_ReviewChangesRequested(t *testing.T) {
-	t.Run("from in_review by CR → in_progress", func(t *testing.T) {
+	t.Run("from in_review by CR → fixing", func(t *testing.T) {
 		got := Decide(Input{
 			Kind: EventKindReview, IssueStatus: StatusInReview,
 			ReviewState: ReviewChangesRequested, ReviewByCR: true,
 		})
-		want := Decision{Action: ActionSetStatus, NewStatus: StatusInProgress, ActivityKind: "review_changes_requested"}
+		want := Decision{Action: ActionSetStatus, NewStatus: StatusFixing, ActivityKind: "review_changes_requested"}
 		if got != want {
 			t.Fatalf("got %+v; want %+v", got, want)
 		}
 	})
-	t.Run("from staged by CR → in_progress (re-bounce)", func(t *testing.T) {
+	t.Run("from staged by CR → fixing (re-bounce)", func(t *testing.T) {
 		got := Decide(Input{
 			Kind: EventKindReview, IssueStatus: StatusStaged,
 			ReviewState: ReviewChangesRequested, ReviewByCR: true,
 		})
-		if got.NewStatus != StatusInProgress {
-			t.Fatalf("got %+v; want NewStatus=in_progress", got)
+		if got.NewStatus != StatusFixing {
+			t.Fatalf("got %+v; want NewStatus=fixing", got)
 		}
 	})
 	t.Run("non-CR reviewer is ignored", func(t *testing.T) {
@@ -158,9 +166,9 @@ func TestDecide_ReviewChangesRequested(t *testing.T) {
 			t.Fatalf("got %+v; want noop", got)
 		}
 	})
-	t.Run("already in_progress is noop", func(t *testing.T) {
+	t.Run("already fixing is noop", func(t *testing.T) {
 		got := Decide(Input{
-			Kind: EventKindReview, IssueStatus: StatusInProgress,
+			Kind: EventKindReview, IssueStatus: StatusFixing,
 			ReviewState: ReviewChangesRequested, ReviewByCR: true,
 		})
 		if got.Action != ActionNoop {
@@ -201,9 +209,9 @@ func TestDecide_ReviewClean(t *testing.T) {
 			t.Fatalf("got %+v; want noop", got)
 		}
 	})
-	t.Run("from in_progress (post-bounce) is noop until synchronize", func(t *testing.T) {
+	t.Run("from fixing (post-bounce) is noop until synchronize", func(t *testing.T) {
 		got := Decide(Input{
-			Kind: EventKindReview, IssueStatus: StatusInProgress,
+			Kind: EventKindReview, IssueStatus: StatusFixing,
 			ReviewState: ReviewCommented, ReviewByCR: true,
 			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
 		})

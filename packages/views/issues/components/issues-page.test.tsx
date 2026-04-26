@@ -74,9 +74,9 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "checkpoint", "staged", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "checkpoint", "staged", "done", "blocked"],
-  STATUS_ORDER: ["backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "checkpoint", "staged", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "staged", "done", "blocked", "cancelled"],
+  BOARD_STATUSES: ["backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "staged", "done", "blocked"],
+  STATUS_ORDER: ["backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "staged", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -87,7 +87,6 @@ vi.mock("@multica/core/issues/config", () => ({
     fixing: { label: "Fixing", iconColor: "text-orange-500", hoverBg: "hover:bg-orange-500/10" },
     testing: { label: "Testing", iconColor: "text-cyan-500", hoverBg: "hover:bg-cyan-500/10" },
     in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
-    checkpoint: { label: "Checkpoint", iconColor: "text-emerald-500", hoverBg: "hover:bg-emerald-500/10" },
     staged: { label: "Staged", iconColor: "text-teal-500", hoverBg: "hover:bg-teal-500/10" },
     done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
