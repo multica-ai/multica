@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -10,7 +11,9 @@ func TestMirroredRelayPublishesSameEventIDToBothBackends(t *testing.T) {
 	mirror := &recordingManagedRelay{nodeID: "mirror"}
 	relay := NewMirroredRelay(primary, mirror)
 
-	relay.PublishWithID(ScopeWorkspace, "workspace-1", "", []byte(`{"type":"issue:updated"}`), "event-1")
+	if err := relay.PublishWithID(ScopeWorkspace, "workspace-1", "", []byte(`{"type":"issue:updated"}`), "event-1"); err != nil {
+		t.Fatalf("PublishWithID: %v", err)
+	}
 
 	if len(primary.calls) != 1 {
 		t.Fatalf("expected primary publish call, got %d", len(primary.calls))
@@ -23,6 +26,30 @@ func TestMirroredRelayPublishesSameEventIDToBothBackends(t *testing.T) {
 	}
 }
 
+func TestMirroredRelayRecordsDivergenceWhenOneBackendFails(t *testing.T) {
+	M.Reset()
+	t.Cleanup(M.Reset)
+
+	primary := &recordingManagedRelay{nodeID: "primary"}
+	mirror := &recordingManagedRelay{nodeID: "mirror", publishErr: errors.New("mirror unavailable")}
+	relay := NewMirroredRelay(primary, mirror)
+
+	err := relay.PublishWithID(ScopeWorkspace, "workspace-1", "", []byte(`{"type":"issue:updated"}`), "event-1")
+
+	if err == nil {
+		t.Fatal("expected mirrored publish to return backend error")
+	}
+	if got := M.RedisMirrorPrimaryErrors.Load(); got != 0 {
+		t.Fatalf("expected 0 primary errors, got %d", got)
+	}
+	if got := M.RedisMirrorSecondaryErrors.Load(); got != 1 {
+		t.Fatalf("expected 1 secondary error, got %d", got)
+	}
+	if got := M.RedisMirrorDivergenceTotal.Load(); got != 1 {
+		t.Fatalf("expected 1 divergence, got %d", got)
+	}
+}
+
 type relayPublishCall struct {
 	scopeType string
 	scopeID   string
@@ -32,8 +59,9 @@ type relayPublishCall struct {
 }
 
 type recordingManagedRelay struct {
-	nodeID string
-	calls  []relayPublishCall
+	nodeID     string
+	publishErr error
+	calls      []relayPublishCall
 }
 
 func (r *recordingManagedRelay) NodeID() string                      { return r.nodeID }
@@ -55,7 +83,7 @@ func (r *recordingManagedRelay) SendToUser(userID string, frame []byte, excludeW
 	r.PublishWithID(ScopeUser, userID, exclude, frame, "")
 }
 
-func (r *recordingManagedRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
+func (r *recordingManagedRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
 	r.calls = append(r.calls, relayPublishCall{
 		scopeType: scopeType,
 		scopeID:   scopeID,
@@ -63,4 +91,5 @@ func (r *recordingManagedRelay) PublishWithID(scopeType, scopeID, exclude string
 		frame:     string(frame),
 		eventID:   id,
 	})
+	return r.publishErr
 }

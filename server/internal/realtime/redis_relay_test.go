@@ -112,7 +112,7 @@ type localFirstPublisher struct {
 	localFrame []byte
 }
 
-func (p *localFirstPublisher) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
+func (p *localFirstPublisher) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
 	p.called = true
 	p.scopeType = scopeType
 	p.scopeID = scopeID
@@ -125,4 +125,5 @@ func (p *localFirstPublisher) PublishWithID(scopeType, scopeID, exclude string, 
 	default:
 		p.t.Fatal("expected local fanout to happen before relay publish")
 	}
+	return nil
 }

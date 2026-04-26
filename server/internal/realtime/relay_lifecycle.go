@@ -2,6 +2,8 @@ package realtime
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -51,7 +53,7 @@ func (r *MirroredRelay) Wait() {
 }
 
 func (r *MirroredRelay) BroadcastToScope(scopeType, scopeID string, message []byte) {
-	r.PublishWithID(scopeType, scopeID, "", message, ulid.Make().String())
+	_ = r.PublishWithID(scopeType, scopeID, "", message, ulid.Make().String())
 }
 
 func (r *MirroredRelay) BroadcastToWorkspace(workspaceID string, message []byte) {
@@ -63,16 +65,37 @@ func (r *MirroredRelay) SendToUser(userID string, message []byte, excludeWorkspa
 	if len(excludeWorkspace) > 0 {
 		exclude = excludeWorkspace[0]
 	}
-	r.PublishWithID(ScopeUser, userID, exclude, message, ulid.Make().String())
+	_ = r.PublishWithID(ScopeUser, userID, exclude, message, ulid.Make().String())
 }
 
 func (r *MirroredRelay) Broadcast(message []byte) {
-	r.PublishWithID("global", "all", "", message, ulid.Make().String())
+	_ = r.PublishWithID("global", "all", "", message, ulid.Make().String())
 }
 
-func (r *MirroredRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
-	r.primary.PublishWithID(scopeType, scopeID, exclude, frame, id)
-	r.mirror.PublishWithID(scopeType, scopeID, exclude, frame, id)
+func (r *MirroredRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
+	primaryErr := r.primary.PublishWithID(scopeType, scopeID, exclude, frame, id)
+	mirrorErr := r.mirror.PublishWithID(scopeType, scopeID, exclude, frame, id)
+
+	if primaryErr != nil {
+		M.RedisMirrorPrimaryErrors.Add(1)
+		slog.Warn("realtime/redis mirror: primary publish failed", "error", primaryErr, "scope", scopeType, "scope_id", scopeID, "event_id", id)
+	}
+	if mirrorErr != nil {
+		M.RedisMirrorSecondaryErrors.Add(1)
+		slog.Warn("realtime/redis mirror: secondary publish failed", "error", mirrorErr, "scope", scopeType, "scope_id", scopeID, "event_id", id)
+	}
+	if (primaryErr == nil) != (mirrorErr == nil) {
+		M.RedisMirrorDivergenceTotal.Add(1)
+		slog.Warn(
+			"realtime/redis mirror: divergent publish result",
+			"primary_error", primaryErr,
+			"secondary_error", mirrorErr,
+			"scope", scopeType,
+			"scope_id", scopeID,
+			"event_id", id,
+		)
+	}
+	return errors.Join(primaryErr, mirrorErr)
 }
 
 var _ ManagedRelay = (*RedisRelay)(nil)

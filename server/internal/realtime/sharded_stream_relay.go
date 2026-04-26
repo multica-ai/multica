@@ -136,7 +136,7 @@ func (r *ShardedStreamRelay) Wait() {
 }
 
 func (r *ShardedStreamRelay) BroadcastToScope(scopeType, scopeID string, message []byte) {
-	r.PublishWithID(scopeType, scopeID, "", message, ulid.Make().String())
+	_ = r.PublishWithID(scopeType, scopeID, "", message, ulid.Make().String())
 }
 
 func (r *ShardedStreamRelay) BroadcastToWorkspace(workspaceID string, message []byte) {
@@ -148,14 +148,14 @@ func (r *ShardedStreamRelay) SendToUser(userID string, message []byte, excludeWo
 	if len(excludeWorkspace) > 0 {
 		exclude = excludeWorkspace[0]
 	}
-	r.PublishWithID(ScopeUser, userID, exclude, message, ulid.Make().String())
+	_ = r.PublishWithID(ScopeUser, userID, exclude, message, ulid.Make().String())
 }
 
 func (r *ShardedStreamRelay) Broadcast(message []byte) {
-	r.PublishWithID("global", "all", "", message, ulid.Make().String())
+	_ = r.PublishWithID("global", "all", "", message, ulid.Make().String())
 }
 
-func (r *ShardedStreamRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
+func (r *ShardedStreamRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
 	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, id)
 	stream := ShardedStreamKey(r.shardFor(scopeType, scopeID))
 	args := &redis.XAddArgs{
@@ -172,10 +172,11 @@ func (r *ShardedStreamRelay) PublishWithID(scopeType, scopeID, exclude string, f
 		M.RedisXAddErrors.Add(1)
 		M.SetRedisLastError(err.Error())
 		slog.Warn("realtime/sharded-redis: XADD failed", "error", err, "scope", scopeType, "scope_id", scopeID, "stream", stream)
-		return
+		return err
 	}
 	M.RedisXAddTotal.Add(1)
 	M.RedisLastXAddLagMicros.Store(time.Since(start).Microseconds())
+	return nil
 }
 
 func (r *ShardedStreamRelay) shardFor(scopeType, scopeID string) int {

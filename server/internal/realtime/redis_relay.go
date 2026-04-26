@@ -497,7 +497,7 @@ type DualWriteBroadcaster struct {
 // RelayPublisher is implemented by Redis relay backends that can publish a
 // caller-supplied event id for local/Redis loopback deduplication.
 type RelayPublisher interface {
-	PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string)
+	PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error
 }
 
 func NewDualWriteBroadcaster(local *Hub, relay RelayPublisher) *DualWriteBroadcaster {
@@ -514,7 +514,7 @@ func (d *DualWriteBroadcaster) BroadcastToScope(scopeType, scopeID string, messa
 	// Local fast path: BroadcastToScopeDedup marks each client as having
 	// seen `id`, so the Redis loopback for the same id will be ignored.
 	d.local.BroadcastToScopeDedup(scopeType, scopeID, frame, id)
-	d.relay.PublishWithID(scopeType, scopeID, "", message, id)
+	_ = d.relay.PublishWithID(scopeType, scopeID, "", message, id)
 }
 
 func (d *DualWriteBroadcaster) BroadcastToWorkspace(workspaceID string, message []byte) {
@@ -529,19 +529,19 @@ func (d *DualWriteBroadcaster) SendToUser(userID string, message []byte, exclude
 	id := ulid.Make().String()
 	frame := injectEventID(message, id)
 	d.local.fanoutUser(userID, frame, exclude, id)
-	d.relay.PublishWithID(ScopeUser, userID, exclude, message, id)
+	_ = d.relay.PublishWithID(ScopeUser, userID, exclude, message, id)
 }
 
 func (d *DualWriteBroadcaster) Broadcast(message []byte) {
 	id := ulid.Make().String()
 	frame := injectEventID(message, id)
 	d.local.fanoutAllDedup(frame, "", id)
-	d.relay.PublishWithID("global", "all", "", message, id)
+	_ = d.relay.PublishWithID("global", "all", "", message, id)
 }
 
 // PublishWithID is like publish but uses a caller-supplied event id so the
 // dual-write path can dedup.
-func (r *RedisRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
+func (r *RedisRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
 	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, id)
 	args := &redis.XAddArgs{
 		Stream: StreamKey(scopeType, scopeID),
@@ -556,10 +556,11 @@ func (r *RedisRelay) PublishWithID(scopeType, scopeID, exclude string, frame []b
 		M.RedisXAddErrors.Add(1)
 		M.SetRedisLastError(err.Error())
 		slog.Warn("realtime/redis: XADD failed", "error", err, "scope", scopeType, "scope_id", scopeID)
-		return
+		return err
 	}
 	M.RedisXAddTotal.Add(1)
 	M.RedisLastXAddLagMicros.Store(time.Since(start).Microseconds())
+	return nil
 }
 
 var _ Broadcaster = (*RedisRelay)(nil)
