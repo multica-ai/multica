@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -28,9 +31,17 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if execPath == "" {
 		execPath = "opencode"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("opencode executable not found at %q: %w", execPath, err)
 	}
+	if runtime.GOOS == "windows" {
+		if native := resolveOpenCodeNativeFromShim(resolved, os.Stat); native != "" {
+			b.cfg.Logger.Info("opencode resolved to native binary to avoid .cmd shim argv truncation", "shim", resolved, "native", native)
+			resolved = native
+		}
+	}
+	execPath = resolved
 
 	timeout := opts.Timeout
 	if timeout == 0 {
@@ -273,6 +284,35 @@ func (b *opencodeBackend) handleErrorEvent(event opencodeEvent, ch chan<- Messag
 
 	*finalStatus = "failed"
 	*finalError = errMsg
+}
+
+// resolveOpenCodeNativeFromShim returns the path to the native OpenCode
+// executable bundled inside the npm package, given the path to the npm
+// `opencode.cmd` shim that PATH lookup found on Windows. Returns "" if shim
+// doesn't end in `.cmd` or the expected native binary isn't present.
+//
+// Windows batch argument forwarding via `%*` does not preserve newlines, so
+// multi-line positional argv is truncated at the first newline before the
+// shim hands off to the JS entrypoint. Daemon prompts can include literal
+// newlines (system prompt + user message), which makes the agent see only
+// the first line. Native binary spawn skips the cmd.exe layer entirely.
+//
+// Layout when installed via `npm install -g opencode-ai`:
+//
+//	<prefix>\opencode.cmd                                                  (shim)
+//	<prefix>\node_modules\opencode-ai\node_modules\opencode-windows-x64\bin\opencode.exe (native)
+//
+// statFn is injected so this is testable on non-Windows hosts.
+func resolveOpenCodeNativeFromShim(shimPath string, statFn func(string) (os.FileInfo, error)) string {
+	if !strings.EqualFold(filepath.Ext(shimPath), ".cmd") {
+		return ""
+	}
+	prefix := filepath.Dir(shimPath)
+	candidate := filepath.Join(prefix, "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+	if _, err := statFn(candidate); err != nil {
+		return ""
+	}
+	return candidate
 }
 
 // extractToolOutput converts the tool state output (which may be a string or

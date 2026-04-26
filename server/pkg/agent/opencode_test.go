@@ -2,8 +2,11 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -708,4 +711,81 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 	}
 
 	close(ch)
+}
+
+// ── Windows native-binary resolution tests ──
+
+// fakeStat returns a statFn that reports any path in `present` as existing
+// and every other path as not-found. The returned os.FileInfo is a stub
+// because resolveOpenCodeNativeFromShim only inspects the error.
+func fakeStat(present ...string) func(string) (os.FileInfo, error) {
+	set := make(map[string]struct{}, len(present))
+	for _, p := range present {
+		set[p] = struct{}{}
+	}
+	return func(path string) (os.FileInfo, error) {
+		if _, ok := set[path]; ok {
+			return nil, nil
+		}
+		return nil, errors.New("not found")
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimResolvesNpmShim(t *testing.T) {
+	t.Parallel()
+
+	// Reporter's exact layout from multica#1717.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.cmd")
+	native := filepath.Join("C:\\nvm4w", "nodejs", "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat(native))
+	if got != native {
+		t.Errorf("got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimReturnsEmptyWhenNativeMissing(t *testing.T) {
+	t.Parallel()
+
+	// Shim ends in .cmd but the bundled native binary isn't present (e.g.
+	// platform package didn't install or layout changed). Caller must keep
+	// the original shim path so PATH lookup still wins.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.cmd")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat())
+	if got != "" {
+		t.Errorf("got %q, want empty (missing native binary)", got)
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimSkipsNonCmdPath(t *testing.T) {
+	t.Parallel()
+
+	// On macOS/Linux the path returned by exec.LookPath is the native
+	// binary itself, with no .cmd extension. Helper should signal "no
+	// rewrite needed" by returning empty.
+	cases := []string{
+		"/usr/local/bin/opencode",
+		"C:\\nvm4w\\nodejs\\opencode.exe",
+		"",
+	}
+	for _, p := range cases {
+		if got := resolveOpenCodeNativeFromShim(p, fakeStat("anything")); got != "" {
+			t.Errorf("path %q: got %q, want empty", p, got)
+		}
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimAcceptsUppercaseExtension(t *testing.T) {
+	t.Parallel()
+
+	// Windows is case-insensitive on filesystem extensions. PATHEXT tokens
+	// are commonly uppercase, and exec.LookPath can return either case.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.CMD")
+	native := filepath.Join("C:\\nvm4w", "nodejs", "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat(native))
+	if got != native {
+		t.Errorf("got %q, want %q", got, native)
+	}
 }
