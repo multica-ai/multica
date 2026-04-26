@@ -163,7 +163,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   };
 
   return (
-    <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
+    <div className="group/row flex h-11 items-center gap-2 px-3 sm:px-5 text-sm transition-colors hover:bg-accent/40">
       <AppLink
         href={wsPaths.autopilotDetail(autopilot.id)}
         className="flex min-w-0 flex-1 items-center gap-2"
@@ -172,16 +172,16 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         <span className="min-w-0 flex-1 truncate font-medium">{autopilot.title}</span>
       </AppLink>
 
-      {/* Agent */}
-      <span className="flex w-32 items-center gap-1.5 shrink-0">
+      {/* Agent — hidden on mobile */}
+      <span className="hidden sm:flex w-32 items-center gap-1.5 shrink-0">
         <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} />
         <span className="truncate text-xs text-muted-foreground">
           {getActorName("agent", autopilot.assignee_id)}
         </span>
       </span>
 
-      {/* Mode */}
-      <span className="w-24 shrink-0 text-center text-xs text-muted-foreground">
+      {/* Mode — hidden below md */}
+      <span className="hidden md:block w-24 shrink-0 text-center text-xs text-muted-foreground">
         {EXECUTION_MODE_LABELS[autopilot.execution_mode] ?? autopilot.execution_mode}
       </span>
 
@@ -191,12 +191,12 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         {statusCfg.label}
       </span>
 
-      {/* Last run */}
-      <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+      {/* Last run — hidden below md */}
+      <span className="hidden md:block w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
       </span>
 
-      {/* Run now — visible on row hover */}
+      {/* Run now — visible on row hover; icon-only on mobile */}
       <Button
         size="sm"
         variant="outline"
@@ -204,8 +204,8 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         onClick={handleRunNow}
         disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
       >
-        <Play className="h-3 w-3 mr-1" />
-        {triggerAutopilot.isPending ? "..." : "Run now"}
+        <Play className="h-3 w-3 sm:mr-1" />
+        <span className="hidden sm:inline">{triggerAutopilot.isPending ? "..." : "Run now"}</span>
       </Button>
     </div>
   );
@@ -420,13 +420,13 @@ export function AutopilotsPage() {
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <>
-            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5">
+            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-3 sm:px-5">
               <span className="shrink-0 w-4" />
               <Skeleton className="h-3 w-12 flex-1 max-w-[48px]" />
-              <Skeleton className="h-3 w-12 shrink-0" />
+              <Skeleton className="hidden sm:block h-3 w-12 shrink-0" />
+              <Skeleton className="hidden md:block h-3 w-10 shrink-0" />
               <Skeleton className="h-3 w-10 shrink-0" />
-              <Skeleton className="h-3 w-10 shrink-0" />
-              <Skeleton className="h-3 w-12 shrink-0" />
+              <Skeleton className="hidden md:block h-3 w-12 shrink-0" />
             </div>
             <div className="p-5 pt-1 space-y-1">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -468,13 +468,13 @@ export function AutopilotsPage() {
         ) : (
           <>
             {/* Column headers */}
-            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground">
+            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-3 sm:px-5 text-xs font-medium text-muted-foreground">
               <span className="shrink-0 w-4" />
               <span className="min-w-0 flex-1">Name</span>
-              <span className="w-32 shrink-0">Agent</span>
-              <span className="w-24 text-center shrink-0">Mode</span>
+              <span className="hidden sm:block w-32 shrink-0">Agent</span>
+              <span className="hidden md:block w-24 text-center shrink-0">Mode</span>
               <span className="w-20 text-center shrink-0">Status</span>
-              <span className="w-20 text-right shrink-0">Last run</span>
+              <span className="hidden md:block w-20 text-right shrink-0">Last run</span>
             </div>
             {autopilots.map((autopilot) => (
               <AutopilotRow key={autopilot.id} autopilot={autopilot} />
