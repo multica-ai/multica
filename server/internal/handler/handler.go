@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -21,6 +23,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// randomID returns a random 16-byte hex string used as a request ID for
+// in-memory stores (model list, local skills, CLI update, etc.).
+func randomID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 type txStarter interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
@@ -47,11 +57,10 @@ type Handler struct {
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
-	PingStore             *PingStore
 	UpdateStore           *UpdateStore
 	ModelListStore        *ModelListStore
-	LocalSkillListStore   *RuntimeLocalSkillListStore
-	LocalSkillImportStore *RuntimeLocalSkillImportStore
+	LocalSkillListStore   LocalSkillListStore
+	LocalSkillImportStore LocalSkillImportStore
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
@@ -78,11 +87,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:           taskSvc,
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:          emailService,
-		PingStore:             NewPingStore(),
 		UpdateStore:           NewUpdateStore(),
 		ModelListStore:        NewModelListStore(),
-		LocalSkillListStore:   NewRuntimeLocalSkillListStore(),
-		LocalSkillImportStore: NewRuntimeLocalSkillImportStore(),
+		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
+		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
 		Storage:               store,
 		CFSigner:              cfSigner,
 		Analytics:             analyticsClient,
@@ -118,6 +126,32 @@ func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, pay
 		ActorType:   actorType,
 		ActorID:     actorID,
 		Payload:     payload,
+	})
+}
+
+// publishTask is publish() plus a TaskID hint so the realtime layer can route
+// the event to the per-task scope rather than the whole workspace.
+func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID string, payload any) {
+	h.Bus.Publish(events.Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		TaskID:      taskID,
+		Payload:     payload,
+	})
+}
+
+// publishChat is publish() plus a ChatSessionID hint so the realtime layer
+// can route the event to the per-chat-session scope.
+func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
+	h.Bus.Publish(events.Event{
+		Type:          eventType,
+		WorkspaceID:   workspaceID,
+		ActorType:     actorType,
+		ActorID:       actorID,
+		ChatSessionID: chatSessionID,
+		Payload:       payload,
 	})
 }
 

@@ -24,7 +24,6 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { formatLastSeen } from "../utils";
 import { StatusBadge, InfoField } from "./shared";
 import { ProviderLogo } from "./provider-logo";
-import { PingSection } from "./ping-section";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 
@@ -163,14 +162,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             />
           </div>
         )}
-
-        {/* Connection Test */}
-        <div>
-          <h3 className="text-xs font-medium text-muted-foreground mb-3">
-            Connection Test
-          </h3>
-          <PingSection runtimeId={runtime.id} />
-        </div>
 
         {/* Usage */}
         <div>

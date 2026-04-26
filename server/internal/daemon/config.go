@@ -20,8 +20,8 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
-	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
+	DefaultGCTTL                 = 24 * time.Hour     // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL           = 72 * time.Hour     // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 )
 
 // Config holds all daemon configuration.
@@ -41,8 +41,8 @@ type Config struct {
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
 	GCEnabled          bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
-	GCOrphanTTL        time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
+	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 24h)
+	GCOrphanTTL        time.Duration         // clean orphan dirs with no meta older than this (default: 72h). Dirs whose issue returned 404 are cleaned immediately.
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration

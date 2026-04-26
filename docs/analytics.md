@@ -270,6 +270,24 @@ funnel and used to size hosted-runtime interest.
 
 `distinct_id` is the user's id.
 
+### `feedback_submitted`
+
+Fires from `CreateFeedback` after the `feedback` row is inserted and the
+hourly per-user rate-limit check has passed. Retries within the same hour
+that were rate-limited (429) don't emit. The free-text message is stored
+in the DB and never broadcast.
+
+| Property | Type | Description |
+|---|---|---|
+| `message_length_bucket` | string | `0-100` / `100-500` / `500-2000` / `2000+` — coarse bucket of `len(message)` so we can tell "quick note" from "bug report with repro steps" without leaking content. |
+| `has_images` | bool | `true` when the markdown contains at least one `![...](url)` image reference — signals bug reports with visual evidence. |
+| `platform` | string | Client platform from `X-Client-Platform` header (`web` / `desktop`). Omitted when the header is absent. |
+| `app_version` | string | Client version from `X-Client-Version` header. Omitted when absent. |
+
+`distinct_id` is the submitter's user id; `workspace_id` is attached from
+the modal's current-workspace context and may be empty when feedback is
+sent from a pre-workspace surface.
+
 ### `starter_content_decided`
 
 Fires on the atomic NULL → terminal state transition in both
@@ -304,6 +322,45 @@ request payload.
   intent" is now better served by `download_intent_expressed` below —
   `path: "download_desktop"` signals Step 3 path choice specifically,
   not actual download start.
+
+- `onboarding_runtime_detected` — fired from
+  `packages/views/onboarding/steps/step-runtime-connect.tsx` (desktop
+  Step 3) once per mount, when the scanning phase resolves — either
+  immediately on first runtime registration, or after the 5 s empty
+  timeout. Answers the question "did the user have any AI CLI
+  installed on this machine when they hit Step 3" — currently
+  unanswerable from the existing funnel because the bundled daemon
+  fails to register at all when zero CLIs are on PATH, so
+  `runtime_registered` is silent on that cohort. Splits
+  `completion_path=runtime_skipped` into "had CLIs, skipped anyway"
+  vs "no CLIs available, had no choice". Properties:
+  - `source`: `step3_desktop` (literal; reserved for a future web
+    emission under a different value).
+  - `outcome`: `found` (at least one runtime registered before the
+    5 s grace window expired) or `empty` (none registered by then).
+  - `runtime_count`: number of runtimes visible to this user at
+    resolution time.
+  - `online_count`: subset of `runtime_count` whose `status` is
+    `online`.
+  - `providers`: sorted array of distinct provider names (e.g.
+    `["claude", "codex"]`).
+  - `has_claude` / `has_codex` / `has_cursor`: convenience booleans
+    derived from `providers` for funnel breakdowns without array
+    filtering in HogQL.
+  - `detect_ms`: wall-clock ms from component mount to resolution.
+    Surfaces daemon boot latency — `found` events with a high
+    `detect_ms` approach the timeout threshold and inform whether
+    to lengthen the grace period.
+
+  Person properties set with `$set`:
+  - `has_any_cli`: boolean — cohort signal for "user has at least
+    one local AI CLI detected on this machine".
+  - `detected_cli_count`: number — granular cohort signal.
+
+  Not emitted from the web Step 3 (`step-platform-fork.tsx`) — web
+  users don't run the bundled daemon, so their runtime list reflects
+  daemons from other machines and would corrupt the
+  "CLI installed locally" signal.
 
 - `download_intent_expressed` — fired whenever a user clicks a CTA
   that points at the `/download` page. Surfaces five sources across
@@ -343,6 +400,16 @@ request payload.
   - `matched_detect`: `true` when the chosen platform+arch matches
     what the page detected. `false` lets us quantify detect misses
     from the single event (no cross-join needed).
+- `feedback_opened` — fired when the in-app Feedback modal mounts
+  (user clicked "Feedback" in the Help launcher). Paired with the
+  backend's `feedback_submitted` to give a completion rate for the
+  form. Wrapper lives in `packages/core/analytics/feedback.ts`
+  (`captureFeedbackOpened`). Properties:
+  - `source`: `help_menu` (reserved — future entry points like
+    keyboard shortcut or error-toast CTA will pass their own value)
+  - `workspace_id`: string (UUID) when the modal opens inside a
+    workspace. Omitted on pre-workspace surfaces.
+
 - Attribution is NOT a separate event; UTM + referrer origin are written
   to the `multica_signup_source` cookie on the first anonymous pageview
   and read by the backend's `signup` emission. The cookie carries a JSON

@@ -1,0 +1,77 @@
+---
+title: Desktop app
+description: What Multica Desktop is, how it differs from the web app, and when it's worth using.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica Desktop is a native desktop app for macOS, Windows, and Linux. It talks to the same backend as the web app and shows the same data, but it adds a few things the browser can't: **independent tab groups per [workspace](/workspaces)**, **automatic [daemon](/daemon-runtimes) startup**, and **one-click upgrades**.
+
+## Desktop or web — which to pick
+
+| | Web | Desktop |
+|---|---|---|
+| Access | Open a URL in your browser | Install a native app |
+| Multiple tabs | Your browser's own tabs (no workspace separation) | **One independent tab group per workspace** |
+| Daemon | You run `multica daemon start` yourself | **Started automatically** on launch |
+| Upgrades | Refresh to get the latest | App checks in the background and installs on next launch |
+| Signed-in data | Identical | Identical |
+
+**Pick web** for one-off use, working on someone else's machine, or when you'd rather not install anything.
+**Pick desktop** for daily use, juggling multiple workspaces, or avoiding manual daemon management.
+
+## Multiple tabs: what happens when you switch workspaces
+
+Desktop maintains an independent tab group for **every workspace you've joined**. When you switch workspaces, the current workspace's tabs are hidden as a unit and the previous workspace's tabs are restored as you left them — similar to VSCode's multi-workspace behavior or switching workspaces in Slack.
+
+Example: you open 3 issue tabs in workspace A and switch to workspace B. A's 3 tabs disappear, and B shows whatever you last had open in B. Switch back to A and those 3 tabs come back exactly as they were. **Tabs never leak across workspaces.**
+
+Logging out **clears every workspace's tab state**, so you don't leak data when a machine is shared between users.
+
+## How Desktop auto-updates
+
+On launch, Desktop checks GitHub Releases for a newer version. If one is found:
+
+1. It downloads the new version silently in the background.
+2. It tells you "ready — will install on next launch."
+3. When you quit (or next restart), the app installs the update before closing.
+4. The next launch runs the new version.
+
+The whole process **doesn't interrupt what you're working on**.
+
+<Callout type="warning">
+**On Windows, ARM64 and x64 are separate update channels** — install the wrong architecture and updates won't be detected. When you download, pick the `.exe` that matches your machine (the ARM build has an `arm64` suffix).
+</Callout>
+
+The macOS build is signed and notarized, so you won't see an "unidentified developer" warning on first launch. The Linux build is an `.AppImage` — auto-updates rely on electron-updater, which can be flaky on some distros. **If auto-update doesn't work, download the new version manually and replace the old file.**
+
+## Do I still need the standalone CLI and daemon?
+
+**No.** Desktop ships with the same `multica` CLI binary embedded inside it, and it launches its own daemon profile at startup (isolated from any daemon you may be running manually from the terminal).
+
+If you've already installed the CLI and run `multica daemon start` by hand, Desktop won't take over your daemon — it starts its own with a separate profile. Both register as **different runtimes**, and you'll see two independent runtimes in the UI.
+
+If you want to run CLI commands in your terminal, Desktop doesn't offer a special path — use the CLI you installed separately, or run the bundled copy at `resources/bin/multica` inside the app's resources directory.
+
+## Downloading and installing
+
+Grab the installer for your platform from the [Multica downloads page](https://multica.ai/download):
+
+| Platform | File |
+|---|---|
+| macOS (Intel or Apple Silicon) | `.dmg` |
+| Windows x64 | `.exe` (standard) |
+| Windows ARM64 | `.exe` (with `arm64` suffix) |
+| Linux | `.AppImage` |
+
+On first launch you'll need to sign in — the same email + verification code flow as the web app. Once you're in, Desktop syncs your workspace list automatically.
+
+<Callout type="info">
+**Which backend Desktop connects to** is determined by the address you select at sign-in. It defaults to Multica Cloud; if you're running self-hosted, click "Connect to a self-hosted instance" on the first login screen and fill in your server address.
+</Callout>
+
+## Next steps
+
+- [Cloud Quickstart](/cloud-quickstart) — the Cloud onboarding flow for Desktop
+- [Self-Host Quickstart](/self-host-quickstart) — connecting Desktop to a self-hosted backend
+- [Daemon and runtimes](/daemon-runtimes) — how the daemon works (Desktop starts it for you, but the behavior is the same)

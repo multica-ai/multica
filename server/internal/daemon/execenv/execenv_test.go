@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -264,6 +265,45 @@ func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
 	}
 	if strings.Contains(s, "## Agent Skills") {
 		t.Error("expected skills section to be omitted when no skills")
+	}
+}
+
+func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		AutopilotRunID:       "run-1",
+		AutopilotID:          "autopilot-1",
+		AutopilotTitle:       "Daily dependency check",
+		AutopilotDescription: "Check dependencies and report outdated packages.",
+		AutopilotSource:      "manual",
+	}
+
+	if err := writeContextFiles(dir, "", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"# Autopilot Run",
+		"run-1",
+		"autopilot-1",
+		"Check dependencies and report outdated packages.",
+		"multica autopilot get autopilot-1 --output json",
+		"no assigned issue",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("autopilot context missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "Run `multica issue get") {
+		t.Errorf("autopilot context should not contain issue get workflow\n---\n%s", s)
 	}
 }
 
@@ -731,6 +771,49 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		AutopilotRunID:       "run-1",
+		AutopilotID:          "autopilot-1",
+		AutopilotTitle:       "Daily dependency check",
+		AutopilotDescription: "Check dependencies and report outdated packages.",
+		AutopilotSource:      "manual",
+	}
+
+	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"Autopilot in run-only mode",
+		"Autopilot run ID: `run-1`",
+		"Check dependencies and report outdated packages.",
+		"multica autopilot get autopilot-1 --output json",
+		"Your final assistant output is captured automatically as the autopilot run result",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("autopilot runtime config missing %q\n---\n%s", want, s)
+		}
+	}
+
+	for _, absent := range []string{
+		"Run `multica issue get",
+		"Final results MUST be delivered via `multica issue comment add`",
+	} {
+		if strings.Contains(s, absent) {
+			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -747,6 +830,74 @@ func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigHermes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// Hermes uses AGENTS.md.
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	// Hermes has no native skill discovery path wired up, so AGENTS.md must
+	// point the agent at the .agent_context/skills/ fallback — NOT claim that
+	// skills are "discovered automatically".
+	if strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Hermes should not claim native skill discovery")
+	}
+	if !strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Hermes should reference .agent_context/skills/ fallback path")
+	}
+
+	// CLAUDE.md should NOT exist.
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("expected CLAUDE.md to NOT exist for Hermes provider")
+	}
+}
+
+func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "hermes-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "hermes", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Skills should be in the fallback .agent_context/skills/ path since
+	// Hermes has no native skills discovery directory.
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .agent_context/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+}
+
 func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
@@ -756,6 +907,13 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"o3"}`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model = "o3"`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("Be helpful."), 0o644)
+	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
+	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
+		t.Fatalf("write shared plugin skill: %v", err)
+	}
 
 	// Point CODEX_HOME to our fake shared home.
 	t.Setenv("CODEX_HOME", sharedHome)
@@ -771,12 +929,19 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	sessionsIsLink := fi.Mode()&os.ModeSymlink != 0
+	if !sessionsIsLink && runtime.GOOS != "windows" {
 		t.Error("sessions should be a symlink")
 	}
-	sessTarget, _ := os.Readlink(sessionsPath)
-	if sessTarget != filepath.Join(sharedHome, "sessions") {
-		t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+	if sessionsIsLink {
+		sessTarget, _ := os.Readlink(sessionsPath)
+		if sessTarget != filepath.Join(sharedHome, "sessions") {
+			t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+		}
+	} else if fi.IsDir() {
+		if _, err := os.Stat(sessionsPath); err != nil {
+			t.Fatalf("sessions link target should be accessible: %v", err)
+		}
 	}
 
 	// auth.json should be a symlink.
@@ -785,12 +950,15 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.json not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	authIsLink := fi.Mode()&os.ModeSymlink != 0
+	if !authIsLink && runtime.GOOS != "windows" {
 		t.Error("auth.json should be a symlink")
 	}
-	target, _ := os.Readlink(authPath)
-	if target != filepath.Join(sharedHome, "auth.json") {
-		t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
+	if authIsLink {
+		target, _ := os.Readlink(authPath)
+		if target != filepath.Join(sharedHome, "auth.json") {
+			t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
+		}
 	}
 	// Verify content is accessible through symlink.
 	data, _ := os.ReadFile(authPath)
@@ -827,6 +995,16 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if string(data) != "Be helpful." {
 		t.Errorf("instructions.md content = %q", data)
 	}
+
+	// plugin cache should be exposed at the same relative path in codex-home.
+	pluginSkillPath := filepath.Join(codexHome, "plugins", "cache", "superpowers", "SKILL.md")
+	data, err = os.ReadFile(pluginSkillPath)
+	if err != nil {
+		t.Fatalf("plugin cache skill not exposed: %v", err)
+	}
+	if string(data) != "Use superpowers." {
+		t.Errorf("plugin cache skill content = %q", data)
+	}
 }
 
 func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
@@ -856,8 +1034,11 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["config.toml"] {
 		t.Error("expected config.toml (auto-generated for network access)")
 	}
+	if !entryNames["plugins"] {
+		t.Error("expected plugins directory for plugin cache exposure")
+	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" {
+		if name != "sessions" && name != "config.toml" && name != "plugins" {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
@@ -867,8 +1048,11 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	if fi.Mode()&os.ModeSymlink == 0 && runtime.GOOS != "windows" {
 		t.Error("sessions should be a symlink")
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
+		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
 	}
 }
 
@@ -1216,6 +1400,164 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 }
 
+func TestReuseRestoresCodexPluginCache(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
+	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
+		t.Fatalf("write shared plugin skill: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-plugin-reuse",
+		TaskID:         "a5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-plugin-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := os.RemoveAll(filepath.Join(env.CodexHome, "plugins")); err != nil {
+		t.Fatalf("remove codex plugins dir: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{IssueID: "reuse-plugin-test"}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "plugins", "cache", "superpowers", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("reused codex plugin cache not restored: %v", err)
+	}
+	if string(data) != "Use superpowers." {
+		t.Errorf("reused plugin cache skill content = %q", data)
+	}
+}
+
+func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-skill-reuse",
+		TaskID:         "b5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-skill-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := os.RemoveAll(filepath.Join(env.CodexHome, "skills")); err != nil {
+		t.Fatalf("remove codex skills dir: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "reuse-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Writing",
+				Content: "Write clearly.",
+				Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Example"}},
+			},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill: %v", err)
+	}
+	if string(data) != "Write clearly." {
+		t.Errorf("skill content = %q", data)
+	}
+	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill support file: %v", err)
+	}
+	if string(example) != "Example" {
+		t.Errorf("support file content = %q", example)
+	}
+}
+
+func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-skill-update",
+		TaskID:         "c5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "reuse-skill-update-test",
+			AgentSkills: []SkillContextForEnv{
+				{
+					Name:    "Writing",
+					Content: "Old writing guidance.",
+					Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Old example"}},
+				},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "reuse-skill-update-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Writing",
+				Content: "Updated writing guidance.",
+				Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Updated example"}},
+			},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill: %v", err)
+	}
+	if string(data) != "Updated writing guidance." {
+		t.Errorf("skill content = %q", data)
+	}
+	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill support file: %v", err)
+	}
+	if string(example) != "Updated example" {
+		t.Errorf("support file content = %q", example)
+	}
+}
+
 func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1226,7 +1568,12 @@ func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	os.WriteFile(src, []byte("real"), 0o644)
 
 	// Create a broken symlink pointing to a non-existent file.
-	os.Symlink(filepath.Join(dir, "old-source.json"), dst)
+	if err := os.Symlink(filepath.Join(dir, "old-source.json"), dst); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("file symlink unavailable on this Windows session: %v", err)
+		}
+		t.Fatalf("seed broken symlink: %v", err)
+	}
 
 	if err := ensureSymlink(src, dst); err != nil {
 		t.Fatalf("ensureSymlink failed: %v", err)
@@ -1284,4 +1631,77 @@ func TestReadGCMeta_NoFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
+}
+
+// TestInjectRuntimeConfigMentionLoopHardening locks in the mention-loop
+// instructions (see MUL-1323 / GH#1576). Two agents were stuck in an infinite
+// @mention loop because the harness told them mentions were "actions" but did
+// not tell them (a) when NOT to mention, (b) that silence ends a thread, or
+// (c) that the triggering comment was from another agent. If any of the
+// signals below regress, agent-to-agent loops come back.
+func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
+	t.Parallel()
+
+	commentTriggerCtx := TaskContextForEnv{
+		IssueID:          "issue-1",
+		TriggerCommentID: "comment-1",
+	}
+	assignmentCtx := TaskContextForEnv{IssueID: "issue-1"}
+
+	readClaudeMD := func(t *testing.T, ctx TaskContextForEnv) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig failed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		return string(data)
+	}
+
+	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
+		t.Parallel()
+		s := readClaudeMD(t, assignmentCtx)
+		for _, want := range []string{
+			"side-effecting actions",
+			"enqueues a new run for that agent",
+			"When NOT to use a mention link",
+			"When a mention IS appropriate",
+			"end with no mention at all",
+			"Silence ends conversations",
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("Mentions section missing %q\n---\n%s", want, s)
+			}
+		}
+	})
+
+	t.Run("closing-line-no-longer-says-always-mention", func(t *testing.T) {
+		t.Parallel()
+		s := readClaudeMD(t, assignmentCtx)
+		// The old footer said "**always** use the mention format" which models
+		// over-generalized to agent/member mentions. Guard against regression.
+		if strings.Contains(s, "**always** use the mention format") {
+			t.Errorf("CLAUDE.md still contains the overreaching \"**always** use the mention format\" guidance")
+		}
+	})
+
+	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
+		t.Parallel()
+		s := readClaudeMD(t, commentTriggerCtx)
+		// The anti-loop signal for CLAUDE.md lives in the numbered workflow
+		// steps (4 + 5), not in a dedicated preamble. Lock in the key phrases
+		// so the signal can't decay back into pure prose again.
+		for _, want := range []string{
+			"Decide whether a reply is warranted",
+			"Silence is a valid and preferred way",
+			"Never @mention the agent you are replying to as a thank-you or sign-off",
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
+			}
+		}
+	})
 }

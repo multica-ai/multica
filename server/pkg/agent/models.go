@@ -220,6 +220,7 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil
@@ -278,6 +279,7 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
@@ -392,6 +394,7 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, executablePath, "acp")
+	hideAgentWindow(cmd)
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)
 	}
@@ -570,6 +573,7 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return cursorStaticModels(), nil
@@ -666,6 +670,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 		{"agents", "list", "-o", "json"},
 	} {
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
+		hideAgentWindow(cmd)
 		out, err := cmd.Output()
 		if err != nil {
 			continue
@@ -679,6 +684,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// banner with box-drawing and section headers, and picking up
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil

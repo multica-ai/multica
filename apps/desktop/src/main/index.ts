@@ -6,6 +6,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
+import { installContextMenu } from "./context-menu";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -108,6 +109,8 @@ function createWindow(): void {
     openExternalSafely(details.url);
     return { action: "deny" };
   });
+
+  installContextMenu(mainWindow.webContents);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);

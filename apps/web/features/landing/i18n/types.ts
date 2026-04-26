@@ -43,6 +43,7 @@ export type LandingDict = {
     steps: { title: string; description: string }[];
     cta: string;
     ctaGithub: string;
+    ctaDocs: string;
   };
   openSource: {
     label: string;
@@ -86,6 +87,7 @@ export type LandingDict = {
   changelog: {
     title: string;
     subtitle: string;
+    toc: string;
     categories: {
       features: string;
       improvements: string;

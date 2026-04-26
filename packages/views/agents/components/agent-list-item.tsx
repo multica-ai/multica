@@ -24,7 +24,7 @@ export function AgentListItem({
         isSelected ? "bg-accent" : "hover:bg-accent/50"
       }`}
     >
-      <ActorAvatar actorType="agent" actorId={agent.id} size={32} className={`rounded-lg ${isArchived ? "opacity-50 grayscale" : ""}`} />
+      <ActorAvatar actorType="agent" actorId={agent.id} size={32} className={`rounded-lg ${isArchived ? "opacity-50 grayscale" : ""}`} disableHoverCard />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

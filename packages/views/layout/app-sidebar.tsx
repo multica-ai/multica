@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../navigation";
+import { HelpLauncher } from "./help-launcher";
 import {
   DndContext,
   PointerSensor,
@@ -28,7 +29,8 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
-  Sparkles,
+  MessageSquare,
+  Loader2,
   X,
   Zap,
 } from "lucide-react";
@@ -41,11 +43,11 @@ import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarFooter,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -60,16 +62,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
+import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
+import { useAnchorTracker } from "../chat/components/context-anchor";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
@@ -89,12 +88,14 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_CHAT_SESSIONS: Awaited<ReturnType<typeof api.listChatSessions>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
 // Only parameterless paths are valid nav destinations.
 type NavKey =
   | "inbox"
+  | "chat"
   | "myIssues"
   | "issues"
   | "projects"
@@ -106,6 +107,7 @@ type NavKey =
 
 const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
+  { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "myIssues", label: "My Issues", icon: CircleUser },
 ];
 
@@ -326,6 +328,22 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
+  const { data: chatSessions = EMPTY_CHAT_SESSIONS } = useQuery({
+    ...chatSessionsOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const hasChatUnread = React.useMemo(
+    () => chatSessions.some((s) => s.has_unread),
+    [chatSessions],
+  );
+  const { data: pendingChatTasks } = useQuery({
+    ...pendingChatTasksOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const hasChatRunning = (pendingChatTasks?.tasks.length ?? 0) > 0;
+  // Track last anchor-eligible route so the Chat page (which is its own route)
+  // can still resolve focus-mode context from the page the user was just on.
+  useAnchorTracker();
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
@@ -438,16 +456,27 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   }
                 />
                 <DropdownMenuContent
-                  className="w-auto"
+                  className="w-auto min-w-56"
                   align="start"
                   side="bottom"
                   sideOffset={4}
                 >
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      {user?.email}
-                    </DropdownMenuLabel>
-                  </DropdownMenuGroup>
+                  <div className="flex items-center gap-2.5 px-2 py-1.5">
+                    <ActorAvatar
+                      name={user?.name ?? ""}
+                      initials={(user?.name ?? "U").charAt(0).toUpperCase()}
+                      avatarUrl={user?.avatar_url}
+                      size={32}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium leading-tight">
+                        {user?.name}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground leading-tight">
+                        {user?.email}
+                      </p>
+                    </div>
+                  </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-xs text-muted-foreground">
@@ -516,22 +545,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    {/* Plain anchor with target=_blank works on both web
-                        (new tab) and desktop (intercepted by the main
-                        process's setWindowOpenHandler → openExternalSafely),
-                        so the shared component doesn't need to branch. */}
-                    <DropdownMenuItem
-                      render={
-                        <a
-                          href="https://multica.ai/changelog"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        />
-                      }
-                    >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      What&apos;s new
-                    </DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
                       Log out
@@ -584,6 +597,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
+                        )}
+                        {item.label === "Chat" && hasChatRunning && (
+                          <Loader2 className="ml-auto !size-3 animate-spin text-muted-foreground" />
+                        )}
+                        {item.label === "Chat" && !hasChatRunning && hasChatUnread && (
+                          <span className="ml-auto size-1.5 rounded-full bg-brand" />
                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -681,61 +700,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          <div className="border-t pt-2">
-            <Popover>
-              <PopoverTrigger className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent transition-colors cursor-pointer">
-                <ActorAvatar
-                  name={user?.name ?? ""}
-                  initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                  avatarUrl={user?.avatar_url}
-                  size={28}
-                />
-                <div className="min-w-0 flex-1 text-left">
-                  <p className="truncate text-sm font-medium leading-tight">
-                    {user?.name}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground leading-tight">
-                    {user?.email}
-                  </p>
-                </div>
-              </PopoverTrigger>
-              <PopoverContent side="top" sideOffset={8} align="start" className="w-48 p-0">
-                <div className="flex items-center gap-2.5 px-2.5 py-2 border-b">
-                  <ActorAvatar
-                    name={user?.name ?? ""}
-                    initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                    avatarUrl={user?.avatar_url}
-                    size={32}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {user?.name}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {user?.email}
-                    </p>
-                  </div>
-                </div>
-                <div className="p-1">
-                  <a
-                    href="https://multica.ai/changelog"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent transition-colors cursor-pointer"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    What&apos;s new
-                  </a>
-                  <button
-                    onClick={logout}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Log out
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
+          <div className="flex justify-end">
+            <HelpLauncher />
           </div>
         </SidebarFooter>
         <SidebarRail />

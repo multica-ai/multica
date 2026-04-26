@@ -3,7 +3,6 @@
 import { DashboardLayout } from "@multica/views/layout";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
-import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { StarterContentPrompt } from "@multica/views/onboarding";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -14,8 +13,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       extra={
         <>
           <SearchCommand />
-          <ChatWindow />
-          <ChatFab />
           <StarterContentPrompt />
         </>
       }

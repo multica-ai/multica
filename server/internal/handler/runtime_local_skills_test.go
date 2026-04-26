@@ -106,9 +106,13 @@ func countSkillFiles(t *testing.T, skillID string) int {
 	return count
 }
 
-func TestRuntimeLocalSkillListStore_PreservesSummaries(t *testing.T) {
-	store := NewRuntimeLocalSkillListStore()
-	req := store.Create("runtime-xyz")
+func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryLocalSkillListStore()
+	req, err := store.Create(ctx, "runtime-xyz")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	body := map[string]any{
 		"status":    "completed",
@@ -133,8 +137,13 @@ func TestRuntimeLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		t.Fatalf("unmarshal report body: %v", err)
 	}
 
-	store.Complete(req.ID, parsed.Skills, true)
-	got := store.Get(req.ID)
+	if err := store.Complete(ctx, req.ID, parsed.Skills, true); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
 	if got == nil {
 		t.Fatal("expected stored result")
 	}
@@ -149,14 +158,21 @@ func TestRuntimeLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	}
 }
 
-func TestRuntimeLocalSkillListStore_TimesOutRunningRequests(t *testing.T) {
-	store := NewRuntimeLocalSkillListStore()
-	req := store.Create("runtime-xyz")
+func TestInMemoryLocalSkillListStore_TimesOutRunningRequests(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryLocalSkillListStore()
+	req, err := store.Create(ctx, "runtime-xyz")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	req.Status = RuntimeLocalSkillRunning
 	startedAt := time.Now().Add(-61 * time.Second)
 	req.RunStartedAt = &startedAt
 
-	got := store.Get(req.ID)
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
 	if got == nil {
 		t.Fatal("expected stored request")
 	}
@@ -168,14 +184,21 @@ func TestRuntimeLocalSkillListStore_TimesOutRunningRequests(t *testing.T) {
 	}
 }
 
-func TestRuntimeLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
-	store := NewRuntimeLocalSkillImportStore()
-	req := store.Create("runtime-xyz", "user-1", "review-helper", nil, nil)
+func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryLocalSkillImportStore()
+	req, err := store.Create(ctx, "runtime-xyz", "user-1", "review-helper", nil, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	req.Status = RuntimeLocalSkillRunning
 	startedAt := time.Now().Add(-61 * time.Second)
 	req.RunStartedAt = &startedAt
 
-	got := store.Get(req.ID)
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
 	if got == nil {
 		t.Fatal("expected stored request")
 	}
@@ -214,7 +237,10 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
 	adminUserID := createRuntimeLocalSkillTestMember(t, "admin")
-	importReq := testHandler.LocalSkillImportStore.Create(runtimeID, testUserID, "review-helper", nil, nil)
+	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), runtimeID, testUserID, "review-helper", nil, nil)
+	if err != nil {
+		t.Fatalf("create import request: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
@@ -349,18 +375,26 @@ func TestReportLocalSkillImportResult_IgnoresTimedOutRequests(t *testing.T) {
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	importReq := testHandler.LocalSkillImportStore.Create(
+	ctx := context.Background()
+	importReq, err := testHandler.LocalSkillImportStore.Create(
+		ctx,
 		runtimeID,
 		testUserID,
 		"review-helper",
 		cleanOptionalString(ptr("Timed Out Import")),
 		cleanOptionalString(ptr("Should not be created")),
 	)
+	if err != nil {
+		t.Fatalf("create import request: %v", err)
+	}
 	importReq.Status = RuntimeLocalSkillRunning
 	startedAt := time.Now().Add(-61 * time.Second)
 	importReq.RunStartedAt = &startedAt
 
-	timedOut := testHandler.LocalSkillImportStore.Get(importReq.ID)
+	timedOut, err := testHandler.LocalSkillImportStore.Get(ctx, importReq.ID)
+	if err != nil {
+		t.Fatalf("get import request: %v", err)
+	}
 	if timedOut == nil || timedOut.Status != RuntimeLocalSkillTimeout {
 		t.Fatalf("expected timed out request, got %#v", timedOut)
 	}
@@ -399,7 +433,10 @@ func TestReportLocalSkillImportResult_RejectsCrossWorkspaceDaemonToken(t *testin
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	importReq := testHandler.LocalSkillImportStore.Create(runtimeID, testUserID, "review-helper", nil, nil)
+	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), runtimeID, testUserID, "review-helper", nil, nil)
+	if err != nil {
+		t.Fatalf("create import request: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	reportReq := withURLParams(

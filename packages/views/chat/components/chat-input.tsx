@@ -81,7 +81,7 @@ export function ChatInput({
 
   return (
     <div className="px-5 pb-3 pt-0">
-      <div className="relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand">
+      <div className="relative mx-auto flex min-h-28 max-h-60 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand">
         {topSlot}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
