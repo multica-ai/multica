@@ -203,6 +203,13 @@ export function AgentTranscriptDialog({
     return () => clearInterval(interval);
   }, [isLive, task.started_at, task.dispatched_at]);
 
+  // Auto-scroll to bottom when new events arrive during live execution
+  useEffect(() => {
+    if (!isLive || !open) return;
+    const el = scrollContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [isLive, open, items.length]);
+
   // Click a timeline segment → scroll to event
   const handleSegmentClick = useCallback((idx: number) => {
     setSelectedIdx(idx);

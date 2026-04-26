@@ -88,9 +88,17 @@ function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: str
   const cfg = (RUN_STATUS_CONFIG[run.status] ?? RUN_STATUS_CONFIG["issue_created"])!;
   const StatusIcon = cfg.icon;
   const [logOpen, setLogOpen] = useState(false);
-  const [logItems, setLogItems] = useState<TimelineItem[] | null>(null);
-  const [logLoading, setLogLoading] = useState(false);
   const [stopping, setStopping] = useState(false);
+
+  const { data: rawMessages, isFetching: logLoading } = useQuery({
+    queryKey: ["task-messages", run.task_id ?? ""],
+    queryFn: () => api.listTaskMessages(run.task_id!),
+    enabled: logOpen && !!run.task_id,
+    staleTime: Infinity,
+  });
+  const logItems = rawMessages ? buildTimeline(rawMessages) : null;
+
+  const isLive = run.status === "running";
 
   const handleStop = useCallback(async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -108,25 +116,12 @@ function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: str
     }
   }, [run.task_id, stopping, queryClient, wsId, autopilotId]);
 
-  const handleViewLog = useCallback(async (e: React.MouseEvent) => {
+  const handleViewLog = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!run.task_id) return;
-    if (logItems !== null) {
-      setLogOpen(true);
-      return;
-    }
-    setLogLoading(true);
-    try {
-      const msgs = await api.listTaskMessages(run.task_id);
-      setLogItems(buildTimeline(msgs));
-      setLogOpen(true);
-    } catch {
-      toast.error("Failed to load execution log");
-    } finally {
-      setLogLoading(false);
-    }
-  }, [run.task_id, logItems]);
+    setLogOpen(true);
+  }, [run.task_id]);
 
   const taskStatus: AgentTask["status"] =
     run.status === "completed" ? "completed" :
@@ -164,11 +159,11 @@ function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: str
       {run.task_id && (
         <button
           onClick={handleViewLog}
-          disabled={logLoading}
+          disabled={logLoading && !logItems}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
           title="View execution log"
         >
-          {logLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+          {logLoading && !logItems ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
           <span>Log</span>
         </button>
       )}
@@ -220,6 +215,7 @@ function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: str
           task={syntheticTask}
           items={logItems}
           agentName={getActorName("agent", agentId)}
+          isLive={isLive}
         />
       )}
     </>
@@ -532,7 +528,13 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const { getActorName } = useActorName();
 
   const { data, isLoading } = useQuery(autopilotDetailOptions(wsId, autopilotId));
-  const { data: runs = [], isLoading: runsLoading } = useQuery(autopilotRunsOptions(wsId, autopilotId));
+  const { data: runs = [], isLoading: runsLoading } = useQuery({
+    ...autopilotRunsOptions(wsId, autopilotId),
+    refetchInterval: (query): number | false => {
+      const data = query.state.data as AutopilotRun[] | undefined;
+      return data?.some((r: AutopilotRun) => r.status === "running") ? 5000 : false;
+    },
+  });
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const updateAutopilot = useUpdateAutopilot();
