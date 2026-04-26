@@ -47,6 +47,80 @@ type envelope struct {
 	PayloadJSON string `json:"payload_json"` // raw JSON of the original ws frame
 }
 
+func newEnvelope(nodeID, scopeType, scopeID, exclude string, frame []byte, id string) envelope {
+	ev := envelope{
+		EventID:     id,
+		Scope:       scopeType,
+		ScopeID:     scopeID,
+		NodeID:      nodeID,
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		PayloadJSON: string(frame),
+	}
+	if exclude != "" {
+		ev.WorkspaceID = exclude
+	}
+	if t, a := peekTypeActor(frame); t != "" {
+		ev.EventType = t
+		ev.ActorID = a
+	}
+	return ev
+}
+
+func envelopeRedisValues(ev envelope) map[string]any {
+	return map[string]any{
+		"event_id":     ev.EventID,
+		"event_type":   ev.EventType,
+		"scope":        ev.Scope,
+		"scope_id":     ev.ScopeID,
+		"workspace_id": ev.WorkspaceID,
+		"actor_id":     ev.ActorID,
+		"created_at":   ev.CreatedAt,
+		"node_id":      ev.NodeID,
+		"payload_json": ev.PayloadJSON,
+	}
+}
+
+func envelopeFromXMessage(msg redis.XMessage) (envelope, bool) {
+	ev := envelope{
+		EventID:     redisString(msg.Values["event_id"]),
+		EventType:   redisString(msg.Values["event_type"]),
+		Scope:       redisString(msg.Values["scope"]),
+		ScopeID:     redisString(msg.Values["scope_id"]),
+		WorkspaceID: redisString(msg.Values["workspace_id"]),
+		ActorID:     redisString(msg.Values["actor_id"]),
+		CreatedAt:   redisString(msg.Values["created_at"]),
+		NodeID:      redisString(msg.Values["node_id"]),
+		PayloadJSON: redisString(msg.Values["payload_json"]),
+	}
+	return ev, ev.PayloadJSON != ""
+}
+
+func redisString(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case []byte:
+		return string(s)
+	default:
+		return ""
+	}
+}
+
+func deliverEnvelope(hub *Hub, ev envelope) {
+	if ev.PayloadJSON == "" {
+		return
+	}
+	frame := injectEventID([]byte(ev.PayloadJSON), ev.EventID)
+	switch ev.Scope {
+	case "global":
+		hub.fanoutAllDedup(frame, "", ev.EventID)
+	case ScopeUser:
+		hub.fanoutUser(ev.ScopeID, frame, ev.WorkspaceID, ev.EventID)
+	default:
+		hub.BroadcastToScopeDedup(ev.Scope, ev.ScopeID, frame, ev.EventID)
+	}
+}
+
 // RedisRelay is a Broadcaster implementation that writes every message to a
 // per-scope Redis Stream and consumes streams for which there are local
 // subscribers. Local fanout is delegated to the wrapped *Hub.
@@ -182,38 +256,13 @@ func (r *RedisRelay) Broadcast(message []byte) {
 }
 
 func (r *RedisRelay) publish(scopeType, scopeID, exclude string, frame []byte) {
-	ev := envelope{
-		EventID:     ulid.Make().String(),
-		Scope:       scopeType,
-		ScopeID:     scopeID,
-		NodeID:      r.nodeID,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		PayloadJSON: string(frame),
-	}
-	if exclude != "" {
-		ev.WorkspaceID = exclude
-	}
-	// Best-effort: peek inside the JSON for event_type / actor_id.
-	if t, a := peekTypeActor(frame); t != "" {
-		ev.EventType = t
-		ev.ActorID = a
-	}
+	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, ulid.Make().String())
 
 	args := &redis.XAddArgs{
 		Stream: StreamKey(scopeType, scopeID),
 		MaxLen: streamMaxLen,
 		Approx: true,
-		Values: map[string]any{
-			"event_id":     ev.EventID,
-			"event_type":   ev.EventType,
-			"scope":        ev.Scope,
-			"scope_id":     ev.ScopeID,
-			"workspace_id": ev.WorkspaceID,
-			"actor_id":     ev.ActorID,
-			"created_at":   ev.CreatedAt,
-			"node_id":      ev.NodeID,
-			"payload_json": ev.PayloadJSON,
-		},
+		Values: envelopeRedisValues(ev),
 	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -335,28 +384,17 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 }
 
 func (r *RedisRelay) deliverMessage(scopeType, scopeID string, msg redis.XMessage) {
-	payloadAny, ok := msg.Values["payload_json"]
+	ev, ok := envelopeFromXMessage(msg)
 	if !ok {
 		return
 	}
-	payload, _ := payloadAny.(string)
-	if payload == "" {
-		return
+	if ev.Scope == "" {
+		ev.Scope = scopeType
 	}
-	exclude, _ := msg.Values["workspace_id"].(string)
-	eventID, _ := msg.Values["event_id"].(string)
-
-	// Inject event_id into the outgoing frame for client-side dedup.
-	frame := injectEventID([]byte(payload), eventID)
-
-	switch scopeType {
-	case "global":
-		r.hub.fanoutAllDedup(frame, "", eventID)
-	case ScopeUser:
-		r.hub.fanoutUser(scopeID, frame, exclude, eventID)
-	default:
-		r.hub.BroadcastToScopeDedup(scopeType, scopeID, frame, eventID)
+	if ev.ScopeID == "" {
+		ev.ScopeID = scopeID
 	}
+	deliverEnvelope(r.hub, ev)
 }
 
 // fanoutUser is implemented in hub.go.
@@ -453,18 +491,20 @@ func injectEventID(frame []byte, eventID string) []byte {
 // the Redis relay loops the message back.
 type DualWriteBroadcaster struct {
 	local *Hub
-	relay relayPublisher
+	relay RelayPublisher
 }
 
-func NewDualWriteBroadcaster(local *Hub, relay *RedisRelay) *DualWriteBroadcaster {
+// RelayPublisher is implemented by Redis relay backends that can publish a
+// caller-supplied event id for local/Redis loopback deduplication.
+type RelayPublisher interface {
+	PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string)
+}
+
+func NewDualWriteBroadcaster(local *Hub, relay RelayPublisher) *DualWriteBroadcaster {
 	return newDualWriteBroadcaster(local, relay)
 }
 
-type relayPublisher interface {
-	publishWithID(scopeType, scopeID, exclude string, frame []byte, id string)
-}
-
-func newDualWriteBroadcaster(local *Hub, relay relayPublisher) *DualWriteBroadcaster {
+func newDualWriteBroadcaster(local *Hub, relay RelayPublisher) *DualWriteBroadcaster {
 	return &DualWriteBroadcaster{local: local, relay: relay}
 }
 
@@ -474,7 +514,7 @@ func (d *DualWriteBroadcaster) BroadcastToScope(scopeType, scopeID string, messa
 	// Local fast path: BroadcastToScopeDedup marks each client as having
 	// seen `id`, so the Redis loopback for the same id will be ignored.
 	d.local.BroadcastToScopeDedup(scopeType, scopeID, frame, id)
-	d.relay.publishWithID(scopeType, scopeID, "", message, id)
+	d.relay.PublishWithID(scopeType, scopeID, "", message, id)
 }
 
 func (d *DualWriteBroadcaster) BroadcastToWorkspace(workspaceID string, message []byte) {
@@ -489,49 +529,25 @@ func (d *DualWriteBroadcaster) SendToUser(userID string, message []byte, exclude
 	id := ulid.Make().String()
 	frame := injectEventID(message, id)
 	d.local.fanoutUser(userID, frame, exclude, id)
-	d.relay.publishWithID(ScopeUser, userID, exclude, message, id)
+	d.relay.PublishWithID(ScopeUser, userID, exclude, message, id)
 }
 
 func (d *DualWriteBroadcaster) Broadcast(message []byte) {
 	id := ulid.Make().String()
 	frame := injectEventID(message, id)
 	d.local.fanoutAllDedup(frame, "", id)
-	d.relay.publishWithID("global", "all", "", message, id)
+	d.relay.PublishWithID("global", "all", "", message, id)
 }
 
-// publishWithID is like publish but uses a caller-supplied event id so the
+// PublishWithID is like publish but uses a caller-supplied event id so the
 // dual-write path can dedup.
-func (r *RedisRelay) publishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
-	ev := envelope{
-		EventID:     id,
-		Scope:       scopeType,
-		ScopeID:     scopeID,
-		NodeID:      r.nodeID,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		PayloadJSON: string(frame),
-	}
-	if exclude != "" {
-		ev.WorkspaceID = exclude
-	}
-	if t, a := peekTypeActor(frame); t != "" {
-		ev.EventType = t
-		ev.ActorID = a
-	}
+func (r *RedisRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
+	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, id)
 	args := &redis.XAddArgs{
 		Stream: StreamKey(scopeType, scopeID),
 		MaxLen: streamMaxLen,
 		Approx: true,
-		Values: map[string]any{
-			"event_id":     ev.EventID,
-			"event_type":   ev.EventType,
-			"scope":        ev.Scope,
-			"scope_id":     ev.ScopeID,
-			"workspace_id": ev.WorkspaceID,
-			"actor_id":     ev.ActorID,
-			"created_at":   ev.CreatedAt,
-			"node_id":      ev.NodeID,
-			"payload_json": ev.PayloadJSON,
-		},
+		Values: envelopeRedisValues(ev),
 	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -548,3 +564,4 @@ func (r *RedisRelay) publishWithID(scopeType, scopeID, exclude string, frame []b
 
 var _ Broadcaster = (*RedisRelay)(nil)
 var _ Broadcaster = (*DualWriteBroadcaster)(nil)
+var _ RelayPublisher = (*RedisRelay)(nil)

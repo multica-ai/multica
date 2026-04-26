@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,6 +43,69 @@ func closeRedisClient(label string, client *redis.Client) {
 	if err := client.Close(); err != nil {
 		slog.Warn("redis client close failed", "client", label, "error", err)
 	}
+}
+
+func shardedRelayConfigFromEnv() realtime.ShardedStreamRelayConfig {
+	cfg := realtime.DefaultShardedStreamRelayConfig()
+	cfg.Shards = envPositiveInt("REALTIME_RELAY_SHARDS", cfg.Shards)
+	cfg.StreamMaxLen = envPositiveInt64("REALTIME_RELAY_STREAM_MAXLEN", cfg.StreamMaxLen)
+	cfg.ReadCount = envPositiveInt64("REALTIME_RELAY_XREAD_COUNT", cfg.ReadCount)
+	cfg.ReadBlock = envDuration("REALTIME_RELAY_XREAD_BLOCK", cfg.ReadBlock)
+	return cfg
+}
+
+func realtimeRelayModeFromEnv() string {
+	const defaultMode = "sharded"
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("REALTIME_RELAY_MODE")))
+	if raw == "" {
+		return defaultMode
+	}
+	switch raw {
+	case "sharded", "dual", "legacy":
+		return raw
+	default:
+		slog.Warn("invalid env var, using default", "name", "REALTIME_RELAY_MODE", "value", raw, "default", defaultMode)
+		return defaultMode
+	}
+}
+
+func envPositiveInt(name string, def int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return v
+}
+
+func envPositiveInt64(name string, def int64) int64 {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v <= 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return v
+}
+
+func envDuration(name string, def time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil || v <= 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def.String(), "error", err)
+		return def
+	}
+	return v
 }
 
 func main() {
@@ -95,7 +160,7 @@ func main() {
 	var storeRedis *redis.Client
 	var relayWriteRedis *redis.Client
 	var relayReadRedis *redis.Client
-	var relay *realtime.RedisRelay
+	var relay realtime.ManagedRelay
 	defer func() {
 		if relay != nil {
 			relay.Stop()
@@ -117,12 +182,28 @@ func main() {
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
 			relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 
-			relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+			relayMode := realtimeRelayModeFromEnv()
+			relayConfig := shardedRelayConfigFromEnv()
+			switch relayMode {
+			case "legacy":
+				relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+			case "dual":
+				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
+				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+				relay = realtime.NewMirroredRelay(sharded, legacy)
+			default:
+				relay = realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
+			}
 			relay.Start(relayCtx)
 			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
 			slog.Info(
 				"realtime: Redis relay enabled",
 				"node_id", relay.NodeID(),
+				"mode", relayMode,
+				"shards", relayConfig.Shards,
+				"stream_max_len", relayConfig.StreamMaxLen,
+				"xread_count", relayConfig.ReadCount,
+				"xread_block", relayConfig.ReadBlock.String(),
 				"store_pool_size", opts.PoolSize,
 				"realtime_write_pool_size", opts.PoolSize,
 				"realtime_read_pool_size", opts.PoolSize,

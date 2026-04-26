@@ -112,7 +112,7 @@ type localFirstPublisher struct {
 	localFrame []byte
 }
 
-func (p *localFirstPublisher) publishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
+func (p *localFirstPublisher) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) {
 	p.called = true
 	p.scopeType = scopeType
 	p.scopeID = scopeID
