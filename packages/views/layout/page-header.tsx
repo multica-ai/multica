@@ -19,9 +19,11 @@ interface PageHeaderProps {
 
 export function PageHeader({ children, className }: PageHeaderProps) {
   return (
-    <div className={cn("flex h-12 shrink-0 items-center border-b px-4", className)}>
+    <div className={cn("flex shrink-0 items-center border-b px-4 py-2", className)}>
       <MobileSidebarTrigger />
-      {children}
+      <div className="flex flex-col justify-center min-h-[2.5rem] w-full">
+        {children}
+      </div>
     </div>
   );
 }
