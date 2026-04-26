@@ -62,6 +62,9 @@ import type {
   Autopilot,
   AutopilotTrigger,
   IssueLabel,
+  IssueLink,
+  IssueBlocker,
+  LinkType,
   LabelColor,
   AutopilotRun,
   CreateAutopilotRequest,
@@ -1139,5 +1142,43 @@ export class ApiClient {
     await this.fetch(`/api/issues/${issueId}/labels/${labelId}?workspace_id=${workspaceId}`, {
       method: "DELETE",
     });
+  }
+
+  // Issue links (cross-issue dependencies). Workspace membership is checked on
+  // the source issue; the target may live in any workspace the source issue's
+  // creator can reach by issue id.
+  async listIssueLinks(issueId: string, workspaceId: string): Promise<IssueLink[]> {
+    return this.fetch(`/api/issues/${issueId}/links?workspace_id=${workspaceId}`);
+  }
+
+  async listIssueBlockers(issueId: string, workspaceId: string): Promise<IssueBlocker[]> {
+    return this.fetch(`/api/issues/${issueId}/blockers?workspace_id=${workspaceId}`);
+  }
+
+  /** Create a new issue link. Returns the freshly created outgoing-direction
+   *  row; the mirror incoming row on the target issue is created server-side
+   *  in the same transaction. */
+  async createIssueLink(
+    issueId: string,
+    workspaceId: string,
+    data: { target_issue_id: string; link_type: LinkType },
+  ): Promise<IssueLink> {
+    return this.fetch(`/api/issues/${issueId}/links?workspace_id=${workspaceId}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Delete a link by its row id. The mirror row on the other side is
+   *  removed atomically. */
+  async deleteIssueLink(
+    issueId: string,
+    linkId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/issues/${issueId}/links/${linkId}?workspace_id=${workspaceId}`,
+      { method: "DELETE" },
+    );
   }
 }
