@@ -18,6 +18,31 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
+	opts := *base
+	opts.ClientName = redisClientName(opts.ClientName, suffix)
+	return redis.NewClient(&opts)
+}
+
+func redisClientName(existing, suffix string) string {
+	if suffix == "" {
+		return existing
+	}
+	if existing != "" {
+		return existing + ":" + suffix
+	}
+	return "multica-api:" + suffix
+}
+
+func closeRedisClient(label string, client *redis.Client) {
+	if client == nil {
+		return
+	}
+	if err := client.Close(); err != nil {
+		slog.Warn("redis client close failed", "client", label, "error", err)
+	}
+}
+
 func main() {
 	logger.Init()
 
@@ -62,22 +87,35 @@ func main() {
 	// MUL-1138: when REDIS_URL is set, route fanout through a Redis relay so
 	// multiple API nodes can deliver each other's events. Without it the hub
 	// is the sole broadcaster and the server stays single-node (legacy).
-	// The same client is also used for cross-node request stores (e.g. runtime
-	// local-skill pending requests) so every node sees the same pending set.
+	// Runtime local-skill stores and realtime relay traffic use separate Redis
+	// clients so blocking stream consumers cannot starve request-path Redis
+	// operations.
 	relayCtx, relayCancel := context.WithCancel(context.Background())
 	defer relayCancel()
 	var broadcaster realtime.Broadcaster = hub
-	var rdb *redis.Client
+	var storeRedis *redis.Client
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
 		opts, err := redis.ParseURL(redisURL)
 		if err != nil {
 			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
 		} else {
-			rdb = redis.NewClient(opts)
-			relay := realtime.NewRedisRelay(hub, rdb)
+			storeRedis = newNamedRedisClient(opts, "store")
+			relayWriteRedis := newNamedRedisClient(opts, "realtime-write")
+			relayReadRedis := newNamedRedisClient(opts, "realtime-read")
+			defer closeRedisClient("store", storeRedis)
+			defer closeRedisClient("realtime-write", relayWriteRedis)
+			defer closeRedisClient("realtime-read", relayReadRedis)
+
+			relay := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
 			relay.Start(relayCtx)
-			broadcaster = relay
-			slog.Info("realtime: Redis relay enabled", "node_id", relay.NodeID())
+			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
+			slog.Info(
+				"realtime: Redis relay enabled",
+				"node_id", relay.NodeID(),
+				"store_pool_size", opts.PoolSize,
+				"realtime_write_pool_size", opts.PoolSize,
+				"realtime_read_pool_size", opts.PoolSize,
+			)
 		}
 	} else {
 		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
@@ -96,7 +134,7 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
-	r := NewRouter(pool, hub, bus, analyticsClient, rdb)
+	r := NewRouter(pool, hub, bus, analyticsClient, storeRedis)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

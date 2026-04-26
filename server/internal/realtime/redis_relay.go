@@ -51,9 +51,10 @@ type envelope struct {
 // per-scope Redis Stream and consumes streams for which there are local
 // subscribers. Local fanout is delegated to the wrapped *Hub.
 type RedisRelay struct {
-	hub    *Hub
-	rdb    *redis.Client
-	nodeID string
+	hub      *Hub
+	writeRDB *redis.Client
+	readRDB  *redis.Client
+	nodeID   string
 
 	mu        sync.Mutex
 	consumers map[scopeKey]*scopeConsumer
@@ -67,9 +68,21 @@ type scopeConsumer struct {
 // NewRedisRelay constructs a relay. The caller is responsible for invoking
 // Start before producing messages.
 func NewRedisRelay(hub *Hub, rdb *redis.Client) *RedisRelay {
+	return NewRedisRelayWithClients(hub, rdb, rdb)
+}
+
+// NewRedisRelayWithClients constructs a relay with separate Redis clients for
+// writes and blocking reads. The read client is reserved for XREADGROUP BLOCK
+// calls so long-polling stream consumers cannot exhaust the pool used by XADD,
+// heartbeats, acks, and other request-path Redis operations.
+func NewRedisRelayWithClients(hub *Hub, writeRDB, readRDB *redis.Client) *RedisRelay {
+	if readRDB == nil {
+		readRDB = writeRDB
+	}
 	return &RedisRelay{
 		hub:       hub,
-		rdb:       rdb,
+		writeRDB:  writeRDB,
+		readRDB:   readRDB,
 		nodeID:    ulid.Make().String(),
 		consumers: make(map[scopeKey]*scopeConsumer),
 	}
@@ -84,10 +97,18 @@ func (r *RedisRelay) NodeID() string { return r.nodeID }
 // relay down.
 func (r *RedisRelay) Start(ctx context.Context) {
 	M.NodeID.Store(r.nodeID)
-	if err := r.rdb.Ping(ctx).Err(); err != nil {
+	if err := r.writeRDB.Ping(ctx).Err(); err != nil {
 		slog.Error("realtime/redis: initial ping failed", "error", err)
 		M.RedisConnected.Store(false)
 		M.SetRedisLastError(err.Error())
+	} else if r.readRDB != r.writeRDB {
+		if err := r.readRDB.Ping(ctx).Err(); err != nil {
+			slog.Error("realtime/redis: initial read-client ping failed", "error", err)
+			M.RedisConnected.Store(false)
+			M.SetRedisLastError(err.Error())
+		} else {
+			M.RedisConnected.Store(true)
+		}
 	} else {
 		M.RedisConnected.Store(true)
 	}
@@ -168,7 +189,7 @@ func (r *RedisRelay) publish(scopeType, scopeID, exclude string, frame []byte) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := r.rdb.XAdd(ctx, args).Err(); err != nil {
+	if err := r.writeRDB.XAdd(ctx, args).Err(); err != nil {
 		M.RedisXAddErrors.Add(1)
 		M.SetRedisLastError(err.Error())
 		slog.Warn("realtime/redis: XADD failed", "error", err, "scope", scopeType, "scope_id", scopeID)
@@ -218,14 +239,14 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 
 	// MKSTREAM ensures the stream exists. Ignore BUSYGROUP.
 	createCtx, createCancel := context.WithTimeout(ctx, 2*time.Second)
-	if err := r.rdb.XGroupCreateMkStream(createCtx, stream, group, "$").Err(); err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+	if err := r.writeRDB.XGroupCreateMkStream(createCtx, stream, group, "$").Err(); err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
 		slog.Warn("realtime/redis: XGROUP CREATE failed", "error", err, "scope", scopeType, "scope_id", scopeID)
 	}
 	createCancel()
 
 	// Register ourselves as a node interested in this scope.
 	regCtx, regCancel := context.WithTimeout(ctx, 2*time.Second)
-	r.rdb.ZAdd(regCtx, NodesKey(scopeType, scopeID), redis.Z{Score: float64(time.Now().Add(heartbeatTTL).Unix()), Member: r.nodeID})
+	r.writeRDB.ZAdd(regCtx, NodesKey(scopeType, scopeID), redis.Z{Score: float64(time.Now().Add(heartbeatTTL).Unix()), Member: r.nodeID})
 	regCancel()
 
 	for {
@@ -233,7 +254,7 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 			break
 		}
 		readCtx, readCancel := context.WithTimeout(ctx, 6*time.Second)
-		res, err := r.rdb.XReadGroup(readCtx, &redis.XReadGroupArgs{
+		res, err := r.readRDB.XReadGroup(readCtx, &redis.XReadGroupArgs{
 			Group:    group,
 			Consumer: consumerName,
 			Streams:  []string{stream, ">"},
@@ -260,7 +281,7 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 				M.RedisXReadTotal.Add(1)
 				r.deliverMessage(scopeType, scopeID, msg)
 				ackCtx, ackCancel := context.WithTimeout(ctx, time.Second)
-				if err := r.rdb.XAck(ackCtx, stream, group, msg.ID).Err(); err != nil {
+				if err := r.writeRDB.XAck(ackCtx, stream, group, msg.ID).Err(); err != nil {
 					slog.Debug("realtime/redis: XACK failed", "error", err, "id", msg.ID)
 				} else {
 					M.RedisAckTotal.Add(1)
@@ -272,7 +293,7 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 
 	// Best-effort consumer cleanup.
 	cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	r.rdb.XGroupDelConsumer(cleanCtx, stream, group, consumerName)
+	r.writeRDB.XGroupDelConsumer(cleanCtx, stream, group, consumerName)
 	cleanCancel()
 }
 
@@ -319,7 +340,7 @@ func (r *RedisRelay) heartbeatLoop(ctx context.Context) {
 func (r *RedisRelay) heartbeatOnce(ctx context.Context) {
 	hbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := r.rdb.Set(hbCtx, HeartbeatKey(r.nodeID), time.Now().UTC().Format(time.RFC3339Nano), heartbeatTTL).Err(); err != nil {
+	if err := r.writeRDB.Set(hbCtx, HeartbeatKey(r.nodeID), time.Now().UTC().Format(time.RFC3339Nano), heartbeatTTL).Err(); err != nil {
 		M.RedisConnected.Store(false)
 		M.SetRedisLastError(err.Error())
 		return
@@ -327,7 +348,7 @@ func (r *RedisRelay) heartbeatOnce(ctx context.Context) {
 	M.RedisConnected.Store(true)
 	expiry := float64(time.Now().Add(heartbeatTTL).Unix())
 	for _, key := range r.hub.LocalScopes() {
-		r.rdb.ZAdd(hbCtx, NodesKey(key.Type, key.ID), redis.Z{Score: expiry, Member: r.nodeID})
+		r.writeRDB.ZAdd(hbCtx, NodesKey(key.Type, key.ID), redis.Z{Score: expiry, Member: r.nodeID})
 	}
 }
 
@@ -347,7 +368,7 @@ func (r *RedisRelay) consumerSweeper(ctx context.Context) {
 		now := float64(time.Now().Unix())
 		for _, key := range r.hub.LocalScopes() {
 			swCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			r.rdb.ZRemRangeByScore(swCtx, NodesKey(key.Type, key.ID), "-inf", fmt.Sprintf("%f", now))
+			r.writeRDB.ZRemRangeByScore(swCtx, NodesKey(key.Type, key.ID), "-inf", fmt.Sprintf("%f", now))
 			cancel()
 		}
 	}
@@ -395,10 +416,18 @@ func injectEventID(frame []byte, eventID string) []byte {
 // the Redis relay loops the message back.
 type DualWriteBroadcaster struct {
 	local *Hub
-	relay *RedisRelay
+	relay relayPublisher
 }
 
 func NewDualWriteBroadcaster(local *Hub, relay *RedisRelay) *DualWriteBroadcaster {
+	return newDualWriteBroadcaster(local, relay)
+}
+
+type relayPublisher interface {
+	publishWithID(scopeType, scopeID, exclude string, frame []byte, id string)
+}
+
+func newDualWriteBroadcaster(local *Hub, relay relayPublisher) *DualWriteBroadcaster {
 	return &DualWriteBroadcaster{local: local, relay: relay}
 }
 
@@ -470,9 +499,10 @@ func (r *RedisRelay) publishWithID(scopeType, scopeID, exclude string, frame []b
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := r.rdb.XAdd(ctx, args).Err(); err != nil {
+	if err := r.writeRDB.XAdd(ctx, args).Err(); err != nil {
 		M.RedisXAddErrors.Add(1)
 		M.SetRedisLastError(err.Error())
+		slog.Warn("realtime/redis: XADD failed", "error", err, "scope", scopeType, "scope_id", scopeID)
 		return
 	}
 	M.RedisXAddTotal.Add(1)
