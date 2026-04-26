@@ -46,73 +46,54 @@ type Task struct {
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
 	WorkspaceID string `json:"workspace_id"`
-	// WorkspaceContext mirrors workspace.context (the per-workspace system
-	// prompt set in Settings → General). Server populates this on every claim
-	// regardless of task kind so the daemon can inject `## Workspace Context`
-	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext         string                `json:"workspace_context,omitempty"`
-	ThreadName               string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ThreadName               string                `json:"thread_name,omitempty"`
 	Agent                    *AgentData            `json:"agent,omitempty"`
 	Repos                    []RepoData            `json:"repos,omitempty"`
-	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
-	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
-	ProjectDescription       string                `json:"project_description,omitempty"`         // durable project-level context injected into the brief
-	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`           // project-scoped resources to expose to the agent
-	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
-	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
-	TriggerCommentID         string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
-	TriggerThreadID          string                `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
-	TriggerCommentContent    string                `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
-	TriggerAuthorType        string                `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind for the triggering comment
-	TriggerAuthorName        string                `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
-	NewCommentCount          int                   `json:"new_comment_count,omitempty"`           // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
-	NewCommentsSince         string                `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
-	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatMessage              string                `json:"chat_message,omitempty"`                // user message content for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
-	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks
-	AutopilotID              string                `json:"autopilot_id,omitempty"`                // autopilot that spawned this run
-	AutopilotTitle           string                `json:"autopilot_title,omitempty"`             // autopilot title used as task context
-	AutopilotDescription     string                `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
-	AutopilotSource          string                `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
-	AutopilotTriggerPayload  json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
-	HandoffNote              string                `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the opening prompt + issue_context.md
+	ProjectID                string                `json:"project_id,omitempty"`
+	ProjectTitle             string                `json:"project_title,omitempty"`
+	ProjectDescription       string                `json:"project_description,omitempty"`
+	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`
+	PriorSessionID           string                `json:"prior_session_id,omitempty"`
+	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`
+	TriggerCommentID         string                `json:"trigger_comment_id,omitempty"`
+	TriggerThreadID          string                `json:"trigger_thread_id,omitempty"`
+	TriggerCommentContent    string                `json:"trigger_comment_content,omitempty"`
+	TriggerAuthorType        string                `json:"trigger_author_type,omitempty"`
+	TriggerAuthorName        string                `json:"trigger_author_name,omitempty"`
+	NewCommentCount          int                   `json:"new_comment_count,omitempty"`
+	NewCommentsSince         string                `json:"new_comments_since,omitempty"`
+	ChatSessionID            string                `json:"chat_session_id,omitempty"`
+	ChatMessage              string                `json:"chat_message,omitempty"`
+	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`
+	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`
+	AutopilotID              string                `json:"autopilot_id,omitempty"`
+	AutopilotTitle           string                `json:"autopilot_title,omitempty"`
+	AutopilotDescription     string                `json:"autopilot_description,omitempty"`
+	AutopilotSource          string                `json:"autopilot_source,omitempty"`
+	AutopilotTriggerPayload  json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`
+	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`
+	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"`
+	HandoffNote              string                `json:"handoff_note,omitempty"`
 
-	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
-	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
-	// RequestingUserName + RequestingUserProfileDescription describe the human
-	// the agent is working on behalf of. v1 sources them from the runtime
-	// owner (the user who registered the daemon). Empty when the runtime has
-	// no owner (cloud / system runtimes) or the user hasn't set a description.
-	// Injected into the brief under `## Requesting User`; omitted entirely
-	// when description is empty so the agent doesn't see a useless heading.
+	SquadID               string `json:"squad_id,omitempty"`
+	SquadName             string `json:"squad_name,omitempty"`
+	ParentIssueID         string `json:"parent_issue_id,omitempty"`
+	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"`
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
-	// Initiator* identify the actor who triggered THIS task (the real
-	// requester behind the current comment/mention or chat message) as
-	// distinct from the runtime owner whose credentials the agent runs with.
-	// Comment-triggered tasks resolve to the triggering comment's author;
-	// chat tasks resolve to the chat session creator. Empty for task kinds
-	// with no attributable human initiator (on-assign, autopilot,
-	// quick-create). InitiatorEmail is set only for member initiators. The
-	// daemon emits these into the brief under `## Task Initiator` so a
-	// workspace-visible agent can attribute the request per person. The
-	// agent's effective credentials stay owner-scoped — this is an attested
-	// identity, not a credential. See MUL-2645.
 	InitiatorType  string `json:"initiator_type,omitempty"`
 	InitiatorID    string `json:"initiator_id,omitempty"`
 	InitiatorName  string `json:"initiator_name,omitempty"`
 	InitiatorEmail string `json:"initiator_email,omitempty"`
-	// AuthToken is the task-scoped credential the server mints at claim time.
-	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
-	// agent never sees the daemon's own (often workspace-owner) credential.
-	// Empty or non-task-scoped values are fatal for writable agent tasks; the
-	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	LabelInstructions []LabelInstruction `json:"label_instructions,omitempty"`
+}
+
+// LabelInstruction carries a single label's agent-facing instructions.
+type LabelInstruction struct {
+	Name         string `json:"name"`
+	Instructions string `json:"instructions"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon
