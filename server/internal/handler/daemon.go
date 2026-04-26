@@ -793,6 +793,37 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.PriorWorkDir = prior.WorkDir.String
 			}
 		}
+
+		// Fetch label-linked instructions so the daemon can inject them
+		// into the agent's system prompt. Labels with empty instructions
+		// are skipped — they're organizational only.
+		//
+		// Skip the fetch when the issue's workspace couldn't be resolved
+		// (GetIssue above failed transiently). The downstream isolation
+		// check would already abort the claim, but querying with a zero
+		// UUID is wasted I/O and obscures intent.
+		if resp.WorkspaceID != "" {
+			labels, err := h.Queries.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{
+				IssueID:     task.IssueID,
+				WorkspaceID: parseUUID(resp.WorkspaceID),
+			})
+			if err != nil {
+				slog.Warn("ClaimTaskByRuntime: ListLabelsByIssue failed, proceeding without label instructions",
+					"task_id", uuidToString(task.ID),
+					"issue_id", uuidToString(task.IssueID),
+					"workspace_id", resp.WorkspaceID,
+					"error", err)
+			} else {
+				for _, l := range labels {
+					if l.Instructions != "" {
+						resp.LabelInstructions = append(resp.LabelInstructions, TaskLabelInstruction{
+							Name:         l.Name,
+							Instructions: l.Instructions,
+						})
+					}
+				}
+			}
+		}
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.

@@ -42,19 +42,25 @@ func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssue
 }
 
 const createLabel = `-- name: CreateLabel :one
-INSERT INTO issue_label (workspace_id, name, color)
-VALUES ($1, $2, $3)
-RETURNING id, workspace_id, name, color, created_at, updated_at
+INSERT INTO issue_label (workspace_id, name, color, instructions)
+VALUES ($1, $2, $3, $4)
+RETURNING id, workspace_id, name, color, created_at, updated_at, instructions
 `
 
 type CreateLabelParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Name        string      `json:"name"`
-	Color       string      `json:"color"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Name         string      `json:"name"`
+	Color        string      `json:"color"`
+	Instructions string      `json:"instructions"`
 }
 
 func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (IssueLabel, error) {
-	row := q.db.QueryRow(ctx, createLabel, arg.WorkspaceID, arg.Name, arg.Color)
+	row := q.db.QueryRow(ctx, createLabel,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Color,
+		arg.Instructions,
+	)
 	var i IssueLabel
 	err := row.Scan(
 		&i.ID,
@@ -63,6 +69,7 @@ func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Issue
 		&i.Color,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Instructions,
 	)
 	return i, err
 }
@@ -112,7 +119,7 @@ func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromI
 }
 
 const getLabel = `-- name: GetLabel :one
-SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+SELECT id, workspace_id, name, color, created_at, updated_at, instructions FROM issue_label
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -131,12 +138,13 @@ func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (IssueLabel,
 		&i.Color,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Instructions,
 	)
 	return i, err
 }
 
 const listLabels = `-- name: ListLabels :many
-SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+SELECT id, workspace_id, name, color, created_at, updated_at, instructions FROM issue_label
 WHERE workspace_id = $1
 ORDER BY LOWER(name) ASC
 `
@@ -157,6 +165,7 @@ func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]Is
 			&i.Color,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Instructions,
 		); err != nil {
 			return nil, err
 		}
@@ -169,7 +178,7 @@ func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]Is
 }
 
 const listLabelsByIssue = `-- name: ListLabelsByIssue :many
-SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
+SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.instructions
 FROM issue_label l
 JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = $1::uuid
@@ -200,6 +209,7 @@ func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssuePa
 			&i.Color,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Instructions,
 		); err != nil {
 			return nil, err
 		}
@@ -270,16 +280,18 @@ const updateLabel = `-- name: UpdateLabel :one
 UPDATE issue_label SET
     name = COALESCE($3, name),
     color = COALESCE($4, color),
+    instructions = COALESCE($5, instructions),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, color, created_at, updated_at
+RETURNING id, workspace_id, name, color, created_at, updated_at, instructions
 `
 
 type UpdateLabelParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Name        pgtype.Text `json:"name"`
-	Color       pgtype.Text `json:"color"`
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	Name         pgtype.Text `json:"name"`
+	Color        pgtype.Text `json:"color"`
+	Instructions pgtype.Text `json:"instructions"`
 }
 
 func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (IssueLabel, error) {
@@ -288,6 +300,7 @@ func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Issue
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Color,
+		arg.Instructions,
 	)
 	var i IssueLabel
 	err := row.Scan(
@@ -297,6 +310,7 @@ func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Issue
 		&i.Color,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Instructions,
 	)
 	return i, err
 }

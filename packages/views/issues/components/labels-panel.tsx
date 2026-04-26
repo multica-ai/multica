@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Trash2, Plus, Pencil, Check, X } from "lucide-react";
+import { Trash2, Plus, Pencil, Check, X, Sparkles } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label as UILabel } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
@@ -43,6 +43,7 @@ export function LabelsPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
+  const [editInstructions, setEditInstructions] = useState("");
   const [editError, setEditError] = useState("");
 
   const [pendingDeletion, setPendingDeletion] = useState<Label | null>(null);
@@ -68,6 +69,7 @@ export function LabelsPanel() {
     setEditingId(label.id);
     setEditName(label.name);
     setEditColor(label.color);
+    setEditInstructions(label.instructions || "");
     setEditError("");
   };
 
@@ -75,21 +77,19 @@ export function LabelsPanel() {
     setEditingId(null);
     setEditName("");
     setEditColor("");
+    setEditInstructions("");
     setEditError("");
   };
 
   const saveEdit = (id: string) => {
     const name = editName.trim();
     if (!name) {
-      // Surface the reason the save didn't happen — previously this was a
-      // silent no-op. Button is also disabled (below) but a visible message
-      // beats a greyed-out button for telling the user WHY.
       setEditError("Label name is required.");
       return;
     }
     setEditError("");
     update.mutate(
-      { id, name, color: editColor },
+      { id, name, color: editColor, instructions: editInstructions },
       {
         onSuccess: cancelEdit,
         onError: (err: unknown) => {
@@ -179,8 +179,6 @@ export function LabelsPanel() {
                   </>
                 ) : (
                   <>
-                    {/* min-w-0 on the label wrapper lets long names wrap without
-                        pushing the hex/buttons off the right edge. */}
                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                       <LabelChip label={label} fullName />
                       <span className="text-xs text-muted-foreground">
@@ -206,6 +204,31 @@ export function LabelsPanel() {
                   </>
                 )}
               </div>
+              {/* Agent instructions — shown below the label row. The 2000-char
+                  cap matches the server-side validateLabelInstructions limit;
+                  stopping typing in the textarea is friendlier than a 400 on save. */}
+              {isEditing && (
+                <div className="mt-2">
+                  <textarea
+                    value={editInstructions}
+                    onChange={(e) => setEditInstructions(e.target.value)}
+                    placeholder="Agent instructions (optional) — appended to the agent's prompt when this label is on an issue"
+                    maxLength={2000}
+                    className="w-full rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
+                    rows={2}
+                  />
+                </div>
+              )}
+              {!isEditing && label.instructions && (
+                <p className="mt-1.5 flex items-center gap-1 pl-1 text-xs italic text-muted-foreground">
+                  <Sparkles className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden />
+                  <span>
+                    {label.instructions.length > 80
+                      ? label.instructions.slice(0, 80) + "…"
+                      : label.instructions}
+                  </span>
+                </p>
+              )}
               {isEditing && editError && (
                 <p
                   id={`label-edit-error-${label.id}`}
