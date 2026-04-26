@@ -31,9 +31,8 @@ export function StatusPicker({
   const cfg = getStatusConfig(status);
   const displayLabel = pipelineColumns?.find((c) => c.status_key === status)?.label ?? cfg.label;
 
-  const filteredItems = pipelineColumns
-    ? pipelineColumns.map((c) => ({ status_key: c.status_key, label: c.label }))
-    : ALL_STATUSES.map((s) => ({ status_key: s, label: getStatusConfig(s).label }));
+  const items = pipelineColumns
+    ?? ALL_STATUSES.map((s) => ({ status_key: s, label: getStatusConfig(s).label }));
 
   return (
     <PropertyPicker
@@ -51,7 +50,7 @@ export function StatusPicker({
         )
       }
     >
-      {filteredItems.map((item) => {
+      {items.map((item) => {
         const c = getStatusConfig(item.status_key);
         return (
           <PickerItem
