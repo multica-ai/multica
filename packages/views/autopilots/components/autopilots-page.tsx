@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
+import { Plus, Zap, Play, Pause, AlertCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -14,93 +14,8 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { AUTOPILOT_TEMPLATES, type AutopilotTemplate } from "./autopilot-templates";
 import type { Autopilot } from "@multica/core/types";
-import type { TriggerFrequency } from "./trigger-config";
-
-interface AutopilotTemplate {
-  title: string;
-  prompt: string;
-  summary: string;
-  icon: typeof Zap;
-  frequency: TriggerFrequency;
-  time: string;
-}
-
-const TEMPLATES: AutopilotTemplate[] = [
-  {
-    title: "Daily news digest",
-    summary: "Search and summarize today's news for the team",
-    prompt: `1. Search the web for news and announcements published today only (strictly today's date)
-2. Filter for topics relevant to our team and industry
-3. For each item, write a short summary including: title, source, key takeaways
-4. Compile everything into a single digest post
-5. Post the digest as a comment on this issue and @mention all workspace members`,
-    icon: Newspaper,
-    frequency: "daily",
-    time: "09:00",
-  },
-  {
-    title: "PR review reminder",
-    summary: "Flag stale pull requests that need review",
-    prompt: `1. List all open pull requests in the repository
-2. Identify PRs that have been open for more than 24 hours without a review
-3. For each stale PR, note the author, age, and a one-line summary of the change
-4. Post a comment on this issue listing all stale PRs with links
-5. @mention the team to remind them to review`,
-    icon: GitPullRequest,
-    frequency: "weekdays",
-    time: "10:00",
-  },
-  {
-    title: "Bug triage",
-    summary: "Assess and prioritize new bug reports",
-    prompt: `1. List all issues with status "triage" or "backlog" that have not been prioritized
-2. For each issue, read the description and any attached logs or screenshots
-3. Assess severity (critical / high / medium / low) based on user impact and scope
-4. Set the priority field on the issue accordingly
-5. Add a comment explaining your assessment and suggested next steps`,
-    icon: Bug,
-    frequency: "weekdays",
-    time: "09:00",
-  },
-  {
-    title: "Weekly progress report",
-    summary: "Compile a weekly summary of team progress",
-    prompt: `1. Gather all issues completed (status "done") in the past 7 days
-2. Gather all issues currently in progress
-3. Identify any blocked issues and their blockers
-4. Calculate key metrics: issues closed, issues opened, net change
-5. Write a structured weekly report with sections: Completed, In Progress, Blocked, Metrics
-6. Post the report as a comment on this issue`,
-    icon: BarChart3,
-    frequency: "weekly",
-    time: "17:00",
-  },
-  {
-    title: "Dependency audit",
-    summary: "Scan for security vulnerabilities and outdated packages",
-    prompt: `1. Run dependency audit tools on the project (npm audit, go vuln check, etc.)
-2. Identify any packages with known security vulnerabilities
-3. List outdated packages that are more than 2 major versions behind
-4. For each finding, note the severity, affected package, and recommended fix
-5. Post a summary report as a comment with actionable items`,
-    icon: Shield,
-    frequency: "weekly",
-    time: "08:00",
-  },
-  {
-    title: "Documentation check",
-    summary: "Review recent changes for documentation gaps",
-    prompt: `1. List all code changes merged in the past 7 days (via git log)
-2. For each significant change, check if related documentation was updated
-3. Identify any new APIs, config options, or features missing documentation
-4. Create a list of documentation gaps with file paths and suggested content
-5. Post the findings as a comment on this issue`,
-    icon: FileSearch,
-    frequency: "weekly",
-    time: "14:00",
-  },
-];
 
 function formatRelativeDate(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
@@ -220,7 +135,7 @@ export function AutopilotsPage() {
               Schedule recurring tasks for your AI agents. Pick a template or start from scratch.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full max-w-3xl">
-              {TEMPLATES.map((t) => {
+              {AUTOPILOT_TEMPLATES.map((t) => {
                 const Icon = t.icon;
                 return (
                   <button
@@ -266,16 +181,7 @@ export function AutopilotsPage() {
           mode="create"
           open={createOpen}
           onOpenChange={setCreateOpen}
-          initial={
-            selectedTemplate
-              ? { title: selectedTemplate.title, description: selectedTemplate.prompt }
-              : undefined
-          }
-          initialTriggerConfig={
-            selectedTemplate
-              ? { frequency: selectedTemplate.frequency, time: selectedTemplate.time }
-              : undefined
-          }
+          initialTemplate={selectedTemplate}
         />
       )}
     </div>

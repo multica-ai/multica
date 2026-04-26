@@ -50,6 +50,10 @@ import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPicker } from "./pickers/agent-picker";
 import {
+  AUTOPILOT_TEMPLATES,
+  type AutopilotTemplate,
+} from "./autopilot-templates";
+import {
   getDefaultTriggerConfig,
   getLocalTimezone,
   parseCronExpression,
@@ -76,6 +80,7 @@ export type AutopilotDialogProps =
       onOpenChange: (v: boolean) => void;
       initial?: Partial<AutopilotInitial>;
       initialTriggerConfig?: Partial<TriggerConfig>;
+      initialTemplate?: AutopilotTemplate | null;
     }
   | {
       mode: "edit";
@@ -248,8 +253,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
+  const initialTemplate = isCreate ? props.initialTemplate ?? null : null;
   const initial: Partial<AutopilotInitial> = isCreate
-    ? props.initial ?? {}
+    ? {
+        ...(props.initial ?? {}),
+        ...(initialTemplate
+          ? { title: initialTemplate.title, description: initialTemplate.prompt }
+          : {}),
+      }
     : props.initial;
 
   const [title, setTitle] = useState(initial.title ?? "");
@@ -258,10 +269,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    initialTemplate?.id ?? null,
+  );
+  const [editorVersion, setEditorVersion] = useState(0);
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
-      const tpl = props.initialTriggerConfig;
+      const tpl = initialTemplate
+        ? { frequency: initialTemplate.frequency, time: initialTemplate.time }
+        : props.initialTriggerConfig;
       return tpl ? { ...getDefaultTriggerConfig(), ...tpl } : getDefaultTriggerConfig();
     }
     const first = props.triggers[0];
@@ -298,6 +315,18 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
   const canSubmit =
     title.trim().length > 0 && assigneeId.length > 0 && !submitting;
+
+  const handleApplyTemplate = (template: AutopilotTemplate) => {
+    setSelectedTemplateId(template.id);
+    setTitle(template.title);
+    setDescription(template.prompt);
+    setTriggerConfig({
+      ...getDefaultTriggerConfig(),
+      frequency: template.frequency,
+      time: template.time,
+    });
+    setEditorVersion((version) => version + 1);
+  };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -366,7 +395,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     }
   };
 
-  const contentKey = isCreate ? "create" : props.autopilotId;
+  const contentKey = isCreate ? `create-${editorVersion}` : props.autopilotId;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -445,7 +474,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 autoFocus={isCreate}
-                defaultValue={initial.title ?? ""}
+                defaultValue={title}
                 placeholder="Autopilot name"
                 className="text-2xl font-semibold tracking-tight"
                 onChange={setTitle}
@@ -465,7 +494,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col">
               <div className="h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
                 <ContentEditor
-                  defaultValue={initial.description ?? ""}
+                  defaultValue={description}
                   placeholder={`# Goal\nWhat should the agent accomplish?\n\n# Context\nWho is this for? Any constraints?\n\n# Steps\n1. …\n2. …`}
                   onUpdate={setDescription}
                   debounceMs={300}
@@ -477,6 +506,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
           {/* Right: Configuration */}
           <aside className="w-full lg:w-[340px] shrink-0 overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
+            {isCreate && (
+              <TemplateSection
+                selectedId={selectedTemplateId}
+                onApply={handleApplyTemplate}
+              />
+            )}
+
             <AgentSection
               selectedId={assigneeId}
               onChange={setAssigneeId}
@@ -535,6 +571,64 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
       {children}
+    </div>
+  );
+}
+
+function TemplateSection({
+  selectedId,
+  onApply,
+}: {
+  selectedId: string | null;
+  onApply: (template: AutopilotTemplate) => void;
+}) {
+  return (
+    <div>
+      <SectionLabel>Templates</SectionLabel>
+      <div className="space-y-1.5">
+        {AUTOPILOT_TEMPLATES.map((template) => {
+          const Icon = template.icon;
+          const selected = template.id === selectedId;
+          return (
+            <button
+              key={template.id}
+              type="button"
+              onClick={() => onApply(template)}
+              className={cn(
+                "w-full flex items-start gap-2.5 rounded-md border px-3 py-2 text-left cursor-pointer transition-colors",
+                selected
+                  ? "border-primary bg-primary/5"
+                  : "bg-background hover:bg-accent/40",
+              )}
+            >
+              <span
+                className={cn(
+                  "mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md",
+                  selected
+                    ? "bg-primary/15 text-primary"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                <Icon className="size-3.5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">
+                  {template.title}
+                </span>
+                <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">
+                  {template.summary}
+                </span>
+              </span>
+              {selected && (
+                <Check
+                  className="mt-1 size-3.5 shrink-0 text-primary"
+                  strokeWidth={3}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
