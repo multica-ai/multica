@@ -131,17 +131,13 @@ func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 	}
 
 	if fi, err := os.Lstat(dst); err == nil {
-		target, readlinkErr := os.Readlink(dst)
-		if readlinkErr == nil {
-			if target == src {
+		isLink := fi.Mode()&os.ModeSymlink != 0
+		if isLink {
+			if target, readlinkErr := os.Readlink(dst); readlinkErr == nil && target == src {
 				return nil
 			}
 			if err := os.Remove(dst); err != nil {
 				return fmt.Errorf("remove stale plugin cache link: %w", err)
-			}
-		} else if fi.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache symlink: %w", err)
 			}
 		} else {
 			if err := os.RemoveAll(dst); err != nil {
@@ -212,7 +208,6 @@ func ensureSymlink(src, dst string) error {
 // sandbox/network directives now live in a managed block rendered by
 // codex_sandbox.go's ensureCodexSandboxConfig so they can be updated
 // idempotently without touching user-managed keys.)
-
 
 // copyFileIfExists copies src to dst. If src doesn't exist, it's a no-op.
 // If dst already exists, it's not overwritten.
