@@ -159,6 +159,10 @@ func TestFetchFromSkillsSh_SkipsNonUTF8SupportingFiles(t *testing.T) {
 	if !equalStrings(gotPaths, wantPaths) {
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}
+	wantSkipped := []string{"preview.png"}
+	if !equalStrings(result.skippedFiles, wantSkipped) {
+		t.Fatalf("skippedFiles = %v, want %v", result.skippedFiles, wantSkipped)
+	}
 }
 
 func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.T) {

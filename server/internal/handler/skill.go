@@ -373,15 +373,17 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 // --- Skill import ---
 
 type ImportSkillRequest struct {
-	URL string `json:"url"`
+	URL               string `json:"url"`
+	AllowSkippedFiles bool   `json:"allow_skipped_files"`
 }
 
 // importedSkill holds the data extracted from an external source.
 type importedSkill struct {
-	name        string
-	description string
-	content     string // SKILL.md body
-	files       []importedFile
+	name         string
+	description  string
+	content      string // SKILL.md body
+	files        []importedFile
+	skippedFiles []string
 }
 
 type importedFile struct {
@@ -389,12 +391,13 @@ type importedFile struct {
 	content string
 }
 
-func appendImportedTextFile(files []importedFile, path string, body []byte) []importedFile {
+func (s *importedSkill) appendTextFile(path string, body []byte) {
 	if !utf8.Valid(body) {
 		slog.Warn("skill import: skipping non-UTF-8 supporting file", "path", path)
-		return files
+		s.skippedFiles = append(s.skippedFiles, path)
+		return
 	}
-	return append(files, importedFile{path: path, content: string(body)})
+	s.files = append(s.files, importedFile{path: path, content: string(body)})
 }
 
 // --- ClawHub types ---
@@ -615,7 +618,7 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 		if fp == "SKILL.md" {
 			result.content = string(body)
 		} else {
-			result.files = appendImportedTextFile(result.files, fp, body)
+			result.appendTextFile(fp, body)
 		}
 	}
 
@@ -744,7 +747,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 		// Convert absolute GitHub path to relative path within skill
 		relPath := strings.TrimPrefix(entry.Path, basePath)
-		result.files = appendImportedTextFile(result.files, relPath, body)
+		result.appendTextFile(relPath, body)
 	}
 
 	return result, nil
@@ -1106,6 +1109,14 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if len(imported.skippedFiles) > 0 && !req.AllowSkippedFiles {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":         "skill import contains files that cannot be stored as text",
+			"code":          "skill_import_skipped_files",
+			"skipped_files": imported.skippedFiles,
+		})
 		return
 	}
 

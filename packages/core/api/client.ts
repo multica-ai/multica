@@ -26,6 +26,7 @@ import type {
   Skill,
   CreateSkillRequest,
   UpdateSkillRequest,
+  ImportSkillRequest,
   SetAgentSkillsRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
@@ -146,12 +147,14 @@ export interface ImportStarterContentResponse {
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
+  readonly details: unknown;
 
-  constructor(message: string, status: number, statusText: string) {
+  constructor(message: string, status: number, statusText: string, details?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.statusText = statusText;
+    this.details = details;
   }
 }
 
@@ -206,14 +209,17 @@ export class ApiClient {
     this.options.onUnauthorized?.();
   }
 
-  private async parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  private async parseError(res: Response, fallback: string): Promise<{ message: string; details?: unknown }> {
     try {
       const data = await res.json() as { error?: string };
-      if (typeof data.error === "string" && data.error) return data.error;
+      if (typeof data.error === "string" && data.error) {
+        return { message: data.error, details: data };
+      }
+      return { message: fallback, details: data };
     } catch {
       // Ignore non-JSON error bodies.
     }
-    return fallback;
+    return { message: fallback };
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -238,10 +244,10 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      const { message, details } = await this.parseError(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new ApiError(message, res.status, res.statusText);
+      throw new ApiError(message, res.status, res.statusText, details);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
@@ -830,7 +836,7 @@ export class ApiClient {
     await this.fetch(`/api/skills/${id}`, { method: "DELETE" });
   }
 
-  async importSkill(data: { url: string }): Promise<Skill> {
+  async importSkill(data: ImportSkillRequest): Promise<Skill> {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
@@ -884,7 +890,7 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      const { message } = await this.parseError(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);
     }

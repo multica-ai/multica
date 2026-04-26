@@ -29,6 +29,41 @@ describe("ApiClient", () => {
         message: "workspace slug already exists",
         status: 409,
         statusText: "Conflict",
+        details: { error: "workspace slug already exists" },
+      });
+    }
+  });
+
+  it("preserves structured error details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          error: "skill import contains files that cannot be stored as text",
+          code: "skill_import_skipped_files",
+          skipped_files: ["assets/logo.png"],
+        }), {
+          status: 409,
+          statusText: "Conflict",
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+
+    try {
+      await client.importSkill({ url: "https://skills.sh/acme/skills/demo" });
+      throw new Error("expected importSkill to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({
+        message: "skill import contains files that cannot be stored as text",
+        status: 409,
+        details: {
+          code: "skill_import_skipped_files",
+          skipped_files: ["assets/logo.png"],
+        },
       });
     }
   });

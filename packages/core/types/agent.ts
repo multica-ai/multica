@@ -142,6 +142,17 @@ export interface UpdateSkillRequest {
   files?: { path: string; content: string }[];
 }
 
+export interface ImportSkillRequest {
+  url: string;
+  allow_skipped_files?: boolean;
+}
+
+export interface SkillImportSkippedFilesError {
+  error: string;
+  code: "skill_import_skipped_files";
+  skipped_files: string[];
+}
+
 export interface SetAgentSkillsRequest {
   skill_ids: string[];
 }
