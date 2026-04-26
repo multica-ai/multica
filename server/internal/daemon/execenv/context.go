@@ -27,6 +27,13 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 		return fmt.Errorf("write issue_context.md: %w", err)
 	}
 
+	if len(ctx.Memories) > 0 {
+		path := filepath.Join(contextDir, "memory.md")
+		if err := os.WriteFile(path, []byte(renderMemoryContext(ctx.Memories)), 0o644); err != nil {
+			return fmt.Errorf("write memory.md: %w", err)
+		}
+	}
+
 	if len(ctx.AgentSkills) > 0 {
 		skillsDir, err := resolveSkillsDir(workDir, provider)
 		if err != nil {
@@ -136,5 +143,34 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	if len(ctx.Memories) > 0 {
+		b.WriteString("## Approved Memory\n\n")
+		b.WriteString("Approved platform memory is available in `.agent_context/memory.md` and may be used as task context.\n\n")
+	}
+
+	return b.String()
+}
+
+func renderMemoryContext(memories []MemoryContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Approved Memory\n\n")
+	b.WriteString("These entries were approved in Multica memory and passed platform guardrails before injection.\n\n")
+	for _, memory := range memories {
+		fmt.Fprintf(&b, "## %s\n\n", memory.Title)
+		fmt.Fprintf(&b, "- ID: `%s`\n", memory.ID)
+		fmt.Fprintf(&b, "- Scope: `%s", memory.ScopeType)
+		if memory.ScopeID != nil && *memory.ScopeID != "" {
+			fmt.Fprintf(&b, ":%s", *memory.ScopeID)
+		}
+		b.WriteString("`\n")
+		if memory.SourceCommentID != nil && *memory.SourceCommentID != "" {
+			fmt.Fprintf(&b, "- Source comment: `%s`\n", *memory.SourceCommentID)
+		} else if memory.SourceIssueID != nil && *memory.SourceIssueID != "" {
+			fmt.Fprintf(&b, "- Source issue: `%s`\n", *memory.SourceIssueID)
+		}
+		b.WriteString("\n")
+		b.WriteString(memory.Content)
+		b.WriteString("\n\n")
+	}
 	return b.String()
 }

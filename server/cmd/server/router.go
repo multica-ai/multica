@@ -206,12 +206,45 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// Autopilots
+			r.Route("/api/autopilots", func(r chi.Router) {
+				r.Get("/", h.ListAutopilots)
+				r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/", h.CreateAutopilot)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetAutopilot)
+					r.Get("/runs", h.ListAutopilotRuns)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Put("/", h.UpdateAutopilot)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Patch("/", h.UpdateAutopilot)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Delete("/", h.DeleteAutopilot)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/disable", h.DisableAutopilot)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/trigger", h.TriggerAutopilot)
+					r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/triggers", h.CreateAutopilotTrigger)
+					r.Route("/triggers/{triggerId}", func(r chi.Router) {
+						r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Put("/", h.UpdateAutopilotTrigger)
+						r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Patch("/", h.UpdateAutopilotTrigger)
+						r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Delete("/", h.DeleteAutopilotTrigger)
+					})
+				})
+			})
+
 			// Pins
 			r.Route("/api/pins", func(r chi.Router) {
 				r.Get("/", h.ListPins)
 				r.Post("/", h.CreatePin)
 				r.Put("/reorder", h.ReorderPins)
 				r.Delete("/{itemType}/{itemId}", h.DeletePin)
+			})
+
+			// Memories
+			r.Route("/api/memories", func(r chi.Router) {
+				r.Get("/", h.ListMemories)
+				r.Get("/search", h.SearchMemories)
+				r.Post("/propose", h.ProposeMemory)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetMemory)
+					r.Post("/approve", h.ApproveMemory)
+					r.Post("/reject", h.RejectMemory)
+				})
 			})
 
 			// Attachments

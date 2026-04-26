@@ -397,6 +397,12 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	ctx := TaskContextForEnv{
 		IssueID:     "test-issue-id",
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		Memories: []MemoryContextForEnv{{
+			ID:        "memory-1",
+			ScopeType: "workspace",
+			Title:     "Project convention",
+			Content:   "Prefer the existing API client for REST calls.",
+		}},
 	}
 
 	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
@@ -414,6 +420,47 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	}
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "Project convention") || !strings.Contains(s, "existing API client") {
+		t.Error("AGENTS.md missing approved memory")
+	}
+}
+
+func TestWriteContextFilesMemory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	sourceIssueID := "issue-1"
+	ctx := TaskContextForEnv{
+		IssueID: "test-issue-id",
+		Memories: []MemoryContextForEnv{{
+			ID:            "memory-1",
+			ScopeType:     "issue",
+			Title:         "Issue convention",
+			Content:       "Use focused Go tests for handler changes.",
+			SourceIssueID: &sourceIssueID,
+		}},
+	}
+
+	if err := writeContextFiles(dir, "codex", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	issueContext, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
+	if err != nil {
+		t.Fatalf("failed to read issue_context.md: %v", err)
+	}
+	if !strings.Contains(string(issueContext), "Approved Memory") {
+		t.Fatal("issue_context.md missing approved memory hint")
+	}
+
+	memoryContext, err := os.ReadFile(filepath.Join(dir, ".agent_context", "memory.md"))
+	if err != nil {
+		t.Fatalf("failed to read memory.md: %v", err)
+	}
+	s := string(memoryContext)
+	if !strings.Contains(s, "Issue convention") || !strings.Contains(s, "Use focused Go tests") {
+		t.Fatalf("memory.md missing memory content: %s", s)
 	}
 }
 

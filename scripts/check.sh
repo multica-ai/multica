@@ -35,14 +35,31 @@ EXIT_CODE=0
 # --------------------------------------------------------------------------
 # Cleanup: kill only services this script started
 # --------------------------------------------------------------------------
+kill_process_tree() {
+  local pid="${1:-}"
+  if [ -z "$pid" ]; then
+    return 0
+  fi
+
+  local children
+  children="$(pgrep -P "$pid" 2>/dev/null || true)"
+  for child in $children; do
+    kill_process_tree "$child"
+  done
+
+  kill "$pid" 2>/dev/null || true
+}
+
 cleanup() {
   echo ""
   if [ "$STARTED_BACKEND" = true ] && [ -n "$BACKEND_PID" ]; then
-    kill "$BACKEND_PID" 2>/dev/null && wait "$BACKEND_PID" 2>/dev/null || true
+    kill_process_tree "$BACKEND_PID"
+    wait "$BACKEND_PID" 2>/dev/null || true
     echo "    Stopped backend (PID $BACKEND_PID)"
   fi
   if [ "$STARTED_FRONTEND" = true ] && [ -n "$FRONTEND_PID" ]; then
-    kill "$FRONTEND_PID" 2>/dev/null && wait "$FRONTEND_PID" 2>/dev/null || true
+    kill_process_tree "$FRONTEND_PID"
+    wait "$FRONTEND_PID" 2>/dev/null || true
     echo "    Stopped frontend (PID $FRONTEND_PID)"
   fi
   echo ""

@@ -95,6 +95,54 @@ type Attachment struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type Autopilot struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Title              string             `json:"title"`
+	Description        pgtype.Text        `json:"description"`
+	Status             string             `json:"status"`
+	Mode               string             `json:"mode"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	Priority           string             `json:"priority"`
+	IssueTitleTemplate string             `json:"issue_title_template"`
+	CreatedBy          pgtype.UUID        `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type AutopilotRun struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
+	TriggerID      pgtype.UUID        `json:"trigger_id"`
+	Source         string             `json:"source"`
+	Status         string             `json:"status"`
+	ScheduledFor   pgtype.Timestamptz `json:"scheduled_for"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	CreatedIssueID pgtype.UUID        `json:"created_issue_id"`
+	CreatedTaskID  pgtype.UUID        `json:"created_task_id"`
+	Error          pgtype.Text        `json:"error"`
+	IdempotencyKey pgtype.Text        `json:"idempotency_key"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type AutopilotTrigger struct {
+	ID          pgtype.UUID        `json:"id"`
+	AutopilotID pgtype.UUID        `json:"autopilot_id"`
+	Type        string             `json:"type"`
+	Label       pgtype.Text        `json:"label"`
+	Cron        pgtype.Text        `json:"cron"`
+	Timezone    string             `json:"timezone"`
+	Status      string             `json:"status"`
+	NextRunAt   pgtype.Timestamptz `json:"next_run_at"`
+	LastRunAt   pgtype.Timestamptz `json:"last_run_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`

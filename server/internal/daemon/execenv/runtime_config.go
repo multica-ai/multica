@@ -55,7 +55,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica repo checkout <url>` — Check out a repository into the working directory (creates a git worktree with a dedicated branch)\n")
 	b.WriteString("- `multica issue runs <issue-id> --output json` — List all execution runs for an issue (status, timestamps, errors)\n")
 	b.WriteString("- `multica issue run-messages <task-id> [--since <seq>] --output json` — List messages for a specific execution run (supports incremental fetch)\n")
-	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n\n")
+	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
+	b.WriteString("- `multica memory list [--status approved|pending|rejected] --output json` — List workspace memory entries\n")
+	b.WriteString("- `multica memory get <id> --output json` — Get a memory entry\n")
+	b.WriteString("- `multica memory search <query> --output json` — Search memory entries\n\n")
 
 	b.WriteString("### Write\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--assignee X] [--parent <issue-id>] [--status X]` — Create a new issue\n")
@@ -63,7 +66,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n")
+	b.WriteString("- `multica memory propose --title \"...\" --content \"...\" [--scope workspace|project|agent|issue] [--scope-id <id>] [--source-issue <id>] [--source-comment <id>]` — Propose a guarded memory entry for review\n")
+	b.WriteString("- `multica memory approve <id> [--note \"...\"]` — Approve a pending memory entry (admin/owner)\n")
+	b.WriteString("- `multica memory reject <id> [--note \"...\"]` — Reject a pending memory entry (admin/owner)\n\n")
 
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
@@ -80,6 +86,27 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
+	}
+
+	if len(ctx.Memories) > 0 {
+		b.WriteString("## Approved Memory\n\n")
+		b.WriteString("Use these approved memory entries as platform context. Do not persist new secrets or personal data into memory.\n\n")
+		for _, memory := range ctx.Memories {
+			fmt.Fprintf(&b, "### %s\n\n", memory.Title)
+			fmt.Fprintf(&b, "- Scope: `%s", memory.ScopeType)
+			if memory.ScopeID != nil && *memory.ScopeID != "" {
+				fmt.Fprintf(&b, ":%s", *memory.ScopeID)
+			}
+			b.WriteString("`\n")
+			if memory.SourceCommentID != nil && *memory.SourceCommentID != "" {
+				fmt.Fprintf(&b, "- Source comment: `%s`\n", *memory.SourceCommentID)
+			} else if memory.SourceIssueID != nil && *memory.SourceIssueID != "" {
+				fmt.Fprintf(&b, "- Source issue: `%s`\n", *memory.SourceIssueID)
+			}
+			b.WriteString("\n")
+			b.WriteString(memory.Content)
+			b.WriteString("\n\n")
+		}
 	}
 
 	b.WriteString("### Workflow\n\n")

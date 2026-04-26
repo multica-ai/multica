@@ -706,7 +706,12 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               render={
                 <TooltipTrigger
                   render={
-                    <Button variant="outline" size="icon-sm" className="text-muted-foreground">
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      aria-label={viewMode === "board" ? "Board view" : "List view"}
+                    >
                       {viewMode === "board" ? (
                         <Columns3 className="size-4" />
                       ) : (

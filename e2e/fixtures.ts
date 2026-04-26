@@ -21,29 +21,34 @@ export class TestApiClient {
   private createdIssueIds: string[] = [];
 
   async login(email: string, name: string) {
-    // Step 1: Send verification code
-    const sendRes = await fetch(`${API_BASE}/auth/send-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (!sendRes.ok) {
-      // Rate limited — code already sent recently, read it from DB
-      if (sendRes.status !== 429) {
-        throw new Error(`send-code failed: ${sendRes.status}`);
-      }
-    }
+    const normalizedEmail = email.toLowerCase().trim();
 
-    // Step 2: Read code from database
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
+      // Avoid rate-limit and stale-code races when a test logs in repeatedly.
+      await client.query("DELETE FROM verification_code WHERE email = $1", [
+        normalizedEmail,
+      ]);
+
+      // Step 1: Send verification code
+      const sendRes = await fetch(`${API_BASE}/auth/send-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail }),
+      });
+      if (!sendRes.ok) {
+        const body = await sendRes.text();
+        throw new Error(`send-code failed: ${sendRes.status} ${body}`);
+      }
+
+      // Step 2: Read code from database
       const result = await client.query(
         "SELECT code FROM verification_code WHERE email = $1 AND used = FALSE AND expires_at > now() ORDER BY created_at DESC LIMIT 1",
-        [email]
+        [normalizedEmail],
       );
       if (result.rows.length === 0) {
-        throw new Error(`No verification code found for ${email}`);
+        throw new Error(`No verification code found for ${normalizedEmail}`);
       }
       const code = result.rows[0].code;
 
@@ -51,9 +56,14 @@ export class TestApiClient {
       const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email: normalizedEmail, code }),
       });
       const data = await verifyRes.json();
+      if (!verifyRes.ok || !data.token) {
+        throw new Error(
+          `verify-code failed: ${verifyRes.status} ${JSON.stringify(data)}`,
+        );
+      }
       this.token = data.token;
 
       // Update user name if needed
@@ -72,7 +82,13 @@ export class TestApiClient {
 
   async getWorkspaces(): Promise<TestWorkspace[]> {
     const res = await this.authedFetch("/api/workspaces");
-    return res.json();
+    const data = await res.json();
+    if (!res.ok || !Array.isArray(data)) {
+      throw new Error(
+        `getWorkspaces failed: ${res.status} ${JSON.stringify(data)}`,
+      );
+    }
+    return data;
   }
 
   setWorkspaceId(id: string) {
@@ -135,6 +151,10 @@ export class TestApiClient {
 
   getToken() {
     return this.token;
+  }
+
+  getWorkspaceId() {
+    return this.workspaceId;
   }
 
   private async authedFetch(path: string, init?: RequestInit) {

@@ -16,13 +16,24 @@ type RepoContextForEnv struct {
 	Description string // human-readable description
 }
 
+// MemoryContextForEnv describes an approved platform memory entry.
+type MemoryContextForEnv struct {
+	ID              string
+	ScopeType       string
+	ScopeID         *string
+	Title           string
+	Content         string
+	SourceIssueID   *string
+	SourceCommentID *string
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string           // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string           // workspace UUID — tasks are grouped under this
-	TaskID         string           // task UUID — used for directory name
-	AgentName      string           // for git branch naming only
-	Provider       string           // agent provider ("claude", "codex") — determines skill injection paths
+	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID    string            // workspace UUID — tasks are grouped under this
+	TaskID         string            // task UUID — used for directory name
+	AgentName      string            // for git branch naming only
+	Provider       string            // agent provider ("claude", "codex") — determines skill injection paths
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -34,7 +45,8 @@ type TaskContextForEnv struct {
 	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
-	ChatSessionID     string              // non-empty for chat tasks
+	Memories          []MemoryContextForEnv
+	ChatSessionID     string // non-empty for chat tasks
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

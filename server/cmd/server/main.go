@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -77,6 +78,13 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 
+	// Start background autopilot scheduler.
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	taskService := service.NewTaskService(queries, hub, bus)
+	autopilotService := service.NewAutopilotService(queries, pool, taskService)
+	autopilotScheduler := service.NewAutopilotScheduler(autopilotService, service.AutopilotSchedulerConfig{})
+	go autopilotScheduler.Run(schedulerCtx)
+
 	// Graceful shutdown
 	go func() {
 		slog.Info("server starting", "port", port)
@@ -92,6 +100,7 @@ func main() {
 
 	slog.Info("shutting down server")
 	sweepCancel()
+	schedulerCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

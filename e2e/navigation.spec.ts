@@ -8,17 +8,17 @@ test.describe("Navigation", () => {
 
   test("sidebar navigation works", async ({ page }) => {
     // Click Inbox
-    await page.locator("nav a", { hasText: "Inbox" }).click();
+    await page.getByRole("link", { name: "Inbox" }).click();
     await page.waitForURL("**/inbox");
     await expect(page).toHaveURL(/\/inbox/);
 
     // Click Agents
-    await page.locator("nav a", { hasText: "Agents" }).click();
+    await page.getByRole("link", { name: "Agents" }).click();
     await page.waitForURL("**/agents");
     await expect(page).toHaveURL(/\/agents/);
 
     // Click Issues
-    await page.locator("nav a", { hasText: "Issues" }).click();
+    await page.getByRole("link", { name: "Issues", exact: true }).click();
     await page.waitForURL("**/issues");
     await expect(page).toHaveURL(/\/issues/);
   });
@@ -29,12 +29,13 @@ test.describe("Navigation", () => {
     await page.locator("text=Settings").click();
     await page.waitForURL("**/settings");
 
-    await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Members" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Members" })).toBeVisible();
   });
 
   test("agents page shows agent list", async ({ page }) => {
-    await page.locator("nav a", { hasText: "Agents" }).click();
+    await page.getByRole("link", { name: "Agents" }).click();
     await page.waitForURL("**/agents");
 
     // Should show "Agents" heading

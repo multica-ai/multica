@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -19,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type txStarter interface {
@@ -32,17 +32,18 @@ type dbExecutor interface {
 }
 
 type Handler struct {
-	Queries      *db.Queries
-	DB           dbExecutor
-	TxStarter    txStarter
-	Hub          *realtime.Hub
-	Bus          *events.Bus
-	TaskService  *service.TaskService
-	EmailService *service.EmailService
-	PingStore    *PingStore
-	UpdateStore  *UpdateStore
-	Storage      *storage.S3Storage
-	CFSigner     *auth.CloudFrontSigner
+	Queries          *db.Queries
+	DB               dbExecutor
+	TxStarter        txStarter
+	Hub              *realtime.Hub
+	Bus              *events.Bus
+	TaskService      *service.TaskService
+	AutopilotService *service.AutopilotService
+	EmailService     *service.EmailService
+	PingStore        *PingStore
+	UpdateStore      *UpdateStore
+	Storage          *storage.S3Storage
+	CFSigner         *auth.CloudFrontSigner
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 *storage.S3Storage, cfSigner *auth.CloudFrontSigner) *Handler {
@@ -51,18 +52,21 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		executor = candidate
 	}
 
+	taskService := service.NewTaskService(queries, hub, bus)
+
 	return &Handler{
-		Queries:      queries,
-		DB:           executor,
-		TxStarter:    txStarter,
-		Hub:          hub,
-		Bus:          bus,
-		TaskService:  service.NewTaskService(queries, hub, bus),
-		EmailService: emailService,
-		PingStore:    NewPingStore(),
-		UpdateStore:  NewUpdateStore(),
-		Storage:      s3,
-		CFSigner:     cfSigner,
+		Queries:          queries,
+		DB:               executor,
+		TxStarter:        txStarter,
+		Hub:              hub,
+		Bus:              bus,
+		TaskService:      taskService,
+		AutopilotService: service.NewAutopilotService(queries, txStarter, taskService),
+		EmailService:     emailService,
+		PingStore:        NewPingStore(),
+		UpdateStore:      NewUpdateStore(),
+		Storage:          s3,
+		CFSigner:         cfSigner,
 	}
 }
 
@@ -77,14 +81,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // Thin wrappers around util functions (preserve existing handler code unchanged).
-func parseUUID(s string) pgtype.UUID       { return util.ParseUUID(s) }
-func uuidToString(u pgtype.UUID) string    { return util.UUIDToString(u) }
-func textToPtr(t pgtype.Text) *string      { return util.TextToPtr(t) }
-func ptrToText(s *string) pgtype.Text      { return util.PtrToText(s) }
-func strToText(s string) pgtype.Text       { return util.StrToText(s) }
+func parseUUID(s string) pgtype.UUID                { return util.ParseUUID(s) }
+func uuidToString(u pgtype.UUID) string             { return util.UUIDToString(u) }
+func textToPtr(t pgtype.Text) *string               { return util.TextToPtr(t) }
+func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
+func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func uuidToPtr(u pgtype.UUID) *string      { return util.UUIDToPtr(u) }
+func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
