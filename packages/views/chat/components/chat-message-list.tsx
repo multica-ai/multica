@@ -9,13 +9,16 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle, Copy, Check } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
+import { toast } from "sonner";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -146,6 +149,7 @@ function AssistantMessage({
   isPending?: boolean;
 }) {
   const taskId = message.task_id;
+  const [copied, setCopied] = useState(false);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
   // seeded by useRealtimeSync during task execution — zero refetch when the
@@ -157,8 +161,49 @@ function AssistantMessage({
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
 
+  const handleCopy = async () => {
+    if (!navigator.clipboard) {
+      toast.error("Your browser does not support automatic copying. Please manually select and copy the text.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      toast.success("Copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed:", err);
+      toast.error("Copy failed. Please manually select and copy the text.");
+    }
+  };
+
   return (
-    <div className="w-full space-y-1.5">
+    <div className="group relative w-full space-y-1.5">
+      {/* Copy button - hover on desktop, always visible on mobile */}
+      <div className="absolute -top-1 right-0 opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
+        <Tooltip>
+          <TooltipTrigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 [@media(hover:none)]:size-11"
+              onClick={handleCopy}
+              aria-label="Copy message"
+            >
+              {copied ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {copied ? "Copied!" : "Copy"}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
       {timeline.length > 0 ? (
         <TimelineView items={timeline} />
       ) : message.content ? (
@@ -274,6 +319,10 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
     case "thinking":
       return <ThinkingRow item={item} />;
     case "error":
+      // Silent handling for task cancellation - user initiated action, not an error
+      if (item.content?.includes("task_cancelled") || item.content?.includes("Task cancelled")) {
+        return null;
+      }
       return <ErrorRow item={item} />;
     default:
       return null;
