@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { projectListOptions, isOpenProject } from "@multica/core/projects/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
@@ -627,7 +627,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         onOpenChange={setEditDialogOpen}
         autopilot={autopilot}
         agents={agents}
-        projects={projects}
+        projects={projects.filter(isOpenProject)}
       />
     </div>
   );

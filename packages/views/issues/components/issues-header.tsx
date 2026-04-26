@@ -48,7 +48,7 @@ import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { projectListOptions, isOpenProject } from "@multica/core/projects/queries";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   SORT_OPTIONS,
@@ -309,7 +309,7 @@ function ProjectSubContent({
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const query = search.trim().toLowerCase();
   const filtered = projects.filter((p) =>
-    p.title.toLowerCase().includes(query),
+    isOpenProject(p) && p.title.toLowerCase().includes(query),
   );
 
   return (
