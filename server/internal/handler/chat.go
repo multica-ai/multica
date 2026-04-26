@@ -15,8 +15,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type CreateChatSessionRequest struct {
-	AgentID string `json:"agent_id"`
-	Title   string `json:"title"`
+	AgentID          string   `json:"agent_id"`
+	Title            string   `json:"title"`
+	SelectedRepoURLs []string `json:"selected_repo_urls"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -50,11 +51,16 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	selectedRepoURLs := req.SelectedRepoURLs
+	if selectedRepoURLs == nil {
+		selectedRepoURLs = []string{}
+	}
 	session, err := h.Queries.CreateChatSession(r.Context(), db.CreateChatSessionParams{
-		WorkspaceID: parseUUID(workspaceID),
-		AgentID:     parseUUID(req.AgentID),
-		CreatorID:   parseUUID(userID),
-		Title:       req.Title,
+		WorkspaceID:      parseUUID(workspaceID),
+		AgentID:          parseUUID(req.AgentID),
+		CreatorID:        parseUUID(userID),
+		Title:            req.Title,
+		SelectedRepoUrls: selectedRepoURLs,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
@@ -87,16 +93,21 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, len(rows))
 		for i, s := range rows {
+			urls := s.SelectedRepoUrls
+			if urls == nil {
+				urls = []string{}
+			}
 			resp[i] = ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.HasUnread,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:               uuidToString(s.ID),
+				WorkspaceID:      uuidToString(s.WorkspaceID),
+				AgentID:          uuidToString(s.AgentID),
+				CreatorID:        uuidToString(s.CreatorID),
+				Title:            s.Title,
+				Status:           s.Status,
+				HasUnread:        s.HasUnread,
+				CreatedAt:        timestampToString(s.CreatedAt),
+				UpdatedAt:        timestampToString(s.UpdatedAt),
+				SelectedRepoURLs: urls,
 			}
 		}
 	} else {
@@ -110,16 +121,21 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, len(rows))
 		for i, s := range rows {
+			urls := s.SelectedRepoUrls
+			if urls == nil {
+				urls = []string{}
+			}
 			resp[i] = ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.HasUnread,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:               uuidToString(s.ID),
+				WorkspaceID:      uuidToString(s.WorkspaceID),
+				AgentID:          uuidToString(s.AgentID),
+				CreatorID:        uuidToString(s.CreatorID),
+				Title:            s.Title,
+				Status:           s.Status,
+				HasUnread:        s.HasUnread,
+				CreatedAt:        timestampToString(s.CreatedAt),
+				UpdatedAt:        timestampToString(s.UpdatedAt),
+				SelectedRepoURLs: urls,
 			}
 		}
 	}
@@ -482,16 +498,17 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type ChatSessionResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	AgentID     string `json:"agent_id"`
-	CreatorID   string `json:"creator_id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
+	ID               string   `json:"id"`
+	WorkspaceID      string   `json:"workspace_id"`
+	AgentID          string   `json:"agent_id"`
+	CreatorID        string   `json:"creator_id"`
+	Title            string   `json:"title"`
+	Status           string   `json:"status"`
 	// Only populated by list endpoints — single-session fetches return false.
-	HasUnread bool   `json:"has_unread"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	HasUnread        bool     `json:"has_unread"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
+	SelectedRepoURLs []string `json:"selected_repo_urls"`
 }
 
 type ChatMessageResponse struct {
@@ -504,15 +521,20 @@ type ChatMessageResponse struct {
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
+	urls := s.SelectedRepoUrls
+	if urls == nil {
+		urls = []string{}
+	}
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		Title:       s.Title,
-		Status:      s.Status,
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:               uuidToString(s.ID),
+		WorkspaceID:      uuidToString(s.WorkspaceID),
+		AgentID:          uuidToString(s.AgentID),
+		CreatorID:        uuidToString(s.CreatorID),
+		Title:            s.Title,
+		Status:           s.Status,
+		CreatedAt:        timestampToString(s.CreatedAt),
+		UpdatedAt:        timestampToString(s.UpdatedAt),
+		SelectedRepoURLs: urls,
 	}
 }
 

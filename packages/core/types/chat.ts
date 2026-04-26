@@ -9,6 +9,8 @@ export interface ChatSession {
   has_unread: boolean;
   created_at: string;
   updated_at: string;
+  /** Repo URLs pinned to this session. Empty = use all workspace repos. */
+  selected_repo_urls: string[];
 }
 
 export interface PendingChatTaskItem {

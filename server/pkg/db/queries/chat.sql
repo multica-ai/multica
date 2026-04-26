@@ -1,6 +1,6 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-VALUES ($1, $2, $3, $4)
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, selected_repo_urls)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetChatSession :one
@@ -15,14 +15,14 @@ WHERE id = $1 AND workspace_id = $2;
 -- Returns active sessions with a boolean unread flag. Unread is strictly
 -- per-session: either the user has uncleared assistant replies in this
 -- session or they don't. Counting messages would be misleading.
-SELECT cs.*,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.selected_repo_urls,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
 ORDER BY cs.updated_at DESC;
 
 -- name: ListAllChatSessionsByCreator :many
-SELECT cs.*,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.selected_repo_urls,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2

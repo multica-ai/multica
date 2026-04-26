@@ -7,6 +7,7 @@ const logger = createLogger("chat.store");
 
 const AGENT_STORAGE_KEY = "multica:chat:selectedAgentId";
 const SESSION_STORAGE_KEY = "multica:chat:activeSessionId";
+const REPO_URLS_STORAGE_KEY = "multica:chat:selectedRepoUrls";
 /** Drafts are stored as one JSON blob per workspace: { [sessionId]: text }. */
 const DRAFTS_KEY = "multica:chat:drafts";
 /** Placeholder sessionId for a chat that hasn't been created yet. */
@@ -62,6 +63,8 @@ export interface ChatState {
   isOpen: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
+  /** Repo URLs to pin to new chats. Empty = use all workspace repos. */
+  selectedRepoUrls: string[];
   showHistory: boolean;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
@@ -73,6 +76,7 @@ export interface ChatState {
   toggle: () => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
+  setSelectedRepoUrls: (urls: string[]) => void;
   setShowHistory: (show: boolean) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
@@ -94,10 +98,22 @@ export function createChatStore(options: ChatStoreOptions) {
     return slug ? `${base}:${slug}` : base;
   };
 
+  function readRepoUrls(s: typeof storage, key: string): string[] {
+    const raw = s.getItem(key);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
   const store = create<ChatState>((set, get) => ({
     isOpen: false,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
+    selectedRepoUrls: readRepoUrls(storage, wsKey(REPO_URLS_STORAGE_KEY)),
     showHistory: false,
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
@@ -125,6 +141,15 @@ export function createChatStore(options: ChatStoreOptions) {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
       set({ selectedAgentId: id });
+    },
+    setSelectedRepoUrls: (urls) => {
+      logger.info("setSelectedRepoUrls", { count: urls.length });
+      if (urls.length === 0) {
+        storage.removeItem(wsKey(REPO_URLS_STORAGE_KEY));
+      } else {
+        storage.setItem(wsKey(REPO_URLS_STORAGE_KEY), JSON.stringify(urls));
+      }
+      set({ selectedRepoUrls: urls });
     },
     setShowHistory: (show) => {
       logger.debug("setShowHistory", { to: show });
@@ -172,17 +197,20 @@ export function createChatStore(options: ChatStoreOptions) {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
     const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
     const nextDrafts = readDrafts(storage, wsKey(DRAFTS_KEY));
+    const nextRepoUrls = readRepoUrls(storage, wsKey(REPO_URLS_STORAGE_KEY));
     logger.info("workspace rehydration", {
       prevSession: store.getState().activeSessionId,
       nextSession,
       prevAgent: store.getState().selectedAgentId,
       nextAgent,
       draftCount: Object.keys(nextDrafts).length,
+      repoUrlCount: nextRepoUrls.length,
     });
     store.setState({
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       inputDrafts: nextDrafts,
+      selectedRepoUrls: nextRepoUrls,
     });
   });
 
