@@ -211,6 +211,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					r.Get("/repo-bindings", h.ListRepoBindings)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -223,6 +224,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Post("/repo-bindings", h.CreateRepoBinding)
+					r.Patch("/repo-bindings/{bindingId}", h.UpdateRepoBinding)
+					r.Delete("/repo-bindings/{bindingId}", h.DeleteRepoBinding)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)

@@ -21,6 +21,9 @@ import type {
   IssueReaction,
   Workspace,
   WorkspaceRepo,
+  WorkspaceRepoBinding,
+  CreateRepoBindingRequest,
+  UpdateRepoBindingRequest,
   MemberWithUser,
   User,
   Skill,
@@ -771,6 +774,31 @@ export class ApiClient {
 
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/invitations/${invitationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Repo bindings (CodeRabbit / GitHub PR-driven status automation)
+  async listRepoBindings(workspaceId: string): Promise<WorkspaceRepoBinding[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/repo-bindings`);
+  }
+
+  async createRepoBinding(workspaceId: string, data: CreateRepoBindingRequest): Promise<WorkspaceRepoBinding> {
+    return this.fetch(`/api/workspaces/${workspaceId}/repo-bindings`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRepoBinding(workspaceId: string, bindingId: string, data: UpdateRepoBindingRequest): Promise<WorkspaceRepoBinding> {
+    return this.fetch(`/api/workspaces/${workspaceId}/repo-bindings/${bindingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRepoBinding(workspaceId: string, bindingId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/repo-bindings/${bindingId}`, {
       method: "DELETE",
     });
   }

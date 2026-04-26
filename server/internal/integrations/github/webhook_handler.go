@@ -35,6 +35,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -395,19 +396,32 @@ func (h *WebhookHandler) applyDecision(ctx context.Context, issue db.Issue, dec 
 	}
 
 	// Publish bus events for WS broadcast.
+	//
+	// We include the full issue object under "issue" (mirroring handler.publish's
+	// shape for protocol.EventIssueUpdated) so the frontend's global WS handler
+	// can hydrate query caches naturally — same path a UI-driven status change
+	// would take. Flat fields are kept for any consumer that prefers them.
 	wsID := uuidStr(updated.WorkspaceID)
+	issueResp, prefix, respErr := h.buildIssueResponse(ctx, updated)
+	if respErr != nil {
+		slog.Warn("webhook: failed to build issue response for WS payload", "issue", uuidStr(updated.ID), "error", respErr)
+	}
+	_ = prefix
 	h.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: wsID,
 		ActorType:   "system",
 		Payload: map[string]any{
-			"id":         uuidStr(updated.ID),
-			"status":     updated.Status,
-			"prev":       prevStatus,
-			"source":     "github_webhook",
-			"src_event":  srcEvent,
-			"pr_number":  pr.Number,
-			"pr_url":     pr.HTMLURL,
+			"issue":          issueResp,
+			"id":             uuidStr(updated.ID),
+			"status":         updated.Status,
+			"prev":           prevStatus,
+			"status_changed": updated.Status != prevStatus,
+			"prev_status":    prevStatus,
+			"source":         "github_webhook",
+			"src_event":      srcEvent,
+			"pr_number":      pr.Number,
+			"pr_url":         pr.HTMLURL,
 		},
 	})
 
@@ -572,3 +586,85 @@ func uuidStr(u pgtype.UUID) string {
 // for streaming payloads.
 var _ = bytes.NewReader
 var _ = io.Discard
+
+// buildIssueResponse constructs a payload matching internal/handler.IssueResponse
+// JSON shape. Defined locally (not imported) to avoid a circular dependency
+// between the github integration package and the handler package.
+//
+// Returns (response, prefix, error). The response is intentionally a plain
+// map so the json encoder shapes it exactly like the handler's struct.
+func (h *WebhookHandler) buildIssueResponse(ctx context.Context, i db.Issue) (map[string]any, string, error) {
+	ws, err := h.Queries.GetWorkspace(ctx, i.WorkspaceID)
+	if err != nil {
+		return nil, "", err
+	}
+	prefix := ws.IssuePrefix
+	identifier := prefix + "-" + strconv.Itoa(int(i.Number))
+
+	var description any
+	if i.Description.Valid {
+		description = i.Description.String
+	}
+	var assigneeType any
+	if i.AssigneeType.Valid {
+		assigneeType = i.AssigneeType.String
+	}
+	var assigneeID any
+	if i.AssigneeID.Valid {
+		assigneeID = uuidStr(i.AssigneeID)
+	}
+	var parentID any
+	if i.ParentIssueID.Valid {
+		parentID = uuidStr(i.ParentIssueID)
+	}
+	var projectID any
+	if i.ProjectID.Valid {
+		projectID = uuidStr(i.ProjectID)
+	}
+	var dueDate any
+	if i.DueDate.Valid {
+		dueDate = i.DueDate.Time.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+
+	var prURL any
+	if i.PrUrl.Valid {
+		prURL = i.PrUrl.String
+	}
+	var prNumber any
+	if i.PrNumber.Valid {
+		prNumber = i.PrNumber.Int32
+	}
+	var prRepo any
+	if i.PrRepo.Valid {
+		prRepo = i.PrRepo.String
+	}
+
+	resp := map[string]any{
+		"id":              uuidStr(i.ID),
+		"workspace_id":    uuidStr(i.WorkspaceID),
+		"number":          i.Number,
+		"identifier":      identifier,
+		"title":           i.Title,
+		"description":     description,
+		"status":          i.Status,
+		"priority":        i.Priority,
+		"assignee_type":   assigneeType,
+		"assignee_id":     assigneeID,
+		"creator_type":    i.CreatorType,
+		"creator_id":      uuidStr(i.CreatorID),
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+		"position":        i.Position,
+		"due_date":        dueDate,
+		"created_at":      i.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05.000Z"),
+		"updated_at":      i.UpdatedAt.Time.UTC().Format("2006-01-02T15:04:05.000Z"),
+		"pr_url":          prURL,
+		"pr_number":       prNumber,
+		"pr_repo":         prRepo,
+	}
+	if len(i.PhaseState) > 0 {
+		resp["phase_state"] = json.RawMessage(i.PhaseState)
+	}
+	return resp, prefix, nil
+}
+

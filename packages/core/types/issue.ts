@@ -46,6 +46,9 @@ export interface Issue {
   due_date: string | null;
   reactions?: IssueReaction[];
   phase_state?: Record<string, unknown> | null;
+  pr_url?: string | null;
+  pr_number?: number | null;
+  pr_repo?: string | null;
   created_at: string;
   updated_at: string;
 }
