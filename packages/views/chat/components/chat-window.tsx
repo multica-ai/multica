@@ -631,25 +631,27 @@ function RepoMultiSelectDropdown({
         ) : null}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-auto max-w-72">
-        <DropdownMenuLabel className="text-xs">Repos (empty = all)</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {repos.map((repo) => {
-          const url = repo.url ?? "";
-          if (!url) return null;
-          const isSelected = selectedUrls.includes(url);
-          const label = repo.description || url.split("/").pop() || url;
-          return (
-            <DropdownMenuItem
-              key={url}
-              closeOnClick={false}
-              onClick={() => toggleRepo(url)}
-              className="flex items-center gap-2"
-            >
-              <Check className={`size-3.5 shrink-0 ${isSelected ? "text-foreground" : "text-transparent"}`} />
-              <span className="truncate flex-1 text-xs">{label}</span>
-            </DropdownMenuItem>
-          );
-        })}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs">Repos (empty = all)</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {repos.map((repo) => {
+            const url = repo.url ?? "";
+            if (!url) return null;
+            const isSelected = selectedUrls.includes(url);
+            const label = repo.description || url.split("/").pop() || url;
+            return (
+              <DropdownMenuItem
+                key={url}
+                closeOnClick={false}
+                onClick={() => toggleRepo(url)}
+                className="flex items-center gap-2"
+              >
+                <Check className={`size-3.5 shrink-0 ${isSelected ? "text-foreground" : "text-transparent"}`} />
+                <span className="truncate flex-1 text-xs">{label}</span>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
