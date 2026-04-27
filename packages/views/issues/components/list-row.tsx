@@ -91,19 +91,19 @@ export const ListRow = memo(function ListRow({
                 </span>
               </span>
             )}
+            {showLabels && (
+              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+                {labels.slice(0, 3).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {labels.length > 3 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{labels.length - 3}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
-          {showLabels && (
-            <span className="hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
-              {labels.slice(0, 3).map((label) => (
-                <LabelChip key={label.id} label={label} />
-              ))}
-              {labels.length > 3 && (
-                <span className="text-[11px] text-muted-foreground">
-                  +{labels.length - 3}
-                </span>
-              )}
-            </span>
-          )}
           {showProject && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
               <ProjectIcon project={project} size="sm" />

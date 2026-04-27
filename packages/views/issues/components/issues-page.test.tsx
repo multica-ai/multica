@@ -130,6 +130,7 @@ const mockViewState = {
 vi.mock("@multica/core/issues/stores/view-store", () => ({
   useClearFiltersOnWorkspaceChange: () => {},
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
+  mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
@@ -153,6 +154,7 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { key: "assignee", label: "Assignee" },
     { key: "dueDate", label: "Due date" },
     { key: "project", label: "Project" },
+    { key: "labels", label: "Labels" },
     { key: "childProgress", label: "Sub-issue progress" },
   ],
 }));

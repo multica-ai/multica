@@ -212,18 +212,28 @@ export const viewStorePersistOptions = (name: string) => ({
   // missing — the dropdown switch then reads `undefined` and renders unchecked
   // even though defaults treat it as on. Deep-merge `cardProperties` so newly
   // added toggles inherit their default value for existing users.
-  merge: (persisted: unknown, current: IssueViewState): IssueViewState => {
-    const p = (persisted ?? {}) as Partial<IssueViewState>;
-    return {
-      ...current,
-      ...p,
-      cardProperties: {
-        ...current.cardProperties,
-        ...(p.cardProperties ?? {}),
-      },
-    };
-  },
+  merge: mergeViewStatePersisted,
 });
+
+/**
+ * Reusable persist `merge` for view-state stores. Generic over T so the same
+ * deep-merge for `cardProperties` works for both the issues view store and
+ * the my-issues view store (which extends IssueViewState).
+ */
+export function mergeViewStatePersisted<T extends IssueViewState>(
+  persisted: unknown,
+  current: T,
+): T {
+  const p = (persisted ?? {}) as Partial<T>;
+  return {
+    ...current,
+    ...p,
+    cardProperties: {
+      ...current.cardProperties,
+      ...(p.cardProperties ?? {}),
+    },
+  };
+}
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */
 export function createIssueViewStore(persistKey: string): StoreApi<IssueViewState> {
