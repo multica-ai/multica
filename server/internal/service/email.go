@@ -217,8 +217,42 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 	return s.sender.Send(s.formatFrom(), []string{to}, subject, htmlBody)
 }
 
+// SendNotificationEmail sends a notification email (e.g. when a user is @mentioned).
+func (s *EmailService) SendNotificationEmail(to, title, body, link string) error {
+	safeTitle := html.EscapeString(title)
+	safeBody := html.EscapeString(body)
+
+	subject := sanitizeSubjectField(title)
+	if subject == "" {
+		subject = "Multica Notification"
+	}
+
+	linkHTML := ""
+	if link != "" {
+		linkHTML = fmt.Sprintf(
+			`<p style="margin: 24px 0;">
+				<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">View in Multica</a>
+			</p>`, link)
+	}
+
+	htmlBody := fmt.Sprintf(
+		`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+			<h2>%s</h2>
+			<p>%s</p>
+			%s
+			<p style="color: #666; font-size: 14px;">You received this email because notifications are enabled in your Multica settings.</p>
+		</div>`, safeTitle, safeBody, linkHTML)
+
+	if s.sender == nil {
+		fmt.Printf("[DEV] Notification email to %s: %s — %s\n", to, title, link)
+		return nil
+	}
+
+	return s.sender.Send(s.formatFrom(), []string{to}, subject, htmlBody)
+}
+
 // buildInvitationEmail assembles subject and HTML body for an invitation email.
-// Separated so the sanitization behavior is unit-testable without needing to
+// Separated so the sanitisation behavior is unit-testable without needing to
 // mock any sending backend.
 func buildInvitationEmail(inviterName, workspaceName, inviteURL string) (subject, htmlBody string) {
 	safeWorkspace := html.EscapeString(workspaceName)

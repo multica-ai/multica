@@ -163,3 +163,57 @@ func TestBuildInvitationEmail_BodyContainsInviteURL(t *testing.T) {
 		t.Errorf("body missing invite URL: %s", body)
 	}
 }
+
+func TestSendNotificationEmail_DevMode(t *testing.T) {
+	svc := &EmailService{sender: nil, fromEmail: "test@multica.ai"}
+	err := svc.SendNotificationEmail("user@example.com", "Test Title", "Test Body", "https://app.multica.ai/issue/123")
+	if err != nil {
+		t.Fatalf("expected nil error in dev mode, got %v", err)
+	}
+}
+
+func TestSendNotificationEmail_EmptyTitle(t *testing.T) {
+	svc := &EmailService{sender: nil, fromEmail: "test@multica.ai"}
+	err := svc.SendNotificationEmail("user@example.com", "", "Body text", "")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestSendNotificationEmail_HTMLEscaping(t *testing.T) {
+	var capturedSubject, capturedBody string
+	mockSender := &mockEmailSender{
+		sendFn: func(from string, to []string, subject, htmlBody string) error {
+			capturedSubject = subject
+			capturedBody = htmlBody
+			return nil
+		},
+	}
+	svc := &EmailService{sender: mockSender, fromEmail: "test@multica.ai"}
+
+	err := svc.SendNotificationEmail("user@example.com", "<script>alert(1)</script>", "Hello & goodbye", "https://app.multica.ai")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if strings.Contains(capturedBody, "<script>") {
+		t.Errorf("body should not contain raw script tag: %s", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "&lt;script&gt;") {
+		t.Errorf("body should contain escaped script tag: %s", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "Hello &amp; goodbye") {
+		t.Errorf("body should contain escaped ampersand: %s", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "View in Multica") {
+		t.Errorf("body should contain link button: %s", capturedBody)
+	}
+	_ = capturedSubject
+}
+
+type mockEmailSender struct {
+	sendFn func(from string, to []string, subject, htmlBody string) error
+}
+
+func (m *mockEmailSender) Send(from string, to []string, subject, htmlBody string) error {
+	return m.sendFn(from, to, subject, htmlBody)
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -20,6 +21,7 @@ const (
 	notificationDispatchInterval  = 10 * time.Second
 	notificationDispatchBatchSize = 20
 	dingTalkDeliveryMaxAttempts   = 3
+	emailDeliveryMaxAttempts      = 3
 )
 
 type dingtalkDeliveryPayload struct {
@@ -44,7 +46,14 @@ type dingTalkBindingMetadata struct {
 	Mobile  string `json:"mobile"`
 }
 
-func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries) {
+type emailDeliveryPayload struct {
+	BindingID         string          `json:"binding_id"`
+	Provider          string          `json:"provider"`
+	ExternalUserID    string          `json:"external_user_id"`
+	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
+func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService) {
 	ticker := time.NewTicker(notificationDispatchInterval)
 	defer ticker.Stop()
 
@@ -53,26 +62,24 @@ func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			dispatchPendingNotificationDeliveries(ctx, queries)
+			dispatchPendingNotificationDeliveries(ctx, queries, emailSvc)
 		}
 	}
 }
 
-func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Queries) {
+func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService) {
 	cfg, err := notifyutil.LoadDingTalkConfig()
-	if err != nil {
-		if errors.Is(err, notifyutil.ErrDingTalkNotConfigured) {
-			return
-		}
+	dingtalkReady := err == nil
+	if err != nil && !errors.Is(err, notifyutil.ErrDingTalkNotConfigured) {
 		slog.Warn("notification dispatcher: failed to load dingtalk config", "error", err)
-		return
 	}
-	if err := cfg.ValidateDeliveryConfig(); err != nil {
-		if errors.Is(err, notifyutil.ErrDingTalkDeliveryNotConfigured) {
-			return
+	if dingtalkReady {
+		if err := cfg.ValidateDeliveryConfig(); err != nil {
+			if !errors.Is(err, notifyutil.ErrDingTalkDeliveryNotConfigured) {
+				slog.Warn("notification dispatcher: invalid dingtalk delivery config", "error", err)
+			}
+			dingtalkReady = false
 		}
-		slog.Warn("notification dispatcher: invalid dingtalk delivery config", "error", err)
-		return
 	}
 
 	deliveries, err := queries.ListNotificationDeliveriesByStatus(ctx, "pending")
@@ -83,14 +90,20 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 
 	dispatched := 0
 	for _, delivery := range deliveries {
-		if delivery.Channel != "dingtalk" {
-			continue
-		}
 		if dispatched >= notificationDispatchBatchSize {
 			break
 		}
-		dispatched++
-		processDingTalkDelivery(ctx, queries, cfg, delivery)
+		switch delivery.Channel {
+		case "dingtalk":
+			if !dingtalkReady {
+				continue
+			}
+			dispatched++
+			processDingTalkDelivery(ctx, queries, cfg, delivery)
+		case "email":
+			dispatched++
+			processEmailDelivery(ctx, queries, emailSvc, delivery)
+		}
 	}
 }
 
@@ -156,6 +169,95 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 			"error", err,
 		)
 	}
+}
+
+func processEmailDelivery(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService, delivery db.NotificationDelivery) {
+	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
+		ID:       delivery.ID,
+		Status:   "pending",
+		Status_2: "pending",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to claim email delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var payload emailDeliveryPayload
+	if err := json.Unmarshal(delivery.PayloadSnapshot, &payload); err != nil {
+		finalizeFailedEmailDelivery(ctx, queries, claimed, errors.New("invalid email delivery payload"))
+		return
+	}
+
+	recipientEmail := strings.TrimSpace(payload.ExternalUserID)
+	if recipientEmail == "" {
+		finalizeFailedEmailDelivery(ctx, queries, claimed, errors.New("missing recipient email"))
+		return
+	}
+
+	var eventPayload notificationEventPayload
+	if len(payload.NotificationEvent) > 0 {
+		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
+			finalizeFailedEmailDelivery(ctx, queries, claimed, errors.New("invalid nested notification payload"))
+			return
+		}
+	}
+
+	title := strings.TrimSpace(eventPayload.Title)
+	if title == "" {
+		title = "Multica Notification"
+	}
+	body := strings.TrimSpace(eventPayload.Body)
+	link := strings.TrimSpace(eventPayload.Link)
+
+	if err := emailSvc.SendNotificationEmail(recipientEmail, title, body, link); err != nil {
+		finalizeFailedEmailDelivery(ctx, queries, claimed, err)
+		return
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark email delivery sent",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
+	}
+}
+
+func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
+	nextStatus := "pending"
+	if delivery.AttemptCount >= emailDeliveryMaxAttempts {
+		nextStatus = "failed"
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    nextStatus,
+		LastError: util.StrToText(truncateError(dispatchErr)),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark email delivery failure",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Warn("notification dispatcher: email delivery failed",
+		"delivery_id", util.UUIDToString(delivery.ID),
+		"status", nextStatus,
+		"attempt_count", delivery.AttemptCount,
+		"error", dispatchErr,
+	)
 }
 
 func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) (dingtalkDeliveryPayload, notificationEventPayload, db.ExternalAccountBinding, error) {

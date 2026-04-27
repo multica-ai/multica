@@ -90,7 +90,7 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
-	go runNotificationDeliveryDispatcher(sweepCtx, queries)
+	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService())
 	go runDBStatsLogger(sweepCtx, pool)
 
 	// Graceful shutdown

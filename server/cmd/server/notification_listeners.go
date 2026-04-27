@@ -163,6 +163,7 @@ func recordMentionNotification(
 	}
 
 	recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 }
 
 func recordMentionDingTalkDelivery(
@@ -241,6 +242,89 @@ func recordMentionDingTalkDelivery(
 		SentAt:              pgtype.Timestamptz{},
 	}); err != nil {
 		slog.Error("failed to create dingtalk delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+}
+
+func recordMentionEmailDelivery(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for email delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var emailPref *db.NotificationChannelPreference
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "email" && pref.EventType == "mentioned" && pref.Enabled {
+			emailPref = pref
+			break
+		}
+	}
+	if emailPref == nil {
+		return
+	}
+
+	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load external account bindings for email delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var binding *db.ExternalAccountBinding
+	for i := range bindings {
+		candidate := &bindings[i]
+		if candidate.Provider != "email" || candidate.Status != "active" {
+			continue
+		}
+		if emailPref.BindingID.Valid && util.UUIDToString(emailPref.BindingID) != util.UUIDToString(candidate.ID) {
+			continue
+		}
+		binding = candidate
+		break
+	}
+	if binding == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"binding_id":         util.UUIDToString(binding.ID),
+		"provider":           binding.Provider,
+		"external_user_id":   binding.ExternalUserID,
+		"notification_event": json.RawMessage(payloadSnapshot),
+	}
+	emailPayload, err := json.Marshal(payload)
+	if err != nil {
+		emailPayload = payloadSnapshot
+	}
+
+	if _, err := queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "email",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     emailPayload,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Error("failed to create email delivery record for mention notification",
 			"notification_event_id", util.UUIDToString(event.ID),
 			"recipient_id", recipientID,
 			"error", err,
