@@ -1,3 +1,5 @@
+import type { Attachment } from "./attachment";
+
 export type IssueStatus =
   | "backlog"
   | "todo"
@@ -38,6 +40,7 @@ export interface Issue {
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];
+  attachments?: Attachment[];
   created_at: string;
   updated_at: string;
 }

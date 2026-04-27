@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,7 +35,8 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
-import type { TimelineEntry, Attachment } from "@multica/core/types";
+import { AttachmentList } from "./attachment-list";
+import type { TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 
 // ---------------------------------------------------------------------------
@@ -89,59 +90,6 @@ function DeleteCommentDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Standalone attachment list — renders attachments not already in the markdown
-// ---------------------------------------------------------------------------
-
-function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
-  if (!attachments?.length) return null;
-  // Skip attachments whose URL is already referenced in the markdown content,
-  // and duplicates of the same file (same name/type/size) that are referenced.
-  const standalone = content
-    ? attachments.filter((a) => {
-        if (content.includes(a.url)) return false;
-        // Dedup: if another attachment with the same file identity is already
-        // inline in the content, this is a duplicate upload — skip it.
-        const hasSiblingInContent = attachments.some(
-          (other) =>
-            other.id !== a.id &&
-            other.filename === a.filename &&
-            other.content_type === a.content_type &&
-            other.size_bytes === a.size_bytes &&
-            content.includes(other.url),
-        );
-        if (hasSiblingInContent) return false;
-        return true;
-      })
-    : attachments;
-  if (!standalone.length) return null;
-
-  return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      {standalone.map((a) => (
-        <div
-          key={a.id}
-          className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        >
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{a.filename}</p>
-          </div>
-          {a.download_url && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
   );
 }
 
