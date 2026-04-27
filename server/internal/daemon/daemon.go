@@ -984,7 +984,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// have built a real session before getting stuck (rate-limit, tool
 		// error, etc.) and we want the next chat turn to resume there
 		// rather than start over and "forget" the conversation.
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, "agent_error"); err != nil {
+		failureReason := result.FailureReason
+		if failureReason == "" {
+			failureReason = "agent_error"
+		}
+		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
 		}
 	default:
@@ -1174,12 +1178,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		model = entry.Model
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:             env.WorkDir,
-		Model:           model,
-		Timeout:         d.cfg.AgentTimeout,
-		ResumeSessionID: task.PriorSessionID,
-		CustomArgs:      customArgs,
-		McpConfig:       mcpConfig,
+		Cwd:                       env.WorkDir,
+		Model:                     model,
+		Timeout:                   d.cfg.AgentTimeout,
+		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
+		ResumeSessionID:           task.PriorSessionID,
+		CustomArgs:                customArgs,
+		McpConfig:                 mcpConfig,
 	}
 	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
 	// workspace dir rather than the task workdir, so the AGENTS.md written by
@@ -1264,13 +1269,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		// in sync even when the agent times out after building a session.
 		// We mark as "blocked" (not a hard error return) so handleTask
 		// goes through the FailTask path that forwards session info.
+		comment := result.Error
+		if comment == "" {
+			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
+		}
 		return TaskResult{
-			Status:    "blocked",
-			Comment:   fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout),
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:        "blocked",
+			Comment:       comment,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: "timeout",
+			Usage:         usageEntries,
 		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
@@ -1363,6 +1373,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				if err := d.client.ReportTaskMessages(sendCtx, taskID, toSend); err != nil {
 					taskLog.Debug("failed to report task messages", "error", err)
+				} else {
+					taskLog.Debug("reported task messages", "count", len(toSend), "last_seq", toSend[len(toSend)-1].Seq)
 				}
 				cancel()
 			}
@@ -1436,6 +1448,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						toolName = callIDToTool[msg.CallID]
 						mu.Unlock()
 					}
+					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:    int(s),

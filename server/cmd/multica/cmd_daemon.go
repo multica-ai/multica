@@ -65,6 +65,7 @@ func init() {
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
@@ -81,6 +82,7 @@ func init() {
 	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
 	daemonCmd.AddCommand(daemonStartCmd)
@@ -241,6 +243,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		args = append(args, "--agent-timeout", d.String())
 	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		args = append(args, "--codex-semantic-inactivity-timeout", d.String())
+	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		args = append(args, "--max-concurrent-tasks", strconv.Itoa(n))
 	}
@@ -281,6 +286,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		overrides.AgentTimeout = d
+	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		overrides.CodexSemanticInactivityTimeout = d
 	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		overrides.MaxConcurrentTasks = n
