@@ -31,6 +31,7 @@ const (
 	defaultDingTalkMessageURL  = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
 	defaultDingTalkScope       = "openid corpid Contact.User.Read"
 	dingTalkStatePrefix        = "dingtalk"
+	dingTalkAccessTokenHeader  = "x-acs-dingtalk-access-token"
 )
 
 var ErrDingTalkNotConfigured = errors.New("dingtalk is not configured")
@@ -334,7 +335,7 @@ func (c DingTalkConfig) GetUserProfile(ctx context.Context, accessToken string) 
 	if err != nil {
 		return DingTalkUserProfile{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set(dingTalkAccessTokenHeader, strings.TrimSpace(accessToken))
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -490,7 +491,7 @@ func (c DingTalkConfig) SendTextMessage(ctx context.Context, corpID, unionID, co
 	if err != nil {
 		return DingTalkSendResult{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set(dingTalkAccessTokenHeader, strings.TrimSpace(accessToken))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)

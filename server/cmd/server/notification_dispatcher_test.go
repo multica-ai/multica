@@ -146,8 +146,8 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 			_, _ = w.Write([]byte(`{"access_token":"app-token","expires_in":7200}`))
 		case r.URL.Path == "/message":
 			messageCalls++
-			if got := r.Header.Get("Authorization"); got != "Bearer app-token" {
-				t.Fatalf("expected bearer app token, got %q", got)
+			if got := r.Header.Get("x-acs-dingtalk-access-token"); got != "app-token" {
+				t.Fatalf("expected x-acs-dingtalk-access-token %q, got %q", "app-token", got)
 			}
 
 			var body struct {

@@ -79,8 +79,8 @@ func TestCompleteMyDingTalkBinding(t *testing.T) {
 				"openId": "token-open-id"
 			}`))
 		case "/userinfo":
-			if got := r.Header.Get("Authorization"); got != "Bearer ding-access-token" {
-				t.Fatalf("expected bearer token, got %q", got)
+			if got := r.Header.Get("x-acs-dingtalk-access-token"); got != "ding-access-token" {
+				t.Fatalf("expected x-acs-dingtalk-access-token %q, got %q", "ding-access-token", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
