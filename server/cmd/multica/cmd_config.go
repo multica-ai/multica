@@ -24,7 +24,7 @@ var configShowCmd = &cobra.Command{
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "Set a CLI configuration value",
-	Long:  "Supported keys: server_url, app_url, workspace_id",
+	Long:  "Supported keys: server_url, app_url, workspace_id, update_manifest_url",
 	Args:  exactArgs(2),
 	RunE:  runConfigSet,
 }
@@ -49,6 +49,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "server_url:   %s\n", valueOrDefault(cfg.ServerURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "app_url:      %s\n", valueOrDefault(cfg.AppURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "workspace_id: %s\n", valueOrDefault(cfg.WorkspaceID, "(not set)"))
+	fmt.Fprintf(os.Stdout, "update_manifest_url: %s\n", valueOrDefault(cfg.UpdateManifestURL, "(not set)"))
 	return nil
 }
 
@@ -68,8 +69,10 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		cfg.AppURL = value
 	case "workspace_id":
 		cfg.WorkspaceID = value
+	case "update_manifest_url":
+		cfg.UpdateManifestURL = value
 	default:
-		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id)", key)
+		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id, update_manifest_url)", key)
 	}
 
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
@@ -79,7 +82,6 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, value)
 	return nil
 }
-
 
 func valueOrDefault(v, fallback string) string {
 	if v == "" {
