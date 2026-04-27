@@ -263,8 +263,17 @@ server: ## Run only the Go server for the current checkout
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server
 
-daemon: ## Restart the local agent daemon using the CLI's stored auth/session
-	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
+daemon: ## Idempotent daemon bootstrap for current checkout: ensure env, configure profile, restart daemon
+	@set -e; \
+	OUTPUT=$$(bash scripts/setup-daemon.sh "$(ENV_FILE)"); \
+	printf "%s\n" "$$OUTPUT"; \
+	PROFILE=$$(printf "%s\n" "$$OUTPUT" | tail -n 1); \
+	if [ -z "$$PROFILE" ]; then \
+		echo "Error: could not resolve daemon profile"; \
+		exit 1; \
+	fi; \
+	echo "==> Restarting daemon with profile: $$PROFILE"; \
+	cd server && go build -o bin/multica ./cmd/multica && ./bin/multica daemon restart --profile "$$PROFILE"
 
 cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
