@@ -45,6 +45,55 @@ function Get-UpdateManifest {
 # ---------------------------------------------------------------------------
 # CLI Installation
 # ---------------------------------------------------------------------------
+function Get-ManagedInstallMarkerPath {
+    Join-Path $CliBinDir ".install-source.json"
+}
+
+function Test-ManagedInstall {
+    if (-not (Test-Path $CliBinPath)) {
+        return $false
+    }
+
+    $markerPath = Get-ManagedInstallMarkerPath
+    if (-not (Test-Path $markerPath)) {
+        return $false
+    }
+
+    try {
+        $marker = Get-Content $markerPath -Raw | ConvertFrom-Json
+        return $marker.install_channel -eq "managed-manifest"
+    } catch {
+        return $false
+    }
+}
+
+function Write-ManagedInstallMarker {
+    $markerPath = Get-ManagedInstallMarkerPath
+    $payload = @{
+        install_channel  = "managed-manifest"
+        installed_at     = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        manifest_url     = $UpdateManifestUrl
+        installer_version = "managed-manifest-v1"
+    }
+    $payload | ConvertTo-Json | Set-Content -Path $markerPath -Encoding UTF8
+}
+
+function Test-LegacyInstall {
+    (Test-Path $CliBinPath) -and -not (Test-ManagedInstall)
+}
+
+function Uninstall-LegacyInstall {
+    Write-Info "Detected legacy CLI install from the main-branch installer. It will be replaced in place by the managed manifest install."
+}
+
+function Migrate-LegacyInstallIfNeeded {
+    if (-not (Test-LegacyInstall)) {
+        return $false
+    }
+    Uninstall-LegacyInstall
+    return $true
+}
+
 function Install-CliBinary {
     Write-Info "Installing Multica CLI from update manifest..."
 
@@ -141,6 +190,13 @@ function Install-CliBinary {
         Write-Fail "Failed to install the new CLI binary: $_"
     }
 
+    try {
+        Write-ManagedInstallMarker
+    } catch {
+        Remove-Item $tmpDir -Recurse -Force
+        Write-Fail "Installed the CLI but failed to write the managed install marker: $_"
+    }
+
     Remove-Item $tmpDir -Recurse -Force
 
     Add-ToUserPath $CliBinDir
@@ -163,11 +219,13 @@ function Add-ToUserPath {
 }
 
 function Install-Cli {
+    $null = Migrate-LegacyInstallIfNeeded
+
     if ((Test-CommandExists "multica") -and ((Get-Command multica).Source -ne $CliBinPath)) {
         Write-Warn "Detected another multica on PATH at $((Get-Command multica).Source). The managed install will use $CliBinPath."
     }
 
-    if (Test-Path $CliBinPath) {
+    if (Test-ManagedInstall) {
         $currentVer = (& $CliBinPath version 2>$null) -replace '.*?(v[\d.]+).*','$1'
         $manifest = Get-UpdateManifest
         $latestVer = if ($manifest) { $manifest.version } else { $null }

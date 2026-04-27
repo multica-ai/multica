@@ -19,6 +19,7 @@ REPO_URL="https://github.com/multica-ai/multica.git"
 INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.multica/server}"
 CLI_BIN_DIR="${MULTICA_CLI_BIN_DIR:-$HOME/.multica/bin}"
 CLI_BIN_PATH="$CLI_BIN_DIR/multica"
+BREW_PACKAGE="multica-ai/tap/multica"
 APP_URL="${MULTICA_APP_URL:-https://multica.wujieai.com}"
 SERVER_URL="${MULTICA_SERVER_URL:-https://multica.wujieai.com}"
 UPDATE_MANIFEST_URL="${MULTICA_UPDATE_MANIFEST_URL:-https://mock-oss.multica.local/cli/manifest.json}"
@@ -44,6 +45,16 @@ warn()  { printf "${BOLD}${YELLOW}⚠ %s${RESET}\n" "$*" >&2; }
 fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+paths_match() {
+  python3 - "$1" "$2" <<'PY'
+import os, sys
+a, b = sys.argv[1], sys.argv[2]
+if not (os.path.exists(a) and os.path.exists(b)):
+    raise SystemExit(1)
+raise SystemExit(0 if os.path.realpath(a) == os.path.realpath(b) else 1)
+PY
+}
 
 json_get() {
   local expr="$1"
@@ -88,6 +99,62 @@ detect_os() {
 # ---------------------------------------------------------------------------
 # CLI Installation
 # ---------------------------------------------------------------------------
+managed_install_marker_path() {
+  printf '%s\n' "$CLI_BIN_DIR/.install-source.json"
+}
+
+is_managed_install() {
+  local marker_path install_channel
+  [ -x "$CLI_BIN_PATH" ] || return 1
+
+  marker_path=$(managed_install_marker_path)
+  [ -f "$marker_path" ] || return 1
+
+  install_channel=$(json_get "install_channel" < "$marker_path" 2>/dev/null || true)
+  [ "$install_channel" = "managed-manifest" ]
+}
+
+write_managed_install_marker() {
+  local marker_path installed_at
+  marker_path=$(managed_install_marker_path)
+  installed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+  python3 - "$marker_path" "$UPDATE_MANIFEST_URL" "$installed_at" <<'PY'
+import json, sys
+path, manifest_url, installed_at = sys.argv[1:4]
+data = {
+    "install_channel": "managed-manifest",
+    "installed_at": installed_at,
+    "manifest_url": manifest_url,
+    "installer_version": "managed-manifest-v1",
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, ensure_ascii=True, indent=2)
+    fh.write("\n")
+PY
+}
+
+legacy_install_candidates_unix() {
+  if command_exists brew && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
+    printf 'brew\n'
+  fi
+
+  local candidate
+  for candidate in "/usr/local/bin/multica" "$HOME/.local/bin/multica"; do
+    [ -e "$candidate" ] || continue
+    if paths_match "$candidate" "$CLI_BIN_PATH"; then
+      continue
+    fi
+    printf 'path:%s\n' "$candidate"
+  done
+}
+
+has_legacy_install_unix() {
+  local candidates
+  candidates=$(legacy_install_candidates_unix || true)
+  [ -n "$candidates" ]
+}
+
 find_manifest_asset_index() {
   local manifest="$1"
   MANIFEST_PATH="$manifest" python3 - "$OS" "$ARCH" <<'PY'
@@ -166,6 +233,11 @@ install_cli_binary() {
     fail "Failed to install the new CLI binary."
   fi
 
+  if ! write_managed_install_marker; then
+    rm -rf "$tmp_dir"
+    fail "Installed the CLI but failed to write the managed install marker."
+  fi
+
   if ! echo "$PATH" | tr ':' '\n' | grep -q "^$CLI_BIN_DIR$"; then
     export PATH="$CLI_BIN_DIR:$PATH"
     add_to_path "$CLI_BIN_DIR"
@@ -206,11 +278,13 @@ get_latest_version() {
 }
 
 install_cli() {
+  migrate_legacy_install_if_needed
+
   if command_exists multica && [ "$(command -v multica)" != "$CLI_BIN_PATH" ]; then
     warn "Detected another multica on PATH at $(command -v multica). The managed install will use $CLI_BIN_PATH."
   fi
 
-  if [ -x "$CLI_BIN_PATH" ]; then
+  if is_managed_install; then
     local current_ver
     current_ver=$("$CLI_BIN_PATH" version 2>/dev/null | awk '{print $2}' || echo "unknown")
 
@@ -255,18 +329,64 @@ is_daemon_running() {
   "$CLI_BIN_PATH" daemon status 2>/dev/null | grep -qi "running"
 }
 
-stop_managed_daemon_for_replace() {
-  if [ ! -x "$CLI_BIN_PATH" ]; then
-    return 0
-  fi
-  if ! is_daemon_running; then
+is_daemon_running_for_binary() {
+  local binary_path="$1"
+  [ -x "$binary_path" ] || return 1
+  "$binary_path" daemon status 2>/dev/null | grep -qi "running"
+}
+
+stop_daemon_for_binary() {
+  local binary_path="$1"
+  [ -x "$binary_path" ] || return 0
+  if ! is_daemon_running_for_binary "$binary_path"; then
     return 0
   fi
 
   info "Stopping running Multica daemon before replacing CLI..."
-  if ! "$CLI_BIN_PATH" daemon stop >/dev/null 2>&1; then
+  if ! "$binary_path" daemon stop >/dev/null 2>&1; then
     fail "Failed to stop the running Multica daemon. Please stop it manually and retry."
   fi
+}
+
+stop_managed_daemon_for_replace() {
+  stop_daemon_for_binary "$CLI_BIN_PATH"
+}
+
+uninstall_legacy_install_unix() {
+  local candidate candidate_path
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+
+    case "$candidate" in
+      brew)
+        info "Detected legacy Homebrew install. Uninstalling $BREW_PACKAGE ..."
+        if ! brew uninstall "$BREW_PACKAGE" >/dev/null 2>&1; then
+          fail "Failed to uninstall legacy Homebrew package $BREW_PACKAGE."
+        fi
+        ok "Removed legacy Homebrew install"
+        ;;
+      path:*)
+        candidate_path="${candidate#path:}"
+        info "Detected legacy CLI binary at $candidate_path. Removing it before managed install ..."
+        stop_daemon_for_binary "$candidate_path"
+        if ! rm -f "$candidate_path"; then
+          fail "Failed to remove legacy CLI binary at $candidate_path."
+        fi
+        ok "Removed legacy CLI binary at $candidate_path"
+        ;;
+    esac
+  done <<EOF
+$(legacy_install_candidates_unix || true)
+EOF
+}
+
+migrate_legacy_install_if_needed() {
+  if ! has_legacy_install_unix; then
+    return 0
+  fi
+
+  info "Detected legacy CLI install from the main-branch installer. Migrating to managed manifest install ..."
+  uninstall_legacy_install_unix
 }
 
 login_and_start_daemon() {
