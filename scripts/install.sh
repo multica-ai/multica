@@ -108,6 +108,7 @@ install_cli_binary() {
   info "Installing Multica CLI from update manifest..."
 
   local tmp_dir manifest_path asset_index asset_url asset_checksum asset_version archive_path
+  local staged_binary backup_path had_existing_cli=0
   tmp_dir=$(mktemp -d)
   manifest_path="$tmp_dir/manifest.json"
 
@@ -141,8 +142,29 @@ install_cli_binary() {
 
   mkdir -p "$CLI_BIN_DIR"
   tar -xzf "$archive_path" -C "$tmp_dir" multica
-  mv "$tmp_dir/multica" "$CLI_BIN_PATH"
-  chmod +x "$CLI_BIN_PATH"
+  staged_binary="$tmp_dir/multica"
+  chmod +x "$staged_binary"
+
+  backup_path="$CLI_BIN_PATH.bak"
+  rm -f "$backup_path"
+  if [ -e "$CLI_BIN_PATH" ]; then
+    had_existing_cli=1
+    stop_managed_daemon_for_replace
+    if ! mv "$CLI_BIN_PATH" "$backup_path"; then
+      rm -rf "$tmp_dir"
+      fail "Failed to move existing CLI out of the way before installing the new version."
+    fi
+  fi
+
+  if mv "$staged_binary" "$CLI_BIN_PATH"; then
+    rm -f "$backup_path"
+  else
+    if [ "$had_existing_cli" -eq 1 ] && [ -e "$backup_path" ]; then
+      mv "$backup_path" "$CLI_BIN_PATH" || true
+    fi
+    rm -rf "$tmp_dir"
+    fail "Failed to install the new CLI binary."
+  fi
 
   if ! echo "$PATH" | tr ':' '\n' | grep -q "^$CLI_BIN_DIR$"; then
     export PATH="$CLI_BIN_DIR:$PATH"
@@ -231,6 +253,20 @@ configure_internal_cloud() {
 
 is_daemon_running() {
   "$CLI_BIN_PATH" daemon status 2>/dev/null | grep -qi "running"
+}
+
+stop_managed_daemon_for_replace() {
+  if [ ! -x "$CLI_BIN_PATH" ]; then
+    return 0
+  fi
+  if ! is_daemon_running; then
+    return 0
+  fi
+
+  info "Stopping running Multica daemon before replacing CLI..."
+  if ! "$CLI_BIN_PATH" daemon stop >/dev/null 2>&1; then
+    fail "Failed to stop the running Multica daemon. Please stop it manually and retry."
+  fi
 }
 
 login_and_start_daemon() {

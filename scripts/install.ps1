@@ -108,7 +108,39 @@ function Install-CliBinary {
         Write-Fail "multica.exe not found in downloaded archive."
     }
 
-    Copy-Item $exeSrc $CliBinPath -Force
+    $backupPath = "$CliBinPath.bak"
+    if (Test-Path $backupPath) {
+        Remove-Item $backupPath -Force
+    }
+
+    $hadExistingCli = Test-Path $CliBinPath
+    if ($hadExistingCli) {
+        Stop-ManagedDaemonForReplace
+        try {
+            Move-Item $CliBinPath $backupPath -Force
+        } catch {
+            Remove-Item $tmpDir -Recurse -Force
+            Write-Fail "Failed to move existing CLI out of the way before installing the new version: $_"
+        }
+    }
+
+    try {
+        Move-Item $exeSrc $CliBinPath -Force
+        if (Test-Path $backupPath) {
+            Remove-Item $backupPath -Force
+        }
+    } catch {
+        if ($hadExistingCli -and (Test-Path $backupPath)) {
+            try {
+                Move-Item $backupPath $CliBinPath -Force
+            } catch {
+                Write-Warn "Failed to restore the previous CLI from backup at $backupPath."
+            }
+        }
+        Remove-Item $tmpDir -Recurse -Force
+        Write-Fail "Failed to install the new CLI binary: $_"
+    }
+
     Remove-Item $tmpDir -Recurse -Force
 
     Add-ToUserPath $CliBinDir
@@ -186,6 +218,21 @@ function Test-DaemonRunning {
         return $status -match 'running'
     } catch {
         return $false
+    }
+}
+
+function Stop-ManagedDaemonForReplace {
+    if (-not (Test-Path $CliBinPath)) {
+        return
+    }
+    if (-not (Test-DaemonRunning)) {
+        return
+    }
+
+    Write-Info "Stopping running Multica daemon before replacing CLI..."
+    & $CliBinPath daemon stop | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to stop the running Multica daemon. Please stop it manually and retry."
     }
 }
 
