@@ -676,32 +676,15 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		"status": "running",
 	})
 
-	// Try Homebrew first, fall back to direct download.
-	var output string
-	if cli.IsBrewInstall() {
-		d.logger.Info("updating CLI via Homebrew...")
-		var err error
-		output, err = cli.UpdateViaBrew()
-		if err != nil {
-			d.logger.Error("CLI update failed", "error", err, "output", output)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-				"status": "failed",
-				"error":  fmt.Sprintf("brew upgrade failed: %v", err),
-			})
-			return
-		}
-	} else {
-		d.logger.Info("updating CLI via direct download...", "target_version", update.TargetVersion)
-		var err error
-		output, err = cli.UpdateViaDownload(update.TargetVersion)
-		if err != nil {
-			d.logger.Error("CLI update failed", "error", err)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-				"status": "failed",
-				"error":  fmt.Sprintf("download update failed: %v", err),
-			})
-			return
-		}
+	d.logger.Info("updating CLI via configured manifest...", "target_version", update.TargetVersion)
+	output, err := cli.UpdateViaDownload(update.TargetVersion)
+	if err != nil {
+		d.logger.Error("CLI update failed", "error", err)
+		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  fmt.Sprintf("download update failed: %v", err),
+		})
+		return
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
@@ -715,22 +698,16 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
-// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/multica)
-// so the restarted daemon picks up the new Cellar version automatically.
-// For non-brew installs, it resolves to the absolute path of the replaced binary.
-// The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
+// The restart target should match the managed install path whenever possible so
+// the child process starts from the newly-replaced binary.
 func (d *Daemon) triggerRestart() {
-	newBin, err := os.Executable()
+	newBin, err := cli.ResolveInstalledBinaryPath()
 	if err != nil {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
 	}
-	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
-	// points to the latest Cellar version, so we must preserve it.
-	if !cli.IsBrewInstall() {
-		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
-			newBin = resolved
-		}
+	if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
+		newBin = resolved
 	}
 
 	d.logger.Info("scheduling daemon restart", "new_binary", newBin)

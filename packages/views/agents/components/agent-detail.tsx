@@ -13,6 +13,7 @@ import {
   Settings,
   KeyRound,
   Terminal,
+  Copy,
 } from "lucide-react";
 import type { Agent, RuntimeDevice, MemberWithUser } from "@multica/core/types";
 import {
@@ -62,6 +63,7 @@ export function AgentDetail({
   onUpdate,
   onArchive,
   onRestore,
+  onDuplicate,
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
@@ -70,12 +72,27 @@ export function AgentDetail({
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
+  onDuplicate: () => void | Promise<void>;
 }) {
   const st = statusConfig[agent.status];
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
   const isArchived = !!agent.archived_at;
+  const isOwner = !!currentUserId && agent.owner_id === currentUserId;
+  const myMembership = members.find((m) => m.user_id === currentUserId);
+  const canDuplicate =
+    !isArchived &&
+    !!currentUserId &&
+    !!myMembership &&
+    (agent.owner_id === currentUserId ||
+      myMembership.role === "owner" ||
+      myMembership.role === "admin");
+
+  // All tabs visible for everyone; non-owners get read-only mode
+  const effectiveTab = detailTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : "instructions";
 
   return (
     <div className="flex h-full flex-col">
@@ -84,9 +101,11 @@ export function AgentDetail({
         <div className="flex items-center gap-2 bg-muted/50 px-4 py-2 text-xs text-muted-foreground border-b">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1">This agent is archived. It cannot be assigned or mentioned.</span>
-          <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
-            Restore
-          </Button>
+          {isOwner && (
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
+              Restore
+            </Button>
+          )}
         </div>
       )}
 
@@ -116,7 +135,7 @@ export function AgentDetail({
             </span>
           </div>
         </div>
-        {!isArchived && (
+        {!isArchived && (canDuplicate || isOwner) && (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -126,13 +145,21 @@ export function AgentDetail({
               <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setConfirmArchive(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Archive Agent
-              </DropdownMenuItem>
+              {canDuplicate && (
+                <DropdownMenuItem onClick={() => void onDuplicate()}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Duplicate agent
+                </DropdownMenuItem>
+              )}
+              {isOwner && (
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => setConfirmArchive(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Archive Agent
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -145,7 +172,7 @@ export function AgentDetail({
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
-              activeTab === tab.id
+              effectiveTab === tab.id
                 ? "border-primary text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
@@ -158,36 +185,39 @@ export function AgentDetail({
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto p-6">
-        {activeTab === "instructions" && (
+        {effectiveTab === "instructions" && (
           <InstructionsTab
             agent={agent}
+            readOnly={!isOwner}
             onSave={(instructions) => onUpdate(agent.id, { instructions })}
           />
         )}
-        {activeTab === "skills" && (
-          <SkillsTab agent={agent} />
+        {effectiveTab === "skills" && (
+          <SkillsTab agent={agent} readOnly={!isOwner} />
         )}
-        {activeTab === "tasks" && <TasksTab agent={agent} />}
-        {activeTab === "env" && (
+        {effectiveTab === "tasks" && <TasksTab agent={agent} />}
+        {effectiveTab === "env" && (
           <EnvTab
             agent={agent}
-            readOnly={agent.custom_env_redacted}
+            readOnly={agent.custom_env_redacted || !isOwner}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
-        {activeTab === "custom_args" && (
+        {effectiveTab === "custom_args" && (
           <CustomArgsTab
             agent={agent}
             runtimeDevice={runtimeDevice}
+            readOnly={!isOwner}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
-        {activeTab === "settings" && (
+        {effectiveTab === "settings" && (
           <SettingsTab
             agent={agent}
             runtimes={runtimes}
             members={members}
             currentUserId={currentUserId}
+            readOnly={!isOwner}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}

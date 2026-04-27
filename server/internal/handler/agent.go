@@ -8,6 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,8 +44,9 @@ type AgentResponse struct {
 	Skills             []SkillResponse   `json:"skills"`
 	CreatedAt          string            `json:"created_at"`
 	UpdatedAt          string            `json:"updated_at"`
-	ArchivedAt         *string           `json:"archived_at"`
-	ArchivedBy         *string           `json:"archived_by"`
+	ArchivedAt              *string           `json:"archived_at"`
+	ArchivedBy              *string           `json:"archived_by"`
+	CustomEnvCopiedPending  bool              `json:"custom_env_copied_pending"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -100,9 +104,30 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		ArchivedAt:             timestampToPtr(a.ArchivedAt),
+		ArchivedBy:             uuidToPtr(a.ArchivedBy),
+		CustomEnvCopiedPending: a.CustomEnvCopiedPending,
 	}
+}
+
+// stripCustomEnvValuesForCopy keeps env keys from the source but clears all values.
+// The second return is true when the source had at least one non-empty value (secrets
+// that must be re-entered on the copy).
+func stripCustomEnvValuesForCopy(src []byte) ([]byte, bool) {
+	var m map[string]string
+	if err := json.Unmarshal(src, &m); err != nil || len(m) == 0 {
+		return []byte("{}"), false
+	}
+	hadSecret := false
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = ""
+		if strings.TrimSpace(v) != "" {
+			hadSecret = true
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b, hadSecret
 }
 
 // RepoData holds repository information included in claim responses so the
@@ -179,11 +204,25 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 
+	ownerFilter := r.URL.Query().Get("owner")
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+
 	var agents []db.Agent
 	var err error
-	if r.URL.Query().Get("include_archived") == "true" {
+	switch {
+	case ownerFilter == "me":
+		byOwner := db.ListAgentsByOwnerParams{
+			WorkspaceID: parseUUID(workspaceID),
+			OwnerID:     parseUUID(userID),
+		}
+		if includeArchived {
+			agents, err = h.Queries.ListAllAgentsByOwner(r.Context(), byOwner)
+		} else {
+			agents, err = h.Queries.ListAgentsByOwner(r.Context(), byOwner)
+		}
+	case includeArchived:
 		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
-	} else {
+	default:
 		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
 	}
 	if err != nil {
@@ -331,11 +370,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only the runtime owner or workspace owner/admin may bind this runtime to an agent.
+	// Only the runtime owner may bind this runtime to an agent.
 	// Runtimes without an owner_id (legacy) are usable by anyone.
-	if member, ok := ctxMember(r.Context()); ok {
+	{
 		runtimeOwner := uuidToString(runtime.OwnerID)
-		if runtimeOwner != "" && !roleAllowed(member.Role, "owner", "admin") && runtimeOwner != ownerID {
+		if runtimeOwner != "" && runtimeOwner != ownerID {
 			writeError(w, http.StatusForbidden, "you can only use your own runtime to create an agent")
 			return
 		}
@@ -362,21 +401,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        parseUUID(workspaceID),
-		Name:               req.Name,
-		Description:        req.Description,
-		Instructions:       req.Instructions,
-		AvatarUrl:          ptrToText(req.AvatarURL),
-		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeConfig:      rc,
-		RuntimeID:          runtime.ID,
-		Visibility:         req.Visibility,
-		MaxConcurrentTasks: req.MaxConcurrentTasks,
-		OwnerID:            parseUUID(ownerID),
-		CustomEnv:          ce,
-		CustomArgs:         ca,
-		McpConfig:          mc,
-		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		WorkspaceID:              parseUUID(workspaceID),
+		Name:                     req.Name,
+		Description:              req.Description,
+		Instructions:             req.Instructions,
+		AvatarUrl:                ptrToText(req.AvatarURL),
+		RuntimeMode:              runtime.RuntimeMode,
+		RuntimeConfig:            rc,
+		RuntimeID:                runtime.ID,
+		Visibility:               req.Visibility,
+		MaxConcurrentTasks:       req.MaxConcurrentTasks,
+		OwnerID:                  parseUUID(ownerID),
+		CustomEnv:                ce,
+		CustomArgs:               ca,
+		McpConfig:                mc,
+		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		CustomEnvCopiedPending:   false,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -400,6 +440,186 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(agent)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+type CopyAgentRequest struct {
+	Name string `json:"name"`
+}
+
+// Matches a trailing " (N)" suffix where N is a non-negative integer (e.g. "Agent (12)").
+var agentNumberedNameSuffix = regexp.MustCompile(`^(.+?) \((\d+)\)$`)
+
+func agentDuplicateBaseName(name string) string {
+	if m := agentNumberedNameSuffix.FindStringSubmatch(name); m != nil {
+		return m[1]
+	}
+	return name
+}
+
+// nextDuplicateAgentName picks the next "base (N)" name not colliding with existing agent
+// names in the workspace. The base is derived from sourceName by stripping one trailing
+// " (N)" suffix if present (so duplicating "Agent (1)" uses base "Agent").
+func nextDuplicateAgentName(existingNames []string, sourceName string) string {
+	base := agentDuplicateBaseName(sourceName)
+	maxN := 0
+	prefix := base + " ("
+	for _, n := range existingNames {
+		if n == base {
+			continue
+		}
+		if strings.HasPrefix(n, prefix) && strings.HasSuffix(n, ")") {
+			inner := n[len(prefix) : len(n)-1]
+			if num, err := strconv.Atoi(inner); err == nil && num > maxN {
+				maxN = num
+			}
+		}
+	}
+	return fmt.Sprintf("%s (%d)", base, maxN+1)
+}
+
+func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sourceAgent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	wsID := uuidToString(sourceAgent.WorkspaceID)
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	if !ok {
+		return
+	}
+	userID := requestUserID(r)
+	isAgentOwner := uuidToString(sourceAgent.OwnerID) == userID
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	if !isAgentOwner && !isAdmin {
+		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can duplicate this agent")
+		return
+	}
+
+	var req CopyAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	newName := strings.TrimSpace(req.Name)
+	if newName == "" {
+		allAgents, err := h.Queries.ListAllAgents(r.Context(), sourceAgent.WorkspaceID)
+		if err != nil {
+			slog.Warn("failed to list agents for duplicate name", "workspace_id", wsID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to duplicate agent: "+err.Error())
+			return
+		}
+		names := make([]string, len(allAgents))
+		for i, a := range allAgents {
+			names[i] = a.Name
+		}
+		newName = nextDuplicateAgentName(names, sourceAgent.Name)
+	}
+
+	skills, err := h.Queries.ListAgentSkills(r.Context(), sourceAgent.ID)
+	if err != nil {
+		slog.Warn("failed to load agent skills for copy", "agent_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+
+	rc := sourceAgent.RuntimeConfig
+	if len(rc) == 0 {
+		rc = []byte("{}")
+	} else {
+		rc = append([]byte(nil), rc...)
+	}
+	ce, envCopiedPending := stripCustomEnvValuesForCopy(sourceAgent.CustomEnv)
+	ca := sourceAgent.CustomArgs
+	if len(ca) == 0 {
+		ca = []byte("[]")
+	} else {
+		ca = append([]byte(nil), ca...)
+	}
+	var mc []byte
+	if len(sourceAgent.McpConfig) > 0 {
+		mc = append([]byte(nil), sourceAgent.McpConfig...)
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+
+	newAgent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
+		WorkspaceID:              sourceAgent.WorkspaceID,
+		Name:                     newName,
+		Description:              sourceAgent.Description,
+		Instructions:             sourceAgent.Instructions,
+		AvatarUrl:                sourceAgent.AvatarUrl,
+		RuntimeMode:              sourceAgent.RuntimeMode,
+		RuntimeConfig:            rc,
+		RuntimeID:                sourceAgent.RuntimeID,
+		Visibility:               sourceAgent.Visibility,
+		MaxConcurrentTasks:       sourceAgent.MaxConcurrentTasks,
+		OwnerID:                  parseUUID(userID),
+		CustomEnv:                ce,
+		CustomArgs:               ca,
+		McpConfig:                mc,
+		Model:                    sourceAgent.Model,
+		CustomEnvCopiedPending:   envCopiedPending,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "agent_workspace_name_unique" {
+			writeError(w, http.StatusConflict, fmt.Sprintf("an agent named %q already exists in this workspace", newName))
+			return
+		}
+		slog.Warn("duplicate agent failed", append(logger.RequestAttrs(r), "source_agent_id", id, "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to duplicate agent: "+err.Error())
+		return
+	}
+
+	for _, s := range skills {
+		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
+			AgentID: newAgent.ID,
+			SkillID: s.ID,
+		}); err != nil {
+			slog.Warn("failed to copy agent skill", append(logger.RequestAttrs(r), "source_agent_id", id, "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to copy agent skills")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	slog.Info("agent duplicated", append(logger.RequestAttrs(r), "source_agent_id", id, "new_agent_id", uuidToString(newAgent.ID))...)
+
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          newAgent.RuntimeID,
+		WorkspaceID: newAgent.WorkspaceID,
+	})
+	if err == nil && runtime.Status == "online" {
+		h.TaskService.ReconcileAgentStatus(r.Context(), newAgent.ID)
+		newAgent, _ = h.Queries.GetAgent(r.Context(), newAgent.ID)
+	}
+
+	resp := agentToResponse(newAgent)
+	skillRows, err := h.Queries.ListAgentSkills(r.Context(), newAgent.ID)
+	if err == nil && len(skillRows) > 0 {
+		resp.Skills = make([]SkillResponse, len(skillRows))
+		for i, s := range skillRows {
+			resp.Skills[i] = skillToResponse(s)
+		}
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, wsID)
+	h.publish(protocol.EventAgentCreated, wsID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -508,6 +728,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomEnv != nil {
 		ce, _ := json.Marshal(*req.CustomEnv)
 		params.CustomEnv = ce
+		if agent.CustomEnvCopiedPending {
+			params.CustomEnvCopiedPending = pgtype.Bool{Bool: false, Valid: true}
+		}
 	}
 	if req.CustomArgs != nil {
 		ca, _ := json.Marshal(*req.CustomArgs)
@@ -527,15 +750,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
-		// Only the runtime owner or workspace owner/admin may bind this runtime to an agent.
+		// Only the runtime owner may bind this runtime to an agent.
 		// Runtimes without an owner_id (legacy) are usable by anyone.
 		userID := requestUserID(r)
-		if member, ok := ctxMember(r.Context()); ok {
-			runtimeOwner := uuidToString(runtime.OwnerID)
-			if runtimeOwner != "" && !roleAllowed(member.Role, "owner", "admin") && runtimeOwner != userID {
-				writeError(w, http.StatusForbidden, "you can only use your own runtime")
-				return
-			}
+		runtimeOwner := uuidToString(runtime.OwnerID)
+		if runtimeOwner != "" && runtimeOwner != userID {
+			writeError(w, http.StatusForbidden, "you can only use your own runtime")
+			return
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}

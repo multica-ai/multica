@@ -63,6 +63,27 @@ spec:
                 secretKeyRef:
                   name: multica-bot-secrets
                   key: GOOGLE_CLIENT_SECRET
+            - name: DINGTALK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: DINGTALK_CLIENT_ID
+            - name: DINGTALK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: DINGTALK_CLIENT_SECRET
+            - name: DINGTALK_ROBOT_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: DINGTALK_ROBOT_CODE
+            - name: DINGTALK_TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: DINGTALK_TOKEN_ENCRYPTION_KEY
+                  optional: true
             - name: GOOGLE_REDIRECT_URI
               value: https://multica.wujieai.com/auth/callback
             - name: COOKIE_DOMAIN

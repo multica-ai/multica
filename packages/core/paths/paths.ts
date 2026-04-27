@@ -19,7 +19,11 @@ function workspaceScoped(slug: string) {
   return {
     root: () => `${ws}/issues`,
     issues: () => `${ws}/issues`,
-    issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    issueDetail: (id: string, opts?: { commentId?: string }) => {
+      const path = `${ws}/issues/${encode(id)}`;
+      if (!opts?.commentId) return path;
+      return `${path}?comment=${encode(opts.commentId)}`;
+    },
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
