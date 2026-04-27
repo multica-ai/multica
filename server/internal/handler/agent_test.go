@@ -53,36 +53,3 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 		t.Fatalf("second CreateAgent with duplicate name: expected 409, got %d: %s", w2.Code, w2.Body.String())
 	}
 }
-
-func TestCopyEnvKeysOnly(t *testing.T) {
-	tests := []struct {
-		name string
-		in   []byte
-		want map[string]string
-	}{
-		{"nil input", nil, map[string]string{}},
-		{"empty object", []byte("{}"), map[string]string{}},
-		{"single key", []byte(`{"API_KEY":"secret123"}`), map[string]string{"API_KEY": ""}},
-		{"multiple keys", []byte(`{"A":"1","B":"2","C":"3"}`), map[string]string{"A": "", "B": "", "C": ""}},
-		{"invalid json", []byte(`not json`), map[string]string{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			out := copyEnvKeysOnly(tt.in)
-			var got map[string]string
-			if err := json.Unmarshal(out, &got); err != nil {
-				t.Fatalf("invalid JSON output: %s", out)
-			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %d keys, want %d", len(got), len(tt.want))
-			}
-			for k, wantV := range tt.want {
-				if gotV, ok := got[k]; !ok {
-					t.Errorf("missing key %q", k)
-				} else if gotV != wantV {
-					t.Errorf("key %q: got %q, want %q", k, gotV, wantV)
-				}
-			}
-		})
-	}
-}

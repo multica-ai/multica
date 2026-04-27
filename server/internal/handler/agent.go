@@ -465,9 +465,12 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rc = append([]byte(nil), rc...)
 	}
-	// Copy env keys only — values are left empty so the new owner fills in
-	// their own credentials.
-	ce := copyEnvKeysOnly(sourceAgent.CustomEnv)
+	ce := sourceAgent.CustomEnv
+	if len(ce) == 0 {
+		ce = []byte("{}")
+	} else {
+		ce = append([]byte(nil), ce...)
+	}
 	ca := sourceAgent.CustomArgs
 	if len(ca) == 0 {
 		ca = []byte("[]")
@@ -593,29 +596,6 @@ func redactEnv(resp *AgentResponse) {
 	}
 	resp.CustomEnv = masked
 	resp.CustomEnvRedacted = true
-}
-
-// copyEnvKeysOnly takes a raw JSON custom_env blob and returns a new JSON
-// object that preserves all keys but replaces every value with an empty string.
-// This is used during agent duplication so the new owner can see which env vars
-// need to be configured without inheriting the source agent's secrets.
-func copyEnvKeysOnly(raw []byte) []byte {
-	if len(raw) == 0 {
-		return []byte("{}")
-	}
-	var m map[string]string
-	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
-		return []byte("{}")
-	}
-	blanked := make(map[string]string, len(m))
-	for k := range m {
-		blanked[k] = ""
-	}
-	out, err := json.Marshal(blanked)
-	if err != nil {
-		return []byte("{}")
-	}
-	return out
 }
 
 // redactMcpConfig removes the mcp_config value from the response when the caller is not

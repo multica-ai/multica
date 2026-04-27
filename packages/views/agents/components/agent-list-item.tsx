@@ -1,13 +1,7 @@
 "use client";
 
-import { Cloud, Monitor, Copy } from "lucide-react";
+import { Cloud, Monitor } from "lucide-react";
 import type { Agent, MemberWithUser } from "@multica/core/types";
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-} from "@multica/ui/components/ui/context-menu";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { statusConfig } from "../config";
 
@@ -16,20 +10,17 @@ export function AgentListItem({
   isSelected,
   onClick,
   ownerMember,
-  onDuplicate,
 }: {
   agent: Agent;
   isSelected: boolean;
   onClick: () => void;
   /** When set (e.g. All scope), show owner under the agent name. */
   ownerMember?: MemberWithUser | null;
-  /** Called when the user selects "Duplicate" from the context menu. */
-  onDuplicate?: () => void;
 }) {
   const st = statusConfig[agent.status];
   const isArchived = !!agent.archived_at;
 
-  const inner = (
+  return (
     <button
       onClick={onClick}
       className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
@@ -65,21 +56,5 @@ export function AgentListItem({
         </div>
       </div>
     </button>
-  );
-
-  if (!onDuplicate || isArchived) return inner;
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger className="w-full">
-        {inner}
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onClick={onDuplicate}>
-          <Copy className="h-3.5 w-3.5" />
-          Duplicate
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
   );
 }
