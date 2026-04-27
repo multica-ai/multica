@@ -18,6 +18,7 @@ export type WSEventType =
   | "agent:created"
   | "agent:archived"
   | "agent:restored"
+  | "task:queued"
   | "task:dispatch"
   | "task:progress"
   | "task:completed"
@@ -186,6 +187,14 @@ export interface TaskMessagePayload {
 }
 
 export interface TaskCompletedPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+}
+
+export interface TaskQueuedPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;

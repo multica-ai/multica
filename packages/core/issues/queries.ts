@@ -123,7 +123,7 @@ export function childIssueProgressOptions(wsId: string) {
 export function issueExecutionSummaryOptions(wsId: string) {
   return queryOptions({
     queryKey: issueKeys.executionSummary(wsId),
-    queryFn: () => api.getIssueExecutionSummaries(),
+    queryFn: () => api.getIssueExecutionSummaries({ limit: 1000 }),
     select: (data) => {
       const map = new Map<string, IssueExecutionSummary>();
       for (const summary of data.summaries) {

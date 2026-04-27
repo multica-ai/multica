@@ -205,19 +205,27 @@ export function TasksTab({ agent }: { agent: Agent }) {
     if (selectedTasks.length === 0 || cancelling) return;
     setCancelling(true);
     try {
+      const cancellableTasks = selectedTasks.filter((task) => !!task.issue_id);
       const results = await Promise.allSettled(
-        selectedTasks
-          .filter((task) => !!task.issue_id)
-          .map((task) => api.cancelTask(task.issue_id, task.id)),
+        cancellableTasks.map((task) => api.cancelTask(task.issue_id, task.id)),
       );
       const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failedIds = new Set<string>();
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          const task = cancellableTasks[index];
+          if (task) failedIds.add(task.id);
+        }
+      });
       if (succeeded > 0) {
         toast.success(`Cancelled ${succeeded} task${succeeded > 1 ? "s" : ""}`);
       }
-      if (succeeded !== results.length) {
-        toast.error("Some tasks could not be cancelled");
+      if (failedIds.size > 0) {
+        toast.error(`${failedIds.size} task${failedIds.size > 1 ? "s" : ""} could not be cancelled`);
+        setSelectedTaskIds(failedIds);
+      } else {
+        clearSelected();
       }
-      clearSelected();
       await refetch();
     } finally {
       setCancelling(false);

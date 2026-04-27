@@ -421,8 +421,12 @@ export class ApiClient {
     return this.fetch("/api/issues/child-progress");
   }
 
-  async getIssueExecutionSummaries(): Promise<{ summaries: IssueExecutionSummary[] }> {
-    return this.fetch("/api/issues/execution-summary");
+  async getIssueExecutionSummaries(params?: { limit?: number; offset?: number }): Promise<{ summaries: IssueExecutionSummary[] }> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.fetch(`/api/issues/execution-summary${qs ? `?${qs}` : ""}`);
   }
 
   async deleteIssue(id: string): Promise<void> {

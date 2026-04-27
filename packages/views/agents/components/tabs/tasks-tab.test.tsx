@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentTask } from "@multica/core/types";
 
@@ -115,6 +116,10 @@ describe("TasksTab", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    cleanup();
+  });
+
   it("uses workspace-scoped issue detail paths when issue data is loaded", async () => {
     renderTasksTab(
       [
@@ -217,6 +222,65 @@ describe("TasksTab", () => {
       expect(mockCancelTask).toHaveBeenCalledWith("issue-queue", "task-3");
     });
     expect(toastState.success).toHaveBeenCalledWith("Task cancelled");
+  });
+
+  it("keeps failed tasks selected after partial bulk cancel failure", async () => {
+    renderTasksTab([
+      {
+        id: "task-ok",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-ok",
+        status: "running",
+        priority: 2,
+        dispatched_at: "2026-04-16T00:00:00Z",
+        started_at: "2026-04-16T00:01:00Z",
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-04-16T00:00:00Z",
+        issue_identifier: "MUL-8",
+        issue_title: "Successful cancel",
+      },
+      {
+        id: "task-fail",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-fail",
+        status: "queued",
+        priority: 2,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-04-16T00:00:00Z",
+        issue_identifier: "MUL-9",
+        issue_title: "Failed cancel",
+      },
+    ]);
+    mockCancelTask.mockImplementation((_issueId: string, taskId: string) =>
+      taskId === "task-fail"
+        ? Promise.reject(new Error("cancel failed"))
+        : Promise.resolve({ id: taskId, status: "cancelled" }),
+    );
+
+    const checkboxes = await screen.findAllByRole("checkbox", {
+      name: "Select task for bulk actions",
+    });
+    fireEvent.click(checkboxes[0]!);
+    fireEvent.click(checkboxes[1]!);
+
+    expect(await screen.findByText("2 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+
+    await waitFor(() => {
+      expect(mockCancelTask).toHaveBeenCalledWith("issue-ok", "task-ok");
+      expect(mockCancelTask).toHaveBeenCalledWith("issue-fail", "task-fail");
+    });
+    await screen.findByText("1 selected");
+    expect(toastState.success).toHaveBeenCalledWith("Cancelled 1 task");
+    expect(toastState.error).toHaveBeenCalledWith("1 task could not be cancelled");
   });
 
   it("renders tasks with empty issue_id as inert rows and does not fetch issue detail", async () => {

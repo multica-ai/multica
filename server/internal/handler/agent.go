@@ -777,6 +777,8 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Keep this custom projection local until the enriched task response is
+	// promoted to sqlc; it joins issue/comment/chat metadata in one round trip.
 	rows, err := h.DB.Query(r.Context(), `
 SELECT
 	atq.id,
@@ -800,17 +802,18 @@ SELECT
 	i.number,
 	i.title,
 	c.content AS trigger_comment_content,
-	(
-		SELECT cm.content
-		FROM chat_message cm
-		WHERE cm.chat_session_id = atq.chat_session_id
-			AND cm.role = 'user'
-		ORDER BY cm.created_at DESC
-		LIMIT 1
-	) AS chat_message
+	latest_chat_message.content AS chat_message
 FROM agent_task_queue atq
 LEFT JOIN issue i ON i.id = atq.issue_id AND i.workspace_id = $2
 LEFT JOIN comment c ON c.id = atq.trigger_comment_id
+LEFT JOIN LATERAL (
+	SELECT cm.content
+	FROM chat_message cm
+	WHERE cm.chat_session_id = atq.chat_session_id
+		AND cm.role = 'user'
+	ORDER BY cm.created_at DESC
+	LIMIT 1
+) latest_chat_message ON true
 WHERE atq.agent_id = $1
 ORDER BY atq.created_at DESC
 `, parseUUID(id), agent.WorkspaceID)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, ListTodo } from "lucide-react";
 import { toast } from "sonner";
@@ -47,8 +47,24 @@ function isTextInputTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   if (target.isContentEditable) return true;
-  if (target.closest("[contenteditable='true']")) return true;
+  if (target.closest("[contenteditable='true'], [contenteditable='plaintext-only']")) return true;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+function shouldIgnorePreviewShortcut(event: KeyboardEvent) {
+  if (event.defaultPrevented) return true;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return true;
+  if (!(event.target instanceof HTMLElement)) return false;
+  if (isTextInputTarget(event.target)) return true;
+  return !!event.target.closest(
+    [
+      "[role='dialog']",
+      "[role='menu']",
+      "[role='listbox']",
+      "[data-radix-popper-content-wrapper]",
+      "[data-floating-ui-portal]",
+    ].join(", "),
+  );
 }
 
 export function IssuesPage() {
@@ -309,30 +325,38 @@ export function IssuesPage() {
     ],
   );
 
+  const closePreviewRef = useRef(closePreview);
+  const navigatePreviewRef = useRef(navigatePreview);
+
+  useEffect(() => {
+    closePreviewRef.current = closePreview;
+    navigatePreviewRef.current = navigatePreview;
+  }, [closePreview, navigatePreview]);
+
   useEffect(() => {
     if (!peekIssueId) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isTextInputTarget(event.target)) return;
+      if (shouldIgnorePreviewShortcut(event)) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        closePreview();
+        closePreviewRef.current();
         return;
       }
       if (event.key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
-        void navigatePreview(1);
+        void navigatePreviewRef.current(1);
         return;
       }
       if (event.key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
-        void navigatePreview(-1);
+        void navigatePreviewRef.current(-1);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closePreview, navigatePreview, peekIssueId]);
+  }, [peekIssueId]);
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(

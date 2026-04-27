@@ -1,9 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+// @vitest-environment jsdom
+
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, IssueStatus } from "@multica/core/types";
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/realtime", () => ({
+  useWSEvent: vi.fn(),
+  useWSReconnect: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -75,6 +83,8 @@ const mockGetChildIssueProgress = vi.hoisted(() =>
 const mockGetIssueExecutionSummaries = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ summaries: [] }),
 );
+const mockGetIssue = vi.hoisted(() => vi.fn());
+const mockListTimeline = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
     "@multica/core/api",
@@ -87,6 +97,10 @@ vi.mock("@multica/core/api", async () => {
       getChildIssueProgress: (...args: any[]) => mockGetChildIssueProgress(...args),
       getIssueExecutionSummaries: (...args: any[]) =>
         mockGetIssueExecutionSummaries(...args),
+      getIssue: (...args: any[]) => mockGetIssue(...args),
+      listTimeline: (...args: any[]) => mockListTimeline(...args),
+      getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
+      createComment: vi.fn(),
       updateIssue: vi.fn(),
       listMembers: () => Promise.resolve([]),
       listAgents: () => Promise.resolve([]),
@@ -96,6 +110,10 @@ vi.mock("@multica/core/api", async () => {
       getChildIssueProgress: (...args: any[]) => mockGetChildIssueProgress(...args),
       getIssueExecutionSummaries: (...args: any[]) =>
         mockGetIssueExecutionSummaries(...args),
+      getIssue: (...args: any[]) => mockGetIssue(...args),
+      listTimeline: (...args: any[]) => mockListTimeline(...args),
+      getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
+      createComment: vi.fn(),
       updateIssue: vi.fn(),
       listMembers: () => Promise.resolve([]),
       listAgents: () => Promise.resolve([]),
@@ -380,13 +398,42 @@ function renderWithQuery(ui: React.ReactElement) {
 describe("IssuesPage (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+      configurable: true,
+      value: vi.fn(() => []),
+    });
     navigationState.search = "";
     mockListIssues.mockResolvedValue({ issues: [], total: 0 });
     mockGetChildIssueProgress.mockResolvedValue({ progress: [] });
     mockGetIssueExecutionSummaries.mockResolvedValue({ summaries: [] });
+    mockGetIssue.mockImplementation((id: string) =>
+      Promise.resolve(mockIssues.find((issue) => issue.id === id) ?? mockIssues[0]),
+    );
+    mockListTimeline.mockResolvedValue([]);
     mockViewState.viewMode = "board";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("shows loading skeletons initially", () => {
@@ -473,6 +520,150 @@ describe("IssuesPage (shared)", () => {
     fireEvent.click(link!);
 
     expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-1");
+  });
+
+  it("navigates the preview with J/K and arrow keys within the current lane", async () => {
+    const laneIssues: Issue[] = [
+      { ...mockIssues[0]!, position: 0 },
+      {
+        ...mockIssues[0]!,
+        id: "issue-4",
+        number: 4,
+        identifier: "TES-4",
+        title: "Second todo",
+        position: 1,
+      },
+    ];
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: laneIssues.filter((i) => i.status === params?.status),
+        total: laneIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    mockGetIssue.mockImplementation((id: string) =>
+      Promise.resolve(laneIssues.find((issue) => issue.id === id) ?? laneIssues[0]),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Second todo");
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(window, { key: "j" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-4");
+
+    navigationState.replace.mockClear();
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-4");
+  });
+
+  it("navigates to the previous preview item with K and ArrowUp", async () => {
+    const laneIssues: Issue[] = [
+      { ...mockIssues[0]!, position: 0 },
+      {
+        ...mockIssues[0]!,
+        id: "issue-4",
+        number: 4,
+        identifier: "TES-4",
+        title: "Second todo",
+        position: 1,
+      },
+    ];
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: laneIssues.filter((i) => i.status === params?.status),
+        total: laneIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    mockGetIssue.mockImplementation((id: string) =>
+      Promise.resolve(laneIssues.find((issue) => issue.id === id) ?? laneIssues[1]),
+    );
+    navigationState.search = "?peek=issue-4";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Second todo");
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(window, { key: "k" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-1");
+
+    navigationState.replace.mockClear();
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-1");
+  });
+
+  it("closes preview with Escape without resetting workbench state", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Implement auth");
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues");
+  });
+
+  it("does not trigger preview shortcuts while typing in quick comment", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Quick comment");
+    const textbox = document.querySelector(
+      "[contenteditable='true'], [contenteditable='plaintext-only']",
+    ) as HTMLElement | null;
+    expect(textbox).toBeTruthy();
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(textbox!, { key: "j" });
+    fireEvent.keyDown(textbox!, { key: "ArrowDown" });
+    fireEvent.keyDown(textbox!, { key: "Escape" });
+
+    expect(navigationState.replace).not.toHaveBeenCalled();
+  });
+
+  it("does not steal arrow or escape keys from open picker/listbox popovers", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Implement auth");
+    navigationState.replace.mockClear();
+
+    const listbox = document.createElement("div");
+    listbox.setAttribute("role", "listbox");
+    const option = document.createElement("button");
+    listbox.appendChild(option);
+    document.body.appendChild(listbox);
+    try {
+      fireEvent.keyDown(option, { key: "ArrowDown" });
+      fireEvent.keyDown(option, { key: "Escape" });
+    } finally {
+      document.body.removeChild(listbox);
+    }
+
+    expect(navigationState.replace).not.toHaveBeenCalled();
   });
 
   it("scrolls the selected board card into the safe preview viewport", async () => {

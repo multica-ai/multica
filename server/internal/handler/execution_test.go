@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func createExecutionTestIssue(t *testing.T, title string, number int) string {
@@ -158,6 +162,33 @@ func createForeignWorkspaceIssueWithTask(t *testing.T) string {
 	return issueID
 }
 
+func subscribeTaskEventForIssue(eventType, issueID string) <-chan string {
+	ch := make(chan string, 16)
+	testHandler.Bus.Subscribe(eventType, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok || payload["issue_id"] != issueID {
+			return
+		}
+		taskID, _ := payload["task_id"].(string)
+		select {
+		case ch <- taskID:
+		default:
+		}
+	})
+	return ch
+}
+
+func waitForTaskEvent(t *testing.T, ch <-chan string, eventType string) string {
+	t.Helper()
+	select {
+	case taskID := <-ch:
+		return taskID
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", eventType)
+		return ""
+	}
+}
+
 func TestGetIssueExecutionSummaries_AggregatesPerIssue(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -238,6 +269,194 @@ func TestGetIssueExecutionSummaries_AggregatesPerIssue(t *testing.T) {
 	if _, ok := byIssueID[foreignIssueID]; ok {
 		t.Fatalf("foreign workspace issue should not be included")
 	}
+}
+
+func TestGetIssueExecutionSummaries_PaginatesIssues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	firstIssueID := createExecutionTestIssue(t, "Paged execution summary issue 1", 9311)
+	secondIssueID := createExecutionTestIssue(t, "Paged execution summary issue 2", 9312)
+	thirdIssueID := createExecutionTestIssue(t, "Paged execution summary issue 3", 9313)
+
+	ctx := context.Background()
+	updates := []struct {
+		id       string
+		interval string
+	}{
+		{firstIssueID, "30 minutes"},
+		{secondIssueID, "20 minutes"},
+		{thirdIssueID, "10 minutes"},
+	}
+	for _, update := range updates {
+		if _, err := testPool.Exec(ctx, `UPDATE issue SET created_at = now() + $2::interval WHERE id = $1`, update.id, update.interval); err != nil {
+			t.Fatalf("update issue created_at: %v", err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/issues/execution-summary?limit=1&offset=1", nil)
+
+	testHandler.GetIssueExecutionSummaries(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Summaries []IssueExecutionSummaryResponse `json:"summaries"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Summaries) != 1 {
+		t.Fatalf("expected one paged summary, got %d", len(resp.Summaries))
+	}
+	if resp.Summaries[0].IssueID != secondIssueID {
+		t.Fatalf("expected second newest issue %s, got %s", secondIssueID, resp.Summaries[0].IssueID)
+	}
+}
+
+func TestGetIssueExecutionSummaries_PrefersRunningTaskAsLatest(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "execution-summary-latest-agent", nil)
+	issueID := createExecutionTestIssue(t, "Running plus queued issue", 9314)
+	runningCommentID := createExecutionTestComment(t, issueID, "Active running trigger")
+	queuedCommentID := createExecutionTestComment(t, issueID, "New queued follow-up")
+
+	createExecutionTestTask(t, agentID, issueID, "running", 1, runningCommentID, "", "started_at")
+	createExecutionTestTask(t, agentID, issueID, "queued", 2, queuedCommentID, "", "")
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/issues/execution-summary?limit=1000", nil)
+
+	testHandler.GetIssueExecutionSummaries(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Summaries []IssueExecutionSummaryResponse `json:"summaries"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	var summary *IssueExecutionSummaryResponse
+	for i := range resp.Summaries {
+		if resp.Summaries[i].IssueID == issueID {
+			summary = &resp.Summaries[i]
+			break
+		}
+	}
+	if summary == nil {
+		t.Fatalf("missing issue summary")
+	}
+	if summary.State != "running" || summary.RunningCount != 1 || summary.QueuedCount != 1 {
+		t.Fatalf("running+queued summary mismatch: %+v", summary)
+	}
+	if summary.LatestTriggerExcerpt == nil || *summary.LatestTriggerExcerpt != "Active running trigger" {
+		t.Fatalf("expected running trigger as latest/current trigger, got %+v", summary.LatestTriggerExcerpt)
+	}
+}
+
+func TestTaskServicePublishesQueuedAndCancelledEvents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "task-event-agent", nil)
+	issueID := createExecutionTestIssue(t, "Task event issue", 9315)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue SET assignee_type = 'agent', assignee_id = $1
+		WHERE id = $2
+	`, agentID, issueID); err != nil {
+		t.Fatalf("assign issue: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	queuedCh := subscribeTaskEventForIssue(protocol.EventTaskQueued, issueID)
+	cancelledCh := subscribeTaskEventForIssue(protocol.EventTaskCancelled, issueID)
+
+	task, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue)
+	if err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+	if got := waitForTaskEvent(t, queuedCh, protocol.EventTaskQueued); got != uuidToString(task.ID) {
+		t.Fatalf("queued event task id mismatch: want %s, got %s", uuidToString(task.ID), got)
+	}
+
+	if err := testHandler.TaskService.CancelTasksForIssue(ctx, issue.ID); err != nil {
+		t.Fatalf("cancel issue tasks: %v", err)
+	}
+	if got := waitForTaskEvent(t, cancelledCh, protocol.EventTaskCancelled); got != uuidToString(task.ID) {
+		t.Fatalf("cancelled event task id mismatch: want %s, got %s", uuidToString(task.ID), got)
+	}
+}
+
+func TestCreateCommentTriggersQueuedExecutionSummary(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "comment-queued-agent", nil)
+	issueID := createExecutionTestIssue(t, "Comment queued issue", 9316)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue SET assignee_type = 'agent', assignee_id = $1
+		WHERE id = $2
+	`, agentID, issueID); err != nil {
+		t.Fatalf("assign issue: %v", err)
+	}
+
+	queuedCh := subscribeTaskEventForIssue(protocol.EventTaskQueued, issueID)
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "Please continue from this comment",
+	})
+	req = withURLParam(req, "id", issueID)
+
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	waitForTaskEvent(t, queuedCh, protocol.EventTaskQueued)
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodGet, "/api/issues/execution-summary?limit=1000", nil)
+
+	testHandler.GetIssueExecutionSummaries(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Summaries []IssueExecutionSummaryResponse `json:"summaries"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	for _, summary := range resp.Summaries {
+		if summary.IssueID != issueID {
+			continue
+		}
+		if summary.State != "queued" || summary.QueuedCount != 1 {
+			t.Fatalf("expected queued summary after comment, got %+v", summary)
+		}
+		if summary.LatestTriggerExcerpt == nil || *summary.LatestTriggerExcerpt != "Please continue from this comment" {
+			t.Fatalf("expected comment trigger excerpt, got %+v", summary.LatestTriggerExcerpt)
+		}
+		return
+	}
+	t.Fatalf("missing summary for comment-triggered issue")
 }
 
 func TestListAgentTasks_EnrichesIssueAndQueueMetadata(t *testing.T) {

@@ -11,10 +11,10 @@ const (
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
-	EventReactionAdded          = "reaction:added"
-	EventReactionRemoved        = "reaction:removed"
-	EventIssueReactionAdded     = "issue_reaction:added"
-	EventIssueReactionRemoved   = "issue_reaction:removed"
+	EventReactionAdded        = "reaction:added"
+	EventReactionRemoved      = "reaction:removed"
+	EventIssueReactionAdded   = "issue_reaction:added"
+	EventIssueReactionRemoved = "issue_reaction:removed"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"
@@ -23,6 +23,7 @@ const (
 	EventAgentRestored = "agent:restored"
 
 	// Task events (server <-> daemon)
+	EventTaskQueued    = "task:queued"
 	EventTaskDispatch  = "task:dispatch"
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed"

@@ -43,8 +43,10 @@ import type {
   SubscriberAddedPayload,
   SubscriberRemovedPayload,
   TaskMessagePayload,
+  TaskQueuedPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
+  TaskCancelledPayload,
   ChatDonePayload,
   InvitationCreatedPayload,
 } from "../types";
@@ -156,7 +158,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat / task events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read",
-      "task:message", "task:completed", "task:failed",
+      "task:message", "task:queued", "task:completed", "task:failed", "task:cancelled",
     ]);
 
     const unsubAny = ws.onAny((msg) => {
@@ -176,7 +178,6 @@ export function useRealtimeSync(
       if (!issue?.id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
         onIssueUpdated(qc, wsId, issue);
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
@@ -189,7 +190,6 @@ export function useRealtimeSync(
       if (!issue) return;
       const wsId = getCurrentWsId();
       if (wsId) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
         onIssueCreated(qc, wsId, issue);
       }
     });
@@ -199,7 +199,6 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
         onIssueDeleted(qc, wsId, issue_id);
         onInboxIssueDeleted(qc, wsId, issue_id);
       }
@@ -226,8 +225,6 @@ export function useRealtimeSync(
       const { comment } = p as CommentCreatedPayload;
       if (comment?.issue_id) {
         invalidateTimeline(comment.issue_id);
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
       }
     });
 
@@ -410,6 +407,12 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: chatKeys.allSessions(id) });
       }
     };
+    const invalidateIssueExecutionSummary = (issueId?: string) => {
+      const id = getCurrentWsId();
+      if (id && issueId) {
+        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(id) });
+      }
+    };
 
     const unsubChatMessage = ws.on("chat:message", (p) => {
       const payload = p as { chat_session_id: string };
@@ -436,12 +439,18 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    const unsubTaskQueued = ws.on("task:queued", (p) => {
+      const payload = p as TaskQueuedPayload;
+      invalidateIssueExecutionSummary(payload.issue_id);
+      if (!payload.chat_session_id) return;
+      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      invalidatePendingAggregate();
+    });
+
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
-      const wsId = getCurrentWsId();
-      if (wsId && payload.issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
-      }
+      invalidateIssueExecutionSummary(payload.issue_id);
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
@@ -455,10 +464,7 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
-      const wsId = getCurrentWsId();
-      if (wsId && payload.issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
-      }
+      invalidateIssueExecutionSummary(payload.issue_id);
       if (!payload.chat_session_id) return;
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
@@ -478,18 +484,12 @@ export function useRealtimeSync(
 
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as { issue_id?: string };
-      const wsId = getCurrentWsId();
-      if (wsId && payload.issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
-      }
+      invalidateIssueExecutionSummary(payload.issue_id);
     });
 
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
-      const payload = p as { issue_id?: string };
-      const wsId = getCurrentWsId();
-      if (wsId && payload.issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(wsId) });
-      }
+      const payload = p as TaskCancelledPayload;
+      invalidateIssueExecutionSummary(payload.issue_id);
     });
 
     return () => {
@@ -518,6 +518,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubTaskQueued();
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
