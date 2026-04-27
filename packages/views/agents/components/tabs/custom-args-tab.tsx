@@ -30,13 +30,13 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 export function CustomArgsTab({
   agent,
   runtimeDevice,
-  onSave,
   readOnly = false,
+  onSave,
 }: {
   agent: Agent;
   runtimeDevice?: RuntimeDevice;
-  onSave: (updates: Partial<Agent>) => Promise<void>;
   readOnly?: boolean;
+  onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
   const [entries, setEntries] = useState<ArgEntry[]>(
     argsToEntries(agent.custom_args ?? []),
@@ -114,10 +114,10 @@ export function CustomArgsTab({
             <div key={entry.id} className="flex items-center gap-2">
               <Input
                 value={entry.value}
-                onChange={(e) => updateEntry(index, e.target.value)}
+                onChange={(e) => { if (!readOnly) updateEntry(index, e.target.value); }}
                 readOnly={readOnly}
                 placeholder="--flag value"
-                className="flex-1 font-mono text-xs read-only:bg-muted/30"
+                className={`flex-1 font-mono text-xs ${readOnly ? "bg-muted/50" : ""}`}
               />
               {!readOnly && (
                 <button
@@ -131,6 +131,9 @@ export function CustomArgsTab({
             </div>
           ))}
         </div>
+      )}
+      {entries.length === 0 && readOnly && (
+        <p className="text-xs text-muted-foreground italic">No custom arguments configured.</p>
       )}
 
       {!readOnly && (

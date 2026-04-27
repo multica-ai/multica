@@ -75,6 +75,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKimiModels(ctx, executablePath)
 		})
+	case "kiro":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverKiroModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -345,6 +349,20 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverKiroModels spins up a throwaway `kiro-cli acp` process and
+// drives the same minimal ACP handshake as Hermes/Kimi to surface the
+// model catalog advertised by Kiro's `session/new` response.
+//
+// Failure modes (kiro-cli missing, not logged in, config error) all
+// return an empty list so the UI falls back to manual entry.
+func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "kiro-cli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-kiro-discovery-",
+	})
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
@@ -362,8 +380,8 @@ type acpDiscoveryProvider struct {
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
 // `models.availableModels` / `models.currentModelId`. This covers
-// Hermes and Kimi today; future ACP backends can plug in by adding
-// an acpDiscoveryProvider entry instead of duplicating the loop.
+// Hermes, Kimi, and Kiro today; future ACP backends can plug in by
+// adding an acpDiscoveryProvider entry instead of duplicating the loop.
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin

@@ -7,12 +7,12 @@ import { Button } from "@multica/ui/components/ui/button";
 
 export function InstructionsTab({
   agent,
-  onSave,
   readOnly = false,
+  onSave,
 }: {
   agent: Agent;
-  onSave: (instructions: string) => Promise<void>;
   readOnly?: boolean;
+  onSave: (instructions: string) => Promise<void>;
 }) {
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
@@ -46,17 +46,17 @@ export function InstructionsTab({
 
       <textarea
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => { if (!readOnly) setValue(e.target.value); }}
         readOnly={readOnly}
-        placeholder={`Define this agent's role, expertise, and working style.\n\nExample:\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/`}
-        className="w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y read-only:bg-muted/30"
+        placeholder={readOnly ? "No instructions set" : `Define this agent's role, expertise, and working style.\n\nExample:\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/`}
+        className={`w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y ${readOnly ? "cursor-default bg-muted/50" : ""}`}
       />
 
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {value.length > 0 ? `${value.length} characters` : "No instructions set"}
-        </span>
-        {!readOnly && (
+      {!readOnly && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {value.length > 0 ? `${value.length} characters` : "No instructions set"}
+          </span>
           <Button
             size="xs"
             onClick={handleSave}
@@ -69,8 +69,8 @@ export function InstructionsTab({
             )}
             Save
           </Button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

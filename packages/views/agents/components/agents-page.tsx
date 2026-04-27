@@ -352,6 +352,7 @@ export function AgentsPage() {
                   isSelected={agent.id === selectedId}
                   onClick={() => setSelectedId(agent.id)}
                   ownerMember={scope === "all" ? getOwnerMember(agent.owner_id) : undefined}
+
                 />
               ))}
             </div>

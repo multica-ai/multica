@@ -125,6 +125,19 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
+// Kiro (AWS) — simplified "K" mark in AWS orange, rounded-square logotype
+function KiroLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#232F3E" />
+      <path
+        d="M7.5 6h2.2v4.8l3.8-4.8h2.7l-4 4.8L16.5 18h-2.7l-2.9-4.9-1.2 1.4V18H7.5V6z"
+        fill="#FF9900"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -151,6 +164,8 @@ export function ProviderLogo({
       return <CursorLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
+    case "kiro":
+      return <KiroLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

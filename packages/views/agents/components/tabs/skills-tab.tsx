@@ -70,15 +70,17 @@ export function SkillsTab({
             Workspace skills assigned to this agent.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => setShowPicker(true)}
-          disabled={readOnly || saving || availableSkills.length === 0}
-        >
-          <Plus className="h-3 w-3" />
-          Add Skill
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => setShowPicker(true)}
+            disabled={saving || availableSkills.length === 0}
+          >
+            <Plus className="h-3 w-3" />
+            Add Skill
+          </Button>
+        )}
       </div>
 
       <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
@@ -95,7 +97,7 @@ export function SkillsTab({
           <p className="mt-1 text-xs text-muted-foreground">
             Add workspace skills to share team knowledge with this agent. Local skills are already used automatically.
           </p>
-          {availableSkills.length > 0 && !readOnly && (
+          {!readOnly && availableSkills.length > 0 && (
             <Button
               onClick={() => setShowPicker(true)}
               size="xs"
@@ -125,15 +127,17 @@ export function SkillsTab({
                   </div>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => handleRemove(skill.id)}
-                disabled={readOnly || saving}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {!readOnly && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => handleRemove(skill.id)}
+                  disabled={saving}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
           ))}
         </div>
