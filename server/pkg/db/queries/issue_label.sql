@@ -66,3 +66,14 @@ JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = sqlc.arg('issue_id')::uuid
   AND l.workspace_id = sqlc.arg('workspace_id')::uuid
 ORDER BY LOWER(l.name) ASC;
+
+-- name: ListLabelsForIssues :many
+-- Bulk variant: fetch labels for many issues in one round-trip so the issue
+-- list endpoints can fold labels into each row without N+1 queries from the
+-- client. Workspace-guarded the same way as ListLabelsByIssue.
+SELECT il.issue_id, l.*
+FROM issue_label l
+JOIN issue_to_label il ON il.label_id = l.id
+WHERE il.issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+ORDER BY il.issue_id, LOWER(l.name) ASC;

@@ -21,6 +21,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
+import { LabelChip } from "../../labels/label-chip";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -54,11 +55,13 @@ export const BoardCardContent = memo(function BoardCardContent({
   const storeProperties = useViewStore((s) => s.cardProperties);
   const priorityCfg = PRIORITY_CONFIG[issue.priority];
   const wsId = useWorkspaceId();
+  const showLabelsToggle = storeProperties.labels ?? true;
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: storeProperties.project && !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
+  const labels = issue.labels ?? [];
 
   const updateIssueMutation = useUpdateIssue();
   const handleUpdate = useCallback(
@@ -77,6 +80,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
+  const showLabels = showLabelsToggle && labels.length > 0;
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
@@ -88,8 +92,8 @@ export const BoardCardContent = memo(function BoardCardContent({
         {issue.title}
       </p>
 
-      {/* Sub-issue progress + project */}
-      {(showChildProgress || showProject) && (
+      {/* Sub-issue progress + project + labels */}
+      {(showChildProgress || showProject || showLabels) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showChildProgress && (
             <div className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
@@ -105,6 +109,9 @@ export const BoardCardContent = memo(function BoardCardContent({
               <span className="truncate">{project!.title}</span>
             </span>
           )}
+          {showLabels && labels.map((label) => (
+            <LabelChip key={label.id} label={label} />
+          ))}
         </div>
       )}
 

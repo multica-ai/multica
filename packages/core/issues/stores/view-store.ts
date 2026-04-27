@@ -20,6 +20,7 @@ export interface CardProperties {
   dueDate: boolean;
   project: boolean;
   childProgress: boolean;
+  labels: boolean;
 }
 
 export interface ActorFilterValue {
@@ -41,6 +42,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "assignee", label: "Assignee" },
   { key: "dueDate", label: "Due date" },
   { key: "project", label: "Project" },
+  { key: "labels", label: "Labels" },
   { key: "childProgress", label: "Sub-issue progress" },
 ];
 
@@ -92,6 +94,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     dueDate: true,
     project: true,
     childProgress: true,
+    labels: true,
   },
   listCollapsedStatuses: [],
 
