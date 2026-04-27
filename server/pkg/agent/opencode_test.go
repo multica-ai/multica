@@ -789,3 +789,56 @@ func TestResolveOpenCodeNativeFromShimAcceptsUppercaseExtension(t *testing.T) {
 		t.Errorf("got %q, want %q", got, native)
 	}
 }
+
+func TestResolveOpenCodeNativeFromShimFallsBackToBaseline(t *testing.T) {
+	t.Parallel()
+
+	// Older CPUs without AVX2 get `opencode-windows-x64-baseline` instead of
+	// the default x64 build. Resolver should fall through and find it when
+	// the primary x64 package isn't installed.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.cmd")
+	baseline := filepath.Join("C:\\nvm4w", "nodejs", "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64-baseline", "bin", "opencode.exe")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat(baseline))
+	if got != baseline {
+		t.Errorf("got %q, want %q", got, baseline)
+	}
+}
+
+func TestOpencodeWindowsPackageCandidatesArm64(t *testing.T) {
+	t.Parallel()
+
+	// ARM64 hosts (Surface, Copilot+ PC) should try arm64 first so the
+	// resolver doesn't accidentally pick up a leftover x64 install when
+	// the matching arm64 package is present.
+	got := opencodeWindowsPackageCandidates("arm64")
+	want := []string{"opencode-windows-arm64", "opencode-windows-x64", "opencode-windows-x64-baseline"}
+	if !equalStringSlice(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestOpencodeWindowsPackageCandidatesAmd64(t *testing.T) {
+	t.Parallel()
+
+	// amd64 (and any non-arm64) hosts try x64 → baseline → arm64. The arm64
+	// fallback at the end covers the unusual case where only the arm64
+	// package is installed; resolution still succeeds.
+	got := opencodeWindowsPackageCandidates("amd64")
+	want := []string{"opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"}
+	if !equalStringSlice(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

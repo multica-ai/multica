@@ -289,7 +289,8 @@ func (b *opencodeBackend) handleErrorEvent(event opencodeEvent, ch chan<- Messag
 // resolveOpenCodeNativeFromShim returns the path to the native OpenCode
 // executable bundled inside the npm package, given the path to the npm
 // `opencode.cmd` shim that PATH lookup found on Windows. Returns "" if shim
-// doesn't end in `.cmd` or the expected native binary isn't present.
+// doesn't end in `.cmd` or no candidate npm platform package has a bundled
+// native binary present.
 //
 // Windows batch argument forwarding via `%*` does not preserve newlines, so
 // multi-line positional argv is truncated at the first newline before the
@@ -299,8 +300,13 @@ func (b *opencodeBackend) handleErrorEvent(event opencodeEvent, ch chan<- Messag
 //
 // Layout when installed via `npm install -g opencode-ai`:
 //
-//	<prefix>\opencode.cmd                                                  (shim)
-//	<prefix>\node_modules\opencode-ai\node_modules\opencode-windows-x64\bin\opencode.exe (native)
+//	<prefix>\opencode.cmd                                                                       (shim)
+//	<prefix>\node_modules\opencode-ai\node_modules\opencode-windows-{x64,x64-baseline,arm64}\bin\opencode.exe (native)
+//
+// `opencode-windows-x64-baseline` ships for older CPUs without AVX2;
+// `opencode-windows-arm64` ships for Surface / Copilot+ PC hosts.
+// Candidates are tried in GOARCH-preferred order so the most likely match
+// for the current host comes first.
 //
 // statFn is injected so this is testable on non-Windows hosts.
 func resolveOpenCodeNativeFromShim(shimPath string, statFn func(string) (os.FileInfo, error)) string {
@@ -308,11 +314,29 @@ func resolveOpenCodeNativeFromShim(shimPath string, statFn func(string) (os.File
 		return ""
 	}
 	prefix := filepath.Dir(shimPath)
-	candidate := filepath.Join(prefix, "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
-	if _, err := statFn(candidate); err != nil {
-		return ""
+	for _, pkg := range opencodeWindowsPackageCandidates(runtime.GOARCH) {
+		candidate := filepath.Join(prefix, "node_modules", "opencode-ai", "node_modules", pkg, "bin", "opencode.exe")
+		if _, err := statFn(candidate); err == nil {
+			return candidate
+		}
 	}
-	return candidate
+	return ""
+}
+
+// opencodeWindowsPackageCandidates returns the npm platform package names
+// that may host the bundled `opencode.exe` on Windows, ordered so the most
+// likely match for the given GOARCH comes first. ARM64 hosts try the arm64
+// build first; everything else tries x64, then the baseline x64 build for
+// older CPUs without AVX2, then arm64 as a final fallback. Cost is one
+// extra statFn call per miss when the GOARCH-preferred package isn't
+// installed.
+func opencodeWindowsPackageCandidates(goarch string) []string {
+	switch goarch {
+	case "arm64":
+		return []string{"opencode-windows-arm64", "opencode-windows-x64", "opencode-windows-x64-baseline"}
+	default:
+		return []string{"opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"}
+	}
 }
 
 // extractToolOutput converts the tool state output (which may be a string or
@@ -368,8 +392,8 @@ type opencodeEventPart struct {
 
 // opencodeTokens represents token usage in a step_finish event.
 type opencodeTokens struct {
-	Input  int64              `json:"input"`
-	Output int64              `json:"output"`
+	Input  int64                `json:"input"`
+	Output int64                `json:"output"`
 	Cache  *opencodeCacheTokens `json:"cache,omitempty"`
 }
 
