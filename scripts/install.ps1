@@ -19,7 +19,7 @@ $CliBinDir     = if ($env:MULTICA_CLI_BIN_DIR) { $env:MULTICA_CLI_BIN_DIR } else
 $CliBinPath    = Join-Path $CliBinDir "multica.exe"
 $AppUrl        = if ($env:MULTICA_APP_URL) { $env:MULTICA_APP_URL } else { "https://multica.wujieai.com" }
 $ServerUrl     = if ($env:MULTICA_SERVER_URL) { $env:MULTICA_SERVER_URL } else { "https://multica.wujieai.com" }
-$UpdateManifestUrl = if ($env:MULTICA_UPDATE_MANIFEST_URL) { $env:MULTICA_UPDATE_MANIFEST_URL } else { "https://mock-oss.multica.local/cli/manifest.json" }
+$UpdateManifestUrl = if ($env:MULTICA_UPDATE_MANIFEST_URL) { $env:MULTICA_UPDATE_MANIFEST_URL } else { "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json" }
 
 # ---------------------------------------------------------------------------
 # Helpers

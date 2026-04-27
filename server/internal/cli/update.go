@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultUpdateManifestURL = "https://mock-oss.multica.local/cli/manifest.json"
+	defaultUpdateManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
 )
 
 type UpdateManifest struct {

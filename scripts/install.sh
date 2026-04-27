@@ -22,7 +22,7 @@ CLI_BIN_PATH="$CLI_BIN_DIR/multica"
 BREW_PACKAGE="multica-ai/tap/multica"
 APP_URL="${MULTICA_APP_URL:-https://multica.wujieai.com}"
 SERVER_URL="${MULTICA_SERVER_URL:-https://multica.wujieai.com}"
-UPDATE_MANIFEST_URL="${MULTICA_UPDATE_MANIFEST_URL:-https://mock-oss.multica.local/cli/manifest.json}"
+UPDATE_MANIFEST_URL="${MULTICA_UPDATE_MANIFEST_URL:-https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json}"
 
 # Colors (disabled when not a terminal)
 if [ -t 1 ] || [ -t 2 ]; then
