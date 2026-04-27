@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import type React from "react";
 import { Bot } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -9,6 +10,7 @@ interface ActorAvatarProps {
   initials: string;
   avatarUrl?: string | null;
   isAgent?: boolean;
+  providerFallback?: React.ReactNode;
   size?: number;
   className?: string;
 }
@@ -18,6 +20,7 @@ function ActorAvatar({
   initials,
   avatarUrl,
   isAgent,
+  providerFallback,
   size = 20,
   className,
 }: ActorAvatarProps) {
@@ -46,6 +49,8 @@ function ActorAvatar({
           className="h-full w-full object-cover"
           onError={() => setImgError(true)}
         />
+      ) : isAgent && providerFallback ? (
+        providerFallback
       ) : isAgent ? (
         <Bot style={{ width: size * 0.55, height: size * 0.55 }} />
       ) : (

@@ -90,15 +90,16 @@ function RunRow({ run, agentId, autopilotId }: { run: AutopilotRun; agentId: str
   const [logOpen, setLogOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
 
+  const isLive = run.status === "running";
+
   const { data: rawMessages, isFetching: logLoading } = useQuery({
     queryKey: ["task-messages", run.task_id ?? ""],
     queryFn: () => api.listTaskMessages(run.task_id!),
     enabled: logOpen && !!run.task_id,
-    staleTime: Infinity,
+    staleTime: isLive ? 0 : Infinity,
+    refetchInterval: isLive && logOpen ? 3000 : false,
   });
   const logItems = rawMessages ? buildTimeline(rawMessages) : null;
-
-  const isLive = run.status === "running";
 
   const handleStop = useCallback(async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -593,6 +594,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const { autopilot, triggers } = data;
 
+  const hasRunningRun = runs.some((r) => r.status === "running");
+
   const handleRunNow = async () => {
     try {
       await triggerAutopilot.mutateAsync(autopilotId);
@@ -620,13 +623,13 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     <div className="flex h-full flex-col">
       {/* Header */}
       <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors">
+        <div className="flex items-center gap-2 overflow-hidden min-w-0 flex-1">
+          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
             <Zap className="h-4 w-4" />
           </AppLink>
-          <span className="text-muted-foreground">/</span>
-          <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
-          <div className="ml-1 flex items-center gap-1.5">
+          <span className="text-muted-foreground shrink-0">/</span>
+          <h1 className="text-sm font-medium truncate min-w-0">{autopilot.title}</h1>
+          <div className="ml-1 flex items-center gap-1.5 shrink-0">
             <Switch
               size="sm"
               checked={autopilot.status === "active"}
@@ -644,14 +647,17 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 ml-4">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
-            Edit
+            <span className="hidden sm:inline">Edit</span>
           </Button>
-          <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
-            <Play className="h-3.5 w-3.5 mr-1" />
-            {triggerAutopilot.isPending ? "Running..." : "Run now"}
+          <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || hasRunningRun || triggerAutopilot.isPending}>
+            {hasRunningRun ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
       </PageHeader>

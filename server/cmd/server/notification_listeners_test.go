@@ -470,7 +470,7 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 }
 
 // TestNotification_TaskCompleted verifies that task:completed events do NOT
-// create inbox notifications (completion is visible from the status change).
+// create inbox notifications for regular (non-autopilot) tasks.
 func TestNotification_TaskCompleted(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -481,10 +481,8 @@ func TestNotification_TaskCompleted(t *testing.T) {
 		cleanupTestIssue(t, issueID)
 	})
 
-	// The agent ID (acting as system actor)
 	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
 
-	// Pre-add subscribers: creator and the agent
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 	addTestSubscriber(t, issueID, "agent", agentID, "assignee")
 
@@ -498,13 +496,107 @@ func TestNotification_TaskCompleted(t *testing.T) {
 			"agent_id": agentID,
 			"issue_id": issueID,
 			"status":   "completed",
+			// no autopilot_title → must not trigger notification
 		},
 	})
 
-	// No inbox notification should be created for task:completed
 	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
 	if len(creatorItems) != 0 {
 		t.Fatalf("expected 0 inbox items for creator on task:completed, got %d", len(creatorItems))
+	}
+}
+
+// TestNotification_TaskCompleted_AutopilotRunOnly verifies that when a run_only
+// autopilot task completes, the autopilot creator receives an autopilot_completed
+// inbox notification.
+func TestNotification_TaskCompleted_AutopilotRunOnly(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	// Resolve the test agent ID created in the fixture.
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("get test agent: %v", err)
+	}
+
+	// Get test runtime ID.
+	var runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id FROM agent WHERE id = $1`, agentID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("get test runtime: %v", err)
+	}
+
+	// Insert a run_only autopilot.
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_id, priority, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'Test Autopilot', $2, 'medium', 'active', 'run_only', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+	})
+
+	// Insert an autopilot run.
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status, trigger_payload)
+		VALUES ($1, 'manual', 'running', '{}'::jsonb)
+		RETURNING id
+	`, autopilotID).Scan(&runID); err != nil {
+		t.Fatalf("create autopilot run: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
+	})
+
+	// Insert a task with autopilot_run_id, with started_at and completed_at.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, autopilot_run_id, started_at, completed_at)
+		VALUES ($1, $2, 'completed', 0, $3, now() - interval '90 seconds', now())
+		RETURNING id
+	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE recipient_id = $1`, testUserID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"task_id":        taskID,
+			"agent_id":       agentID,
+			"issue_id":       "",
+			"status":         "completed",
+			"autopilot_title": "Test Autopilot",
+		},
+	})
+
+	// Creator should receive an autopilot_completed notification.
+	items := inboxItemsForRecipient(t, queries, testUserID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for autopilot creator, got %d", len(items))
+	}
+	if items[0].Type != "autopilot_completed" {
+		t.Fatalf("expected type 'autopilot_completed', got %q", items[0].Type)
+	}
+	if items[0].Severity != "info" {
+		t.Fatalf("expected severity 'info', got %q", items[0].Severity)
+	}
+	if items[0].Title != "Autopilot concluído: Test Autopilot" {
+		t.Fatalf("expected title 'Autopilot concluído: Test Autopilot', got %q", items[0].Title)
 	}
 }
 

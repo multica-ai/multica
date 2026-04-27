@@ -23,17 +23,24 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui
 import { ActorAvatar } from "../../common/actor-avatar";
 import { api } from "@multica/core/api";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
+import type { TaskMessagePayload } from "@multica/core/types/events";
 import { redactSecrets } from "../utils/redact";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface TimelineItem {
+export interface TimelineItem {
   seq: number;
   type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+}
+
+export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
+  return msgs
+    .map((m) => ({ seq: m.seq, type: m.type, tool: m.tool, content: m.content, input: m.input, output: m.output }))
+    .sort((a, b) => a.seq - b.seq);
 }
 
 interface AgentTranscriptDialogProps {

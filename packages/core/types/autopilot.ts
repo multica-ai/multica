@@ -24,6 +24,8 @@ export interface Autopilot {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  has_running_run?: boolean;
+  last_run_status?: string | null;
 }
 
 export interface AutopilotTrigger {

@@ -647,6 +647,82 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 	return items, nil
 }
 
+const listAutopilotsWithRunStatus = `-- name: ListAutopilotsWithRunStatus :many
+SELECT a.id, a.workspace_id, a.project_id, a.title, a.description, a.assignee_id, a.priority, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at,
+  EXISTS(
+    SELECT 1 FROM autopilot_run ar
+    WHERE ar.autopilot_id = a.id AND ar.status = 'running'
+  ) AS has_running_run,
+  (
+    SELECT ar2.status FROM autopilot_run ar2
+    WHERE ar2.autopilot_id = a.id
+    ORDER BY ar2.created_at DESC
+    LIMIT 1
+  ) AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = $1
+  AND ($2::text IS NULL OR a.status = $2)
+ORDER BY a.created_at DESC
+`
+
+type ListAutopilotsWithRunStatusRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	Title              string             `json:"title"`
+	Description        pgtype.Text        `json:"description"`
+	AssigneeID         pgtype.UUID        `json:"assignee_id"`
+	Priority           string             `json:"priority"`
+	Status             string             `json:"status"`
+	ExecutionMode      string             `json:"execution_mode"`
+	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
+	CreatedByType      string             `json:"created_by_type"`
+	CreatedByID        pgtype.UUID        `json:"created_by_id"`
+	LastRunAt          pgtype.Timestamptz `json:"last_run_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	HasRunningRun      bool               `json:"has_running_run"`
+	LastRunStatus      pgtype.Text        `json:"last_run_status"`
+}
+
+func (q *Queries) ListAutopilotsWithRunStatus(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsWithRunStatusRow, error) {
+	rows, err := q.db.Query(ctx, listAutopilotsWithRunStatus, arg.WorkspaceID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAutopilotsWithRunStatusRow{}
+	for rows.Next() {
+		var i ListAutopilotsWithRunStatusRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.Title,
+			&i.Description,
+			&i.AssigneeID,
+			&i.Priority,
+			&i.Status,
+			&i.ExecutionMode,
+			&i.IssueTitleTemplate,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.LastRunAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.HasRunningRun,
+			&i.LastRunStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recoverLostTriggers = `-- name: RecoverLostTriggers :many
 
 SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, a.workspace_id AS autopilot_workspace_id

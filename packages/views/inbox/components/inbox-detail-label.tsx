@@ -20,6 +20,7 @@ const typeLabels: Record<InboxItemType, string> = {
   agent_blocked: "Agent blocked",
   agent_completed: "Agent completed",
   reaction_added: "Reacted",
+  autopilot_completed: "Autopilot completed",
 };
 
 export { typeLabels };

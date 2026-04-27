@@ -572,14 +572,14 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir FROM agent_task_queue
-WHERE agent_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS NOT NULL
+WHERE runtime_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1
 `
 
 type GetLastTaskSessionParams struct {
-	AgentID pgtype.UUID `json:"agent_id"`
-	IssueID pgtype.UUID `json:"issue_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	IssueID   pgtype.UUID `json:"issue_id"`
 }
 
 type GetLastTaskSessionRow struct {
@@ -588,9 +588,10 @@ type GetLastTaskSessionRow struct {
 }
 
 // Returns the session_id and work_dir from the most recent completed task
-// for a given (agent_id, issue_id) pair, used for session resumption.
+// for a given (runtime_id, issue_id) pair, used for session resumption.
+// Keyed by runtime_id so agents sharing the same runtime share session context.
 func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSessionParams) (GetLastTaskSessionRow, error) {
-	row := q.db.QueryRow(ctx, getLastTaskSession, arg.AgentID, arg.IssueID)
+	row := q.db.QueryRow(ctx, getLastTaskSession, arg.RuntimeID, arg.IssueID)
 	var i GetLastTaskSessionRow
 	err := row.Scan(&i.SessionID, &i.WorkDir)
 	return i, err

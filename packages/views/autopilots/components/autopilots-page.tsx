@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
+import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { projectListOpenOptions } from "@multica/core/projects/queries";
@@ -139,6 +139,11 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof
   archived: { label: "Archived", color: "text-muted-foreground", icon: AlertCircle },
 };
 
+const LAST_RUN_STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string }> = {
+  completed: { icon: CheckCircle2, color: "text-emerald-500" },
+  failed: { icon: XCircle, color: "text-destructive" },
+};
+
 const EXECUTION_MODE_LABELS: Record<string, string> = {
   create_issue: "Create Issue",
   run_only: "Run Only",
@@ -150,6 +155,9 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const triggerAutopilot = useTriggerAutopilot();
   const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
   const StatusIcon = statusCfg.icon;
+  const isRunning = autopilot.has_running_run ?? false;
+  const lastRunStatusCfg = autopilot.last_run_status ? LAST_RUN_STATUS_CONFIG[autopilot.last_run_status] : null;
+  const LastRunIcon = lastRunStatusCfg?.icon ?? null;
 
   const handleRunNow = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -191,9 +199,20 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         {statusCfg.label}
       </span>
 
-      {/* Last run — hidden below md */}
-      <span className="hidden md:block w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
+      {/* Last run — icon always visible, time on sm+ */}
+      <span className="flex items-center justify-end gap-1 shrink-0 w-6 sm:w-20 text-xs text-muted-foreground">
+        {autopilot.last_run_at ? (
+          <>
+            {LastRunIcon && (
+              <LastRunIcon className={cn("h-3 w-3 shrink-0", lastRunStatusCfg?.color)} />
+            )}
+            <span className="hidden sm:inline tabular-nums">
+              {formatRelativeDate(autopilot.last_run_at)}
+            </span>
+          </>
+        ) : (
+          <span className="hidden sm:inline">--</span>
+        )}
       </span>
 
       {/* Run now — visible on row hover; icon-only on mobile */}
@@ -202,10 +221,14 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         variant="outline"
         className="h-7 opacity-0 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity shrink-0"
         onClick={handleRunNow}
-        disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+        disabled={autopilot.status !== "active" || isRunning || triggerAutopilot.isPending}
       >
-        <Play className="h-3 w-3 sm:mr-1" />
-        <span className="hidden sm:inline">{triggerAutopilot.isPending ? "..." : "Run now"}</span>
+        {isRunning ? (
+          <Loader2 className="h-3 w-3 sm:mr-1 animate-spin" />
+        ) : (
+          <Play className="h-3 w-3 sm:mr-1" />
+        )}
+        <span className="hidden sm:inline">{isRunning ? "Running..." : "Run now"}</span>
       </Button>
     </div>
   );
@@ -474,7 +497,7 @@ export function AutopilotsPage() {
               <span className="hidden sm:block w-32 shrink-0">Agent</span>
               <span className="hidden md:block w-24 text-center shrink-0">Mode</span>
               <span className="w-20 text-center shrink-0">Status</span>
-              <span className="hidden md:block w-20 text-right shrink-0">Last run</span>
+              <span className="w-6 sm:w-20 text-right shrink-0">Last run</span>
             </div>
             {autopilots.map((autopilot) => (
               <AutopilotRow key={autopilot.id} autopilot={autopilot} />

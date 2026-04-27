@@ -18,7 +18,10 @@ import {
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
 import { IssueDetail } from "../../issues/components";
+import { AgentTranscriptDialog, buildTimeline } from "../../issues/components/agent-transcript-dialog";
 import { useNavigation } from "../../navigation";
+import { api } from "@multica/core/api";
+import type { AgentTask } from "@multica/core/types/agent";
 import { toast } from "sonner";
 import {
   MoreHorizontal,
@@ -28,6 +31,8 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  FileText,
+  Loader2,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -45,6 +50,7 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
@@ -105,6 +111,18 @@ export function InboxPage() {
   });
 
   const isMobile = useIsMobile();
+  const { getActorName } = useActorName();
+
+  // Log viewer state for autopilot_completed notifications
+  const [logOpen, setLogOpen] = useState(false);
+  const autopilotTaskId = selected?.type === "autopilot_completed" ? (selected.details?.task_id ?? null) : null;
+  const { data: rawLogMessages, isFetching: logLoading } = useQuery({
+    queryKey: ["task-messages", autopilotTaskId ?? ""],
+    queryFn: () => api.listTaskMessages(autopilotTaskId!),
+    enabled: logOpen && !!autopilotTaskId,
+    staleTime: Infinity,
+  });
+  const logItems = rawLogMessages ? buildTimeline(rawLogMessages) : null;
   const unreadCount = items.filter((i) => !i.read).length;
 
   const markReadMutation = useMarkInboxRead();
@@ -257,7 +275,22 @@ export function InboxPage() {
           {selected.body}
         </div>
       )}
-      <div className="mt-4">
+      <div className="mt-4 flex items-center gap-2">
+        {selected.type === "autopilot_completed" && autopilotTaskId && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLogOpen(true)}
+            disabled={logLoading && !logItems}
+          >
+            {logLoading && !logItems ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileText className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Ver logs
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -267,6 +300,29 @@ export function InboxPage() {
           Archive
         </Button>
       </div>
+      {selected.type === "autopilot_completed" && autopilotTaskId && logItems !== null && (
+        <AgentTranscriptDialog
+          open={logOpen}
+          onOpenChange={setLogOpen}
+          task={{
+            id: autopilotTaskId,
+            agent_id: selected.details?.agent_id ?? "",
+            runtime_id: "",
+            issue_id: "",
+            status: "completed",
+            priority: 0,
+            dispatched_at: null,
+            started_at: null,
+            completed_at: null,
+            result: null,
+            error: null,
+            created_at: selected.created_at,
+          } satisfies AgentTask}
+          items={logItems}
+          agentName={getActorName("agent", selected.details?.agent_id ?? "")}
+          isLive={false}
+        />
+      )}
     </div>
   ) : null;
 

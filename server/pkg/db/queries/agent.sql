@@ -123,9 +123,10 @@ RETURNING *;
 
 -- name: GetLastTaskSession :one
 -- Returns the session_id and work_dir from the most recent completed task
--- for a given (agent_id, issue_id) pair, used for session resumption.
+-- for a given (runtime_id, issue_id) pair, used for session resumption.
+-- Keyed by runtime_id so agents sharing the same runtime share session context.
 SELECT session_id, work_dir FROM agent_task_queue
-WHERE agent_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS NOT NULL
+WHERE runtime_id = $1 AND issue_id = $2 AND status = 'completed' AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1;
 

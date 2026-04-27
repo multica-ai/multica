@@ -3,11 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "../hooks";
 import { memberListOptions, agentListOptions } from "./queries";
+import { runtimeListOptions } from "../runtimes/queries";
 
 export function useActorName() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
 
   const getMemberName = (userId: string) => {
     const m = members.find((m) => m.user_id === userId);
@@ -41,5 +43,11 @@ export function useActorName() {
     return null;
   };
 
-  return { getMemberName, getAgentName, getActorName, getActorInitials, getActorAvatarUrl };
+  const getActorProvider = (agentId: string): string | null => {
+    const agent = agents.find((a) => a.id === agentId);
+    if (!agent?.runtime_id) return null;
+    return runtimes.find((r) => r.id === agent.runtime_id)?.provider ?? null;
+  };
+
+  return { getMemberName, getAgentName, getActorName, getActorInitials, getActorAvatarUrl, getActorProvider };
 }

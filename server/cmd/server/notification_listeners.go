@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -633,7 +635,73 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:completed — notify autopilot creator when the completed task is a run_only autopilot task
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		autopilotTitle, _ := payload["autopilot_title"].(string)
+		if autopilotTitle == "" {
+			return
+		}
+		taskID, _ := payload["task_id"].(string)
+		if taskID == "" {
+			return
+		}
+		task, err := queries.GetAgentTask(ctx, parseUUID(taskID))
+		if err != nil || !task.AutopilotRunID.Valid {
+			return
+		}
+		run, err := queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err != nil {
+			slog.Error("autopilot_completed notification: failed to get run", "task_id", taskID, "error", err)
+			return
+		}
+		autopilot, err := queries.GetAutopilot(ctx, run.AutopilotID)
+		if err != nil {
+			slog.Error("autopilot_completed notification: failed to get autopilot", "run_id", util.UUIDToString(run.ID), "error", err)
+			return
+		}
+		if autopilot.CreatedByType != "member" {
+			return
+		}
+
+		creatorID := util.UUIDToString(autopilot.CreatedByID)
+		workspaceID := util.UUIDToString(autopilot.WorkspaceID)
+
+		var durationStr string
+		if task.StartedAt.Valid && task.CompletedAt.Valid {
+			durationStr = formatDuration(task.CompletedAt.Time.Sub(task.StartedAt.Time))
+		}
+
+		title := fmt.Sprintf("Autopilot concluído: %s", autopilotTitle)
+		body := "Execução finalizada com sucesso"
+		if durationStr != "" {
+			body += " em " + durationStr
+		}
+
+		issueID := util.UUIDToString(task.IssueID)
+		issueStatus := ""
+		if task.IssueID.Valid {
+			if issue, issueErr := queries.GetIssue(ctx, task.IssueID); issueErr == nil {
+				issueStatus = issue.Status
+			}
+		}
+
+		detailsMap := map[string]any{
+			"autopilot_id": util.UUIDToString(autopilot.ID),
+			"run_id":       util.UUIDToString(run.ID),
+			"task_id":      taskID,
+			"agent_id":     util.UUIDToString(autopilot.AssigneeID),
+		}
+		if durationStr != "" {
+			detailsMap["duration"] = durationStr
+		}
+		details, _ := json.Marshal(detailsMap)
+
+		notifyDirect(ctx, queries, bus, "member", creatorID, workspaceID, e, issueID, issueStatus, "autopilot_completed", "info", title, body, details)
+	})
 
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
@@ -669,6 +737,28 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issue.Title, "",
 			emptyDetails)
 	})
+}
+
+// formatDuration converts a duration to a human-readable string (e.g. "2m 30s").
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		s := int(d.Seconds()) % 60
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
 }
 
 // inboxItemToResponse converts a db.InboxItem into a map suitable for
