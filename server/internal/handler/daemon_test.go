@@ -1560,3 +1560,65 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
 	}
 }
+
+func TestDeviceNameFromMetadata(t *testing.T) {
+	cases := []struct {
+		name     string
+		meta     string
+		expected string
+	}{
+		{"empty", ``, ""},
+		{"missing key", `{"version":"1.0"}`, ""},
+		{"present", `{"device_name":"my-laptop","version":"1.0"}`, "my-laptop"},
+		{"whitespace", `{"device_name":"  dev  "}`, "dev"},
+		{"invalid json", `{bad}`, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := deviceNameFromMetadata(json.RawMessage(c.meta))
+			if got != c.expected {
+				t.Errorf("deviceNameFromMetadata(%q) = %q, want %q", c.meta, got, c.expected)
+			}
+		})
+	}
+}
+
+func TestResolveMachineLocalPaths(t *testing.T) {
+	repos := []RepoData{
+		{URL: "https://github.com/org/repo1.git", LocalPath: "/shared/repo1", MachinePaths: map[string]string{
+			"laptop":  "/home/user/repo1",
+			"desktop": "/opt/repo1",
+		}},
+		{URL: "https://github.com/org/repo2.git", LocalPath: "/shared/repo2"},
+		{URL: "https://github.com/org/repo3.git", MachinePaths: map[string]string{
+			"other-device": "/opt/repo3",
+		}},
+	}
+
+	t.Run("resolves matching device", func(t *testing.T) {
+		got := resolveMachineLocalPaths(repos, "laptop")
+		if got[0].LocalPath != "/home/user/repo1" {
+			t.Errorf("repo1: want /home/user/repo1, got %s", got[0].LocalPath)
+		}
+		if got[1].LocalPath != "/shared/repo2" {
+			t.Errorf("repo2: want /shared/repo2 (unchanged), got %s", got[1].LocalPath)
+		}
+		if got[2].LocalPath != "" {
+			t.Errorf("repo3: want empty (no match), got %s", got[2].LocalPath)
+		}
+	})
+
+	t.Run("empty device name returns repos unchanged", func(t *testing.T) {
+		got := resolveMachineLocalPaths(repos, "")
+		if got[0].LocalPath != "/shared/repo1" {
+			t.Errorf("want unchanged, got %s", got[0].LocalPath)
+		}
+	})
+
+	t.Run("no matching device falls back to local_path", func(t *testing.T) {
+		got := resolveMachineLocalPaths(repos, "unknown-device")
+		if got[0].LocalPath != "/shared/repo1" {
+			t.Errorf("repo1: want /shared/repo1 (fallback), got %s", got[0].LocalPath)
+		}
+	})
+}
