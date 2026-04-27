@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch, Loader2, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { projectListOpenOptions } from "@multica/core/projects/queries";
@@ -142,8 +142,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof
 const LAST_RUN_STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string }> = {
   completed: { icon: CheckCircle2, color: "text-emerald-500" },
   failed: { icon: XCircle, color: "text-destructive" },
-  running: { icon: Loader2, color: "text-blue-500" },
-  issue_created: { icon: Clock, color: "text-blue-400" },
 };
 
 const EXECUTION_MODE_LABELS: Record<string, string> = {
@@ -206,7 +204,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
         {autopilot.last_run_at ? (
           <>
             {LastRunIcon && (
-              <LastRunIcon className={cn("h-3 w-3 shrink-0", lastRunStatusCfg?.color, autopilot.last_run_status === "running" && "animate-spin")} />
+              <LastRunIcon className={cn("h-3 w-3 shrink-0", lastRunStatusCfg?.color)} />
             )}
             <span className="hidden sm:inline tabular-nums">
               {formatRelativeDate(autopilot.last_run_at)}
