@@ -22,8 +22,10 @@ const (
 var ErrAccountSuspended = errors.New(AccountSuspendedMessage)
 
 // UserMayAuthenticate reports whether the user row is allowed to sign in or use API tokens.
+// Only an explicit "active" status grants access; any unknown value (including empty) denies,
+// so future statuses landing without an enforcement update fail closed.
 func UserMayAuthenticate(u db.User) bool {
-	return u.AccountStatus == AccountStatusActive || u.AccountStatus == ""
+	return u.AccountStatus == AccountStatusActive
 }
 
 // SuspendedResponseJSON returns a compact JSON object for 403 suspended responses.

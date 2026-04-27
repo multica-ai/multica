@@ -11,10 +11,13 @@ func TestUserMayAuthenticate(t *testing.T) {
 	if !UserMayAuthenticate(db.User{AccountStatus: AccountStatusActive}) {
 		t.Fatal("active should authenticate")
 	}
-	if !UserMayAuthenticate(db.User{AccountStatus: ""}) {
-		t.Fatal("empty status should treat as active (pre-migration safety)")
+	if UserMayAuthenticate(db.User{AccountStatus: ""}) {
+		t.Fatal("empty status must fail closed")
 	}
 	if UserMayAuthenticate(db.User{AccountStatus: AccountStatusSuspended}) {
 		t.Fatal("suspended must not authenticate")
+	}
+	if UserMayAuthenticate(db.User{AccountStatus: "pending"}) {
+		t.Fatal("unknown status must fail closed")
 	}
 }

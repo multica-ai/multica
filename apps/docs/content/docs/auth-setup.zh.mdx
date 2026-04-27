@@ -121,8 +121,9 @@ Signup 白名单和 `ALLOW_SIGNUP` 只管**新用户注册**。要对**已经存
 **被暂停后**
 
 - 不能发验证码、不能完成 Google 登录、不能访问 `/api/me`、不能签发 CLI token；用 JWT 或 PAT 调 API 也会被拒。
-- **WebSocket** 同样拒绝。
+- **WebSocket**：新连接会被拒绝。**已经建立的连接**会继续收事件，直到客户端断开重连——重连时连接期校验会拒绝它。HTTP 请求在下一次调用时立即失败。
 - 暂停后，已有 JWT 会在**下一次**受鉴权的 HTTP 请求时失效（服务端每次会读用户行）。
+- **暂停不会使其失效**：如果你的自托管启用了 S3 + CloudFront（`CF_*` 环境变量），登录时签发的 CloudFront 签名 Cookie（约 30 天 TTL）以及已经下发的 presigned URL，会一直有效到自然过期。暂停只阻断 API、JWT 与新 CLI token，但不会撤销已经签发的 CDN 凭证。对于高风险下线（凭据泄露），除了暂停账号外，应同时轮换 CloudFront key-pair。
 
 **HTTP 响应**：`403`，JSON 形如：
 

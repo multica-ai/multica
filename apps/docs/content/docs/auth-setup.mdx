@@ -121,8 +121,9 @@ Signup allowlists and `ALLOW_SIGNUP` only control **new** registration. To **rev
 **Behavior when suspended**
 
 - **Cannot** request a verification code, complete Google sign-in, use `/api/me`, refresh a CLI token, or call authenticated HTTP APIs with a JWT or PAT.
-- **WebSocket** connections are rejected with the same policy.
+- **WebSocket**: new connections are rejected. Existing connections continue to receive events until the client reconnects — at which point the connect-time check rejects them. HTTP requests fail immediately on the next call.
 - Existing JWTs stop working on the **next** API request after you suspend the row (the server reloads the user record on each authenticated request).
+- **Not invalidated by suspending**: if you self-host with S3 + CloudFront (`CF_*` env vars), CloudFront signed cookies issued at login (~30 days TTL) and any presigned URLs already handed out remain valid until they expire. Suspend blocks the API, JWT, and new CLI tokens, but does not revoke previously signed CDN credentials. For high-risk offboarding (compromised credentials), rotate the CloudFront key-pair in addition to suspending the row.
 
 **HTTP response**: `403 Forbidden` with JSON:
 
