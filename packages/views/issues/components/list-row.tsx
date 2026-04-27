@@ -10,6 +10,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
@@ -90,7 +91,7 @@ export const ListRow = memo(function ListRow({
           </span>
           {showProject && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
-              <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
+              <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
             </span>
           )}
