@@ -26,19 +26,33 @@ function CallbackContent() {
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const code = searchParams.get("code");
-    if (!code) {
-      setError("Missing authorization code");
-      return;
-    }
-
     const errorParam = searchParams.get("error");
     if (errorParam) {
       setError(errorParam === "access_denied" ? "Access denied" : errorParam);
       return;
     }
 
+    const code = searchParams.get("code");
+    if (!code) {
+      setError("Missing authorization code");
+      return;
+    }
+
     const state = searchParams.get("state") || "";
+    if (state.startsWith("dingtalk.")) {
+      api
+        .completeDingTalkBinding(code, state)
+        .then(({ next_path }) => {
+          router.push(next_path || paths.root());
+        })
+        .catch((err) => {
+          setError(
+            err instanceof Error ? err.message : "DingTalk connection failed",
+          );
+        });
+      return;
+    }
+
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
@@ -111,7 +125,7 @@ function CallbackContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Login Failed</CardTitle>
+            <CardTitle className="text-2xl">Authentication Failed</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">

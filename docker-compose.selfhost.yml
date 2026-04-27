@@ -3,6 +3,7 @@
 # Usage:
 #   cp .env.example .env
 #   # Edit .env — change JWT_SECRET at minimum
+#   # Optional: put local bot / DingTalk secrets in .env.bot
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
 # Frontend: http://localhost:3000
@@ -32,6 +33,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.bot
+        required: false
     depends_on:
       postgres:
         condition: service_healthy

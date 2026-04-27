@@ -7,6 +7,9 @@ describe("paths.workspace(slug)", () => {
   it("builds dashboard paths with slug prefix", () => {
     expect(ws.issues()).toBe("/acme/issues");
     expect(ws.issueDetail("abc-123")).toBe("/acme/issues/abc-123");
+    expect(ws.issueDetail("abc-123", { commentId: "comment-1" })).toBe(
+      "/acme/issues/abc-123?comment=comment-1",
+    );
     expect(ws.projects()).toBe("/acme/projects");
     expect(ws.projectDetail("p1")).toBe("/acme/projects/p1");
     expect(ws.autopilots()).toBe("/acme/autopilots");
@@ -21,6 +24,9 @@ describe("paths.workspace(slug)", () => {
 
   it("URL-encodes special characters in ids", () => {
     expect(ws.issueDetail("id with space")).toBe("/acme/issues/id%20with%20space");
+    expect(ws.issueDetail("abc-123", { commentId: "comment with space" })).toBe(
+      "/acme/issues/abc-123?comment=comment%20with%20space",
+    );
   });
 });
 

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -28,6 +30,27 @@ func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID strin
 	return items
 }
 
+func notificationEventsForRecipient(t *testing.T, queries *db.Queries, recipientID string) []db.NotificationEvent {
+	t.Helper()
+	items, err := queries.ListNotificationEventsByRecipient(context.Background(), db.ListNotificationEventsByRecipientParams{
+		WorkspaceID:     util.ParseUUID(testWorkspaceID),
+		RecipientUserID: util.ParseUUID(recipientID),
+	})
+	if err != nil {
+		t.Fatalf("ListNotificationEventsByRecipient: %v", err)
+	}
+	return items
+}
+
+func notificationDeliveriesForEvent(t *testing.T, queries *db.Queries, eventID string) []db.NotificationDelivery {
+	t.Helper()
+	items, err := queries.ListNotificationDeliveriesByEvent(context.Background(), util.ParseUUID(eventID))
+	if err != nil {
+		t.Fatalf("ListNotificationDeliveriesByEvent: %v", err)
+	}
+	return items
+}
+
 // cleanupInboxForIssue deletes all inbox items related to a given issue.
 func cleanupInboxForIssue(t *testing.T, issueID string) {
 	t.Helper()
@@ -44,6 +67,37 @@ func addTestSubscriber(t *testing.T, issueID, userType, userID, reason string) {
 	`, issueID, userType, userID, reason)
 	if err != nil {
 		t.Fatalf("addTestSubscriber: %v", err)
+	}
+}
+
+func createNotificationBindingForUser(t *testing.T, userID, provider string) string {
+	t.Helper()
+
+	var bindingID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO external_account_binding (
+			user_id, provider, external_user_id, display_name, status, metadata
+		)
+		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
+		RETURNING id
+	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
+		t.Fatalf("createNotificationBindingForUser: %v", err)
+	}
+	return bindingID
+}
+
+func enableNotificationPreferenceForUser(t *testing.T, userID, channel, eventType, bindingID string) {
+	t.Helper()
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_channel_preference (
+			user_id, channel, event_type, enabled, binding_id
+		)
+		VALUES ($1, $2, $3, true, $4)
+		ON CONFLICT (user_id, channel, event_type)
+		DO UPDATE SET enabled = EXCLUDED.enabled, binding_id = EXCLUDED.binding_id
+	`, userID, channel, eventType, bindingID); err != nil {
+		t.Fatalf("enableNotificationPreferenceForUser: %v", err)
 	}
 }
 
@@ -419,8 +473,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
@@ -673,5 +727,265 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	}
 	if sub1Items[0].Severity != "info" {
 		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
+	}
+}
+
+func TestNotification_MentionedCommentCreatesCanonicalNotification(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mentionedEmail := "notif-mentioned@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	commentID := "00000000-0000-0000-0000-000000000123"
+	commentContent := "ping [@Mentioned](mention://member/" + mentionedID + ") please check this"
+	issueTitle := "mentioned issue"
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  issueTitle,
+			"issue_status": "todo",
+		},
+	})
+
+	inboxItems := inboxItemsForRecipient(t, queries, mentionedID)
+	if len(inboxItems) != 1 {
+		t.Fatalf("expected 1 inbox item for mentioned user, got %d", len(inboxItems))
+	}
+	if inboxItems[0].Type != "mentioned" {
+		t.Fatalf("expected inbox type 'mentioned', got %q", inboxItems[0].Type)
+	}
+	if !inboxItems[0].Body.Valid || inboxItems[0].Body.String != commentContent {
+		t.Fatalf("expected inbox body %q, got %#v", commentContent, inboxItems[0].Body)
+	}
+
+	events := notificationEventsForRecipient(t, queries, mentionedID)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 canonical notification event, got %d", len(events))
+	}
+	if events[0].Type != "mentioned" {
+		t.Fatalf("expected notification type 'mentioned', got %q", events[0].Type)
+	}
+	if events[0].Title != issueTitle {
+		t.Fatalf("expected notification title %q, got %q", issueTitle, events[0].Title)
+	}
+	if !events[0].Body.Valid || events[0].Body.String != commentContent {
+		t.Fatalf("expected notification body %q, got %#v", commentContent, events[0].Body)
+	}
+	if !events[0].CommentID.Valid || util.UUIDToString(events[0].CommentID) != commentID {
+		t.Fatalf("expected notification comment_id %q, got %q", commentID, util.UUIDToString(events[0].CommentID))
+	}
+
+	workspace, err := queries.GetWorkspace(context.Background(), util.ParseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	expectedLinkSuffix := "/" + workspace.Slug + "/issues/" + issueID + "?comment=" + commentID
+	if !events[0].Link.Valid || !strings.Contains(events[0].Link.String, expectedLinkSuffix) {
+		t.Fatalf("expected notification link to contain %q, got %#v", expectedLinkSuffix, events[0].Link)
+	}
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(events[0].ID))
+	if len(deliveries) != 1 {
+		t.Fatalf("expected 1 notification delivery, got %d", len(deliveries))
+	}
+	if deliveries[0].Channel != "inbox" {
+		t.Fatalf("expected delivery channel 'inbox', got %q", deliveries[0].Channel)
+	}
+	if deliveries[0].Status != "sent" {
+		t.Fatalf("expected delivery status 'sent', got %q", deliveries[0].Status)
+	}
+	if deliveries[0].AttemptCount != 1 {
+		t.Fatalf("expected delivery attempt_count 1, got %d", deliveries[0].AttemptCount)
+	}
+	if !deliveries[0].SentAt.Valid {
+		t.Fatal("expected delivery sent_at to be populated")
+	}
+}
+
+func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mentionedEmail := "notif-mentioned-dingtalk@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	bindingID := createNotificationBindingForUser(t, mentionedID, "dingtalk")
+	enableNotificationPreferenceForUser(t, mentionedID, "dingtalk", "mentioned", bindingID)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	commentID := "00000000-0000-0000-0000-000000000456"
+	commentContent := "ding [@Mentioned](mention://member/" + mentionedID + ") now"
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "mentioned issue",
+			"issue_status": "todo",
+		},
+	})
+
+	events := notificationEventsForRecipient(t, queries, mentionedID)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 canonical notification event, got %d", len(events))
+	}
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(events[0].ID))
+	if len(deliveries) != 2 {
+		t.Fatalf("expected 2 notification deliveries, got %d", len(deliveries))
+	}
+
+	if deliveries[0].Channel != "inbox" {
+		t.Fatalf("expected first delivery channel 'inbox', got %q", deliveries[0].Channel)
+	}
+	if deliveries[1].Channel != "dingtalk" {
+		t.Fatalf("expected second delivery channel 'dingtalk', got %q", deliveries[1].Channel)
+	}
+	if deliveries[1].Status != "pending" {
+		t.Fatalf("expected dingtalk delivery status 'pending', got %q", deliveries[1].Status)
+	}
+	if deliveries[1].AttemptCount != 0 {
+		t.Fatalf("expected dingtalk delivery attempt_count 0, got %d", deliveries[1].AttemptCount)
+	}
+	if deliveries[1].SentAt.Valid {
+		t.Fatal("expected pending dingtalk delivery sent_at to be empty")
+	}
+
+	var snapshot struct {
+		BindingID         string          `json:"binding_id"`
+		Provider          string          `json:"provider"`
+		ExternalUserID    string          `json:"external_user_id"`
+		NotificationEvent json.RawMessage `json:"notification_event"`
+	}
+	if err := json.Unmarshal(deliveries[1].PayloadSnapshot, &snapshot); err != nil {
+		t.Fatalf("unmarshal dingtalk payload snapshot: %v", err)
+	}
+	if snapshot.BindingID != bindingID {
+		t.Fatalf("expected binding_id %q, got %q", bindingID, snapshot.BindingID)
+	}
+	if snapshot.Provider != "dingtalk" {
+		t.Fatalf("expected provider 'dingtalk', got %q", snapshot.Provider)
+	}
+	if len(snapshot.NotificationEvent) == 0 {
+		t.Fatal("expected nested notification_event payload in dingtalk snapshot")
+	}
+}
+
+func TestNotification_SelfMentionQueuesDingTalkDeliveryWhenEnabled(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_channel_preference WHERE user_id = $1`, testUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM external_account_binding WHERE user_id = $1`, testUserID)
+	})
+
+	bindingID := createNotificationBindingForUser(t, testUserID, "dingtalk")
+	enableNotificationPreferenceForUser(t, testUserID, "dingtalk", "mentioned", bindingID)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	commentID := "00000000-0000-0000-0000-000000000789"
+	commentContent := "self [@Me](mention://member/" + testUserID + ") now"
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "self mentioned issue",
+			"issue_status": "todo",
+		},
+	})
+
+	inboxItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(inboxItems) != 1 {
+		t.Fatalf("expected 1 inbox item for self mention, got %d", len(inboxItems))
+	}
+
+	events := notificationEventsForRecipient(t, queries, testUserID)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 canonical notification event, got %d", len(events))
+	}
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(events[0].ID))
+	if len(deliveries) != 2 {
+		t.Fatalf("expected 2 notification deliveries, got %d", len(deliveries))
+	}
+	if deliveries[1].Channel != "dingtalk" {
+		t.Fatalf("expected second delivery channel 'dingtalk', got %q", deliveries[1].Channel)
+	}
+	if deliveries[1].Status != "pending" {
+		t.Fatalf("expected dingtalk delivery status 'pending', got %q", deliveries[1].Status)
 	}
 }

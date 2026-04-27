@@ -55,6 +55,13 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  ListNotificationBindingsResponse,
+  ListNotificationPreferencesResponse,
+  NotificationChannelPreference,
+  UpdateNotificationPreferenceRequest,
+  StartDingTalkBindingRequest,
+  StartDingTalkBindingResponse,
+  CompleteDingTalkBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -317,6 +324,48 @@ export class ApiClient {
 
   async updateMe(data: UpdateMeRequest): Promise<User> {
     return this.fetch("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listNotificationBindings(): Promise<ListNotificationBindingsResponse> {
+    return this.fetch("/api/me/notification-bindings");
+  }
+
+  async deleteNotificationBinding(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-bindings/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async startDingTalkBinding(
+    payload: StartDingTalkBindingRequest,
+  ): Promise<StartDingTalkBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/dingtalk/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeDingTalkBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteDingTalkBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/dingtalk/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  }
+
+  async listNotificationPreferences(): Promise<ListNotificationPreferencesResponse> {
+    return this.fetch("/api/me/notification-preferences");
+  }
+
+  async updateNotificationPreference(
+    data: UpdateNotificationPreferenceRequest,
+  ): Promise<NotificationChannelPreference> {
+    return this.fetch("/api/me/notification-preferences", {
       method: "PATCH",
       body: JSON.stringify(data),
     });
