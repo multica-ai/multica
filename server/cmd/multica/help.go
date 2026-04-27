@@ -35,7 +35,6 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
-
 // initHelp configures the root command to use gh-style help output.
 func initHelp(root *cobra.Command) {
 	root.SetHelpTemplate(rootHelpTemplate)
@@ -122,6 +121,7 @@ EXAMPLES
   $ multica login
   $ multica issue list --output json
   $ multica daemon start
+  $ multica --config ~/.multica/instances/local/config.json daemon start
   $ multica agent list --output json
 
 ENVIRONMENT VARIABLES

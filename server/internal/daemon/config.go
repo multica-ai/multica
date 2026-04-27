@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 const (
@@ -20,20 +22,20 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
 
 	// Rate Limit retry configuration
-	DefaultRateLimitInitialDelay  = 5 * time.Second  // 5 seconds
-	DefaultRateLimitMaxRetries     = 6                   // max 6 retries
-	DefaultRateLimitBackoffFactor = 2.0                 // exponential backoff
+	DefaultRateLimitInitialDelay  = 5 * time.Second // 5 seconds
+	DefaultRateLimitMaxRetries    = 6               // max 6 retries
+	DefaultRateLimitBackoffFactor = 2.0             // exponential backoff
 )
 
 // Config holds all daemon configuration.
 type Config struct {
 	ServerBaseURL      string
 	DaemonID           string
-	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	LegacyDaemonIDs    []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
 	DeviceName         string
 	RuntimeName        string
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
@@ -51,14 +53,14 @@ type Config struct {
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
-	RateLimitConfig RateLimitConfig
+	RateLimitConfig    RateLimitConfig
 }
 
 // RateLimitConfig holds configuration for automatic rate limit retries.
 type RateLimitConfig struct {
 	InitialDelay  time.Duration // initial delay before first retry (default: 5s)
 	MaxRetries    int           // maximum number of retries (default: 6)
-	BackoffFactor float64     // exponential backoff factor (default: 2.0)
+	BackoffFactor float64       // exponential backoff factor (default: 2.0)
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -74,6 +76,7 @@ type Overrides struct {
 	DeviceName         string
 	RuntimeName        string
 	Profile            string // profile name (empty = default)
+	ConfigPath         string // explicit config path (empty = profile/default resolution)
 	HealthPort         int    // health check port (0 = use default)
 }
 
@@ -212,8 +215,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
 
-	// Profile
+	// Profile/config instance selector
 	profile := overrides.Profile
+	configPath := strings.TrimSpace(overrides.ConfigPath)
 
 	// daemon_id resolution: override > env > persistent UUID on disk.
 	// The persistent UUID is written once to `<profile-dir>/daemon.id` and
@@ -226,7 +230,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		daemonID = overrides.DaemonID
 	}
 	if daemonID == "" {
-		persisted, err := EnsureDaemonID(profile)
+		persisted, err := EnsureDaemonID(profile, configPath)
 		if err != nil {
 			return Config{}, fmt.Errorf("ensure daemon id: %w", err)
 		}
@@ -270,7 +274,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
 		}
-		if profile != "" {
+		if configPath != "" {
+			stateDir, err := cli.StateDirForInstance(profile, configPath)
+			if err != nil {
+				return Config{}, fmt.Errorf("resolve state dir for workspaces root: %w", err)
+			}
+			workspacesRoot = filepath.Join(stateDir, "workspaces")
+		} else if profile != "" {
 			workspacesRoot = filepath.Join(home, "multica_workspaces_"+profile)
 		} else {
 			workspacesRoot = filepath.Join(home, "multica_workspaces")

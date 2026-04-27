@@ -15,7 +15,7 @@ func TestEnsureDaemonID_Persists(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	first, err := EnsureDaemonID("")
+	first, err := EnsureDaemonID("", "")
 	if err != nil {
 		t.Fatalf("EnsureDaemonID first call: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestEnsureDaemonID_Persists(t *testing.T) {
 		t.Fatalf("file contents %q differ from returned UUID %q", data, first)
 	}
 
-	second, err := EnsureDaemonID("")
+	second, err := EnsureDaemonID("", "")
 	if err != nil {
 		t.Fatalf("EnsureDaemonID second call: %v", err)
 	}
@@ -45,11 +45,11 @@ func TestEnsureDaemonID_SharedAcrossProfiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	defaultID, err := EnsureDaemonID("")
+	defaultID, err := EnsureDaemonID("", "")
 	if err != nil {
 		t.Fatalf("default profile: %v", err)
 	}
-	stagingID, err := EnsureDaemonID("staging")
+	stagingID, err := EnsureDaemonID("staging", "")
 	if err != nil {
 		t.Fatalf("staging profile: %v", err)
 	}
@@ -62,6 +62,35 @@ func TestEnsureDaemonID_SharedAcrossProfiles(t *testing.T) {
 	profileFile := filepath.Join(home, ".multica", "profiles", "staging", "daemon.id")
 	if _, err := os.Stat(profileFile); !os.IsNotExist(err) {
 		t.Fatalf("profile-scoped daemon.id should not be created, stat err: %v", err)
+	}
+}
+
+func TestEnsureDaemonID_IsolatedByExplicitConfigPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configA := filepath.Join(home, "instances", "dev", "config.json")
+	configB := filepath.Join(home, "instances", "local", "config.json")
+
+	idA, err := EnsureDaemonID("", configA)
+	if err != nil {
+		t.Fatalf("config A: %v", err)
+	}
+	idB, err := EnsureDaemonID("", configB)
+	if err != nil {
+		t.Fatalf("config B: %v", err)
+	}
+	if idA == idB {
+		t.Fatalf("explicit config paths should get distinct daemon ids, both were %s", idA)
+	}
+
+	pathA := filepath.Join(filepath.Dir(configA), "daemon.id")
+	pathB := filepath.Join(filepath.Dir(configB), "daemon.id")
+	if _, err := os.Stat(pathA); err != nil {
+		t.Fatalf("daemon.id for config A not written: %v", err)
+	}
+	if _, err := os.Stat(pathB); err != nil {
+		t.Fatalf("daemon.id for config B not written: %v", err)
 	}
 }
 
@@ -82,7 +111,7 @@ func TestEnsureDaemonID_PromotesPreChangeProfileFile(t *testing.T) {
 	// First call on the post-change daemon with the matching profile must
 	// reuse the pre-change UUID so existing runtime rows continue to match
 	// without needing a merge round-trip.
-	got, err := EnsureDaemonID("staging")
+	got, err := EnsureDaemonID("staging", "")
 	if err != nil {
 		t.Fatalf("EnsureDaemonID: %v", err)
 	}
@@ -113,7 +142,7 @@ func TestEnsureDaemonID_RegeneratesCorruptFile(t *testing.T) {
 		t.Fatalf("seed corrupt file: %v", err)
 	}
 
-	id, err := EnsureDaemonID("")
+	id, err := EnsureDaemonID("", "")
 	if err != nil {
 		t.Fatalf("EnsureDaemonID: %v", err)
 	}

@@ -90,34 +90,38 @@ func init() {
 	daemonCmd.AddCommand(daemonLogsCmd)
 }
 
-// daemonDirForProfile returns the state directory for the given profile.
-// Empty profile → ~/.multica/, named profile → ~/.multica/profiles/<name>/.
-func daemonDirForProfile(profile string) string {
-	dir, err := cli.ProfileDir(profile)
+// daemonDirForInstance returns the state directory for the given instance.
+// Explicit config paths isolate state in the config file's parent directory.
+func daemonDirForInstance(profile, configPath string) string {
+	dir, err := cli.StateDirForInstance(profile, configPath)
 	if err != nil {
 		return ""
 	}
 	return dir
 }
 
-func daemonPIDPathForProfile(profile string) string {
-	return filepath.Join(daemonDirForProfile(profile), "daemon.pid")
+func daemonPIDPathForInstance(profile, configPath string) string {
+	return filepath.Join(daemonDirForInstance(profile, configPath), "daemon.pid")
 }
 
-func daemonLogPathForProfile(profile string) string {
-	return filepath.Join(daemonDirForProfile(profile), "daemon.log")
+func daemonLogPathForInstance(profile, configPath string) string {
+	return filepath.Join(daemonDirForInstance(profile, configPath), "daemon.log")
 }
 
-// healthPortForProfile returns the health check port for the given profile.
-// Default profile uses the standard port (19514). Named profiles get a
-// deterministic offset derived from the profile name.
-func healthPortForProfile(profile string) int {
-	if profile == "" {
+// healthPortForInstance returns the health check port for the given instance.
+// Default profile uses the standard port (19514). Other instances get a
+// deterministic offset derived from the profile or explicit config path.
+func healthPortForInstance(profile, configPath string) int {
+	key := profile
+	if strings.TrimSpace(configPath) != "" {
+		key = configPath
+	}
+	if key == "" {
 		return daemon.DefaultHealthPort
 	}
 	// Simple hash: sum of bytes mod 1000, offset from base+1.
 	var h int
-	for _, b := range []byte(profile) {
+	for _, b := range []byte(key) {
 		h += int(b)
 	}
 	return daemon.DefaultHealthPort + 1 + (h % 1000)
@@ -135,7 +139,8 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 
 func runDaemonBackground(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
-	healthPort := healthPortForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	healthPort := healthPortForInstance(profile, configPath)
 
 	// Check if daemon is already running.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -160,12 +165,12 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	args := buildDaemonStartArgs(cmd)
 
 	// Ensure daemon directory exists.
-	dir := daemonDirForProfile(profile)
+	dir := daemonDirForInstance(profile, configPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create daemon directory: %w", err)
 	}
 
-	logPath := daemonLogPathForProfile(profile)
+	logPath := daemonLogPathForInstance(profile, configPath)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("open log file %s: %w", logPath, err)
@@ -187,7 +192,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child.Process.Release()
 
 	// Write PID file.
-	pidPath := daemonPIDPathForProfile(profile)
+	pidPath := daemonPIDPathForInstance(profile, configPath)
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
@@ -249,6 +254,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
 		args = append(args, "--server-url", v)
 	}
+	if v := resolveConfigPath(cmd); v != "" {
+		args = append(args, "--config", v)
+	}
 	if v := resolveProfile(cmd); v != "" {
 		args = append(args, "--profile", v)
 	}
@@ -258,10 +266,11 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 
 func runDaemonForeground(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
+	configPath := resolveConfigPath(cmd)
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if serverURL == "" {
-		if c, err := cli.LoadCLIConfigForProfile(profile); err == nil && c.ServerURL != "" {
+		if c, err := cli.LoadCLIConfigForInstance(profile, configPath); err == nil && c.ServerURL != "" {
 			serverURL = c.ServerURL
 		}
 	}
@@ -271,7 +280,8 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		DeviceName:  flagString(cmd, "device-name"),
 		RuntimeName: flagString(cmd, "runtime-name"),
 		Profile:     profile,
-		HealthPort:  healthPortForProfile(profile),
+		ConfigPath:  configPath,
+		HealthPort:  healthPortForInstance(profile, configPath),
 	}
 	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
 		overrides.PollInterval = d
@@ -302,11 +312,11 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	d := daemon.New(cfg, logger)
 
 	// Write PID file so "daemon stop" can find us.
-	if dir := daemonDirForProfile(profile); dir != "" {
+	if dir := daemonDirForInstance(profile, configPath); dir != "" {
 		os.MkdirAll(dir, 0o755)
-		os.WriteFile(daemonPIDPathForProfile(profile), []byte(strconv.Itoa(os.Getpid())), 0o644)
+		os.WriteFile(daemonPIDPathForInstance(profile, configPath), []byte(strconv.Itoa(os.Getpid())), 0o644)
 	}
-	defer os.Remove(daemonPIDPathForProfile(profile))
+	defer os.Remove(daemonPIDPathForInstance(profile, configPath))
 
 	if err := d.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -319,7 +329,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
 
-		logPath := daemonLogPathForProfile(profile)
+		logPath := daemonLogPathForInstance(profile, configPath)
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			logger.Error("failed to open log file for restart", "error", err)
@@ -338,7 +348,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		child.Process.Release()
 
 		// Write new PID file.
-		pidPath := daemonPIDPathForProfile(profile)
+		pidPath := daemonPIDPathForInstance(profile, configPath)
 		os.WriteFile(pidPath, []byte(strconv.Itoa(child.Process.Pid)), 0o644)
 
 		logger.Info("new daemon started", "pid", child.Process.Pid)
@@ -351,7 +361,8 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	profile := resolveProfile(cmd)
-	healthPort := healthPortForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	healthPort := healthPortForInstance(profile, configPath)
 
 	// Stop if running.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -386,7 +397,8 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
-	healthPort := healthPortForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	healthPort := healthPortForInstance(profile, configPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -433,7 +445,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		h := checkDaemonHealthOnPort(ctx2, healthPort)
 		cancel2()
 		if h["status"] != "running" {
-			os.Remove(daemonPIDPathForProfile(profile))
+			os.Remove(daemonPIDPathForInstance(profile, configPath))
 			fmt.Fprintln(os.Stderr, "Daemon stopped.")
 			return nil
 		}
@@ -468,7 +480,8 @@ func requestDaemonShutdown(healthPort int) error {
 
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
-	healthPort := healthPortForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	healthPort := healthPortForInstance(profile, configPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -508,7 +521,8 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 
 func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
-	logPath := daemonLogPathForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	logPath := daemonLogPathForInstance(profile, configPath)
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s\nThe daemon may not have been started in background mode", logPath)
 	}
