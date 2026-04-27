@@ -283,11 +283,25 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
+					r.Get("/labels", h.ListLabelsForIssue)
+					r.Post("/labels", h.AttachLabel)
+					r.Delete("/labels/{labelId}", h.DetachLabel)
 				})
 			})
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+
+			// Labels
+			r.Route("/api/labels", func(r chi.Router) {
+				r.Get("/", h.ListLabels)
+				r.Post("/", h.CreateLabel)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetLabel)
+					r.Put("/", h.UpdateLabel)
+					r.Delete("/", h.DeleteLabel)
+				})
+			})
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {

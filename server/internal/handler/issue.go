@@ -42,6 +42,13 @@ type IssueResponse struct {
 	UpdatedAt          string                  `json:"updated_at"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	// Labels are bulk-attached by list/detail endpoints so the client can render
+	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
+	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
+	// WS broadcast) emit no `labels` field at all — the client merge then
+	// preserves whatever labels are already in cache. nil pointer = "field
+	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
+	Labels             *[]LabelResponse        `json:"labels,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -91,6 +98,37 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+}
+
+// labelsByIssue bulk-loads labels for the given issue IDs and returns a map
+// keyed by issue UUID string. On error or empty input, returns an empty map —
+// label rendering is non-critical and we'd rather serve issues without labels
+// than fail the whole list call.
+func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueIDs []pgtype.UUID) map[string][]LabelResponse {
+	out := map[string][]LabelResponse{}
+	if len(issueIDs) == 0 {
+		return out
+	}
+	rows, err := h.Queries.ListLabelsForIssues(ctx, db.ListLabelsForIssuesParams{
+		IssueIds:    issueIDs,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		slog.Warn("ListLabelsForIssues failed", "error", err)
+		return out
+	}
+	for _, r := range rows {
+		issueID := uuidToString(r.IssueID)
+		out[issueID] = append(out[issueID], LabelResponse{
+			ID:          uuidToString(r.ID),
+			WorkspaceID: uuidToString(r.WorkspaceID),
+			Name:        r.Name,
+			Color:       r.Color,
+			CreatedAt:   timestampToString(r.CreatedAt),
+			UpdatedAt:   timestampToString(r.UpdatedAt),
+		})
+	}
+	return out
 }
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
@@ -603,9 +641,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		prefix := h.getIssuePrefix(ctx, wsUUID)
+		ids := make([]pgtype.UUID, len(issues))
+		for i, issue := range issues {
+			ids[i] = issue.ID
+		}
+		labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
+			labels := labelsMap[resp[i].ID]
+			if labels == nil {
+				labels = []LabelResponse{}
+			}
+			resp[i].Labels = &labels
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -664,9 +712,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
+	ids := make([]pgtype.UUID, len(issues))
+	for i, issue := range issues {
+		ids[i] = issue.ID
+	}
+	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
+		labels := labelsMap[resp[i].ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		resp[i].Labels = &labels
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -683,6 +741,11 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
+	if detailLabels == nil {
+		detailLabels = []LabelResponse{}
+	}
+	resp.Labels = &detailLabels
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)

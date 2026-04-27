@@ -771,6 +771,39 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
+// TestInjectRuntimeConfigDirectsMultiLineWritesToStdin pins the guidance that
+// any multi-line content for `multica issue comment add` must go through
+// `--content-stdin` + a HEREDOC. Agents that reached for the inline
+// `--content "...\n\n..."` form ended up with literal 4-char `\n` sequences
+// in stored comments because bash does not expand backslash escapes inside
+// double quotes; see MUL-1467. This test prevents the multi-line guidance
+// from silently regressing back into a "for special characters" footnote.
+func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"multi-line content",
+		"MUST pipe via stdin",
+		"--content-stdin",
+		"<<'COMMENT'",
+		"`--description`",
+		"--description-stdin",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing multi-line guidance %q\n---\n%s", want, s)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

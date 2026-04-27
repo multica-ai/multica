@@ -25,7 +25,10 @@ var codexBlockedArgs = map[string]blockedArgMode{
 // user supplied a custom_args flag that the `app-server` subcommand
 // rejects). Kept as its own constant so bumping codex independently of
 // other agents stays easy if codex starts shipping longer failure traces.
-const codexStderrTailBytes = 2048
+const (
+	codexStderrTailBytes                  = 2048
+	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
+)
 
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
@@ -45,6 +48,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
+	}
+	semanticInactivityTimeout := opts.SemanticInactivityTimeout
+	if semanticInactivityTimeout == 0 {
+		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
@@ -79,6 +86,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+	semanticActivityCh := make(chan string, 256)
 
 	var outputMu sync.Mutex
 	var output strings.Builder
@@ -93,12 +101,18 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		pending:              make(map[int]*pendingRPC),
 		notificationProtocol: "unknown",
 		onMessage: func(msg Message) {
+			logCodexAgentMessage(b.cfg.Logger, msg)
 			if msg.Type == MessageText {
 				outputMu.Lock()
 				output.WriteString(msg.Content)
 				outputMu.Unlock()
 			}
 			trySend(msgCh, msg)
+			trySendString(semanticActivityCh, describeCodexSemanticActivity(msg))
+		},
+		onSemanticActivity: func(description string) {
+			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
+			trySendString(semanticActivityCh, description)
 		},
 		onTurnDone: func(aborted bool) {
 			select {
@@ -207,26 +221,51 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			return
 		}
 
-		// Wait for turn completion or context cancellation
-		select {
-		case aborted := <-turnDone:
-			switch {
-			case aborted:
-				finalStatus = "aborted"
-				finalError = "turn was aborted"
-			default:
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finalStatus = "failed"
-					finalError = errMsg
+		lastSemanticActivity := time.Now()
+		lastSemanticActivityDescription := "turn/start"
+		semanticTimer := time.NewTimer(semanticInactivityTimeout)
+		defer semanticTimer.Stop()
+
+		waitingForTurn := true
+		for waitingForTurn {
+			select {
+			case aborted := <-turnDone:
+				waitingForTurn = false
+				switch {
+				case aborted:
+					finalStatus = "aborted"
+					finalError = "turn was aborted"
+				default:
+					if errMsg := c.getTurnError(); errMsg != "" {
+						finalStatus = "failed"
+						finalError = errMsg
+					}
 				}
-			}
-		case <-runCtx.Done():
-			if runCtx.Err() == context.DeadlineExceeded {
+			case activity := <-semanticActivityCh:
+				lastSemanticActivity = time.Now()
+				lastSemanticActivityDescription = activity
+				resetTimer(semanticTimer, semanticInactivityTimeout)
+			case <-semanticTimer.C:
+				waitingForTurn = false
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("codex timed out after %s", timeout)
-			} else {
-				finalStatus = "aborted"
-				finalError = "execution cancelled"
+				finalError = fmt.Sprintf("codex semantic inactivity timeout after %s without agent progress (last activity: %s)", semanticInactivityTimeout, lastSemanticActivityDescription)
+				b.cfg.Logger.Warn("codex semantic inactivity timeout",
+					"pid", cmd.Process.Pid,
+					"thread_id", threadID,
+					"turn_id", c.turnID,
+					"timeout", semanticInactivityTimeout.String(),
+					"last_activity", lastSemanticActivityDescription,
+					"idle_for", time.Since(lastSemanticActivity).Round(time.Millisecond).String(),
+				)
+			case <-runCtx.Done():
+				waitingForTurn = false
+				if runCtx.Err() == context.DeadlineExceeded {
+					finalStatus = "timeout"
+					finalError = fmt.Sprintf("codex timed out after %s", timeout)
+				} else {
+					finalStatus = "aborted"
+					finalError = "execution cancelled"
+				}
 			}
 		}
 
@@ -337,18 +376,68 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	return threadID, false, nil
 }
 
+func resetTimer(timer *time.Timer, d time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(d)
+}
+
+func trySendString(ch chan<- string, value string) {
+	select {
+	case ch <- value:
+	default:
+	}
+}
+
+func logCodexAgentMessage(logger *slog.Logger, msg Message) {
+	if logger == nil {
+		return
+	}
+	attrs := []any{
+		"type", string(msg.Type),
+		"tool", msg.Tool,
+		"call_id", msg.CallID,
+		"status", msg.Status,
+		"content_len", len(msg.Content),
+		"output_len", len(msg.Output),
+	}
+	logger.Info("codex agent message received", attrs...)
+	if msg.Type == MessageToolResult {
+		logger.Info("codex tool_result observed", "tool", msg.Tool, "call_id", msg.CallID, "output_len", len(msg.Output))
+	}
+}
+
+func describeCodexSemanticActivity(msg Message) string {
+	switch msg.Type {
+	case MessageToolUse, MessageToolResult:
+		if msg.Tool != "" {
+			return fmt.Sprintf("%s:%s", msg.Type, msg.Tool)
+		}
+	case MessageStatus:
+		if msg.Status != "" {
+			return fmt.Sprintf("%s:%s", msg.Type, msg.Status)
+		}
+	}
+	return string(msg.Type)
+}
+
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg        Config
-	stdin      interface{ Write([]byte) (int, error) }
-	mu         sync.Mutex
-	nextID     int
-	pending    map[int]*pendingRPC
-	threadID   string
-	turnID     string
-	onMessage  func(Message)
-	onTurnDone func(aborted bool)
+	cfg                Config
+	stdin              interface{ Write([]byte) (int, error) }
+	mu                 sync.Mutex
+	nextID             int
+	pending            map[int]*pendingRPC
+	threadID           string
+	turnID             string
+	onMessage          func(Message)
+	onSemanticActivity func(description string)
+	onTurnDone         func(aborted bool)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
@@ -415,6 +504,13 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 		delete(c.pending, id)
 		c.mu.Unlock()
 		return nil, fmt.Errorf("write %s: %w", method, err)
+	}
+	if method == "turn/start" {
+		threadID := ""
+		if paramMap, ok := params.(map[string]any); ok {
+			threadID, _ = paramMap["threadId"].(string)
+		}
+		c.cfg.Logger.Info("codex turn/start sent", "request_id", id, "thread_id", threadID)
 	}
 
 	select {
@@ -666,6 +762,8 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	case "turn/completed":
 		turnID := extractNestedString(params, "turn", "id")
 		status := extractNestedString(params, "turn", "status")
+		threadID, _ := params["threadId"].(string)
+		c.cfg.Logger.Info("codex turn/completed received", "thread_id", threadID, "turn_id", turnID, "status", status)
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
 
@@ -730,13 +828,15 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 }
 
 func (c *codexClient) handleItemNotification(method string, params map[string]any) {
-	item, ok := params["item"].(map[string]any)
-	if !ok {
-		return
-	}
-
+	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
+	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
+	}
+	if item == nil {
+		return
+	}
 
 	switch {
 	case method == "item/started" && itemType == "commandExecution":
@@ -791,6 +891,28 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			}
 		}
 	}
+}
+
+func isCodexItemProgressActivity(method string) bool {
+	switch method {
+	case "item/agentMessage/delta",
+		"item/commandExecution/outputDelta",
+		"item/fileChange/outputDelta",
+		"item/mcpToolCall/progress":
+		return true
+	default:
+		return false
+	}
+}
+
+func describeCodexItemProgressActivity(method, itemType, itemID string) string {
+	if itemType == "" {
+		itemType = "unknown"
+	}
+	if itemID == "" {
+		return fmt.Sprintf("%s:%s", method, itemType)
+	}
+	return fmt.Sprintf("%s:%s:%s", method, itemType, itemID)
 }
 
 // extractUsageFromMap extracts token usage from a map that may contain

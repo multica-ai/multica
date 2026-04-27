@@ -284,6 +284,27 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.18",
+        date: "2026-04-27",
+        title: "Issue Labels, Labs Tab & Sidebar Invite Dot",
+        changes: [],
+        features: [
+          "Issue labels — color-code and filter issues across list, board and detail views",
+          "Labs settings tab for experimental toggles",
+          "Sidebar shows a dot when you have an unread workspace invite",
+        ],
+        improvements: [
+          "Project picker now shows the selected project's icon",
+          "Sidebar parent items stay highlighted on detail pages",
+          "Self-hosted deployments correctly honor signup gating env vars",
+        ],
+        fixes: [
+          "Agent comments preserve line breaks again",
+          "Desktop RPM no longer conflicts with Slack / VS Code on Fedora",
+          "Windows agents handle multi-line prompts correctly",
+        ],
+      },
+      {
         version: "0.2.17",
         date: "2026-04-26",
         title: "Custom Agent Env, Better Failure Messages & Reliability Fixes",

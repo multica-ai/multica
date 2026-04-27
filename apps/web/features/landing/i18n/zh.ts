@@ -284,6 +284,27 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.18",
+        date: "2026-04-27",
+        title: "Issue 标签、Labs 设置页与邀请红点",
+        changes: [],
+        features: [
+          "Issue 标签——给 Issue 上色、分类，列表、看板和详情页都能用",
+          "新增 Labs 设置页，集中放实验性开关",
+          "有未读工作区邀请时，侧边栏会出现红点提示",
+        ],
+        improvements: [
+          "Project 选择器会显示当前所选 Project 的图标",
+          "进入详情页时，侧边栏父级菜单保持高亮",
+          "自托管部署正确读取注册放行相关的环境变量",
+        ],
+        fixes: [
+          "Agent 评论的换行恢复正常显示",
+          "桌面端 RPM 不再与 Slack / VS Code 在 Fedora 上冲突",
+          "Windows 下 Agent 能正确处理多行 prompt",
+        ],
+      },
+      {
         version: "0.2.17",
         date: "2026-04-26",
         title: "Agent 自定义环境变量、更清晰的失败信息与一系列稳定性修复",

@@ -512,6 +512,41 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 	})
 }
 
+// TestDeleteCommentCancelsTriggeredTasks verifies that deleting a comment
+// also cancels any active tasks that were triggered by it. Without this,
+// the daemon would still claim the queued task after the FK SET NULL
+// nullified its trigger_comment_id, and the agent would either run with a
+// stale prompt (race during claim) or with a generic "you are assigned"
+// prompt that has no record of the now-deleted user request — both of
+// which manifest as "the agent still sees the deleted comment".
+func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "Delete-comment cancels task test", agentID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	t.Run("deleting trigger comment cancels its queued task", func(t *testing.T) {
+		clearTasks(t, issueID)
+		commentID := postComment(t, issueID, "Please fix this bug", nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected 1 pending task before delete, got %d", n)
+		}
+
+		resp := authRequest(t, "DELETE", "/api/comments/"+commentID, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("DeleteComment: expected 204, got %d", resp.StatusCode)
+		}
+
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks after deleting trigger comment, got %d", n)
+		}
+	})
+}
+
 // TestCommentTriggerCoalescing verifies that rapid-fire comments don't create
 // duplicate tasks (coalescing dedup).
 func TestCommentTriggerCoalescing(t *testing.T) {
