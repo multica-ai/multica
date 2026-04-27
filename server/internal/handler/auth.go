@@ -92,6 +92,10 @@ func generateCode() (string, error) {
 	return fmt.Sprintf("%06d", n), nil
 }
 
+func configuredMasterLoginCode() string {
+	return strings.TrimSpace(os.Getenv("MASTER_LOGIN_CODE"))
+}
+
 func (h *Handler) issueJWT(user db.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   uuidToString(user.ID),
@@ -311,8 +315,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMasterCode := code == "888888" && os.Getenv("APP_ENV") != "production"
-	if !isMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+	masterCode := configuredMasterLoginCode()
+	isConfiguredMasterCode := masterCode != "" && subtle.ConstantTimeCompare([]byte(code), []byte(masterCode)) == 1
+	isDevFallbackMasterCode := masterCode == "" && code == "888888" && os.Getenv("APP_ENV") != "production"
+	if !isConfiguredMasterCode && !isDevFallbackMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return

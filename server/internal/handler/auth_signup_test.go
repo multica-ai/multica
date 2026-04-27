@@ -65,6 +65,31 @@ func (m *mockRow) Scan(dest ...interface{}) error {
 	return m.err
 }
 
+func TestConfiguredMasterLoginCode(t *testing.T) {
+	t.Run("configured_master_code_enabled_in_production", func(t *testing.T) {
+		t.Setenv("APP_ENV", "production")
+		t.Setenv("MASTER_LOGIN_CODE", "654321")
+		if got := configuredMasterLoginCode(); got != "654321" {
+			t.Fatalf("configuredMasterLoginCode() = %q, want %q", got, "654321")
+		}
+	})
+
+	t.Run("configured_master_code_trims_spaces", func(t *testing.T) {
+		t.Setenv("MASTER_LOGIN_CODE", " 777777 ")
+		if got := configuredMasterLoginCode(); got != "777777" {
+			t.Fatalf("configuredMasterLoginCode() = %q, want %q", got, "777777")
+		}
+	})
+
+	t.Run("legacy_dev_fallback_still_available_when_env_empty", func(t *testing.T) {
+		t.Setenv("APP_ENV", "development")
+		t.Setenv("MASTER_LOGIN_CODE", "")
+		if got := configuredMasterLoginCode(); got != "" {
+			t.Fatalf("configuredMasterLoginCode() = %q, want empty", got)
+		}
+	})
+}
+
 func TestFindOrCreateUserGating(t *testing.T) {
 	t.Run("new_user_blocked", func(t *testing.T) {
 		cfg := Config{AllowSignup: false}

@@ -16,11 +16,12 @@ These are the five you must think about before deploying — some have defaults 
 | `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **Yes** |
 | `PORT` | `8080` | No (unless you change the port) |
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **Yes** (the default is unsafe) |
-| `APP_ENV` | empty | **Yes** (must be `production` — see the next section for the trap) |
+| `APP_ENV` | empty | **Yes** (must be `production` unless you intentionally want the dev `888888` fallback) |
 | `FRONTEND_ORIGIN` | empty | **Yes** (self-host must set its own domain) |
+| `MASTER_LOGIN_CODE` | empty | No (optional fixed master verification code for private self-host deployments) |
 
 <Callout type="warning">
-**If `APP_ENV` is not set to `production`, anyone can sign in to any account using the code `888888`.** Multica has a development-only master code, `888888` — when `APP_ENV != "production"`, **any email** plus `888888` passes verification. The behavior is intentional for local development (no Resend dependency); **in production, failing to set `production` is equivalent to disabling auth entirely**. See [Sign-in and signup configuration → The 888888 trap](/auth-setup#the-888888-trap).
+**If `MASTER_LOGIN_CODE` is set, anyone who knows that code can sign in to any account.** When `MASTER_LOGIN_CODE` is empty and `APP_ENV != "production"`, Multica falls back to the development-only code `888888`. This is intentional for local development (no Resend dependency); in production, set `APP_ENV=production` and only configure `MASTER_LOGIN_CODE` if you explicitly want a fixed master code for a private deployment. See [Sign-in and signup configuration → The 888888 trap](/auth-setup#the-888888-trap).
 </Callout>
 
 ### Database connection pool
