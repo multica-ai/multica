@@ -236,7 +236,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
       className={isDragging ? "opacity-30" : ""}
     >
       <AppLink
-        href={p.issueDetail(issue.id)}
+        href={p.issueDetail(issue.identifier)}
         className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
       >
         <BoardCardContent issue={issue} editable childProgress={childProgress} />

@@ -168,7 +168,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
             return (
               <AppLink
                 key={task.id}
-                href={paths.issueDetail(task.issue_id)}
+                href={paths.issueDetail(issue?.identifier ?? task.issue_id)}
                 className={`${rowClassName} text-foreground no-underline hover:no-underline`}
               >
                 {content}

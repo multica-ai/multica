@@ -69,7 +69,7 @@ export const ListRow = memo(function ListRow({
         />
       </div>
       <AppLink
-        href={p.issueDetail(issue.id)}
+        href={p.issueDetail(issue.identifier)}
         className="flex flex-1 items-center gap-2 min-w-0"
       >
         <span className="w-16 shrink-0 text-xs text-muted-foreground">

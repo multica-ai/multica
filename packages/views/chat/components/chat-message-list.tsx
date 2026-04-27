@@ -1,18 +1,49 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useRef, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
+import {
+  Loader2,
+  ChevronRight,
+  ChevronDown,
+  Brain,
+  AlertCircle,
+  Trash2,
+  RotateCw,
+  MoreHorizontal,
+  Copy,
+} from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { taskMessagesOptions } from "@multica/core/chat/queries";
+import { taskMessagesOptions, chatKeys } from "@multica/core/chat/queries";
+import { api } from "@multica/core/api";
+import { copyMarkdown } from "../../editor";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
@@ -24,12 +55,26 @@ interface ChatMessageListProps {
   /** When set, streams the live timeline for this task from task-messages cache. */
   pendingTaskId: string | null;
   isWaiting: boolean;
+  /** Active session — required for delete/retry actions. */
+  sessionId: string | null;
+  sessionCreatorId: string | null;
+  /** Owner of the agent for this session (for assistant-message delete). */
+  agentOwnerId: string | null;
+  userId: string | undefined;
+  isSessionArchived: boolean;
+  wsId: string;
 }
 
 export function ChatMessageList({
   messages,
   pendingTaskId,
   isWaiting,
+  sessionId,
+  sessionCreatorId,
+  agentOwnerId,
+  userId,
+  isSessionArchived,
+  wsId,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
@@ -61,7 +106,16 @@ export function ChatMessageList({
        *  than issue-detail's px-8 because the chat window can be narrow. */}
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            sessionId={sessionId}
+            sessionCreatorId={sessionCreatorId}
+            agentOwnerId={agentOwnerId}
+            userId={userId}
+            isSessionArchived={isSessionArchived}
+            wsId={wsId}
+          />
         ))}
         {hasLive && (
           <div className="w-full space-y-1.5">
@@ -116,31 +170,196 @@ function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
 
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+interface MessageBubbleContext {
+  sessionId: string | null;
+  sessionCreatorId: string | null;
+  agentOwnerId: string | null;
+  userId: string | undefined;
+  isSessionArchived: boolean;
+  wsId: string;
+}
+
+function MessageBubble({ message, ...ctx }: { message: ChatMessage } & MessageBubbleContext) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so
-           * render them through the same pipeline as assistant replies.
-           * Neutralise prose's leading/trailing margin so single-line
-           * bubbles stay as compact as the plain-text version used to. */}
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown>{message.content}</Markdown>
+        <div className="flex max-w-[80%] items-start gap-1">
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words min-w-0">
+            <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+              <Markdown>{message.content}</Markdown>
+            </div>
           </div>
+          <MessageActionsMenu message={message} copyText={message.content} menuAlign="end" {...ctx} />
         </div>
       </div>
     );
   }
 
-  return <AssistantMessage message={message} />;
+  return <AssistantMessage message={message} {...ctx} />;
+}
+
+function MessageActionsMenu({
+  message,
+  copyText,
+  menuAlign,
+  sessionId,
+  sessionCreatorId,
+  agentOwnerId,
+  userId,
+  isSessionArchived,
+  wsId,
+}: { message: ChatMessage; copyText: string; menuAlign: "end" | "start" } & MessageBubbleContext) {
+  const qc = useQueryClient();
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const optimistic = message.id.startsWith("optimistic-");
+  const canDelete =
+    !optimistic &&
+    !!sessionId &&
+    !!userId &&
+    ((message.role === "user" && userId === sessionCreatorId) ||
+      (message.role === "assistant" && userId === agentOwnerId));
+  const canRetry =
+    !optimistic &&
+    !isSessionArchived &&
+    !!sessionId &&
+    userId === sessionCreatorId &&
+    message.role === "user";
+
+  const deleteMut = useMutation({
+    mutationFn: async () => {
+      if (!sessionId) throw new Error("no session");
+      await api.deleteChatMessage(sessionId, message.id);
+    },
+    onMutate: async () => {
+      if (!sessionId) return {};
+      await qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) });
+      const prev = qc.getQueryData<ChatMessage[]>(chatKeys.messages(sessionId));
+      qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+        (old ?? []).filter((m) => m.id !== message.id),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (!sessionId) return;
+      if (context?.prev) {
+        qc.setQueryData(chatKeys.messages(sessionId), context.prev);
+      }
+      toast.error("Failed to delete message");
+    },
+    onSuccess: () => {
+      toast.success("Message deleted");
+      setConfirmDeleteOpen(false);
+    },
+    onSettled: () => {
+      if (!sessionId) return;
+      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
+    },
+  });
+
+  const retryMut = useMutation({
+    mutationFn: async () => {
+      if (!sessionId) throw new Error("no session");
+      return api.retryChatMessage(sessionId, message.id);
+    },
+    onSuccess: (res) => {
+      if (!sessionId) return;
+      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      qc.setQueryData(chatKeys.pendingTask(sessionId), {
+        task_id: res.task_id,
+        status: "queued",
+      });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
+      toast.success("Retrying…");
+    },
+    onError: () => {
+      toast.error("Failed to retry message");
+    },
+  });
+
+  const handleCopy = () => {
+    void copyMarkdown(copyText).then(
+      () => toast.success("Copied"),
+      () => toast.error("Failed to copy"),
+    );
+  };
+
+  const showActionsFooter = canRetry || canDelete;
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 shrink-0 text-muted-foreground"
+              aria-label="Message actions"
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align={menuAlign === "end" ? "end" : "start"} className="w-44">
+          <DropdownMenuItem onClick={handleCopy}>
+            <Copy className="size-3.5" />
+            Copy
+          </DropdownMenuItem>
+          {showActionsFooter && <DropdownMenuSeparator />}
+          {canRetry && (
+            <DropdownMenuItem
+              disabled={retryMut.isPending || deleteMut.isPending}
+              onClick={() => retryMut.mutate()}
+            >
+              <RotateCw className="size-3.5" />
+              Retry
+            </DropdownMenuItem>
+          )}
+          {canDelete && (
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={deleteMut.isPending || retryMut.isPending}
+              onClick={() => setConfirmDeleteOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this message?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. Related task logs may also be removed depending on server
+              configuration.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteMut.mutate()}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }
 
 function AssistantMessage({
   message,
+  ...ctx
 }: {
   message: ChatMessage;
-}) {
+} & MessageBubbleContext) {
   const taskId = message.task_id;
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
@@ -153,15 +372,34 @@ function AssistantMessage({
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
 
+  const copyText = useMemo(() => {
+    const base = message.content?.trim() ?? "";
+    if (base) return message.content;
+    return timeline
+      .filter((t) => t.type === "text" && (t.content ?? "").trim())
+      .map((t) => t.content ?? "")
+      .join("\n\n");
+  }, [message.content, timeline]);
+
   return (
     <div className="w-full space-y-1.5">
-      {timeline.length > 0 ? (
-        <TimelineView items={timeline} />
-      ) : (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{message.content}</Markdown>
+      <div className="flex items-start gap-1">
+        <MessageActionsMenu
+          message={message}
+          copyText={copyText}
+          menuAlign="start"
+          {...ctx}
+        />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          {timeline.length > 0 ? (
+            <TimelineView items={timeline} />
+          ) : (
+            <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+              <Markdown>{message.content}</Markdown>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -390,4 +628,3 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────
-

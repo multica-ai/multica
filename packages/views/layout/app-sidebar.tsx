@@ -496,7 +496,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <SortablePinItem
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)}
+                              href={pin.item_type === "issue" ? p.issueDetail(pin.identifier ?? pin.item_id) : p.projectDetail(pin.item_id)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                             />

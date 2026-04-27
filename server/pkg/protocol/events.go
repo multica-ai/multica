@@ -88,4 +88,10 @@ const (
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"
+
+	// Chat retry progress event (daemon -> server -> clients)
+	EventChatRetryProgress = "chat:retry_progress"
+
+	// Chat message deleted event
+	EventChatMessageDeleted = "chat:message_deleted"
 )

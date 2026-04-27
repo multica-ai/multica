@@ -91,7 +91,7 @@ function urlTransform(url: string): string {
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
   const { push, openInNewTab } = useNavigation();
   const p = useWorkspacePaths();
-  const path = p.issueDetail(issueId);
+  const path = p.issueDetail(label ?? issueId);
   return (
     <span
       className="inline align-middle"

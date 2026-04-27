@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -373,10 +373,21 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const { data: issue = null, isLoading: issueLoading } = useQuery({
     ...issueDetailOptions(wsId, id),
     initialData: () => {
-      const cached = allIssues.find((i) => i.id === id);
+      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
       return cached?.description != null ? cached : undefined;
     },
   });
+  const issueResourceId = issue?.id ?? id;
+  const searchString = router.searchParams?.toString() ?? "";
+
+  useEffect(() => {
+    if (!issue) return;
+    if (id === issue.identifier) return;
+    const nextPath = paths.issueDetail(issue.identifier);
+    const nextSearch = new URLSearchParams(searchString);
+    const query = nextSearch.toString();
+    router.replace(query ? `${nextPath}?${query}` : nextPath);
+  }, [issue, id, paths, router.replace, searchString]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -390,26 +401,36 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const {
     timeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id);
+  } = useIssueTimeline(issueResourceId, user?.id);
+
+  const commentById = useMemo(() => {
+    const m = new Map<string, TimelineEntry>();
+    for (const e of timeline) {
+      if (e.type === "comment") m.set(e.id, e);
+    }
+    return m;
+  }, [timeline]);
+
+  const isWorkspaceAdmin = currentMemberRole === "owner" || currentMemberRole === "admin";
 
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
+  } = useIssueReactions(issueResourceId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(id, user?.id);
+  } = useIssueSubscribers(issueResourceId, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(id));
+  const { data: usage } = useQuery(issueUsageOptions(issueResourceId));
 
   // Pinned state
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
   });
-  const isPinned = pinnedItems.some((p) => p.item_type === "issue" && p.item_id === id);
+  const isPinned = pinnedItems.some((p) => p.item_type === "issue" && p.item_id === issueResourceId);
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
 
@@ -421,7 +442,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
   const { data: childIssues = [] } = useQuery({
-    ...childIssuesOptions(wsId, id),
+    ...childIssuesOptions(wsId, issueResourceId),
     enabled: !!issue,
   });
   // Parent's children — used to render the "x/y" progress next to the
@@ -456,7 +477,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issue) return;
       updateIssueMutation.mutate(
-        { id, ...updates },
+        { id: issue.id, ...updates },
         { onError: () => toast.error("Failed to update issue") },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
@@ -470,7 +491,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         setBacklogHintOpen(true);
       }
     },
-    [issue, id, updateIssueMutation],
+    [issue, updateIssueMutation],
   );
 
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -604,7 +625,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </button>
           {parentIssueOpen && <div className="pl-2">
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
             >
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
@@ -691,7 +712,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             {parentIssue && (
               <>
                 <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
+                  href={paths.issueDetail(parentIssue.identifier)}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {parentIssue.identifier}
@@ -967,7 +988,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               }}
               onMoveToTodo={() => {
                 updateIssueMutation.mutate(
-                  { id, status: "todo" },
+                  { id: issue.id, status: "todo" },
                   { onError: () => toast.error("Failed to update status") },
                 );
                 setBacklogHintOpen(false);
@@ -980,7 +1001,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onOpenChange={setParentPickerOpen}
               title="Set parent issue"
               description="Search for an issue to set as the parent of this issue"
-              excludeIds={[id, ...childIssues.map((c) => c.id)]}
+              excludeIds={[issueResourceId, ...childIssues.map((c) => c.id)]}
               onSelect={(selected) => {
                 handleUpdateField({ parent_issue_id: selected.id });
                 toast.success(`Set ${selected.identifier} as parent issue`);
@@ -993,10 +1014,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onOpenChange={setChildPickerOpen}
               title="Add sub-issue"
               description="Search for an issue to add as a sub-issue"
-              excludeIds={[id, ...(parentIssueId ? [parentIssueId] : []), ...childIssues.map((c) => c.id)]}
+              excludeIds={[issueResourceId, ...(parentIssueId ? [parentIssueId] : []), ...childIssues.map((c) => c.id)]}
               onSelect={(selected) => {
                 updateIssueMutation.mutate(
-                  { id: selected.id, parent_issue_id: id },
+                  { id: selected.id, parent_issue_id: issue.id },
                   { onError: () => toast.error("Failed to add sub-issue") },
                 );
                 toast.success(`Added ${selected.identifier} as sub-issue`);
@@ -1019,7 +1040,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
           {parentIssue && (
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">Sub-issue of</span>
@@ -1045,13 +1066,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
             <ContentEditor
               ref={descEditorRef}
-              key={id}
+              key={issueResourceId}
               defaultValue={issue.description || ""}
               placeholder="Add description..."
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
-              currentIssueId={id}
+              currentIssueId={issue.id}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -1143,7 +1164,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                       return (
                         <AppLink
                           key={child.id}
-                          href={paths.issueDetail(child.id)}
+                          href={paths.issueDetail(child.identifier)}
                           className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
                         >
                           <StatusIcon
@@ -1278,11 +1299,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 stays pinned while scrolling through TaskRunHistory + comments.
                 Keyed by issue id so switching issues remounts the card and
                 clears any in-flight task state from the previous issue. */}
-            <AgentLiveCard key={id} issueId={id} />
+            <AgentLiveCard key={issueResourceId} issueId={issue.id} />
 
             {/* Agent execution history */}
             <div className="mt-3">
-              <TaskRunHistory key={id} issueId={id} />
+              <TaskRunHistory key={issueResourceId} issueId={issue.id} />
             </div>
 
             {/* Timeline entries */}
@@ -1340,9 +1361,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     return (
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <CommentCard
-                          issueId={id}
+                          issueId={issue.id}
                           entry={entry}
                           allReplies={repliesByParent}
+                          commentById={commentById}
+                          agents={agents}
+                          isWorkspaceAdmin={isWorkspaceAdmin}
+                          issueOpen={
+                            !!issue && issue.status !== "done" && issue.status !== "cancelled"
+                          }
                           currentUserId={user?.id}
                           onReply={submitReply}
                           onEdit={editComment}
@@ -1405,7 +1432,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
+              <CommentInput issueId={issue.id} onSubmit={submitComment} />
             </div>
           </div>
         </div>

@@ -483,6 +483,11 @@ export class ApiClient {
     await this.fetch(`/api/comments/${commentId}`, { method: "DELETE" });
   }
 
+  /** Re-queue the agent for this reply (issue threads only). */
+  async retryAgentComment(commentId: string): Promise<void> {
+    await this.fetch(`/api/comments/${commentId}/retry-agent`, { method: "POST" });
+  }
+
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {
     return this.fetch(`/api/comments/${commentId}/reactions`, {
       method: "POST",
@@ -537,10 +542,15 @@ export class ApiClient {
   }
 
   // Agents
-  async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
+  async listAgents(params?: {
+    workspace_id?: string;
+    include_archived?: boolean;
+    owner?: "me";
+  }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.owner === "me") search.set("owner", "me");
     return this.fetch(`/api/agents?${search}`);
   }
 
@@ -559,6 +569,13 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async copyAgent(id: string, data?: { name?: string }): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/copy`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
     });
   }
 
@@ -912,6 +929,18 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  }
+
+  async deleteChatMessage(sessionId: string, messageId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async retryChatMessage(sessionId: string, messageId: string): Promise<SendChatMessageResponse> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}/retry`, {
+      method: "POST",
     });
   }
 

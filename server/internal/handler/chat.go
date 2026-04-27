@@ -526,3 +526,159 @@ func chatMessageToResponse(m db.ChatMessage) ChatMessageResponse {
 		CreatedAt:     timestampToString(m.CreatedAt),
 	}
 }
+
+// DeleteChatMessage deletes a chat message with ownership check.
+// - User messages: only the session creator can delete
+// - Assistant messages: only the agent owner can delete
+func (h *Handler) DeleteChatMessage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+	messageID := chi.URLParam(r, "messageId")
+
+	// Load session and message.
+	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+		ID:          parseUUID(sessionID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat session not found")
+		return
+	}
+
+	message, err := h.Queries.GetChatMessage(r.Context(), parseUUID(messageID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	// Verify message belongs to this session.
+	if uuidToString(message.ChatSessionID) != sessionID {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	// Permission check based on message role.
+	if message.Role == "user" {
+		// User messages: only session creator can delete.
+		if uuidToString(session.CreatorID) != userID {
+			writeError(w, http.StatusForbidden, "not your message")
+			return
+		}
+	} else if message.Role == "assistant" {
+		// Assistant messages: only agent owner can delete.
+		agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		if uuidToString(agent.OwnerID) != userID {
+			writeError(w, http.StatusForbidden, "not agent owner")
+			return
+		}
+	} else {
+		writeError(w, http.StatusBadRequest, "invalid message role")
+		return
+	}
+
+	// Delete message (CASCADE will handle task_message).
+	if err := h.Queries.DeleteChatMessage(r.Context(), message.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete message")
+		return
+	}
+
+	// Broadcast deletion event.
+	h.publish(protocol.EventChatMessageDeleted, workspaceID, "member", userID, protocol.ChatMessageDeletedPayload{
+		ChatSessionID: sessionID,
+		MessageID:     messageID,
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RetryChatMessage creates a new message and task based on an existing message.
+// Used to retry failed messages.
+func (h *Handler) RetryChatMessage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+	messageID := chi.URLParam(r, "messageId")
+
+	// Load session and original message.
+	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+		ID:          parseUUID(sessionID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat session not found")
+		return
+	}
+
+	originalMessage, err := h.Queries.GetChatMessage(r.Context(), parseUUID(messageID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	// Verify message belongs to this session.
+	if uuidToString(originalMessage.ChatSessionID) != sessionID {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	// Verify session creator matches current user.
+	if uuidToString(session.CreatorID) != userID {
+		writeError(w, http.StatusForbidden, "not your chat session")
+		return
+	}
+
+	// Verify session is active.
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+
+	// Create new user message (reusing original content).
+	newMessage, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       originalMessage.Content,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create chat message")
+		return
+	}
+
+	// Enqueue a new task.
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
+		return
+	}
+
+	// Touch session updated_at.
+	if err := h.Queries.TouchChatSession(r.Context(), session.ID); err != nil {
+		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
+	}
+
+	// Broadcast the new message.
+	h.publish(protocol.EventChatMessage, workspaceID, "member", userID, protocol.ChatMessagePayload{
+		ChatSessionID: sessionID,
+		MessageID:     uuidToString(newMessage.ID),
+		Role:          "user",
+		Content:       originalMessage.Content,
+		TaskID:        uuidToString(task.ID),
+		CreatedAt:     timestampToString(newMessage.CreatedAt),
+	})
+
+	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
+		MessageID: uuidToString(newMessage.ID),
+		TaskID:    uuidToString(task.ID),
+	})
+}

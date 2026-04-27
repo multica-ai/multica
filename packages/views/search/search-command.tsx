@@ -609,7 +609,7 @@ export function SearchCommand() {
                 {results.issues.map((issue) => (
                   <CommandPrimitive.Item
                     key={issue.id}
-                    value={issue.id}
+                    value={issue.identifier}
                     onSelect={handleSelect}
                     className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
@@ -656,7 +656,7 @@ export function SearchCommand() {
                 {recentIssues.map((item) => (
                   <CommandPrimitive.Item
                     key={item.id}
-                    value={item.id}
+                    value={item.identifier}
                     onSelect={handleSelect}
                     className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >

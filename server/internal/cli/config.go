@@ -12,10 +12,11 @@ const defaultCLIConfigPath = ".multica/config.json"
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
-	ServerURL   string `json:"server_url,omitempty"`
-	AppURL      string `json:"app_url,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Token       string `json:"token,omitempty"`
+	ServerURL         string `json:"server_url,omitempty"`
+	AppURL            string `json:"app_url,omitempty"`
+	WorkspaceID       string `json:"workspace_id,omitempty"`
+	Token             string `json:"token,omitempty"`
+	UpdateManifestURL string `json:"update_manifest_url,omitempty"`
 }
 
 // CLIConfigPath returns the default path for the CLI config file.

@@ -65,7 +65,7 @@ function IssueMention({
 
   const issue = listIssue ?? detailIssue;
 
-  const issuePath = p.issueDetail(issueId);
+  const issuePath = p.issueDetail(issue?.identifier ?? fallbackLabel ?? issueId);
   const tabTitle = issue ? `${issue.identifier}: ${issue.title}` : undefined;
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();

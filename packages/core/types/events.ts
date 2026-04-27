@@ -47,6 +47,8 @@ export type WSEventType =
   | "issue_reaction:added"
   | "issue_reaction:removed"
   | "chat:message"
+  | "chat:message_deleted"
+  | "chat:retry_progress"
   | "chat:done"
   | "chat:session_read"
   | "project:created"
@@ -240,6 +242,20 @@ export interface ChatMessageEventPayload {
   content: string;
   task_id?: string;
   created_at: string;
+}
+
+export interface ChatMessageDeletedPayload {
+  chat_session_id: string;
+  message_id: string;
+}
+
+export interface ChatRetryProgressPayload {
+  workspace_id?: string;
+  chat_session_id?: string;
+  task_id?: string;
+  retry_attempt?: number;
+  max_retries?: number;
+  wait_seconds?: number;
 }
 
 export interface ChatDonePayload {

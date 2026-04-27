@@ -1,6 +1,6 @@
 # Multica installer for Windows — one command to get started.
 #
-# Install CLI (default): connects to multica.ai
+# Install CLI (default): connects to the internal cloud
 #   irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 #
 # Self-host: starts a local Multica server + installs CLI + configures
@@ -13,9 +13,13 @@ $ErrorActionPreference = "Stop"
 # Configuration
 # ---------------------------------------------------------------------------
 $RepoUrl       = "https://github.com/multica-ai/multica.git"
-$RepoWebUrl    = "https://github.com/multica-ai/multica"
 $DefaultInstallDir = Join-Path $env:USERPROFILE ".multica\server"
 $InstallDir    = if ($env:MULTICA_INSTALL_DIR) { $env:MULTICA_INSTALL_DIR } else { $DefaultInstallDir }
+$CliBinDir     = if ($env:MULTICA_CLI_BIN_DIR) { $env:MULTICA_CLI_BIN_DIR } else { (Join-Path $env:USERPROFILE ".multica\bin") }
+$CliBinPath    = Join-Path $CliBinDir "multica.exe"
+$AppUrl        = if ($env:MULTICA_APP_URL) { $env:MULTICA_APP_URL } else { "https://multica.wujieai.com" }
+$ServerUrl     = if ($env:MULTICA_SERVER_URL) { $env:MULTICA_SERVER_URL } else { "https://multica.wujieai.com" }
+$UpdateManifestUrl = if ($env:MULTICA_UPDATE_MANIFEST_URL) { $env:MULTICA_UPDATE_MANIFEST_URL } else { "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json" }
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,10 +34,9 @@ function Test-CommandExists {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-function Get-LatestVersion {
+function Get-UpdateManifest {
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
-        return $release.tag_name
+        return Invoke-RestMethod -Uri $UpdateManifestUrl -ErrorAction Stop
     } catch {
         return $null
     }
@@ -42,8 +45,57 @@ function Get-LatestVersion {
 # ---------------------------------------------------------------------------
 # CLI Installation
 # ---------------------------------------------------------------------------
+function Get-ManagedInstallMarkerPath {
+    Join-Path $CliBinDir ".install-source.json"
+}
+
+function Test-ManagedInstall {
+    if (-not (Test-Path $CliBinPath)) {
+        return $false
+    }
+
+    $markerPath = Get-ManagedInstallMarkerPath
+    if (-not (Test-Path $markerPath)) {
+        return $false
+    }
+
+    try {
+        $marker = Get-Content $markerPath -Raw | ConvertFrom-Json
+        return $marker.install_channel -eq "managed-manifest"
+    } catch {
+        return $false
+    }
+}
+
+function Write-ManagedInstallMarker {
+    $markerPath = Get-ManagedInstallMarkerPath
+    $payload = @{
+        install_channel  = "managed-manifest"
+        installed_at     = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        manifest_url     = $UpdateManifestUrl
+        installer_version = "managed-manifest-v1"
+    }
+    $payload | ConvertTo-Json | Set-Content -Path $markerPath -Encoding UTF8
+}
+
+function Test-LegacyInstall {
+    (Test-Path $CliBinPath) -and -not (Test-ManagedInstall)
+}
+
+function Uninstall-LegacyInstall {
+    Write-Info "Detected legacy CLI install from the main-branch installer. It will be replaced in place by the managed manifest install."
+}
+
+function Migrate-LegacyInstallIfNeeded {
+    if (-not (Test-LegacyInstall)) {
+        return $false
+    }
+    Uninstall-LegacyInstall
+    return $true
+}
+
 function Install-CliBinary {
-    Write-Info "Installing Multica CLI from GitHub Releases..."
+    Write-Info "Installing Multica CLI from update manifest..."
 
     if (-not [Environment]::Is64BitOperatingSystem) {
         Write-Fail "Multica requires a 64-bit Windows installation."
@@ -57,18 +109,23 @@ function Install-CliBinary {
         default { Write-Fail "Unsupported Windows architecture: $osArch (only X64 and Arm64 are supported)." }
     }
 
-    $latest = Get-LatestVersion
-    if (-not $latest) {
-        Write-Fail "Could not determine latest release. Check your network connection."
+    $manifest = Get-UpdateManifest
+    if (-not $manifest) {
+        Write-Fail "Could not download update manifest from $UpdateManifestUrl"
     }
 
-    $version = $latest.TrimStart('v')
-    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica-cli-$version-windows-$arch.zip"
+    $asset = $manifest.assets | Where-Object { $_.os -eq "windows" -and $_.arch -eq $arch } | Select-Object -First 1
+    if (-not $asset) {
+        Write-Fail "No matching asset in manifest for windows/$arch"
+    }
+
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install"
 
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
     New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
+    $url = $asset.download_url
+    $checksum = "$($asset.checksum)".ToLower()
     Write-Info "Downloading $url ..."
     try {
         Invoke-WebRequest -Uri $url -OutFile (Join-Path $tmpDir "multica.zip") -UseBasicParsing
@@ -77,32 +134,18 @@ function Install-CliBinary {
         Write-Fail "Failed to download CLI binary: $_"
     }
 
-    # Verify SHA256 checksum
-    $checksumUrl = "https://github.com/multica-ai/multica/releases/download/$latest/checksums.txt"
-    try {
-        $checksums = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -ErrorAction Stop
-        $zipFile = Join-Path $tmpDir "multica.zip"
-        $actualHash = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
-        $expectedLine = ($checksums.Content -split "`n") | Where-Object { $_ -match "multica-cli-$version-windows-$arch\.zip" } | Select-Object -First 1
-        if ($expectedLine) {
-            $expectedHash = ($expectedLine -split "\s+")[0].ToLower()
-            if ($actualHash -ne $expectedHash) {
-                Remove-Item $tmpDir -Recurse -Force
-                Write-Fail "Checksum verification failed. Expected: $expectedHash, Got: $actualHash"
-            }
-            Write-Ok "Checksum verified"
-        } else {
-            Write-Warn "Could not find checksum entry for windows_$arch — skipping verification."
-        }
-    } catch {
-        Write-Warn "Could not download checksums.txt — skipping verification."
+    $zipFile = Join-Path $tmpDir "multica.zip"
+    $actualHash = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
+    if ($actualHash -ne $checksum) {
+        Remove-Item $tmpDir -Recurse -Force
+        Write-Fail "Checksum verification failed. Expected: $checksum, Got: $actualHash"
     }
+    Write-Ok "Checksum verified"
 
     Expand-Archive -Path (Join-Path $tmpDir "multica.zip") -DestinationPath $tmpDir -Force
 
-    $binDir = Join-Path $env:USERPROFILE ".multica\bin"
-    if (-not (Test-Path $binDir)) {
-        New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    if (-not (Test-Path $CliBinDir)) {
+        New-Item -ItemType Directory -Path $CliBinDir -Force | Out-Null
     }
 
     $exeSrc = Join-Path $tmpDir "multica.exe"
@@ -114,11 +157,50 @@ function Install-CliBinary {
         Write-Fail "multica.exe not found in downloaded archive."
     }
 
-    Copy-Item $exeSrc (Join-Path $binDir "multica.exe") -Force
+    $backupPath = "$CliBinPath.bak"
+    if (Test-Path $backupPath) {
+        Remove-Item $backupPath -Force
+    }
+
+    $hadExistingCli = Test-Path $CliBinPath
+    if ($hadExistingCli) {
+        Stop-ManagedDaemonForReplace
+        try {
+            Move-Item $CliBinPath $backupPath -Force
+        } catch {
+            Remove-Item $tmpDir -Recurse -Force
+            Write-Fail "Failed to move existing CLI out of the way before installing the new version: $_"
+        }
+    }
+
+    try {
+        Move-Item $exeSrc $CliBinPath -Force
+        if (Test-Path $backupPath) {
+            Remove-Item $backupPath -Force
+        }
+    } catch {
+        if ($hadExistingCli -and (Test-Path $backupPath)) {
+            try {
+                Move-Item $backupPath $CliBinPath -Force
+            } catch {
+                Write-Warn "Failed to restore the previous CLI from backup at $backupPath."
+            }
+        }
+        Remove-Item $tmpDir -Recurse -Force
+        Write-Fail "Failed to install the new CLI binary: $_"
+    }
+
+    try {
+        Write-ManagedInstallMarker
+    } catch {
+        Remove-Item $tmpDir -Recurse -Force
+        Write-Fail "Installed the CLI but failed to write the managed install marker: $_"
+    }
+
     Remove-Item $tmpDir -Recurse -Force
 
-    Add-ToUserPath $binDir
-    Write-Ok "Multica CLI installed to $binDir\multica.exe"
+    Add-ToUserPath $CliBinDir
+    Write-Ok "Multica CLI installed to $CliBinPath"
 }
 
 function Add-ToUserPath {
@@ -137,9 +219,16 @@ function Add-ToUserPath {
 }
 
 function Install-Cli {
-    if (Test-CommandExists "multica") {
-        $currentVer = (multica version 2>$null) -replace '.*?(v[\d.]+).*','$1'
-        $latestVer = Get-LatestVersion
+    $null = Migrate-LegacyInstallIfNeeded
+
+    if ((Test-CommandExists "multica") -and ((Get-Command multica).Source -ne $CliBinPath)) {
+        Write-Warn "Detected another multica on PATH at $((Get-Command multica).Source). The managed install will use $CliBinPath."
+    }
+
+    if (Test-ManagedInstall) {
+        $currentVer = (& $CliBinPath version 2>$null) -replace '.*?(v[\d.]+).*','$1'
+        $manifest = Get-UpdateManifest
+        $latestVer = if ($manifest) { $manifest.version } else { $null }
 
         $currentCmp = $currentVer -replace '^v',''
         $latestCmp = if ($latestVer) { $latestVer -replace '^v','' } else { $null }
@@ -161,16 +250,70 @@ function Install-Cli {
         Write-Info "Multica CLI $currentVer installed, latest is $latestVer - upgrading..."
         Install-CliBinary
 
-        $newVer = (multica version 2>$null) -replace '.*?(v[\d.]+).*','$1'
+        $newVer = (& $CliBinPath version 2>$null) -replace '.*?(v[\d.]+).*','$1'
         Write-Ok "Multica CLI upgraded ($currentVer -> $newVer)"
         return
     }
 
     Install-CliBinary
 
-    if (-not (Test-CommandExists "multica")) {
+    if (-not (Test-Path $CliBinPath)) {
         Write-Fail "CLI installed but 'multica' not found on PATH. Restart your terminal and try again."
     }
+}
+
+function Configure-InternalCloud {
+    Write-Info "Configuring Multica CLI for $AppUrl ..."
+    & $CliBinPath config set server_url $ServerUrl | Out-Null
+    & $CliBinPath config set app_url $AppUrl | Out-Null
+    & $CliBinPath config set update_manifest_url $UpdateManifestUrl | Out-Null
+    Write-Ok "CLI config updated for the internal cloud"
+}
+
+function Test-DaemonRunning {
+    try {
+        $status = (& $CliBinPath daemon status 2>$null | Out-String)
+        return $status -match 'running'
+    } catch {
+        return $false
+    }
+}
+
+function Stop-ManagedDaemonForReplace {
+    if (-not (Test-Path $CliBinPath)) {
+        return
+    }
+    if (-not (Test-DaemonRunning)) {
+        return
+    }
+
+    Write-Info "Stopping running Multica daemon before replacing CLI..."
+    & $CliBinPath daemon stop | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to stop the running Multica daemon. Please stop it manually and retry."
+    }
+}
+
+function Start-LoginAndDaemon {
+    Write-Host ""
+    Write-Info "Opening browser login for $AppUrl ..."
+    Write-Info "Complete authorization in the browser, then return here."
+    & $CliBinPath login
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Login did not complete successfully."
+    }
+
+    if (Test-DaemonRunning) {
+        Write-Ok "Multica daemon is already running"
+        return
+    }
+
+    Write-Info "Starting Multica daemon..."
+    & $CliBinPath daemon start
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to start the Multica daemon."
+    }
+    Write-Ok "Multica daemon started"
 }
 
 # ---------------------------------------------------------------------------
@@ -272,19 +415,23 @@ function Install-Server {
 function Start-DefaultInstall {
     Write-Host ""
     Write-Host "  Multica - Installer" -ForegroundColor White
+    Write-Host "  Configuring the internal cloud at $AppUrl"
     Write-Host ""
 
     Install-Cli
+    Configure-InternalCloud
+    Start-LoginAndDaemon
 
     Write-Host ""
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host "  [OK] Multica CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Next: configure your environment"
+    Write-Host "  Configured server: $ServerUrl"
+    Write-Host "  Configured app:    $AppUrl"
     Write-Host ""
-    Write-Host "     multica setup               " -NoNewline; Write-Host "# Connect to Multica Cloud (multica.ai)" -ForegroundColor DarkGray
-    Write-Host "     multica setup self-host      " -NoNewline; Write-Host "# Connect to a self-hosted server" -ForegroundColor DarkGray
+    Write-Host "     multica config list          " -NoNewline; Write-Host "# Verify config values" -ForegroundColor DarkGray
+    Write-Host "     multica daemon status        " -NoNewline; Write-Host "# Verify daemon status" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  Self-hosting? Install the server first:"
     Write-Host '     $env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex'

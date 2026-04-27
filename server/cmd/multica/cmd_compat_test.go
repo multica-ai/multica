@@ -39,6 +39,9 @@ func TestRunConfigSetPersistsValues(t *testing.T) {
 	if err := runConfigSet(cmd, []string{"workspace_id", "ws-123"}); err != nil {
 		t.Fatalf("runConfigSet(workspace_id) error = %v", err)
 	}
+	if err := runConfigSet(cmd, []string{"update_manifest_url", "https://mock-oss.example/manifest.json"}); err != nil {
+		t.Fatalf("runConfigSet(update_manifest_url) error = %v", err)
+	}
 
 	cfg, err := cli.LoadCLIConfig()
 	if err != nil {
@@ -49,5 +52,8 @@ func TestRunConfigSetPersistsValues(t *testing.T) {
 	}
 	if cfg.WorkspaceID != "ws-123" {
 		t.Fatalf("WorkspaceID = %q, want %q", cfg.WorkspaceID, "ws-123")
+	}
+	if cfg.UpdateManifestURL != "https://mock-oss.example/manifest.json" {
+		t.Fatalf("UpdateManifestURL = %q, want %q", cfg.UpdateManifestURL, "https://mock-oss.example/manifest.json")
 	}
 }

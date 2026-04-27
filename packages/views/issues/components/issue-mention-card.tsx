@@ -31,7 +31,7 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
   if (!issue) {
     return (
       <AppLink
-        href={p.issueDetail(issueId)}
+        href={p.issueDetail(fallbackLabel ?? issueId)}
         className="issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs hover:bg-accent transition-colors cursor-pointer max-w-72"
       >
         <span className="font-medium text-muted-foreground">
@@ -43,7 +43,7 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
 
   return (
     <AppLink
-      href={p.issueDetail(issueId)}
+      href={p.issueDetail(issue.identifier)}
       className="issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs hover:bg-accent transition-colors cursor-pointer max-w-72"
     >
       <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />

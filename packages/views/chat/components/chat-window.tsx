@@ -78,6 +78,11 @@ export function ChatWindow() {
     : null;
   const isSessionArchived = currentSession?.status === "archived";
 
+  const sessionAgent = useMemo(
+    () => agents.find((a) => a.id === currentSession?.agent_id) ?? null,
+    [agents, currentSession?.agent_id],
+  );
+
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
@@ -386,6 +391,12 @@ export function ChatWindow() {
           messages={messages}
           pendingTaskId={pendingTaskId}
           isWaiting={!!pendingTaskId}
+          sessionId={activeSessionId}
+          sessionCreatorId={currentSession?.creator_id ?? null}
+          agentOwnerId={sessionAgent?.owner_id ?? null}
+          userId={user?.id}
+          isSessionArchived={isSessionArchived}
+          wsId={wsId}
         />
       ) : (
         <EmptyState

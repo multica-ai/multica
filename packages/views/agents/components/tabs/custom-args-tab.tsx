@@ -30,10 +30,12 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 export function CustomArgsTab({
   agent,
   runtimeDevice,
+  readOnly = false,
   onSave,
 }: {
   agent: Agent;
   runtimeDevice?: RuntimeDevice;
+  readOnly?: boolean;
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
   const [entries, setEntries] = useState<ArgEntry[]>(
@@ -93,16 +95,18 @@ export function CustomArgsTab({
             </p>
           )}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addEntry}
-          className="h-7 gap-1 text-xs"
-        >
-          <Plus className="h-3 w-3" />
-          Add
-        </Button>
+        {!readOnly && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addEntry}
+            className="h-7 gap-1 text-xs"
+          >
+            <Plus className="h-3 w-3" />
+            Add
+          </Button>
+        )}
       </div>
       {entries.length > 0 && (
         <div className="space-y-2">
@@ -110,30 +114,38 @@ export function CustomArgsTab({
             <div key={entry.id} className="flex items-center gap-2">
               <Input
                 value={entry.value}
-                onChange={(e) => updateEntry(index, e.target.value)}
+                onChange={(e) => { if (!readOnly) updateEntry(index, e.target.value); }}
+                readOnly={readOnly}
                 placeholder="--flag value"
-                className="flex-1 font-mono text-xs"
+                className={`flex-1 font-mono text-xs ${readOnly ? "bg-muted/50" : ""}`}
               />
-              <button
-                type="button"
-                onClick={() => removeEntry(index)}
-                className="shrink-0 text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => removeEntry(index)}
+                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
+      {entries.length === 0 && readOnly && (
+        <p className="text-xs text-muted-foreground italic">No custom arguments configured.</p>
+      )}
 
-      <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
-        {saving ? (
-          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-        ) : (
-          <Save className="h-3.5 w-3.5 mr-1.5" />
-        )}
-        Save
-      </Button>
+      {!readOnly && (
+        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5 mr-1.5" />
+          )}
+          Save
+        </Button>
+      )}
     </div>
   );
 }
