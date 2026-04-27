@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -27,6 +29,7 @@ func main() {
 	if os.Getenv("RESEND_API_KEY") == "" {
 		slog.Warn("RESEND_API_KEY is not set — email verification codes will be printed to the log instead of emailed.")
 	}
+	warnOptionalNotificationConfig()
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -114,4 +117,23 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+func warnOptionalNotificationConfig() {
+	cfg, err := notifyutil.LoadDingTalkConfig()
+	if err != nil {
+		if errors.Is(err, notifyutil.ErrDingTalkNotConfigured) {
+			slog.Warn("DingTalk binding is disabled — set DINGTALK_CLIENT_ID and DINGTALK_CLIENT_SECRET to enable Settings -> Notifications account linking.")
+			return
+		}
+		slog.Warn("failed to load DingTalk configuration", "error", err)
+		return
+	}
+	if err := cfg.ValidateDeliveryConfig(); err != nil {
+		if errors.Is(err, notifyutil.ErrDingTalkDeliveryNotConfigured) {
+			slog.Warn("DingTalk delivery is disabled — set DINGTALK_ROBOT_CODE to fan out mentioned notifications.")
+			return
+		}
+		slog.Warn("failed to validate DingTalk delivery configuration", "error", err)
+	}
 }
