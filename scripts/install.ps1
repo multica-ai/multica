@@ -110,6 +110,7 @@ function Convert-ToCliArch {
 
 function Get-WindowsCliArch {
     $signals = @()
+    $nativeArchSignalFound = $false
 
     # Prefer the native processor architecture over the current PowerShell
     # process architecture. This keeps Windows on ARM from being misdetected
@@ -119,14 +120,16 @@ function Get-WindowsCliArch {
             $processorArch = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop |
                 Select-Object -First 1 -ExpandProperty Architecture
             $signals += [pscustomobject]@{ Source = "Win32_Processor.Architecture"; Value = $processorArch }
+            $nativeArchSignalFound = $true
         }
     } catch {}
 
     try {
-        if (Get-Command Get-WmiObject -ErrorAction SilentlyContinue) {
+        if (-not $nativeArchSignalFound -and (Get-Command Get-WmiObject -ErrorAction SilentlyContinue)) {
             $processorArch = Get-WmiObject -Class Win32_Processor -ErrorAction Stop |
                 Select-Object -First 1 -ExpandProperty Architecture
             $signals += [pscustomobject]@{ Source = "Win32_Processor.Architecture"; Value = $processorArch }
+            $nativeArchSignalFound = $true
         }
     } catch {}
 
