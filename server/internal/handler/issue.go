@@ -877,6 +877,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.AssigneeType == nil && req.AssigneeID == nil {
+		defaultAssigneeType, defaultAssigneeID, ok := h.workspaceDefaultAssignee(r.Context(), workspaceID)
+		if ok {
+			assigneeType = defaultAssigneeType
+			assigneeID = defaultAssigneeID
+		}
+	}
 
 	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
 		writeError(w, status, msg)
@@ -994,6 +1001,63 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) workspaceDefaultAssignee(ctx context.Context, workspaceID string) (pgtype.Text, pgtype.UUID, bool) {
+	workspace, err := h.Queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("load workspace default assignee failed", "error", err, "workspace_id", workspaceID)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+
+	var settings struct {
+		DefaultAssigneeID   string `json:"default_assignee_id"`
+		DefaultAssigneeType string `json:"default_assignee_type"`
+	}
+	if len(workspace.Settings) == 0 {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	if err := json.Unmarshal(workspace.Settings, &settings); err != nil {
+		slog.Warn("parse workspace default assignee settings failed", "error", err, "workspace_id", workspaceID)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+
+	assigneeType := strings.TrimSpace(settings.DefaultAssigneeType)
+	assigneeID := strings.TrimSpace(settings.DefaultAssigneeID)
+	if assigneeType == "" || assigneeID == "" {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+
+	assigneeUUID := parseUUID(assigneeID)
+	if !assigneeUUID.Valid {
+		slog.Warn("workspace default assignee id is invalid", "workspace_id", workspaceID, "default_assignee_type", assigneeType, "default_assignee_id", assigneeID)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+
+	switch assigneeType {
+	case "agent":
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          assigneeUUID,
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil || agent.ArchivedAt.Valid {
+			slog.Warn("workspace default agent assignee is not available", "error", err, "workspace_id", workspaceID, "default_assignee_id", assigneeID)
+			return pgtype.Text{}, pgtype.UUID{}, false
+		}
+	case "member":
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      assigneeUUID,
+			WorkspaceID: parseUUID(workspaceID),
+		}); err != nil {
+			slog.Warn("workspace default member assignee is not available", "error", err, "workspace_id", workspaceID, "default_assignee_id", assigneeID)
+			return pgtype.Text{}, pgtype.UUID{}, false
+		}
+	default:
+		slog.Warn("workspace default assignee type is unsupported", "workspace_id", workspaceID, "default_assignee_type", assigneeType)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+
+	return pgtype.Text{String: assigneeType, Valid: true}, assigneeUUID, true
 }
 
 type UpdateIssueRequest struct {

@@ -25,6 +25,7 @@ var testPool *pgxpool.Pool
 var testUserID string
 var testWorkspaceID string
 var testRuntimeID string
+var testAgentID string
 
 const (
 	handlerTestEmail         = "handler-test@multica.ai"
@@ -118,15 +119,18 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 	testRuntimeID = runtimeID
 
-	if _, err := pool.Exec(ctx, `
+	var agentID string
+	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
-	`, workspaceID, "Handler Test Agent", runtimeID, userID); err != nil {
+		RETURNING id
+	`, workspaceID, "Handler Test Agent", runtimeID, userID).Scan(&agentID); err != nil {
 		return "", "", err
 	}
+	testAgentID = agentID
 
 	return userID, workspaceID, nil
 }
