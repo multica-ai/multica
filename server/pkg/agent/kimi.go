@@ -179,20 +179,26 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			cwd = "."
 		}
 
+		// Attempt to resume a prior session if one was provided. On failure,
+		// fall back to a new session so the task is not blocked by a stale or
+		// missing session ID. The new session ID is returned in the result so
+		// the caller can update its stored mapping.
 		if opts.ResumeSessionID != "" {
-			result, err := c.request(runCtx, "session/resume", map[string]any{
+			_, resumeErr := c.request(runCtx, "session/resume", map[string]any{
 				"cwd":       cwd,
 				"sessionId": opts.ResumeSessionID,
 			})
-			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("kimi session/resume failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-				return
+			if resumeErr != nil {
+				b.cfg.Logger.Warn("kimi session/resume failed; falling back to new session",
+					"old_session_id", opts.ResumeSessionID, "error", resumeErr)
+				// sessionID stays "", session/new runs below.
+			} else {
+				sessionID = opts.ResumeSessionID
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
-		} else {
+		}
+
+		if sessionID == "" {
+			// Either no prior session was provided, or resume failed above.
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
 				"mcpServers": []any{},
@@ -209,6 +215,10 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				finalError = "kimi session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
+			}
+			if opts.ResumeSessionID != "" {
+				b.cfg.Logger.Info("kimi session recovery: new session created after failed resume",
+					"old_session_id", opts.ResumeSessionID, "new_session_id", sessionID)
 			}
 		}
 
@@ -251,13 +261,69 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		// 5. Send the prompt and wait for PromptResponse.
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+		_, promptErr := c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
 				{"type": "text", "text": userText},
 			},
 		})
-		if err != nil {
+
+		// If the prompt failed with a stale-session error on a resumed session,
+		// create a new session and retry the prompt exactly once.
+		if promptErr != nil && isACPStaleSessionError(promptErr) &&
+			opts.ResumeSessionID != "" && sessionID == opts.ResumeSessionID {
+			b.cfg.Logger.Warn("kimi prompt: stale session after apparent successful resume; retrying on new session",
+				"old_session_id", sessionID, "error", promptErr)
+
+			retryResult, newErr := c.request(runCtx, "session/new", map[string]any{
+				"cwd":        cwd,
+				"mcpServers": []any{},
+			})
+			if newErr != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("kimi session recovery failed (session/new): %v", newErr)
+				promptErr = nil
+			} else {
+				newSessionID := extractACPSessionID(retryResult)
+				if newSessionID == "" {
+					finalStatus = "failed"
+					finalError = "kimi session recovery failed: session/new returned no session ID"
+					promptErr = nil
+				} else {
+					b.cfg.Logger.Info("kimi stale-session recovery: retrying prompt on new session",
+						"old_session_id", sessionID, "new_session_id", newSessionID)
+					sessionID = newSessionID
+					c.sessionID = sessionID
+
+					if opts.Model != "" {
+						if _, modelErr := c.request(runCtx, "session/set_model", map[string]any{
+							"sessionId": sessionID,
+							"modelId":   opts.Model,
+						}); modelErr != nil {
+							b.cfg.Logger.Warn("kimi set_session_model failed on recovery session",
+								"error", modelErr, "model", opts.Model)
+							finalStatus = "failed"
+							finalError = fmt.Sprintf("kimi could not switch to model %q on recovery session: %v", opts.Model, modelErr)
+							promptErr = nil
+						}
+					}
+
+					if finalStatus == "completed" {
+						_, promptErr = c.request(runCtx, "session/prompt", map[string]any{
+							"sessionId": sessionID,
+							"prompt": []map[string]any{
+								{"type": "text", "text": userText},
+							},
+						})
+						if promptErr != nil {
+							promptErr = fmt.Errorf("stale-session retry: %w", promptErr)
+						}
+					}
+				}
+			}
+		}
+
+		if promptErr != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
 				finalError = fmt.Sprintf("kimi timed out after %s", timeout)
@@ -266,9 +332,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				finalError = "execution cancelled"
 			} else {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kimi session/prompt failed: %v", err)
+				finalError = fmt.Sprintf("kimi session/prompt failed: %v", promptErr)
 			}
-		} else {
+		} else if finalStatus == "completed" {
 			select {
 			case pr := <-promptDone:
 				if pr.stopReason == "cancelled" {

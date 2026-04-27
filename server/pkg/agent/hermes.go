@@ -167,20 +167,27 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			cwd = "."
 		}
 
+		// Attempt to resume a prior session if one was provided. On failure,
+		// fall back to a new session so the task is not blocked by a stale or
+		// missing session ID (e.g. provider restart, persisted session lost).
+		// The new session ID is returned in the result so the caller can update
+		// its stored mapping.
 		if opts.ResumeSessionID != "" {
-			result, err := c.request(runCtx, "session/resume", map[string]any{
+			_, resumeErr := c.request(runCtx, "session/resume", map[string]any{
 				"cwd":       cwd,
 				"sessionId": opts.ResumeSessionID,
 			})
-			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes session/resume failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-				return
+			if resumeErr != nil {
+				b.cfg.Logger.Warn("hermes session/resume failed; falling back to new session",
+					"old_session_id", opts.ResumeSessionID, "error", resumeErr)
+				// sessionID stays "", session/new runs below.
+			} else {
+				sessionID = opts.ResumeSessionID
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
-		} else {
+		}
+
+		if sessionID == "" {
+			// Either no prior session was provided, or resume failed above.
 			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 			if err != nil {
 				finalStatus = "failed"
@@ -194,6 +201,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				finalError = "hermes session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
+			}
+			if opts.ResumeSessionID != "" {
+				b.cfg.Logger.Info("hermes session recovery: new session created after failed resume",
+					"old_session_id", opts.ResumeSessionID, "new_session_id", sessionID)
 			}
 		}
 
@@ -234,15 +245,71 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		// 5. Send the prompt and wait for PromptResponse.
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+		_, promptErr := c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
 				{"type": "text", "text": userText},
 			},
 		})
-		if err != nil {
-			// If the request itself failed (not just context cancelled),
-			// check if the context was cancelled/timed out.
+
+		// If the prompt failed with a stale-session error on a resumed session,
+		// create a new session and retry the prompt exactly once. This handles
+		// the case where resume appears to succeed but the provider has already
+		// discarded the session internally (the Hermes incident: ACP
+		// ResumeSessionResponse cannot carry the replacement session ID, so
+		// Multica keeps prompting a session the provider no longer has).
+		if promptErr != nil && isACPStaleSessionError(promptErr) &&
+			opts.ResumeSessionID != "" && sessionID == opts.ResumeSessionID {
+			b.cfg.Logger.Warn("hermes prompt: stale session after apparent successful resume; retrying on new session",
+				"old_session_id", sessionID, "error", promptErr)
+
+			retryResult, newErr := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+			if newErr != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("hermes session recovery failed (session/new): %v", newErr)
+				promptErr = nil
+			} else {
+				newSessionID := extractACPSessionID(retryResult)
+				if newSessionID == "" {
+					finalStatus = "failed"
+					finalError = "hermes session recovery failed: session/new returned no session ID"
+					promptErr = nil
+				} else {
+					b.cfg.Logger.Info("hermes stale-session recovery: retrying prompt on new session",
+						"old_session_id", sessionID, "new_session_id", newSessionID)
+					sessionID = newSessionID
+					c.sessionID = sessionID
+
+					if opts.Model != "" {
+						if _, modelErr := c.request(runCtx, "session/set_model", map[string]any{
+							"sessionId": sessionID,
+							"modelId":   opts.Model,
+						}); modelErr != nil {
+							b.cfg.Logger.Warn("hermes set_session_model failed on recovery session",
+								"error", modelErr, "model", opts.Model)
+							finalStatus = "failed"
+							finalError = fmt.Sprintf("hermes could not switch to model %q on recovery session: %v", opts.Model, modelErr)
+							promptErr = nil
+						}
+					}
+
+					if finalStatus == "completed" {
+						_, promptErr = c.request(runCtx, "session/prompt", map[string]any{
+							"sessionId": sessionID,
+							"prompt": []map[string]any{
+								{"type": "text", "text": userText},
+							},
+						})
+						if promptErr != nil {
+							promptErr = fmt.Errorf("stale-session retry: %w", promptErr)
+						}
+					}
+				}
+			}
+		}
+
+		if promptErr != nil {
+			// Check if the context was cancelled/timed out.
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
 				finalError = fmt.Sprintf("hermes timed out after %s", timeout)
@@ -251,9 +318,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				finalError = "execution cancelled"
 			} else {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
+				finalError = fmt.Sprintf("hermes session/prompt failed: %v", promptErr)
 			}
-		} else {
+		} else if finalStatus == "completed" {
 			// The prompt completed. Check if we got a promptDone result
 			// from the response parsing.
 			select {
@@ -1131,6 +1198,26 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// acpStaleSessionRe matches "session <identifier> not found" — the pattern
+// ACP providers emit when a prompt is sent against a session that no longer
+// exists. Word-boundary anchors prevent the "session/" method-name prefix
+// from creating false positives (e.g. "session/prompt: resource not found").
+var acpStaleSessionRe = regexp.MustCompile(`(?i)\bsession\s+\S+\s+not\s+found\b`)
+
+// isACPStaleSessionError reports whether err looks like a missing or stale
+// session error from session/prompt. These are safe to recover from by
+// calling session/new and retrying the prompt once: the session simply no
+// longer exists on the provider, which is not caused by the prompt itself.
+//
+// The observed pattern (Hermes incident): provider returns a JSON-RPC error
+// whose message matches "session <id> not found".
+func isACPStaleSessionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return acpStaleSessionRe.MatchString(err.Error())
 }
 
 // message returns a single-line summary suitable for the task

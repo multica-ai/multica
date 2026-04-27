@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -789,4 +793,324 @@ func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	if len(s.lines) > acpMaxErrorLines {
 		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
 	}
+}
+
+// ── isACPStaleSessionError ──
+
+func TestIsACPStaleSessionError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		// Matches — the observed Hermes pattern.
+		{"hermes not found", "session/prompt: session 19bbcb1c-b28c-4106-b647-1af0a86a5198 not found (code=-32000)", true},
+		{"simple not found", "session/prompt: session abc not found (code=-32601)", true},
+		{"uppercase mixed", "session/prompt: Session ABC NOT FOUND (code=0)", true},
+		// Non-matches — unrelated errors must not be treated as stale sessions.
+		{"no session word", "session/prompt: resource not found (code=-32001)", false},
+		{"no not found", "session/prompt: session abc expired (code=-32001)", false},
+		{"nil error", "", false},
+		{"provider error", "hermes provider error: HTTP 400 bad request", false},
+		{"timeout", "hermes timed out after 20m0s", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			if tt.msg != "" {
+				err = fmt.Errorf("%s", tt.msg)
+			}
+			got := isACPStaleSessionError(err)
+			if got != tt.want {
+				t.Errorf("isACPStaleSessionError(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+// ── Execute stale-session recovery (fake ACP server) ──
+//
+// The fake ACP server is embedded in the test binary itself: when the env var
+// FAKE_HERMES_SCENARIO is set, the binary acts as a minimal hermes process
+// rather than running tests. This is a standard Go test-helper-binary pattern
+// that avoids needing a real hermes installation.
+
+// TestMain is NOT defined here (it would conflict with other tests in the
+// package). Instead we use TestFakeHermesHelper as the entrypoint for the
+// subprocess, detected via an env var at the top of each Execute test.
+
+func TestHermesExecuteResumeFailFallbackSuccess(t *testing.T) {
+	t.Parallel()
+	// Scenario: resume returns an error; Multica should fall back to a new
+	// session and succeed.
+	runFakeHermesExecuteTest(t, "resume_fail_new_success", func(t *testing.T, result Result) {
+		if result.Status != "completed" {
+			t.Errorf("status: got %q, want completed", result.Status)
+		}
+		if result.Output == "" {
+			t.Error("expected non-empty output")
+		}
+		if result.SessionID == "" {
+			t.Error("expected a session ID in result")
+		}
+		// The result session ID must NOT be the stale one we tried to resume.
+		if result.SessionID == "stale-session-id" {
+			t.Error("result carries stale session ID; expected the new one")
+		}
+	})
+}
+
+func TestHermesExecuteResumeSuccessPromptStaleRetrySuccess(t *testing.T) {
+	t.Parallel()
+	// Scenario: resume appears successful but prompt returns session-not-found;
+	// Multica should create a new session and retry the prompt successfully.
+	runFakeHermesExecuteTest(t, "resume_ok_prompt_stale_retry_success", func(t *testing.T, result Result) {
+		if result.Status != "completed" {
+			t.Errorf("status: got %q, want completed", result.Status)
+		}
+		if result.Output == "" {
+			t.Error("expected non-empty output after retry")
+		}
+		if result.SessionID == "stale-session-id" {
+			t.Error("result carries stale session ID after recovery")
+		}
+	})
+}
+
+func TestHermesExecuteResumeSuccessPromptStaleRetryFail(t *testing.T) {
+	t.Parallel()
+	// Scenario: resume appears successful, prompt returns session-not-found,
+	// new session is created, but retry also fails. The real error must be
+	// surfaced (not "empty output").
+	runFakeHermesExecuteTest(t, "resume_ok_prompt_stale_retry_fail", func(t *testing.T, result Result) {
+		if result.Status != "failed" {
+			t.Errorf("status: got %q, want failed", result.Status)
+		}
+		if result.Error == "" {
+			t.Error("expected a non-empty error on retry failure")
+		}
+		// Must not be the generic empty-output message.
+		if strings.Contains(result.Error, "empty output") {
+			t.Errorf("error should not be the generic empty-output message, got %q", result.Error)
+		}
+	})
+}
+
+// runFakeHermesExecuteTest launches a subprocess running this test binary as a
+// fake hermes ACP server (FAKE_HERMES_SCENARIO=<scenario>), then runs
+// hermesBackend.Execute against it and calls check on the result.
+func runFakeHermesExecuteTest(t *testing.T, scenario string, check func(*testing.T, Result)) {
+	t.Helper()
+
+	// Build the test binary path — os.Executable gives us the running binary.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	b := &hermesBackend{cfg: Config{
+		ExecutablePath: exe,
+		Logger:         slog.Default(),
+	}}
+
+	sess, err := b.Execute(context.Background(), "hello", ExecOptions{
+		ResumeSessionID: "stale-session-id",
+		// Tell the fake server which scenario to run.
+		CustomArgs: []string{"--fake-hermes-scenario=" + scenario},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Drain messages (required to unblock the goroutine).
+	for range sess.Messages {
+	}
+	result := <-sess.Result
+
+	check(t, result)
+}
+
+// TestFakeHermesHelper is the entrypoint for the subprocess. When run normally
+// (no FAKE_HERMES_SCENARIO env var), it exits immediately. When run as a fake
+// hermes binary, it plays back an ACP scenario on stdin/stdout.
+func TestFakeHermesHelper(t *testing.T) {
+	scenario := ""
+	for _, arg := range os.Args {
+		const prefix = "--fake-hermes-scenario="
+		if strings.HasPrefix(arg, prefix) {
+			scenario = strings.TrimPrefix(arg, prefix)
+		}
+	}
+	if scenario == "" {
+		t.Skip("not running as fake hermes helper")
+	}
+
+	// Run the fake ACP server on the real stdin/stdout of this subprocess.
+	if err := runFakeACPServer(scenario); err != nil {
+		fmt.Fprintf(os.Stderr, "fake hermes error: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+// runFakeACPServer speaks the ACP JSON-RPC 2.0 protocol for a given scenario.
+// It reads requests from stdin and writes responses to stdout, then exits.
+func runFakeACPServer(scenario string) error {
+	scanner := bufio.NewScanner(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+
+	readReq := func() (map[string]json.RawMessage, error) {
+		if !scanner.Scan() {
+			return nil, fmt.Errorf("stdin closed")
+		}
+		var req map[string]json.RawMessage
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+			return nil, err
+		}
+		return req, nil
+	}
+
+	sendResult := func(id json.RawMessage, result any) error {
+		return encoder.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"result":  result,
+		})
+	}
+
+	sendError := func(id json.RawMessage, code int, message string) error {
+		return encoder.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"error":   map[string]any{"code": code, "message": message},
+		})
+	}
+
+	sendNotification := func(method string, params any) error {
+		return encoder.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"method":  method,
+			"params":  params,
+		})
+	}
+
+	// Step 1: initialize — always succeeds.
+	req, err := readReq()
+	if err != nil {
+		return err
+	}
+	if err := sendResult(req["id"], map[string]any{"protocolVersion": 1}); err != nil {
+		return err
+	}
+
+	// Step 2: session/resume or session/new.
+	req, err = readReq()
+	if err != nil {
+		return err
+	}
+	var method string
+	_ = json.Unmarshal(req["method"], &method)
+
+	switch scenario {
+	case "resume_fail_new_success":
+		// Resume must fail so Multica falls back to session/new.
+		if method != "session/resume" {
+			return fmt.Errorf("scenario %q: expected session/resume, got %s", scenario, method)
+		}
+		if err := sendError(req["id"], -32000, "session stale-session-id not found"); err != nil {
+			return err
+		}
+		// Multica will now send session/new.
+		req, err = readReq()
+		if err != nil {
+			return err
+		}
+		if err := sendResult(req["id"], map[string]any{"sessionId": "new-session-abc"}); err != nil {
+			return err
+		}
+
+	case "resume_ok_prompt_stale_retry_success", "resume_ok_prompt_stale_retry_fail":
+		// Resume succeeds but the session is silently dead — prompt will fail.
+		if method != "session/resume" {
+			return fmt.Errorf("scenario %q: expected session/resume, got %s", scenario, method)
+		}
+		if err := sendResult(req["id"], map[string]any{"sessionId": "stale-session-id"}); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("unknown scenario: %q", scenario)
+	}
+
+	// Step 3: session/prompt (first attempt).
+	req, err = readReq()
+	if err != nil {
+		return err
+	}
+	_ = json.Unmarshal(req["method"], &method)
+
+	switch scenario {
+	case "resume_fail_new_success":
+		// Prompt on the new session succeeds.
+		if method != "session/prompt" {
+			return fmt.Errorf("scenario %q: expected session/prompt, got %s", scenario, method)
+		}
+		_ = sendNotification("session/update", map[string]any{
+			"sessionId": "new-session-abc",
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": "recovered output"},
+			},
+		})
+		return sendResult(req["id"], map[string]any{"stopReason": "end_turn"})
+
+	case "resume_ok_prompt_stale_retry_success", "resume_ok_prompt_stale_retry_fail":
+		// First prompt fails: session not found.
+		if method != "session/prompt" {
+			return fmt.Errorf("scenario %q: expected session/prompt, got %s", scenario, method)
+		}
+		if err := sendError(req["id"], -32000, "session stale-session-id not found"); err != nil {
+			return err
+		}
+
+		// Multica recovers: sends session/new.
+		req, err = readReq()
+		if err != nil {
+			return err
+		}
+		_ = json.Unmarshal(req["method"], &method)
+		if method != "session/new" {
+			return fmt.Errorf("scenario %q: expected session/new for recovery, got %s", scenario, method)
+		}
+		if err := sendResult(req["id"], map[string]any{"sessionId": "recovery-session-xyz"}); err != nil {
+			return err
+		}
+
+		// Retry prompt.
+		req, err = readReq()
+		if err != nil {
+			return err
+		}
+		_ = json.Unmarshal(req["method"], &method)
+		if method != "session/prompt" {
+			return fmt.Errorf("scenario %q: expected retry session/prompt, got %s", scenario, method)
+		}
+
+		if scenario == "resume_ok_prompt_stale_retry_success" {
+			_ = sendNotification("session/update", map[string]any{
+				"sessionId": "recovery-session-xyz",
+				"update": map[string]any{
+					"sessionUpdate": "agent_message_chunk",
+					"content":       map[string]any{"type": "text", "text": "retry succeeded"},
+				},
+			})
+			return sendResult(req["id"], map[string]any{"stopReason": "end_turn"})
+		}
+
+		// retry_fail: the retry also fails with a real (non-stale) error.
+		return sendError(req["id"], -32001, "upstream LLM unreachable")
+	}
+
+	return nil
 }
