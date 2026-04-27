@@ -56,6 +56,9 @@ services:
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
     restart: unless-stopped
 
   frontend:

@@ -40,9 +40,10 @@ const (
 )
 
 // claimPendingScript atomically claims a pending request:
-//   KEYS[1] = pending zset    ARGV[1] = request id to claim
-//   KEYS[2] = record key       ARGV[2] = new record JSON (status=running)
-//                              ARGV[3] = record TTL in seconds
+//
+//	KEYS[1] = pending zset    ARGV[1] = request id to claim
+//	KEYS[2] = record key       ARGV[2] = new record JSON (status=running)
+//	                           ARGV[3] = record TTL in seconds
 //
 // Returns 1 when this caller won the claim (zset entry removed, record
 // updated), 0 when the entry was already gone (another node won).
@@ -57,7 +58,7 @@ redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[3]))
 return 1
 `)
 
-func localSkillListKey(id string) string            { return localSkillListKeyPrefix + id }
+func localSkillListKey(id string) string { return localSkillListKeyPrefix + id }
 func localSkillListPendingKey(runtimeID string) string {
 	return localSkillListPendingPrefix + runtimeID
 }
@@ -148,6 +149,18 @@ func (s *RedisLocalSkillListStore) persistListRequest(ctx context.Context, req *
 		return fmt.Errorf("persist list request: %w", err)
 	}
 	return nil
+}
+
+// HasPending is a cheap read-only probe (ZCARD) used by hot paths to decide
+// whether to invoke the side-effecting PopPending. It does NOT sweep
+// expired / already-claimed entries — a spurious "true" is fine because the
+// follow-up PopPending still handles the race correctly.
+func (s *RedisLocalSkillListStore) HasPending(ctx context.Context, runtimeID string) (bool, error) {
+	cnt, err := s.rdb.ZCard(ctx, localSkillListPendingKey(runtimeID)).Result()
+	if err != nil {
+		return false, fmt.Errorf("zcard pending: %w", err)
+	}
+	return cnt > 0, nil
 }
 
 func (s *RedisLocalSkillListStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
@@ -350,6 +363,16 @@ func (s *RedisLocalSkillImportStore) unmarshalImport(raw []byte) (*RuntimeLocalS
 	env.Public.CreatorID = env.CreatorID
 	env.Public.RunStartedAt = env.RunStartedAt
 	return env.Public, nil
+}
+
+// HasPending mirrors RedisLocalSkillListStore.HasPending — cheap ZCARD probe
+// for hot-path gating.
+func (s *RedisLocalSkillImportStore) HasPending(ctx context.Context, runtimeID string) (bool, error) {
+	cnt, err := s.rdb.ZCard(ctx, localSkillImportPendingKey(runtimeID)).Result()
+	if err != nil {
+		return false, fmt.Errorf("zcard pending: %w", err)
+	}
+	return cnt > 0, nil
 }
 
 func (s *RedisLocalSkillImportStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error) {

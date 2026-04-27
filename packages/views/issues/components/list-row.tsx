@@ -9,11 +9,13 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueExecutionBadge } from "./issue-execution";
 import { IssueCardLink } from "./issue-card-link";
 import { IssueActionsContextMenu } from "../actions";
+import { LabelChip } from "../../labels/label-chip";
 
 export interface ChildProgress {
   done: number;
@@ -48,11 +50,13 @@ export const ListRow = memo(function ListRow({
     enabled: storeProperties.project && !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
+  const showLabels = storeProperties.labels && labels.length > 0;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -94,10 +98,22 @@ export const ListRow = memo(function ListRow({
                 </span>
               </span>
             )}
+            {showLabels && (
+              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+                {labels.slice(0, 3).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {labels.length > 3 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{labels.length - 3}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
           {showProject && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
-              <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
+              <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
             </span>
           )}

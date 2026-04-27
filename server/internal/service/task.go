@@ -143,7 +143,15 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	return task, nil
 }
 
-// CancelTasksForIssue cancels all active tasks for an issue.
+// CancelTasksForIssue cancels every active task on the issue, reconciles each
+// affected agent's status, and broadcasts task:cancelled events so frontends
+// clear their live cards.
+//
+// Before #1587 this path was "cancel rows and return" — issue-status flips
+// (e.g. user marks the issue `done` or `cancelled` while a task is still
+// running) left the agent stuck at status="working" indefinitely, requiring a
+// manual `multica agent update <id> --status idle` to unwedge. Matches the
+// pattern already used by CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	tasks, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
 	if err != nil {
@@ -153,6 +161,25 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 		slog.Info("task cancelled for issue", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issueID), "agent_id", util.UUIDToString(task.AgentID))
 		s.ReconcileAgentStatus(ctx, task.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	}
+	return nil
+}
+
+// CancelTasksByTriggerComment cancels active tasks whose trigger is the given
+// comment. Called from DeleteComment so an agent does not run with the
+// now-deleted content already embedded in its prompt. Must be invoked BEFORE
+// the comment row is deleted because the FK ON DELETE SET NULL would
+// otherwise nullify trigger_comment_id and we'd lose the ability to find
+// the affected tasks.
+func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID pgtype.UUID) error {
+	cancelled, err := s.Queries.CancelAgentTasksByTriggerComment(ctx, commentID)
+	if err != nil {
+		return fmt.Errorf("cancel tasks by trigger comment: %w", err)
+	}
+	for _, t := range cancelled {
+		slog.Info("task cancelled for deleted trigger comment", "task_id", util.UUIDToString(t.ID), "comment_id", util.UUIDToString(commentID), "agent_id", util.UUIDToString(t.AgentID))
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 	return nil
 }
@@ -231,10 +258,10 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
 
-	// Update agent status to working. Hits the DB and may publish events,
-	// so it must be inside the timed window.
+	// Refresh agent status from active tasks. This avoids a stale unconditional
+	// working write racing after a just-cancelled claim.
 	t0 = time.Now()
-	s.updateAgentStatus(ctx, agentID, "working")
+	s.ReconcileAgentStatus(ctx, agentID)
 	updateStatusMs = time.Since(t0).Milliseconds()
 
 	// Broadcast task:dispatch. ResolveTaskWorkspaceID inside this path can
@@ -802,18 +829,14 @@ func (s *TaskService) ReportProgress(ctx context.Context, taskID string, workspa
 	})
 }
 
-// ReconcileAgentStatus checks running task count and sets agent status accordingly.
+// ReconcileAgentStatus refreshes agent status from the current active task set.
 func (s *TaskService) ReconcileAgentStatus(ctx context.Context, agentID pgtype.UUID) {
-	running, err := s.Queries.CountRunningTasks(ctx, agentID)
+	agent, err := s.Queries.RefreshAgentStatusFromTasks(ctx, agentID)
 	if err != nil {
 		return
 	}
-	newStatus := "idle"
-	if running > 0 {
-		newStatus = "working"
-	}
-	slog.Debug("agent status reconciled", "agent_id", util.UUIDToString(agentID), "status", newStatus, "running_tasks", running)
-	s.updateAgentStatus(ctx, agentID, newStatus)
+	slog.Debug("agent status reconciled", "agent_id", util.UUIDToString(agentID), "status", agent.Status)
+	s.publishAgentStatus(agent)
 }
 
 func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID, status string) {
@@ -824,6 +847,10 @@ func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID
 	if err != nil {
 		return
 	}
+	s.publishAgentStatus(agent)
+}
+
+func (s *TaskService) publishAgentStatus(agent db.Agent) {
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventAgentStatus,
 		WorkspaceID: util.UUIDToString(agent.WorkspaceID),

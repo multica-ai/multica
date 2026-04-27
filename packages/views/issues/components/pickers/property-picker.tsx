@@ -26,6 +26,7 @@ export function PropertyPicker({
   searchPlaceholder = "Filter...",
   onSearchChange,
   children,
+  footer,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -37,6 +38,13 @@ export function PropertyPicker({
   searchPlaceholder?: string;
   onSearchChange?: (query: string) => void;
   children: React.ReactNode;
+  /**
+   * Optional footer rendered below the listbox. Unlike items rendered as
+   * children, the footer is *not* included in arrow-key navigation — use it
+   * for actions like "Create new…" or "Manage…" that shouldn't be treated as
+   * selectable listbox options.
+   */
+  footer?: React.ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -131,6 +139,7 @@ export function PropertyPicker({
           </div>
         )}
         <div ref={listRef} className="p-1 max-h-60 overflow-y-auto">{children}</div>
+        {footer && <div className="border-t p-1">{footer}</div>}
       </PopoverContent>
     </Popover>
   );
@@ -162,8 +171,11 @@ export function PickerItem({
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
-      <span className="flex flex-1 items-center gap-2">{children}</span>
-      {selected && <Check className="h-3.5 w-3.5 text-muted-foreground" />}
+      {/* min-w-0 lets long children (like truncated label names) shrink
+          inside the flex row instead of pushing the selected checkmark off
+          the right edge. shrink-0 on the Check keeps it visible. */}
+      <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>
+      {selected && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
     </button>
   );
 }

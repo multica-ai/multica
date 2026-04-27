@@ -85,7 +85,7 @@ Multica = **人 + AI agent 在同一个看板上协作的任务管理平台**。
 | 7 | **The Daemon** | 分布式执行的灵魂；poll + heartbeat + concurrent execution | 每 30s heartbeat；75s 无心跳 → 离线；启动时调 `recover-orphans` 回收孤儿任务；max_concurrent_tasks 有双层（daemon + agent） |
 | 8 | **Tasks** | 任务是什么；生命周期 queued→dispatched→running→completed/failed | **session_id mid-flight pinning**（agent 首条 system message 一到就持久化，不等完成）；失败自动重试只对 issue-sourced 任务（max_attempts=3），chat 和 autopilot 不自动重试 |
 | 9 | **Triggers & Entry Points** ← **独立页** | 5 种让 task 产生的入口：Assignment / Comment @mention / Chat / Autopilot / Rerun；每种的行为对比 | 每种的 FK 字段不同（trigger_comment_id / chat_session_id / autopilot_run_id）；**对比表**：哪种有 session resume / 自动重试 / priority 来源 / dedup |
-| 10 | **Skills** | 工作区 skill + 本地 skill；按 provider 的注入路径 | 8 种 provider 有不同 skill 根路径（Claude=`.claude/skills/`、Codex=`$CODEX_HOME/skills/`、Pi=`.pi/agent/skills/`、etc）；skill 不参与执行，只参与上下文注入 |
+| 10 | **Skills** | 工作区 skill + 本地 skill；按 provider 的注入路径 | 8 种 provider 有不同 skill 根路径（Claude=`.claude/skills/`、Codex=`$CODEX_HOME/skills/`、Pi=`.pi/skills/`、etc）；skill 不参与执行，只参与上下文注入 |
 | 11 | **MCP** | 独立协议；怎么给 agent 配 MCP server；和 skill 的区别 | **目前只 Claude Code 真用**——其他 provider 收到 McpConfig 但 CLI 没对应 flag；JSONB 明文存储，非 owner redact |
 | 12 | **Autopilots** | 让 agent 自动开工的调度器；两种执行模式；三种触发；并发策略 | **Webhook trigger 字段有但没接路由**——第一版不文档化；concurrency policy 只对 `run_only` 模式生效；`create_issue` 模式由 issue FSM 自然 gate |
 | 13 | **Chat** | 和 issue comment 的区别；session 复用 | **完全沙盒**——chat 里的 agent 不能发 comment 到 issue；session_id 用 COALESCE 持久化，agent crash 不会抹掉 |

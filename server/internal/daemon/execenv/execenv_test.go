@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -770,6 +771,39 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
+// TestInjectRuntimeConfigDirectsMultiLineWritesToStdin pins the guidance that
+// any multi-line content for `multica issue comment add` must go through
+// `--content-stdin` + a HEREDOC. Agents that reached for the inline
+// `--content "...\n\n..."` form ended up with literal 4-char `\n` sequences
+// in stored comments because bash does not expand backslash escapes inside
+// double quotes; see MUL-1467. This test prevents the multi-line guidance
+// from silently regressing back into a "for special characters" footnote.
+func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"multi-line content",
+		"MUST pipe via stdin",
+		"--content-stdin",
+		"<<'COMMENT'",
+		"`--description`",
+		"--description-stdin",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing multi-line guidance %q\n---\n%s", want, s)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -906,6 +940,13 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"o3"}`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model = "o3"`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("Be helpful."), 0o644)
+	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
+	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
+		t.Fatalf("write shared plugin skill: %v", err)
+	}
 
 	// Point CODEX_HOME to our fake shared home.
 	t.Setenv("CODEX_HOME", sharedHome)
@@ -921,12 +962,19 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	sessionsIsLink := fi.Mode()&os.ModeSymlink != 0
+	if !sessionsIsLink && runtime.GOOS != "windows" {
 		t.Error("sessions should be a symlink")
 	}
-	sessTarget, _ := os.Readlink(sessionsPath)
-	if sessTarget != filepath.Join(sharedHome, "sessions") {
-		t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+	if sessionsIsLink {
+		sessTarget, _ := os.Readlink(sessionsPath)
+		if sessTarget != filepath.Join(sharedHome, "sessions") {
+			t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
+		}
+	} else if fi.IsDir() {
+		if _, err := os.Stat(sessionsPath); err != nil {
+			t.Fatalf("sessions link target should be accessible: %v", err)
+		}
 	}
 
 	// auth.json should be a symlink.
@@ -935,12 +983,15 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.json not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	authIsLink := fi.Mode()&os.ModeSymlink != 0
+	if !authIsLink && runtime.GOOS != "windows" {
 		t.Error("auth.json should be a symlink")
 	}
-	target, _ := os.Readlink(authPath)
-	if target != filepath.Join(sharedHome, "auth.json") {
-		t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
+	if authIsLink {
+		target, _ := os.Readlink(authPath)
+		if target != filepath.Join(sharedHome, "auth.json") {
+			t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
+		}
 	}
 	// Verify content is accessible through symlink.
 	data, _ := os.ReadFile(authPath)
@@ -977,6 +1028,16 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if string(data) != "Be helpful." {
 		t.Errorf("instructions.md content = %q", data)
 	}
+
+	// plugin cache should be exposed at the same relative path in codex-home.
+	pluginSkillPath := filepath.Join(codexHome, "plugins", "cache", "superpowers", "SKILL.md")
+	data, err = os.ReadFile(pluginSkillPath)
+	if err != nil {
+		t.Fatalf("plugin cache skill not exposed: %v", err)
+	}
+	if string(data) != "Use superpowers." {
+		t.Errorf("plugin cache skill content = %q", data)
+	}
 }
 
 func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
@@ -1006,8 +1067,11 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["config.toml"] {
 		t.Error("expected config.toml (auto-generated for network access)")
 	}
+	if !entryNames["plugins"] {
+		t.Error("expected plugins directory for plugin cache exposure")
+	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" {
+		if name != "sessions" && name != "config.toml" && name != "plugins" {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
@@ -1017,8 +1081,11 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	if fi.Mode()&os.ModeSymlink == 0 && runtime.GOOS != "windows" {
 		t.Error("sessions should be a symlink")
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
+		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
 	}
 }
 
@@ -1366,6 +1433,164 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 }
 
+func TestReuseRestoresCodexPluginCache(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
+	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
+		t.Fatalf("write shared plugin skill: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-plugin-reuse",
+		TaskID:         "a5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-plugin-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := os.RemoveAll(filepath.Join(env.CodexHome, "plugins")); err != nil {
+		t.Fatalf("remove codex plugins dir: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{IssueID: "reuse-plugin-test"}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "plugins", "cache", "superpowers", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("reused codex plugin cache not restored: %v", err)
+	}
+	if string(data) != "Use superpowers." {
+		t.Errorf("reused plugin cache skill content = %q", data)
+	}
+}
+
+func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-skill-reuse",
+		TaskID:         "b5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-skill-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := os.RemoveAll(filepath.Join(env.CodexHome, "skills")); err != nil {
+		t.Fatalf("remove codex skills dir: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "reuse-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Writing",
+				Content: "Write clearly.",
+				Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Example"}},
+			},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill: %v", err)
+	}
+	if string(data) != "Write clearly." {
+		t.Errorf("skill content = %q", data)
+	}
+	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill support file: %v", err)
+	}
+	if string(example) != "Example" {
+		t.Errorf("support file content = %q", example)
+	}
+}
+
+func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-skill-update",
+		TaskID:         "c5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "reuse-skill-update-test",
+			AgentSkills: []SkillContextForEnv{
+				{
+					Name:    "Writing",
+					Content: "Old writing guidance.",
+					Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Old example"}},
+				},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "reuse-skill-update-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Writing",
+				Content: "Updated writing guidance.",
+				Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Updated example"}},
+			},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill: %v", err)
+	}
+	if string(data) != "Updated writing guidance." {
+		t.Errorf("skill content = %q", data)
+	}
+	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
+	if err != nil {
+		t.Fatalf("missing reused codex workspace skill support file: %v", err)
+	}
+	if string(example) != "Updated example" {
+		t.Errorf("support file content = %q", example)
+	}
+}
+
 func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1376,7 +1601,12 @@ func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	os.WriteFile(src, []byte("real"), 0o644)
 
 	// Create a broken symlink pointing to a non-existent file.
-	os.Symlink(filepath.Join(dir, "old-source.json"), dst)
+	if err := os.Symlink(filepath.Join(dir, "old-source.json"), dst); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("file symlink unavailable on this Windows session: %v", err)
+		}
+		t.Fatalf("seed broken symlink: %v", err)
+	}
 
 	if err := ensureSymlink(src, dst); err != nil {
 		t.Fatalf("ensureSymlink failed: %v", err)

@@ -15,7 +15,7 @@ import (
 // Codex:    skills → handled separately in Prepare via codex-home
 // Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode: skills → {workDir}/.config/opencode/skills/{name}/SKILL.md  (native discovery)
-// Pi:       skills → {workDir}/.pi/agent/skills/{name}/SKILL.md  (native discovery)
+// Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
@@ -65,8 +65,8 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// OpenCode natively discovers skills from .config/opencode/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".config", "opencode", "skills")
 	case "pi":
-		// Pi natively discovers skills from .pi/agent/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".pi", "agent", "skills")
+		// Pi natively discovers skills from .pi/skills/ in the workdir.
+		skillsDir = filepath.Join(workDir, ".pi", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".cursor", "skills")

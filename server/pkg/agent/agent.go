@@ -22,14 +22,15 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd             string
-	Model           string
-	SystemPrompt    string
-	MaxTurns        int
-	Timeout         time.Duration
-	ResumeSessionID string          // if non-empty, resume a previous agent session
-	CustomArgs      []string        // additional CLI arguments appended to the agent command
-	McpConfig       json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	Cwd                       string
+	Model                     string
+	SystemPrompt              string
+	MaxTurns                  int
+	Timeout                   time.Duration
+	SemanticInactivityTimeout time.Duration
+	ResumeSessionID           string          // if non-empty, resume a previous agent session
+	CustomArgs                []string        // additional CLI arguments appended to the agent command
+	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 }
 
 // Session represents a running agent execution.
@@ -77,7 +78,7 @@ type TokenUsage struct {
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout"
+	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
 	Output     string // accumulated text output
 	Error      string // error message if failed
 	DurationMs int64

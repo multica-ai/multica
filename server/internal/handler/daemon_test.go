@@ -8,10 +8,54 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
+
+// slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
+// HasPending until the provided context is cancelled. PopPending delegates
+// to the underlying store. Used to verify that a stalled probe cannot wedge
+// the heartbeat — the bound context must cut it short — while the ack-safe
+// PopPending path is never reached because HasPending returns an error, not
+// true.
+type slowProbeLocalSkillListStore struct{ LocalSkillListStore }
+
+func (s slowProbeLocalSkillListStore) HasPending(ctx context.Context, _ string) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+type slowProbeLocalSkillImportStore struct{ LocalSkillImportStore }
+
+func (s slowProbeLocalSkillImportStore) HasPending(ctx context.Context, _ string) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+// popRecordingLocalSkillListStore counts PopPending calls so a test can assert
+// that the handler never reaches the ack-unsafe side-effecting claim path
+// when HasPending reports an empty queue.
+type popRecordingLocalSkillListStore struct {
+	LocalSkillListStore
+	popCalls int
+}
+
+func (s *popRecordingLocalSkillListStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
+	s.popCalls++
+	return s.LocalSkillListStore.PopPending(ctx, runtimeID)
+}
+
+type popRecordingLocalSkillImportStore struct {
+	LocalSkillImportStore
+	popCalls int
+}
+
+func (s *popRecordingLocalSkillImportStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error) {
+	s.popCalls++
+	return s.LocalSkillImportStore.PopPending(ctx, runtimeID)
+}
 
 func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 	t.Helper()
@@ -135,6 +179,84 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	testHandler.DaemonHeartbeat(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("DaemonHeartbeat with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestDaemonHeartbeat_SlowProbeDoesNotWedge pins the invariant that a stalled
+// HasPending probe cannot wedge the heartbeat endpoint past the per-probe
+// timeout. The probe is the only bounded call; PopPending is ack-safe-
+// critical and is intentionally left unbounded. Without the probe bound the
+// heartbeat would hang on a slow shared store.
+func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	origList := testHandler.LocalSkillListStore
+	origImport := testHandler.LocalSkillImportStore
+	testHandler.LocalSkillListStore = slowProbeLocalSkillListStore{origList}
+	testHandler.LocalSkillImportStore = slowProbeLocalSkillImportStore{origImport}
+	t.Cleanup(func() {
+		testHandler.LocalSkillListStore = origList
+		testHandler.LocalSkillImportStore = origImport
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id": runtimeID,
+	}, testWorkspaceID, "runtime-local-skills-daemon")
+
+	start := time.Now()
+	testHandler.DaemonHeartbeat(w, req)
+	elapsed := time.Since(start)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonHeartbeat with slow probes: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	// Two bounded probes at 1s each + a small fixed slack.
+	if elapsed > 3*time.Second {
+		t.Fatalf("DaemonHeartbeat took %s; expected fast return despite slow probes", elapsed)
+	}
+}
+
+// TestDaemonHeartbeat_EmptyQueueSkipsPopPending pins the ack-safety property:
+// when HasPending reports no work, the heartbeat must NOT invoke PopPending,
+// because PopPending's Redis implementation has non-atomic side effects that
+// a client-side cancel cannot cleanly un-run (see GH #1637 review).
+func TestDaemonHeartbeat_EmptyQueueSkipsPopPending(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	origList := testHandler.LocalSkillListStore
+	origImport := testHandler.LocalSkillImportStore
+	listSpy := &popRecordingLocalSkillListStore{LocalSkillListStore: origList}
+	importSpy := &popRecordingLocalSkillImportStore{LocalSkillImportStore: origImport}
+	testHandler.LocalSkillListStore = listSpy
+	testHandler.LocalSkillImportStore = importSpy
+	t.Cleanup(func() {
+		testHandler.LocalSkillListStore = origList
+		testHandler.LocalSkillImportStore = origImport
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id": runtimeID,
+	}, testWorkspaceID, "runtime-local-skills-daemon")
+
+	testHandler.DaemonHeartbeat(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if listSpy.popCalls != 0 {
+		t.Fatalf("expected 0 PopPending calls on empty list queue, got %d", listSpy.popCalls)
+	}
+	if importSpy.popCalls != 0 {
+		t.Fatalf("expected 0 PopPending calls on empty import queue, got %d", importSpy.popCalls)
 	}
 }
 
@@ -713,7 +835,9 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID); err != nil {
 		t.Fatalf("seed legacy task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID)
+	})
 
 	// Register under the new stable UUID, declaring the prior hostname-derived
 	// id as legacy. The handler should merge the legacy row into the new one.
@@ -795,8 +919,8 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 	}
 
 	ctx := context.Background()
-	const legacyDaemonID = "ReverseDotLocalHost"                          // stored without .local
-	const emittedLegacyID = "ReverseDotLocalHost.local"                    // daemon now reports with .local
+	const legacyDaemonID = "ReverseDotLocalHost"        // stored without .local
+	const emittedLegacyID = "ReverseDotLocalHost.local" // daemon now reports with .local
 	const newDaemonID = "0192a7b0-0011-7ee9-9c21-30a5bcf86aa2"
 
 	var legacyRuntimeID string
@@ -853,8 +977,8 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	const storedDaemonID = "Jiayuans-MacBook-Pro.local"     // DB has original mixed case
-	const emittedLegacyID = "jiayuans-macbook-pro.local"    // Daemon now reports lowercased
+	const storedDaemonID = "Jiayuans-MacBook-Pro.local"  // DB has original mixed case
+	const emittedLegacyID = "jiayuans-macbook-pro.local" // Daemon now reports lowercased
 	const newDaemonID = "0192a7b0-0022-7ee9-9c21-30a5bcf86aa3"
 
 	var legacyRuntimeID string
