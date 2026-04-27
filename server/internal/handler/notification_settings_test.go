@@ -67,6 +67,13 @@ func TestNotificationPreferences_Defaults(t *testing.T) {
 				"enabled": false,
 				"binding_id": null,
 				"requires_binding": true
+			},
+			{
+				"channel": "email",
+				"event_type": "mentioned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": true
 			}
 		]
 	}`)
@@ -162,6 +169,13 @@ func TestNotificationBindingsLifecycle(t *testing.T) {
 			},
 			{
 				"channel": "dingtalk",
+				"event_type": "mentioned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": true
+			},
+			{
+				"channel": "email",
 				"event_type": "mentioned",
 				"enabled": false,
 				"binding_id": null,

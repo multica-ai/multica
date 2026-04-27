@@ -337,6 +337,19 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
 	}
 
+	// Auto-create email binding for email-login users.
+	_, _ = h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
+		UserID:                user.ID,
+		Provider:              "email",
+		ExternalUserID:        email,
+		DisplayName:           strToText(email),
+		AccessTokenEncrypted:  pgtype.Text{},
+		RefreshTokenEncrypted: pgtype.Text{},
+		TokenExpiresAt:        pgtype.Timestamptz{},
+		Status:                "active",
+		Metadata:              []byte("{}"),
+	})
+
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", req.Email)...)

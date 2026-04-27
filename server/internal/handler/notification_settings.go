@@ -30,6 +30,12 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 		DefaultEnabled:  false,
 		RequiresBinding: true,
 	},
+	{
+		Channel:         "email",
+		EventType:       "mentioned",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
 }
 
 type NotificationBindingResponse struct {
