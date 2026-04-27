@@ -1386,6 +1386,32 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(raw, &rawUpdates)
 	}
 
+	// Short-circuit when no mutation field is present in `updates`. Without
+	// this, the loop below runs N no-op UPDATEs (every if-guard skips, every
+	// COALESCE preserves the existing value) and reports `{"updated": N}` —
+	// the response cheerfully claims success while nothing changed. Most
+	// real-world cases that hit this path are caller mistakes (status placed
+	// at the top level, "update" misspelled as singular). Telling the truth
+	// here — `{"updated": 0}` — keeps the wire shape stable while making the
+	// count match reality. See multica-ai/multica#1660.
+	hasMutation := req.Updates.Title != nil ||
+		req.Updates.Description != nil ||
+		req.Updates.Status != nil ||
+		req.Updates.Priority != nil ||
+		req.Updates.Position != nil
+	if !hasMutation {
+		for _, k := range []string{"assignee_type", "assignee_id", "due_date", "parent_issue_id", "project_id"} {
+			if _, ok := rawUpdates[k]; ok {
+				hasMutation = true
+				break
+			}
+		}
+	}
+	if !hasMutation {
+		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
+		return
+	}
+
 	workspaceID := h.resolveWorkspaceID(r)
 	updated := 0
 	for _, issueID := range req.IssueIDs {
