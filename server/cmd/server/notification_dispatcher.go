@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -40,6 +41,7 @@ type dingTalkBindingMetadata struct {
 	UserID  string `json:"user_id"`
 	UnionID string `json:"union_id"`
 	OpenID  string `json:"open_id"`
+	Mobile  string `json:"mobile"`
 }
 
 func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries) {
@@ -187,25 +189,35 @@ func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, deliv
 }
 
 func backfillDingTalkBindingUserID(ctx context.Context, queries *db.Queries, cfg notifyutil.DingTalkConfig, binding db.ExternalAccountBinding, metadata dingTalkBindingMetadata) (string, error) {
-	if !binding.AccessTokenEncrypted.Valid || strings.TrimSpace(binding.AccessTokenEncrypted.String) == "" {
-		return "", errors.New("dingtalk delivery is missing bound user_id")
+	var profile notifyutil.DingTalkUserProfile
+	var lookupErr error
+
+	userID := ""
+	if mobile := strings.TrimSpace(metadata.Mobile); mobile != "" {
+		userID, lookupErr = cfg.UserIDByMobile(ctx, metadata.CorpID, mobile)
 	}
 
-	accessToken, err := notifyutil.DecryptToken(binding.AccessTokenEncrypted.String)
-	if err != nil {
-		return "", errors.New("failed to decrypt dingtalk access token")
-	}
-	if strings.TrimSpace(accessToken) == "" {
-		return "", errors.New("dingtalk delivery is missing bound user access token")
-	}
-
-	profile, err := cfg.GetUserProfile(ctx, accessToken)
-	if err != nil {
-		return "", err
-	}
-	userID := strings.TrimSpace(profile.UserID)
 	if userID == "" {
-		return "", errors.New("dingtalk user info missing user_id")
+		if !binding.AccessTokenEncrypted.Valid || strings.TrimSpace(binding.AccessTokenEncrypted.String) == "" {
+			return "", combineDingTalkLookupErrors(lookupErr, errors.New("dingtalk delivery is missing bound user_id"))
+		}
+
+		accessToken, err := notifyutil.DecryptToken(binding.AccessTokenEncrypted.String)
+		if err != nil {
+			return "", combineDingTalkLookupErrors(lookupErr, errors.New("failed to decrypt dingtalk access token"))
+		}
+		if strings.TrimSpace(accessToken) == "" {
+			return "", combineDingTalkLookupErrors(lookupErr, errors.New("dingtalk delivery is missing bound user access token"))
+		}
+
+		profile, err = cfg.GetUserProfile(ctx, accessToken)
+		if err != nil {
+			return "", combineDingTalkLookupErrors(lookupErr, err)
+		}
+		userID = strings.TrimSpace(profile.UserID)
+		if userID == "" {
+			return "", combineDingTalkLookupErrors(lookupErr, errors.New("dingtalk user info missing user_id"))
+		}
 	}
 
 	rawMetadata := map[string]any{}
@@ -221,6 +233,9 @@ func backfillDingTalkBindingUserID(ctx context.Context, queries *db.Queries, cfg
 	}
 	if openID := firstValue(metadata.OpenID, profile.OpenID); openID != "" {
 		rawMetadata["open_id"] = openID
+	}
+	if mobile := firstValue(metadata.Mobile, profile.Mobile); mobile != "" {
+		rawMetadata["mobile"] = mobile
 	}
 
 	metadataJSON, err := json.Marshal(rawMetadata)
@@ -243,6 +258,16 @@ func backfillDingTalkBindingUserID(ctx context.Context, queries *db.Queries, cfg
 	}
 
 	return userID, nil
+}
+
+func combineDingTalkLookupErrors(primary, fallback error) error {
+	if primary == nil {
+		return fallback
+	}
+	if fallback == nil {
+		return primary
+	}
+	return fmt.Errorf("dingtalk user_id lookup failed: mobile lookup: %v; user token fallback: %v", primary, fallback)
 }
 
 func finalizeFailedDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {

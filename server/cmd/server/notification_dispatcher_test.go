@@ -46,6 +46,7 @@ type dingTalkDeliverySeed struct {
 	CorpID      string
 	UnionID     string
 	UserID      string
+	Mobile      string
 	AccessToken string
 }
 
@@ -62,6 +63,9 @@ func seedPendingDingTalkDelivery(t *testing.T, seed dingTalkDeliverySeed) (strin
 	}
 	if userID := strings.TrimSpace(seed.UserID); userID != "" {
 		metadataMap["user_id"] = userID
+	}
+	if mobile := strings.TrimSpace(seed.Mobile); mobile != "" {
+		metadataMap["mobile"] = mobile
 	}
 	metadata, err := json.Marshal(metadataMap)
 	if err != nil {
@@ -295,24 +299,35 @@ func TestDispatchPendingDingTalkDeliveries_BackfillsMissingUserID(t *testing.T) 
 	cleanupNotificationDispatchData(t)
 	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
 
-	var userInfoCalls int
+	var tokenCalls int
+	var userByMobileCalls int
 	var messageCalls int
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/userinfo":
-			userInfoCalls++
-			if got := r.Header.Get("x-acs-dingtalk-access-token"); got != "user-token-backfill" {
-				t.Fatalf("expected x-acs-dingtalk-access-token %q, got %q", "user-token-backfill", got)
+		case strings.HasPrefix(r.URL.Path, "/corp/") && strings.HasSuffix(r.URL.Path, "/token"):
+			tokenCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"app-token","expires_in":7200}`))
+		case r.URL.Path == "/user-by-mobile":
+			userByMobileCalls++
+			if got := r.URL.Query().Get("access_token"); got != "app-token" {
+				t.Fatalf("expected app access token query %q, got %q", "app-token", got)
+			}
+			var body struct {
+				Mobile string `json:"mobile"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode user-by-mobile body: %v", err)
+			}
+			if body.Mobile != "13800000000" {
+				t.Fatalf("expected mobile %q, got %q", "13800000000", body.Mobile)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
-				"userId":"staff-backfill",
-				"unionId":"union-backfill",
-				"openId":"open-backfill"
+				"errcode":0,
+				"errmsg":"ok",
+				"result":{"userid":"staff-backfill"}
 			}`))
-		case strings.HasPrefix(r.URL.Path, "/corp/") && strings.HasSuffix(r.URL.Path, "/token"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"access_token":"app-token","expires_in":7200}`))
 		case r.URL.Path == "/message":
 			messageCalls++
 			var body struct {
@@ -335,14 +350,14 @@ func TestDispatchPendingDingTalkDeliveries_BackfillsMissingUserID(t *testing.T) 
 	t.Setenv("DINGTALK_CLIENT_ID", "ding-client-id")
 	t.Setenv("DINGTALK_CLIENT_SECRET", "ding-client-secret")
 	t.Setenv("DINGTALK_ROBOT_CODE", "ding-robot-code")
-	t.Setenv("DINGTALK_USERINFO_URL", apiServer.URL+"/userinfo")
 	t.Setenv("DINGTALK_APP_TOKEN_URL", apiServer.URL+"/corp/{corpId}/token")
+	t.Setenv("DINGTALK_USER_BY_MOBILE_URL", apiServer.URL+"/user-by-mobile?access_token={accessToken}")
 	t.Setenv("DINGTALK_MESSAGE_URL", apiServer.URL+"/message")
 
 	bindingID, eventID, _ := seedPendingDingTalkDelivery(t, dingTalkDeliverySeed{
-		CorpID:      "corp-backfill",
-		UnionID:     "union-backfill",
-		AccessToken: "user-token-backfill",
+		CorpID:  "corp-backfill",
+		UnionID: "union-backfill",
+		Mobile:  "13800000000",
 	})
 
 	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool))
@@ -351,8 +366,11 @@ func TestDispatchPendingDingTalkDeliveries_BackfillsMissingUserID(t *testing.T) 
 	if delivery.Status != "sent" {
 		t.Fatalf("expected delivery status sent, got %q", delivery.Status)
 	}
-	if userInfoCalls != 1 {
-		t.Fatalf("expected 1 user info call, got %d", userInfoCalls)
+	if tokenCalls != 1 {
+		t.Fatalf("expected 1 app token call, got %d", tokenCalls)
+	}
+	if userByMobileCalls != 1 {
+		t.Fatalf("expected 1 user-by-mobile call, got %d", userByMobileCalls)
 	}
 	if messageCalls != 1 {
 		t.Fatalf("expected 1 message call, got %d", messageCalls)

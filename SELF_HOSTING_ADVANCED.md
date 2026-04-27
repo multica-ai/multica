@@ -67,6 +67,7 @@ Optional endpoint overrides are available for testing or DingTalk API migration:
 | `DINGTALK_TOKEN_URL` | `https://api.dingtalk.com/v1.0/oauth2/userAccessToken` |
 | `DINGTALK_USERINFO_URL` | `https://api.dingtalk.com/v1.0/contact/users/me` |
 | `DINGTALK_APP_TOKEN_URL` | `https://api.dingtalk.com/v1.0/oauth2/{corpId}/token` |
+| `DINGTALK_USER_BY_MOBILE_URL` | `https://oapi.dingtalk.com/topapi/v2/user/getbymobile?access_token={accessToken}` |
 | `DINGTALK_MESSAGE_URL` | `https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend` |
 
 The DingTalk redirect URL configured in the DingTalk console must match your frontend callback URL:

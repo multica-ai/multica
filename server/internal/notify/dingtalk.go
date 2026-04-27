@@ -24,14 +24,15 @@ import (
 )
 
 const (
-	defaultDingTalkAuthURL     = "https://login.dingtalk.com/oauth2/auth"
-	defaultDingTalkTokenURL    = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken"
-	defaultDingTalkUserInfoURL = "https://api.dingtalk.com/v1.0/contact/users/me"
-	defaultDingTalkAppTokenURL = "https://api.dingtalk.com/v1.0/oauth2/{corpId}/token"
-	defaultDingTalkMessageURL  = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
-	defaultDingTalkScope       = "openid corpid Contact.User.Read"
-	dingTalkStatePrefix        = "dingtalk"
-	dingTalkAccessTokenHeader  = "x-acs-dingtalk-access-token"
+	defaultDingTalkAuthURL         = "https://login.dingtalk.com/oauth2/auth"
+	defaultDingTalkTokenURL        = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken"
+	defaultDingTalkUserInfoURL     = "https://api.dingtalk.com/v1.0/contact/users/me"
+	defaultDingTalkAppTokenURL     = "https://api.dingtalk.com/v1.0/oauth2/{corpId}/token"
+	defaultDingTalkUserByMobileURL = "https://oapi.dingtalk.com/topapi/v2/user/getbymobile?access_token={accessToken}"
+	defaultDingTalkMessageURL      = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+	defaultDingTalkScope           = "openid corpid Contact.User.Read"
+	dingTalkStatePrefix            = "dingtalk"
+	dingTalkAccessTokenHeader      = "x-acs-dingtalk-access-token"
 )
 
 var ErrDingTalkNotConfigured = errors.New("dingtalk is not configured")
@@ -40,16 +41,17 @@ var ErrDingTalkDeliveryNotConfigured = errors.New("dingtalk delivery is not conf
 var dingTalkAppTokenCache sync.Map
 
 type DingTalkConfig struct {
-	ClientID     string
-	ClientSecret string
-	RobotCode    string
-	Scope        string
-	AuthURL      string
-	TokenURL     string
-	UserInfoURL  string
-	AppTokenURL  string
-	MessageURL   string
-	HTTPClient   *http.Client
+	ClientID        string
+	ClientSecret    string
+	RobotCode       string
+	Scope           string
+	AuthURL         string
+	TokenURL        string
+	UserInfoURL     string
+	AppTokenURL     string
+	UserByMobileURL string
+	MessageURL      string
+	HTTPClient      *http.Client
 }
 
 type DingTalkBindingState struct {
@@ -87,16 +89,17 @@ type dingTalkCachedAppToken struct {
 
 func LoadDingTalkConfig() (DingTalkConfig, error) {
 	cfg := DingTalkConfig{
-		ClientID:     strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
-		ClientSecret: strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_SECRET")),
-		RobotCode:    strings.TrimSpace(os.Getenv("DINGTALK_ROBOT_CODE")),
-		Scope:        strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
-		AuthURL:      strings.TrimSpace(os.Getenv("DINGTALK_AUTH_URL")),
-		TokenURL:     strings.TrimSpace(os.Getenv("DINGTALK_TOKEN_URL")),
-		UserInfoURL:  strings.TrimSpace(os.Getenv("DINGTALK_USERINFO_URL")),
-		AppTokenURL:  strings.TrimSpace(os.Getenv("DINGTALK_APP_TOKEN_URL")),
-		MessageURL:   strings.TrimSpace(os.Getenv("DINGTALK_MESSAGE_URL")),
-		HTTPClient:   &http.Client{Timeout: 10 * time.Second},
+		ClientID:        strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
+		ClientSecret:    strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_SECRET")),
+		RobotCode:       strings.TrimSpace(os.Getenv("DINGTALK_ROBOT_CODE")),
+		Scope:           strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
+		AuthURL:         strings.TrimSpace(os.Getenv("DINGTALK_AUTH_URL")),
+		TokenURL:        strings.TrimSpace(os.Getenv("DINGTALK_TOKEN_URL")),
+		UserInfoURL:     strings.TrimSpace(os.Getenv("DINGTALK_USERINFO_URL")),
+		AppTokenURL:     strings.TrimSpace(os.Getenv("DINGTALK_APP_TOKEN_URL")),
+		UserByMobileURL: strings.TrimSpace(os.Getenv("DINGTALK_USER_BY_MOBILE_URL")),
+		MessageURL:      strings.TrimSpace(os.Getenv("DINGTALK_MESSAGE_URL")),
+		HTTPClient:      &http.Client{Timeout: 10 * time.Second},
 	}
 
 	if cfg.Scope == "" {
@@ -113,6 +116,9 @@ func LoadDingTalkConfig() (DingTalkConfig, error) {
 	}
 	if cfg.AppTokenURL == "" {
 		cfg.AppTokenURL = defaultDingTalkAppTokenURL
+	}
+	if cfg.UserByMobileURL == "" {
+		cfg.UserByMobileURL = defaultDingTalkUserByMobileURL
 	}
 	if cfg.MessageURL == "" {
 		cfg.MessageURL = defaultDingTalkMessageURL
@@ -449,6 +455,78 @@ func (c DingTalkConfig) AppAccessToken(ctx context.Context, corpID string) (stri
 		ExpiresAt:   expiresAt,
 	})
 	return decoded.AccessToken, nil
+}
+
+type dingTalkUserByMobileResponse struct {
+	ErrCode int    `json:"errcode"`
+	ErrMsg  string `json:"errmsg"`
+	Result  struct {
+		UserIDSnake string `json:"userid"`
+		UserIDCamel string `json:"userId"`
+	} `json:"result"`
+}
+
+func (c DingTalkConfig) userByMobileURL(accessToken string) string {
+	return strings.Replace(c.UserByMobileURL, "{accessToken}", url.QueryEscape(accessToken), 1)
+}
+
+func (c DingTalkConfig) UserIDByMobile(ctx context.Context, corpID, mobile string) (string, error) {
+	mobile = strings.TrimSpace(mobile)
+	if mobile == "" {
+		return "", errors.New("missing dingtalk user mobile")
+	}
+
+	accessToken, err := c.AppAccessToken(ctx, corpID)
+	if err != nil {
+		return "", err
+	}
+
+	body, err := json.Marshal(map[string]string{
+		"mobile": mobile,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.userByMobileURL(accessToken), strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", &DingTalkAPIError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("dingtalk user lookup by mobile failed: %s", strings.TrimSpace(string(raw))),
+		}
+	}
+
+	var decoded dingTalkUserByMobileResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "", err
+	}
+	if decoded.ErrCode != 0 {
+		return "", &DingTalkAPIError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("dingtalk user lookup by mobile failed: %s", strings.TrimSpace(string(raw))),
+		}
+	}
+
+	userID := firstNonEmpty(decoded.Result.UserIDCamel, decoded.Result.UserIDSnake)
+	if userID == "" {
+		return "", errors.New("dingtalk user lookup by mobile returned empty user_id")
+	}
+	return userID, nil
 }
 
 type DingTalkAPIError struct {
