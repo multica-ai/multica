@@ -35,6 +35,24 @@ vi.mock("./utils/link-handler", () => ({
 import { ReadonlyContent } from "./readonly-content";
 
 describe("ReadonlyContent math rendering", () => {
+  it("renders real blank lines as separate markdown paragraphs", () => {
+    const { container } = render(
+      <ReadonlyContent content={["First paragraph", "", "Second paragraph"].join("\n")} />,
+    );
+
+    const paragraphs = Array.from(container.querySelectorAll("p")).map((p) => p.textContent);
+    expect(paragraphs).toEqual(["First paragraph", "Second paragraph"]);
+  });
+
+  it("does not decode escaped newline text at render time", () => {
+    const { container } = render(
+      <ReadonlyContent content={"First paragraph\\n\\nSecond paragraph"} />,
+    );
+
+    expect(container.querySelectorAll("p")).toHaveLength(1);
+    expect(container.textContent).toContain("First paragraph\\n\\nSecond paragraph");
+  });
+
   it("renders inline and block LaTeX with KaTeX markup", () => {
     const { container } = render(
       <ReadonlyContent

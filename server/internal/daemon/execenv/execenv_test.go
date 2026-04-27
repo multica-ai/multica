@@ -493,6 +493,12 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
+	if !strings.Contains(s, "cat <<'COMMENT' | multica issue comment add test-issue-id --content-stdin") {
+		t.Error("AGENTS.md missing stdin-based final comment command")
+	}
+	if !strings.Contains(s, "do not use escaped `\\n` inside `--content`") {
+		t.Error("AGENTS.md missing escaped-newline warning")
+	}
 }
 
 func TestInjectRuntimeConfigNoSkills(t *testing.T) {
@@ -744,10 +750,13 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			}
 			s := string(data)
 
-			// The workflow must contain an explicit `multica issue comment add`
-			// invocation for this issue — not just a prose mention of posting.
+			// The workflow must contain an explicit stdin-based `multica issue
+			// comment add` invocation for this issue, not just a prose mention
+			// of posting. Using --content with escaped newlines stores literal
+			// backslash-n text in rendered comments.
 			mustContain := []string{
-				"multica issue comment add issue-1",
+				"cat <<'COMMENT' | multica issue comment add issue-1",
+				"--content-stdin",
 				"mandatory",
 			}
 			for _, want := range mustContain {
@@ -762,6 +771,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			for _, want := range []string{
 				"Final results MUST be delivered via `multica issue comment add`",
 				"does NOT see your terminal output",
+				"do not use escaped `\\n` inside `--content`",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s: Output warning missing %q", tc.name, want)

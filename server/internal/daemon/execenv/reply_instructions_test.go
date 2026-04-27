@@ -18,10 +18,15 @@ func TestBuildCommentReplyInstructionsIncludesTriggerID(t *testing.T) {
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID,
 		"do NOT reuse --parent values from previous turns",
+		"--content-stdin",
+		"Do not use `--content \"...\\n...\"`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("reply instructions missing %q\n---\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "--content \"...\"") {
+		t.Fatalf("reply instructions should not recommend --content placeholder\n---\n%s", got)
 	}
 }
 
@@ -58,6 +63,8 @@ func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
 		triggerID,
 		"multica issue comment add " + issueID + " --parent " + triggerID,
 		"do NOT reuse --parent values from previous turns",
+		"--content-stdin",
+		"shell-escaped `\\n` is stored literally",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
