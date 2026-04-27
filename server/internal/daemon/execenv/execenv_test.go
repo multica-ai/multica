@@ -796,6 +796,7 @@ func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
 		"--content-stdin",
 		"<<'COMMENT'",
 		"`--description`",
+		"--description-stdin",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing multi-line guidance %q\n---\n%s", want, s)

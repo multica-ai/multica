@@ -96,7 +96,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("    COMMENT\n")
 	b.WriteString("    ```\n")
 	b.WriteString("\n")
-	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update`: keep the inline `--description \"...\"` form for short single-line text only; for anything multi-line, build the body via HEREDOC and pass through stdin / a tempfile.\n")
+	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n")

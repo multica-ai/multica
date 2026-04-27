@@ -5,11 +5,98 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// pipeStdin replaces os.Stdin with a pipe seeded by the given body for the
+// duration of fn, so resolveTextFlag's --content-stdin / --description-stdin
+// branch can be exercised in unit tests without spawning a subprocess.
+func pipeStdin(t *testing.T, body string, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	if _, err := w.WriteString(body); err != nil {
+		t.Fatalf("write pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	orig := os.Stdin
+	os.Stdin = r
+	defer func() {
+		os.Stdin = orig
+		_ = r.Close()
+	}()
+	fn()
+}
+
+// newFlagTestCmd builds a throwaway cobra.Command carrying the inline +
+// stdin flag pair that resolveTextFlag expects.
+func newFlagTestCmd(name string) *cobra.Command {
+	c := &cobra.Command{Use: "test"}
+	c.Flags().String(name, "", "")
+	c.Flags().Bool(name+"-stdin", false, "")
+	return c
+}
+
+func TestResolveTextFlag(t *testing.T) {
+	t.Run("inline value is unescaped", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description", `para1\n\npara2`)
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != "para1\n\npara2" {
+			t.Errorf("got %q, want decoded paragraphs", got)
+		}
+	})
+
+	t.Run("stdin body is preserved verbatim", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-stdin", "true")
+		body := "first line\nsecond line with a literal \\n in it\n"
+		pipeStdin(t, body, func() {
+			got, ok, err := resolveTextFlag(c, "description")
+			if err != nil || !ok {
+				t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+			}
+			// strings.TrimSuffix one trailing newline like content-stdin.
+			want := "first line\nsecond line with a literal \\n in it"
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	})
+
+	t.Run("inline + stdin is rejected", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description", "inline")
+		_ = c.Flags().Set("description-stdin", "true")
+		if _, _, err := resolveTextFlag(c, "description"); err == nil {
+			t.Fatalf("expected mutually-exclusive error")
+		}
+	})
+
+	t.Run("missing both returns hasValue=false", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if ok || got != "" {
+			t.Errorf("expected absent flag to yield (\"\", false), got (%q, %v)", got, ok)
+		}
+	})
+}
 
 func TestUnescapeFlagText(t *testing.T) {
 	tests := []struct {
@@ -27,6 +114,25 @@ func TestUnescapeFlagText(t *testing.T) {
 		{"unknown escape kept verbatim", `\x not touched`, `\x not touched`},
 		{"mixed real and escaped newlines", "real\n" + `and\nescaped`, "real\nand\nescaped"},
 		{"unicode untouched", `中文段落\n下一段`, "中文段落\n下一段"},
+		// Contract boundary: only \n \r \t \\ are decoded. Common regex /
+		// path / formatter escape sequences such as \d, \w, \s, \u, \0 must
+		// pass through verbatim — this lets users paste regex snippets or
+		// printf-style format strings into --content without surprise
+		// mutation. Anyone who genuinely wants the literal characters \\n
+		// can either double the backslash or pipe the body via stdin.
+		{"regex digit class untouched", `\d+\s*\w+`, `\d+\s*\w+`},
+		{"unicode escape untouched", `café`, `café`},
+		{"null escape untouched", `\0 sentinel`, `\0 sentinel`},
+		{"windows path no special chars", `C:\Users\bob`, `C:\Users\bob`},
+		{"backslash-quote pair untouched", `quote\"inside`, `quote\"inside`},
+		// Documented sharp edge of the contract: a path or string that
+		// embeds a literal backslash-n IS rewritten because the helper
+		// cannot distinguish "model emitted \n thinking it would become a
+		// newline" from "user pasted a path that happens to start with
+		// \new". Callers who need the literal sequence must double the
+		// backslash (`\\new`) or pipe the body via --content-stdin /
+		// --description-stdin. This test pins that intentional behavior.
+		{"path starting with backslash-n is mutated", `C:\new\folder`, "C:\new\\folder"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
