@@ -275,3 +275,13 @@ ORDER BY created_at DESC;
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: RefreshAgentStatusFromTasks :one
+UPDATE agent AS a
+SET status = CASE WHEN EXISTS (
+    SELECT 1 FROM agent_task_queue q
+    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running')
+) THEN 'working' ELSE 'idle' END,
+    updated_at = now()
+WHERE a.id = $1
+RETURNING *;

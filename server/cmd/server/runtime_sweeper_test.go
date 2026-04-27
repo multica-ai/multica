@@ -78,6 +78,49 @@ func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
 }
 
+func TestRefreshAgentStatusFromTasks(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "dispatched")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	queries := db.New(testPool)
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to seed idle agent status: %v", err)
+	}
+
+	agent, err := queries.RefreshAgentStatusFromTasks(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("RefreshAgentStatusFromTasks with dispatched task failed: %v", err)
+	}
+	if agent.Status != "working" {
+		t.Fatalf("expected dispatched task to refresh agent status to working, got %q", agent.Status)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'cancelled', completed_at = now()
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("failed to cancel seeded task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'working' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to reseed working agent status: %v", err)
+	}
+
+	agent, err = queries.RefreshAgentStatusFromTasks(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("RefreshAgentStatusFromTasks with no active tasks failed: %v", err)
+	}
+	if agent.Status != "idle" {
+		t.Fatalf("expected cancelled-only task set to refresh agent status to idle, got %q", agent.Status)
+	}
+}
+
 // TestSweepStaleTasksBroadcastsWithWorkspaceID verifies that when the task sweeper
 // fails a stale running task, the task:failed event is broadcast with the correct
 // WorkspaceID so it reaches frontend WebSocket clients (events without WorkspaceID

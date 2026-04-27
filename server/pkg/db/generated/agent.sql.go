@@ -108,10 +108,10 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 `
 
 // Cancels every active task on the issue and returns the affected rows so the
-// caller can reconcile each agent's status and broadcast task:cancelled
-// events (#1587). Prior :exec form silently dropped that info, so internal
-// cancel paths (issue status flips to cancelled/done, etc.) left agents stuck
-// at status="working" with no self-correction.
+// caller can reconcile each agent's status and broadcast task:cancelled events
+// (#1587). Prior :exec form silently dropped that info, so internal cancel
+// paths (issue status flips to cancelled/done, etc.) left agents stuck at
+// status="working" with no self-correction.
 func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, cancelAgentTasksByIssue, issueID)
 	if err != nil {
@@ -1216,6 +1216,46 @@ func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID 
 		return nil, err
 	}
 	return items, nil
+}
+
+const refreshAgentStatusFromTasks = `-- name: RefreshAgentStatusFromTasks :one
+UPDATE agent AS a
+SET status = CASE WHEN EXISTS (
+    SELECT 1 FROM agent_task_queue q
+    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running')
+) THEN 'working' ELSE 'idle' END,
+    updated_at = now()
+WHERE a.id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model
+`
+
+func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, refreshAgentStatusFromTasks, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+	)
+	return i, err
 }
 
 const restoreAgent = `-- name: RestoreAgent :one

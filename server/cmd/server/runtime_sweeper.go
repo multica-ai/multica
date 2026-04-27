@@ -198,21 +198,10 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 	}
 }
 
-// reconcileAgentStatus checks running task count and updates agent status.
+// reconcileAgentStatus refreshes agent status from the current active task set.
 // Used only by the test-fallback path of broadcastFailedTasks above.
 func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.Bus, agentID pgtype.UUID) {
-	running, err := queries.CountRunningTasks(ctx, agentID)
-	if err != nil {
-		return
-	}
-	newStatus := "idle"
-	if running > 0 {
-		newStatus = "working"
-	}
-	agent, err := queries.UpdateAgentStatus(ctx, db.UpdateAgentStatusParams{
-		ID:     agentID,
-		Status: newStatus,
-	})
+	agent, err := queries.RefreshAgentStatusFromTasks(ctx, agentID)
 	if err != nil {
 		return
 	}
