@@ -81,6 +81,13 @@ func (c *Client) SetVersion(v string) {
 	c.version = v
 }
 
+// SetTimeout overrides the HTTP client timeout for all daemon API requests.
+// The daemon invokes this during startup with cfg.APITimeout so operators can
+// tune it via MULTICA_DAEMON_API_TIMEOUT when the hosted API is slow.
+func (c *Client) SetTimeout(d time.Duration) {
+	c.client.Timeout = d
+}
+
 // setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
 func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.platform != "" {
