@@ -240,8 +240,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
+		"id":       id.String(),
+		"url":      link,
 		"filename": header.Filename,
-		"link":     link,
 	})
 }
 
