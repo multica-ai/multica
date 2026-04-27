@@ -199,7 +199,7 @@ export function AgentDetail({
         {effectiveTab === "env" && (
           <EnvTab
             agent={agent}
-            readOnly={!isOwner}
+            readOnly={agent.custom_env_redacted || !isOwner}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
