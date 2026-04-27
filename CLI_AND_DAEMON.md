@@ -182,6 +182,7 @@ Agent-specific overrides:
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_OPENCODE_DISABLE_SUBAGENT_WAIT` | Set to `1` to disable the persistent `opencode serve` keep-alive and revert to the legacy embedded-server mode. See [OpenCode keep-alive](#opencode-keep-alive-sub-agent-waiting) below. |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
@@ -192,6 +193,27 @@ Agent-specific overrides:
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
+
+### OpenCode keep-alive (sub-agent waiting)
+
+Some OpenCode plugins — for example [`oh-my-openagent`](https://github.com/Zaratustra-x/oh-my-openagent) — spawn **background sub-agents in child sessions** that keep working after the parent `opencode run` returns. To prevent the daemon from completing a task while those children are still running, the OpenCode runner runs in **server keep-alive mode** by default:
+
+1. The daemon spawns a dedicated `opencode serve` process on a random port, secured with an auto-generated `OPENCODE_SERVER_PASSWORD`.
+2. `opencode run` is invoked with `--attach` against that server, so any sessions it (or its plugins) create live on the long-running server rather than on a per-run embedded one.
+3. After `opencode run` exits, the daemon polls `GET /session/status` until **every non-parent session has been idle for 3 consecutive polls** (3 s interval, 10 s HTTP timeout per poll). The parent run session is filtered out because OpenCode keeps it in `/session/status` after the CLI returns.
+4. A **45 s grace window** before trusting an empty status map covers the race where child sessions register slightly after the parent run returns.
+5. Then the server is stopped (SIGTERM, then SIGKILL after a short timeout) and the task is marked completed.
+
+If `opencode serve` fails to come up, the daemon **silently falls back** to the legacy embedded-server mode (single `opencode run`, no polling), so existing setups never regress.
+
+To opt out and force the legacy mode (e.g. to debug a runner issue or shave a few seconds on tasks that never use sub-agents):
+
+```bash
+export MULTICA_OPENCODE_DISABLE_SUBAGENT_WAIT=1
+multica daemon restart
+```
+
+The flag is read once at backend construction. Restart the daemon for changes to take effect.
 
 ### Self-Hosted Server
 

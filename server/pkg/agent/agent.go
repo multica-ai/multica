@@ -107,7 +107,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "copilot":
 		return &copilotBackend{cfg: cfg}, nil
 	case "opencode":
-		return &opencodeBackend{cfg: cfg}, nil
+		return newOpencodeBackend(cfg), nil
 	case "openclaw":
 		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
