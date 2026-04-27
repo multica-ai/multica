@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
+
+// maxAttachmentSize matches the server-side limit in handler.UploadFile.
+const maxAttachmentSize = 100 << 20 // 100 MB
 
 // captureGitContext returns a one-line summary of the current git state.
 func captureGitContext(gitRoot string) string {
@@ -79,7 +83,9 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "list_issues",
-		Description: "List issues in the current workspace. Returns issues with identifier (e.g. JEH-43), title, status, priority, project, and assignee. Use this to find existing work before creating new issues.",
+		Description: `List issues in the current workspace. Returns issues with identifier (e.g. JEH-43), title, status, priority, project, and assignee. Use this to find existing work before creating new issues.
+
+HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status update), use both identifier AND title — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -124,7 +130,9 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "get_issue",
-		Description: "Get full issue details: title, description, status, comments, and sub-issues. Use this to understand the full context of an issue before working on it or commenting.",
+		Description: `Get full issue details: title, description, status, comments, and sub-issues. Use this to understand the full context of an issue before working on it or commenting.
+
+HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status update), use both identifier AND title — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id"},
@@ -162,7 +170,9 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "search_issues",
-		Description: "Search issues by text query across titles and descriptions. Use this to find related or duplicate issues before creating new ones.",
+		Description: `Search issues by text query across titles and descriptions. Use this to find related or duplicate issues before creating new ones.
+
+HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status update), use both identifier AND title — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"query"},
@@ -273,7 +283,7 @@ WRITING GUIDELINES — issues are read by both humans and AI agents:
 				"status":          map[string]any{"type": "string", "description": "New status"},
 				"priority":        map[string]any{"type": "string", "description": "New priority"},
 				"project_id":      map[string]any{"type": "string", "description": "New project ID (empty string to unlink)"},
-				"parent_issue_id": map[string]any{"type": "string", "description": "New parent issue ID"},
+				"parent_issue_id": map[string]any{"type": "string", "description": "Set, change, or remove the parent issue. Pass an issue ID to set/change, or empty string to remove."},
 				"assignee_type":   map[string]any{"type": "string", "description": "Assignee type: member or agent"},
 				"assignee_id":     map[string]any{"type": "string", "description": "Assignee ID"},
 			},
@@ -335,6 +345,67 @@ WRITING GUIDELINES:
 			return mcp.ErrorResult(err.Error()), nil
 		}
 		return jsonText(comment)
+	})
+
+	// -----------------------------------------------------------------------
+	// add_attachment
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name: "add_attachment",
+		Description: `Attach a local file to an issue or comment. Reads the file from your machine and uploads it to the workspace. Use for screenshots, logs, diagrams, design files, or any artifact that helps document the work.
+
+USAGE:
+- To attach to the issue itself, pass only issue_id.
+- To attach to a specific comment, pass both issue_id and comment_id.
+- The path may be absolute or relative to the current working directory.
+- Max file size is 100 MB.`,
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"issue_id", "path"},
+			"properties": map[string]any{
+				"issue_id":   map[string]any{"type": "string", "description": "Issue to attach the file to"},
+				"path":       map[string]any{"type": "string", "description": "Local file path (absolute or relative to cwd)"},
+				"comment_id": map[string]any{"type": "string", "description": "Optional: attach to this comment instead of the issue body"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		issueID, err := requireString(args, "issue_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		path, err := requireString(args, "path")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		commentID := optString(args, "comment_id")
+
+		if !filepath.IsAbs(path) {
+			if abs, err := filepath.Abs(path); err == nil {
+				path = abs
+			}
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("cannot read file: %v", err)), nil
+		}
+		if info.IsDir() {
+			return mcp.ErrorResult(fmt.Sprintf("%s is a directory, not a file", path)), nil
+		}
+		if info.Size() > maxAttachmentSize {
+			return mcp.ErrorResult(fmt.Sprintf("file is %d bytes, max is %d (100 MB)", info.Size(), maxAttachmentSize)), nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("read file: %v", err)), nil
+		}
+
+		result, err := client.UploadAttachment(ctx, data, filepath.Base(path), issueID, commentID)
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
 	})
 
 	// -----------------------------------------------------------------------
@@ -425,11 +496,54 @@ WRITING GUIDELINES:
 	})
 
 	// -----------------------------------------------------------------------
+	// update_project
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name:        "update_project",
+		Description: "Update an existing project. Only provided fields are changed. Use this to update title, description, status, icon, or other project metadata.",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"project_id"},
+			"properties": map[string]any{
+				"project_id":  map[string]any{"type": "string", "description": "Project ID"},
+				"title":       map[string]any{"type": "string", "description": "New title"},
+				"description": map[string]any{"type": "string", "description": "New description (goals, scope, success criteria)"},
+				"status":      map[string]any{"type": "string", "description": "New status (planned, in_progress, paused, completed, cancelled)"},
+				"priority":    map[string]any{"type": "string", "description": "New priority (urgent, high, medium, low, none)"},
+				"icon":        map[string]any{"type": "string", "description": "New icon (emoji)"},
+				"color":       map[string]any{"type": "string", "description": "New color"},
+				"lead_type":   map[string]any{"type": "string", "description": "Lead type: member or agent"},
+				"lead_id":     map[string]any{"type": "string", "description": "Lead ID"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "project_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+
+		body := map[string]any{}
+		for _, key := range []string{"title", "description", "status", "priority", "icon", "color", "lead_type", "lead_id"} {
+			if v, ok := args[key]; ok {
+				body[key] = v
+			}
+		}
+
+		var project any
+		if err := client.PutJSON(ctx, "/api/projects/"+id, body, &project); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(project)
+	})
+
+	// -----------------------------------------------------------------------
 	// get_me
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name:        "get_me",
-		Description: "Get current user, workspace, bound project, and active work session. Call this at the start of a session to understand your context — which project and issue you are working on.",
+		Description: `Get current user, workspace, bound project, and active work session. Call this at the start of a session to understand your context — which project and issue you are working on.
+
+HUMAN COMMUNICATION: When referencing the active issue to a human, use both identifier AND title from active_session — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
