@@ -9,7 +9,10 @@ import { createLogger } from "../logger";
 import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
-import { issueKeys } from "../issues/queries";
+import {
+  issueExecutionSummaryForIssueOptions,
+  issueKeys,
+} from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -49,6 +52,7 @@ import type {
   TaskCancelledPayload,
   ChatDonePayload,
   InvitationCreatedPayload,
+  IssueExecutionSummary,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -407,10 +411,27 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: chatKeys.allSessions(id) });
       }
     };
-    const invalidateIssueExecutionSummary = (issueId?: string) => {
+    const refreshIssueExecutionSummary = (issueId?: string) => {
       const id = getCurrentWsId();
       if (id && issueId) {
-        qc.invalidateQueries({ queryKey: issueKeys.executionSummary(id) });
+        void qc.fetchQuery(issueExecutionSummaryForIssueOptions(id, issueId))
+          .then((summary) => {
+            const workspaceSummaryKey = issueKeys.executionSummary(id);
+            const existing = qc.getQueryData<Map<string, IssueExecutionSummary>>(
+              workspaceSummaryKey,
+            );
+            if (!existing) return;
+            const next = new Map(existing);
+            if (summary) next.set(issueId, summary);
+            else next.delete(issueId);
+            qc.setQueryData(workspaceSummaryKey, next);
+          })
+          .catch((error) => {
+            logger.warn("failed to refresh issue execution summary", {
+              issue_id: issueId,
+              error,
+            });
+          });
       }
     };
 
@@ -441,7 +462,7 @@ export function useRealtimeSync(
 
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
-      invalidateIssueExecutionSummary(payload.issue_id);
+      refreshIssueExecutionSummary(payload.issue_id);
       if (!payload.chat_session_id) return;
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
@@ -450,7 +471,7 @@ export function useRealtimeSync(
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
-      invalidateIssueExecutionSummary(payload.issue_id);
+      refreshIssueExecutionSummary(payload.issue_id);
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
@@ -464,7 +485,7 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
-      invalidateIssueExecutionSummary(payload.issue_id);
+      refreshIssueExecutionSummary(payload.issue_id);
       if (!payload.chat_session_id) return;
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
@@ -484,12 +505,12 @@ export function useRealtimeSync(
 
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as { issue_id?: string };
-      invalidateIssueExecutionSummary(payload.issue_id);
+      refreshIssueExecutionSummary(payload.issue_id);
     });
 
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
-      invalidateIssueExecutionSummary(payload.issue_id);
+      refreshIssueExecutionSummary(payload.issue_id);
     });
 
     return () => {

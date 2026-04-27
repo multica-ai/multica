@@ -52,7 +52,7 @@ import {
   issueDetailOptions,
   childIssuesOptions,
   issueUsageOptions,
-  issueExecutionSummaryOptions,
+  issueExecutionSummaryForIssueOptions,
 } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -186,8 +186,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: executionSummaryMap = new Map() } = useQuery(
-    issueExecutionSummaryOptions(wsId),
+  const { data: executionSummaryResult } = useQuery(
+    issueExecutionSummaryForIssueOptions(wsId, id),
   );
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
@@ -294,8 +294,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   const loading = issueLoading;
-  const executionSummary = executionSummaryMap.get(id);
-
+  const executionSummary = executionSummaryResult ?? undefined;
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
     if (!highlightCommentId || timeline.length === 0) return;

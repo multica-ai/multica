@@ -711,6 +711,16 @@ func (h *Handler) GetIssueExecutionSummaries(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	issueIDFilter := pgtype.UUID{}
+	issueIDParam := r.URL.Query().Get("issue_id")
+	if issueIDParam != "" {
+		issueIDFilter = parseUUID(issueIDParam)
+		if !issueIDFilter.Valid {
+			writeError(w, http.StatusBadRequest, "invalid issue_id parameter")
+			return
+		}
+	}
+
 	limit := 100
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -732,12 +742,17 @@ func (h *Handler) GetIssueExecutionSummaries(w http.ResponseWriter, r *http.Requ
 		}
 		offset = v
 	}
+	if issueIDFilter.Valid {
+		limit = 1
+		offset = 0
+	}
 
 	rows, err := h.DB.Query(r.Context(), `
 WITH paged_issues AS (
 	SELECT i.id, i.created_at
 	FROM issue i
 	WHERE i.workspace_id = $1
+		AND ($4::uuid IS NULL OR i.id = $4)
 	ORDER BY i.created_at DESC
 	LIMIT $2 OFFSET $3
 ),
@@ -803,9 +818,9 @@ LEFT JOIN active_counts ac ON ac.issue_id = i.id
 LEFT JOIN latest_task lt ON lt.issue_id = i.id AND lt.row_num = 1
 LEFT JOIN comment c ON c.id = lt.trigger_comment_id
 ORDER BY pi.created_at DESC
-`, parseUUID(workspaceID), limit, offset)
+`, parseUUID(workspaceID), limit, offset, issueIDFilter)
 	if err != nil {
-		slog.Error("execution summary query failed", "workspace_id", workspaceID, "limit", limit, "offset", offset, "error", err)
+		slog.Error("execution summary query failed", "workspace_id", workspaceID, "issue_id", issueIDParam, "limit", limit, "offset", offset, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load execution summary")
 		return
 	}
@@ -826,7 +841,7 @@ ORDER BY pi.created_at DESC
 			&row.LatestTriggerCommentID,
 			&row.LatestTriggerExcerpt,
 		); err != nil {
-			slog.Error("execution summary scan failed", "workspace_id", workspaceID, "error", err)
+			slog.Error("execution summary scan failed", "workspace_id", workspaceID, "issue_id", issueIDParam, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to load execution summary")
 			return
 		}
@@ -844,7 +859,7 @@ ORDER BY pi.created_at DESC
 		})
 	}
 	if err := rows.Err(); err != nil {
-		slog.Error("execution summary rows failed", "workspace_id", workspaceID, "error", err)
+		slog.Error("execution summary rows failed", "workspace_id", workspaceID, "issue_id", issueIDParam, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load execution summary")
 		return
 	}

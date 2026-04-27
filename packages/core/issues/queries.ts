@@ -22,8 +22,10 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
-  executionSummary: (wsId: string) =>
-    [...issueKeys.all(wsId), "execution-summary"] as const,
+  executionSummary: (wsId: string, issueId?: string) =>
+    issueId
+      ? ([...issueKeys.all(wsId), "execution-summary", issueId] as const)
+      : ([...issueKeys.all(wsId), "execution-summary"] as const),
   timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
@@ -130,6 +132,16 @@ export function issueExecutionSummaryOptions(wsId: string) {
         map.set(summary.issue_id, summary);
       }
       return map;
+    },
+  });
+}
+
+export function issueExecutionSummaryForIssueOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.executionSummary(wsId, issueId),
+    queryFn: async () => {
+      const data = await api.getIssueExecutionSummaries({ issueId });
+      return data.summaries[0] ?? null;
     },
   });
 }

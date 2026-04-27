@@ -315,6 +315,24 @@ func TestGetIssueExecutionSummaries_PaginatesIssues(t *testing.T) {
 	if resp.Summaries[0].IssueID != secondIssueID {
 		t.Fatalf("expected second newest issue %s, got %s", secondIssueID, resp.Summaries[0].IssueID)
 	}
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodGet, "/api/issues/execution-summary?issue_id="+firstIssueID+"&limit=1&offset=99", nil)
+
+	testHandler.GetIssueExecutionSummaries(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for issue-scoped summary, got %d: %s", w.Code, w.Body.String())
+	}
+	resp.Summaries = nil
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode issue-scoped response: %v", err)
+	}
+	if len(resp.Summaries) != 1 {
+		t.Fatalf("expected one issue-scoped summary, got %d", len(resp.Summaries))
+	}
+	if resp.Summaries[0].IssueID != firstIssueID {
+		t.Fatalf("expected issue-scoped summary %s, got %s", firstIssueID, resp.Summaries[0].IssueID)
+	}
 }
 
 func TestGetIssueExecutionSummaries_PrefersRunningTaskAsLatest(t *testing.T) {

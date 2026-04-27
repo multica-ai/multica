@@ -421,8 +421,9 @@ export class ApiClient {
     return this.fetch("/api/issues/child-progress");
   }
 
-  async getIssueExecutionSummaries(params?: { limit?: number; offset?: number }): Promise<{ summaries: IssueExecutionSummary[] }> {
+  async getIssueExecutionSummaries(params?: { issueId?: string; limit?: number; offset?: number }): Promise<{ summaries: IssueExecutionSummary[] }> {
     const search = new URLSearchParams();
+    if (params?.issueId) search.set("issue_id", params.issueId);
     if (params?.limit !== undefined) search.set("limit", String(params.limit));
     if (params?.offset !== undefined) search.set("offset", String(params.offset));
     const qs = search.toString();
