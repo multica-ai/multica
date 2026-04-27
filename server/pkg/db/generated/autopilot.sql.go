@@ -652,7 +652,13 @@ SELECT a.id, a.workspace_id, a.project_id, a.title, a.description, a.assignee_id
   EXISTS(
     SELECT 1 FROM autopilot_run ar
     WHERE ar.autopilot_id = a.id AND ar.status = 'running'
-  ) AS has_running_run
+  ) AS has_running_run,
+  (
+    SELECT ar2.status FROM autopilot_run ar2
+    WHERE ar2.autopilot_id = a.id
+    ORDER BY ar2.created_at DESC
+    LIMIT 1
+  ) AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND ($2::text IS NULL OR a.status = $2)
@@ -676,6 +682,7 @@ type ListAutopilotsWithRunStatusRow struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	HasRunningRun      bool               `json:"has_running_run"`
+	LastRunStatus      pgtype.Text        `json:"last_run_status"`
 }
 
 func (q *Queries) ListAutopilotsWithRunStatus(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsWithRunStatusRow, error) {
@@ -704,6 +711,7 @@ func (q *Queries) ListAutopilotsWithRunStatus(ctx context.Context, arg ListAutop
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.HasRunningRun,
+			&i.LastRunStatus,
 		); err != nil {
 			return nil, err
 		}

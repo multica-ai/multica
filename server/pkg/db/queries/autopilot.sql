@@ -13,7 +13,13 @@ SELECT a.id, a.workspace_id, a.project_id, a.title, a.description, a.assignee_id
   EXISTS(
     SELECT 1 FROM autopilot_run ar
     WHERE ar.autopilot_id = a.id AND ar.status = 'running'
-  ) AS has_running_run
+  ) AS has_running_run,
+  (
+    SELECT ar2.status FROM autopilot_run ar2
+    WHERE ar2.autopilot_id = a.id
+    ORDER BY ar2.created_at DESC
+    LIMIT 1
+  ) AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))

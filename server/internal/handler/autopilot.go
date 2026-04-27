@@ -38,6 +38,7 @@ type AutopilotResponse struct {
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
 	HasRunningRun      bool    `json:"has_running_run"`
+	LastRunStatus      *string `json:"last_run_status"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -111,6 +112,7 @@ func autopilotWithRunStatusToResponse(a db.ListAutopilotsWithRunStatusRow) Autop
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		HasRunningRun:      a.HasRunningRun,
+		LastRunStatus:      textToPtr(a.LastRunStatus),
 	}
 }
 
