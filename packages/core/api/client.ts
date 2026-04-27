@@ -62,6 +62,10 @@ import type {
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
   CompleteDingTalkBindingResponse,
+  StartEmailBindingRequest,
+  StartEmailBindingResponse,
+  VerifyEmailBindingRequest,
+  VerifyEmailBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -362,6 +366,24 @@ export class ApiClient {
     return this.fetch("/api/me/notification-bindings/dingtalk/callback", {
       method: "POST",
       body: JSON.stringify({ code, state }),
+    });
+  }
+
+  async startEmailBinding(
+    payload: StartEmailBindingRequest,
+  ): Promise<StartEmailBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/email/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async verifyEmailBinding(
+    payload: VerifyEmailBindingRequest,
+  ): Promise<VerifyEmailBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/email/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 

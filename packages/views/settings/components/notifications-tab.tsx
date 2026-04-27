@@ -24,11 +24,13 @@ import { Switch } from "@multica/ui/components/ui/switch";
 const channelLabels: Record<NotificationChannel, string> = {
   inbox: "Inbox",
   dingtalk: "DingTalk",
+  email: "Email",
 };
 
 const channelDescriptions: Record<NotificationChannel, string> = {
   inbox: "In-app notification delivered through the existing Inbox and websocket flow.",
   dingtalk: "External notification sent to your linked DingTalk account once that channel is enabled.",
+  email: "Email notification sent to your linked email address when you are mentioned.",
 };
 
 function preferenceKey(pref: NotificationChannelPreference) {
@@ -156,7 +158,7 @@ export function NotificationsTab() {
                     </p>
                     {needsBinding ? (
                       <p className="text-xs text-muted-foreground">
-                        Link a DingTalk account from Profile before enabling this channel.
+                        Link your account from Profile → Linked Accounts before enabling this channel.
                       </p>
                     ) : null}
                   </div>
@@ -179,7 +181,7 @@ export function NotificationsTab() {
           </CardContent>
         </Card>
         <p className="text-sm text-muted-foreground">
-          Manage DingTalk account linking from <span className="font-medium">Profile → Linked Accounts</span>.
+          Manage account linking from <span className="font-medium">Profile → Linked Accounts</span>.
         </p>
       </section>
     </div>
