@@ -129,6 +129,38 @@ type daemonWorkspaceReposResponse struct {
 	ReposVersion string     `json:"repos_version"`
 }
 
+// deviceNameFromMetadata extracts the device_name from a runtime's metadata JSON.
+// Returns an empty string if the field is missing or metadata is unparseable.
+func deviceNameFromMetadata(metadata json.RawMessage) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(metadata, &m); err != nil {
+		return ""
+	}
+	name, _ := m["device_name"].(string)
+	return strings.TrimSpace(name)
+}
+
+// resolveMachineLocalPaths applies machine_paths resolution to a repo list.
+// For each repo, if machine_paths[deviceName] is set it overrides local_path.
+// Repos with no matching machine path are returned unchanged.
+func resolveMachineLocalPaths(repos []RepoData, deviceName string) []RepoData {
+	if deviceName == "" || len(repos) == 0 {
+		return repos
+	}
+	resolved := make([]RepoData, len(repos))
+	for i, repo := range repos {
+		r := repo
+		if path := strings.TrimSpace(repo.MachinePaths[deviceName]); path != "" {
+			r.LocalPath = path
+		}
+		resolved[i] = r
+	}
+	return resolved
+}
+
 // repoKey returns the deduplication key for a repo: LocalPath if set, URL otherwise.
 func repoKey(r RepoData) string {
 	if r.LocalPath != "" {
@@ -913,6 +945,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
 		return
+	}
+
+	// Resolve machine-specific local paths using the dispatched runtime's device_name.
+	// This ensures the daemon receives a pre-resolved LocalPath keyed to the device
+	// that owns the runtime, rather than relying on the daemon knowing its own name.
+	if deviceName := deviceNameFromMetadata(runtime.Metadata); deviceName != "" {
+		resp.Repos = resolveMachineLocalPaths(resp.Repos, deviceName)
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
