@@ -184,15 +184,20 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// missing session ID. The new session ID is returned in the result so
 		// the caller can update its stored mapping.
 		if opts.ResumeSessionID != "" {
-			_, resumeErr := c.request(runCtx, "session/resume", map[string]any{
+			resumeResult, resumeErr := c.request(runCtx, "session/resume", map[string]any{
 				"cwd":       cwd,
 				"sessionId": opts.ResumeSessionID,
 			})
-			if resumeErr != nil {
+			switch {
+			case resumeErr != nil:
 				b.cfg.Logger.Warn("kimi session/resume failed; falling back to new session",
 					"old_session_id", opts.ResumeSessionID, "error", resumeErr)
 				// sessionID stays "", session/new runs below.
-			} else {
+			case len(resumeResult) == 0 || string(resumeResult) == "null":
+				b.cfg.Logger.Warn("kimi session/resume returned null; falling back to new session",
+					"old_session_id", opts.ResumeSessionID)
+				// sessionID stays "", session/new runs below.
+			default:
 				sessionID = opts.ResumeSessionID
 			}
 		}
@@ -316,7 +321,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 							},
 						})
 						if promptErr != nil {
+							b.cfg.Logger.Warn("kimi stale-session recovery: retry prompt failed",
+								"old_session_id", opts.ResumeSessionID, "new_session_id", sessionID, "error", promptErr)
 							promptErr = fmt.Errorf("stale-session retry: %w", promptErr)
+						} else {
+							b.cfg.Logger.Info("kimi stale-session recovery: retry prompt succeeded",
+								"old_session_id", opts.ResumeSessionID, "new_session_id", sessionID)
 						}
 					}
 				}

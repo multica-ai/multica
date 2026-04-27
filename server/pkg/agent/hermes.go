@@ -173,15 +173,22 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// The new session ID is returned in the result so the caller can update
 		// its stored mapping.
 		if opts.ResumeSessionID != "" {
-			_, resumeErr := c.request(runCtx, "session/resume", map[string]any{
+			resumeResult, resumeErr := c.request(runCtx, "session/resume", map[string]any{
 				"cwd":       cwd,
 				"sessionId": opts.ResumeSessionID,
 			})
-			if resumeErr != nil {
+			switch {
+			case resumeErr != nil:
 				b.cfg.Logger.Warn("hermes session/resume failed; falling back to new session",
 					"old_session_id", opts.ResumeSessionID, "error", resumeErr)
 				// sessionID stays "", session/new runs below.
-			} else {
+			case len(resumeResult) == 0 || string(resumeResult) == "null":
+				// Some providers return a JSON null success body to signal the
+				// session cannot be resumed, rather than returning an error.
+				b.cfg.Logger.Warn("hermes session/resume returned null; falling back to new session",
+					"old_session_id", opts.ResumeSessionID)
+				// sessionID stays "", session/new runs below.
+			default:
 				sessionID = opts.ResumeSessionID
 			}
 		}
@@ -301,7 +308,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 							},
 						})
 						if promptErr != nil {
+							b.cfg.Logger.Warn("hermes stale-session recovery: retry prompt failed",
+								"old_session_id", opts.ResumeSessionID, "new_session_id", sessionID, "error", promptErr)
 							promptErr = fmt.Errorf("stale-session retry: %w", promptErr)
+						} else {
+							b.cfg.Logger.Info("hermes stale-session recovery: retry prompt succeeded",
+								"old_session_id", opts.ResumeSessionID, "new_session_id", sessionID)
 						}
 					}
 				}

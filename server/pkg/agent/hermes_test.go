@@ -840,6 +840,24 @@ func TestIsACPStaleSessionError(t *testing.T) {
 // package). Instead we use TestFakeHermesHelper as the entrypoint for the
 // subprocess, detected via an env var at the top of each Execute test.
 
+func TestHermesExecuteResumeNullFallbackSuccess(t *testing.T) {
+	t.Parallel()
+	// Scenario: resume returns a JSON null success body (no error), which some
+	// providers use to signal "cannot resume". Multica should fall back to a
+	// new session and succeed.
+	runFakeHermesExecuteTest(t, "resume_null_new_success", func(t *testing.T, result Result) {
+		if result.Status != "completed" {
+			t.Errorf("status: got %q, want completed", result.Status)
+		}
+		if result.Output == "" {
+			t.Error("expected non-empty output after null-resume fallback")
+		}
+		if result.SessionID == "stale-session-id" {
+			t.Error("result carries stale session ID; expected the new one")
+		}
+	})
+}
+
 func TestHermesExecuteResumeFailFallbackSuccess(t *testing.T) {
 	t.Parallel()
 	// Scenario: resume returns an error; Multica should fall back to a new
@@ -897,6 +915,50 @@ func TestHermesExecuteResumeSuccessPromptStaleRetryFail(t *testing.T) {
 	})
 }
 
+// ── Kimi stale-session recovery ──
+//
+// Kimi uses an identical ACP session-recovery code path. These tests exercise
+// the kimiBackend directly with the same fake ACP server.
+
+func TestKimiExecuteResumeFailFallbackSuccess(t *testing.T) {
+	t.Parallel()
+	runFakeKimiExecuteTest(t, "resume_fail_new_success", func(t *testing.T, result Result) {
+		if result.Status != "completed" {
+			t.Errorf("status: got %q, want completed", result.Status)
+		}
+		if result.Output == "" {
+			t.Error("expected non-empty output")
+		}
+		if result.SessionID == "stale-session-id" {
+			t.Error("result carries stale session ID; expected the new one")
+		}
+	})
+}
+
+func TestKimiExecuteResumeNullFallbackSuccess(t *testing.T) {
+	t.Parallel()
+	runFakeKimiExecuteTest(t, "resume_null_new_success", func(t *testing.T, result Result) {
+		if result.Status != "completed" {
+			t.Errorf("status: got %q, want completed", result.Status)
+		}
+		if result.SessionID == "stale-session-id" {
+			t.Error("result carries stale session ID after null-resume fallback")
+		}
+	})
+}
+
+func TestKimiExecuteResumeSuccessPromptStaleRetrySuccess(t *testing.T) {
+	t.Parallel()
+	runFakeKimiExecuteTest(t, "resume_ok_prompt_stale_retry_success", func(t *testing.T, result Result) {
+		if result.Status != "completed" {
+			t.Errorf("status: got %q, want completed", result.Status)
+		}
+		if result.SessionID == "stale-session-id" {
+			t.Error("result carries stale session ID after recovery")
+		}
+	})
+}
+
 // runFakeHermesExecuteTest launches a subprocess running this test binary as a
 // fake hermes ACP server (FAKE_HERMES_SCENARIO=<scenario>), then runs
 // hermesBackend.Execute against it and calls check on the result.
@@ -924,6 +986,36 @@ func runFakeHermesExecuteTest(t *testing.T, scenario string, check func(*testing
 	}
 
 	// Drain messages (required to unblock the goroutine).
+	for range sess.Messages {
+	}
+	result := <-sess.Result
+
+	check(t, result)
+}
+
+// runFakeKimiExecuteTest is the kimi equivalent of runFakeHermesExecuteTest.
+// Both backends speak the same ACP protocol so the same fake server handles both.
+func runFakeKimiExecuteTest(t *testing.T, scenario string, check func(*testing.T, Result)) {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	b := &kimiBackend{cfg: Config{
+		ExecutablePath: exe,
+		Logger:         slog.Default(),
+	}}
+
+	sess, err := b.Execute(context.Background(), "hello", ExecOptions{
+		ResumeSessionID: "stale-session-id",
+		CustomArgs:      []string{"--fake-hermes-scenario=" + scenario},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
 	for range sess.Messages {
 	}
 	result := <-sess.Result
@@ -1013,6 +1105,24 @@ func runFakeACPServer(scenario string) error {
 	_ = json.Unmarshal(req["method"], &method)
 
 	switch scenario {
+	case "resume_null_new_success":
+		// Resume returns a JSON null body (no error) — provider signals it
+		// cannot resume via null rather than an error. Multica must fall back.
+		if method != "session/resume" {
+			return fmt.Errorf("scenario %q: expected session/resume, got %s", scenario, method)
+		}
+		if err := sendResult(req["id"], nil); err != nil { // nil → JSON null
+			return err
+		}
+		// Multica falls back to session/new.
+		req, err = readReq()
+		if err != nil {
+			return err
+		}
+		if err := sendResult(req["id"], map[string]any{"sessionId": "new-session-abc"}); err != nil {
+			return err
+		}
+
 	case "resume_fail_new_success":
 		// Resume must fail so Multica falls back to session/new.
 		if method != "session/resume" {
@@ -1051,8 +1161,8 @@ func runFakeACPServer(scenario string) error {
 	_ = json.Unmarshal(req["method"], &method)
 
 	switch scenario {
-	case "resume_fail_new_success":
-		// Prompt on the new session succeeds.
+	case "resume_null_new_success", "resume_fail_new_success":
+		// Prompt on the new (fallback) session succeeds.
 		if method != "session/prompt" {
 			return fmt.Errorf("scenario %q: expected session/prompt, got %s", scenario, method)
 		}
