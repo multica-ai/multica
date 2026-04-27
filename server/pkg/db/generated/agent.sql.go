@@ -263,22 +263,22 @@ RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visi
 `
 
 type CreateAgentParams struct {
-	WorkspaceID              pgtype.UUID `json:"workspace_id"`
-	Name                     string      `json:"name"`
-	Description              string      `json:"description"`
-	AvatarUrl                pgtype.Text `json:"avatar_url"`
-	RuntimeMode              string      `json:"runtime_mode"`
-	RuntimeConfig            []byte      `json:"runtime_config"`
-	RuntimeID                pgtype.UUID `json:"runtime_id"`
-	Visibility               string      `json:"visibility"`
-	MaxConcurrentTasks       int32       `json:"max_concurrent_tasks"`
-	OwnerID                  pgtype.UUID `json:"owner_id"`
-	Instructions             string      `json:"instructions"`
-	CustomEnv                []byte      `json:"custom_env"`
-	CustomArgs               []byte      `json:"custom_args"`
-	McpConfig                []byte      `json:"mcp_config"`
-	Model                    pgtype.Text `json:"model"`
-	CustomEnvCopiedPending   bool        `json:"custom_env_copied_pending"`
+	WorkspaceID            pgtype.UUID `json:"workspace_id"`
+	Name                   string      `json:"name"`
+	Description            string      `json:"description"`
+	AvatarUrl              pgtype.Text `json:"avatar_url"`
+	RuntimeMode            string      `json:"runtime_mode"`
+	RuntimeConfig          []byte      `json:"runtime_config"`
+	RuntimeID              pgtype.UUID `json:"runtime_id"`
+	Visibility             string      `json:"visibility"`
+	MaxConcurrentTasks     int32       `json:"max_concurrent_tasks"`
+	OwnerID                pgtype.UUID `json:"owner_id"`
+	Instructions           string      `json:"instructions"`
+	CustomEnv              []byte      `json:"custom_env"`
+	CustomArgs             []byte      `json:"custom_args"`
+	McpConfig              []byte      `json:"mcp_config"`
+	Model                  pgtype.Text `json:"model"`
+	CustomEnvCopiedPending bool        `json:"custom_env_copied_pending"`
 }
 
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
@@ -790,55 +790,6 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 	return items, nil
 }
 
-const listAllAgents = `-- name: ListAllAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending FROM agent
-WHERE workspace_id = $1
-ORDER BY created_at ASC
-`
-
-func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listAllAgents, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.AvatarUrl,
-			&i.RuntimeMode,
-			&i.RuntimeConfig,
-			&i.Visibility,
-			&i.Status,
-			&i.MaxConcurrentTasks,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Description,
-			&i.RuntimeID,
-			&i.Instructions,
-			&i.ArchivedAt,
-			&i.ArchivedBy,
-			&i.CustomEnv,
-			&i.CustomArgs,
-			&i.McpConfig,
-			&i.Model,
-			&i.CustomEnvCopiedPending,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAgentsByOwner = `-- name: ListAgentsByOwner :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending FROM agent
 WHERE workspace_id = $1
@@ -895,6 +846,55 @@ func (q *Queries) ListAgentsByOwner(ctx context.Context, arg ListAgentsByOwnerPa
 	return items, nil
 }
 
+const listAllAgents = `-- name: ListAllAgents :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending FROM agent
+WHERE workspace_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAllAgents, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.CustomEnvCopiedPending,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllAgentsByOwner = `-- name: ListAllAgentsByOwner :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending FROM agent
 WHERE workspace_id = $1
@@ -902,7 +902,12 @@ WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListAllAgentsByOwner(ctx context.Context, arg ListAgentsByOwnerParams) ([]Agent, error) {
+type ListAllAgentsByOwnerParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+func (q *Queries) ListAllAgentsByOwner(ctx context.Context, arg ListAllAgentsByOwnerParams) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listAllAgentsByOwner, arg.WorkspaceID, arg.OwnerID)
 	if err != nil {
 		return nil, err
@@ -1127,22 +1132,22 @@ RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visi
 `
 
 type UpdateAgentParams struct {
-	ID                       pgtype.UUID `json:"id"`
-	Name                     pgtype.Text `json:"name"`
-	Description              pgtype.Text `json:"description"`
-	AvatarUrl                pgtype.Text `json:"avatar_url"`
-	RuntimeConfig            []byte      `json:"runtime_config"`
-	RuntimeMode              pgtype.Text `json:"runtime_mode"`
-	RuntimeID                pgtype.UUID `json:"runtime_id"`
-	Visibility               pgtype.Text `json:"visibility"`
-	Status                   pgtype.Text `json:"status"`
-	MaxConcurrentTasks       pgtype.Int4 `json:"max_concurrent_tasks"`
-	Instructions             pgtype.Text `json:"instructions"`
-	CustomEnv                []byte      `json:"custom_env"`
-	CustomArgs               []byte      `json:"custom_args"`
-	McpConfig                []byte      `json:"mcp_config"`
-	Model                    pgtype.Text `json:"model"`
-	CustomEnvCopiedPending   pgtype.Bool `json:"custom_env_copied_pending"`
+	ID                     pgtype.UUID `json:"id"`
+	Name                   pgtype.Text `json:"name"`
+	Description            pgtype.Text `json:"description"`
+	AvatarUrl              pgtype.Text `json:"avatar_url"`
+	RuntimeConfig          []byte      `json:"runtime_config"`
+	RuntimeMode            pgtype.Text `json:"runtime_mode"`
+	RuntimeID              pgtype.UUID `json:"runtime_id"`
+	Visibility             pgtype.Text `json:"visibility"`
+	Status                 pgtype.Text `json:"status"`
+	MaxConcurrentTasks     pgtype.Int4 `json:"max_concurrent_tasks"`
+	Instructions           pgtype.Text `json:"instructions"`
+	CustomEnv              []byte      `json:"custom_env"`
+	CustomArgs             []byte      `json:"custom_args"`
+	McpConfig              []byte      `json:"mcp_config"`
+	Model                  pgtype.Text `json:"model"`
+	CustomEnvCopiedPending pgtype.Bool `json:"custom_env_copied_pending"`
 }
 
 func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent, error) {

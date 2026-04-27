@@ -223,6 +223,7 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		AccessTokenEncrypted:  pgtype.Text{String: encryptedAccess, Valid: encryptedAccess != ""},
 		RefreshTokenEncrypted: pgtype.Text{String: encryptedRefresh, Valid: encryptedRefresh != ""},
 		TokenExpiresAt:        tokenExpires,
+		Status:                "active",
 		Metadata:              []byte("{}"),
 	})
 	if err != nil {
