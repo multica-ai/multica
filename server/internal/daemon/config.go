@@ -15,6 +15,7 @@ const (
 	DefaultPollInterval          = 3 * time.Second
 	DefaultHeartbeatInterval     = 15 * time.Second
 	DefaultAgentTimeout          = 2 * time.Hour
+	DefaultAPITimeout            = 60 * time.Second
 	DefaultRuntimeName           = "Local Agent"
 	DefaultWorkspaceSyncInterval = 30 * time.Second
 	DefaultHealthPort            = 19514
@@ -46,6 +47,7 @@ type Config struct {
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
+	APITimeout         time.Duration // HTTP timeout for daemon↔server calls (default 60s, env MULTICA_DAEMON_API_TIMEOUT)
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -56,6 +58,7 @@ type Overrides struct {
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
+	APITimeout         time.Duration
 	MaxConcurrentTasks int
 	DaemonID           string
 	DeviceName         string
@@ -184,6 +187,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agentTimeout = overrides.AgentTimeout
 	}
 
+	apiTimeout, err := durationFromEnv("MULTICA_DAEMON_API_TIMEOUT", DefaultAPITimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.APITimeout > 0 {
+		apiTimeout = overrides.APITimeout
+	}
+
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
 	if err != nil {
 		return Config{}, err
@@ -307,6 +318,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,
+		APITimeout:         apiTimeout,
 	}, nil
 }
 
