@@ -232,7 +232,7 @@ func (s *EmailService) SendNotificationEmail(to, title, body, link string) error
 		linkHTML = fmt.Sprintf(
 			`<p style="margin: 24px 0;">
 				<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">View in Multica</a>
-			</p>`, link)
+			</p>`, html.EscapeString(link))
 	}
 
 	htmlBody := fmt.Sprintf(

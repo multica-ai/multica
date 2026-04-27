@@ -210,6 +210,52 @@ func TestSendNotificationEmail_HTMLEscaping(t *testing.T) {
 	_ = capturedSubject
 }
 
+func TestSendNotificationEmail_LinkEscaping(t *testing.T) {
+	var capturedBody string
+	mockSender := &mockEmailSender{
+		sendFn: func(from string, to []string, subject, htmlBody string) error {
+			capturedBody = htmlBody
+			return nil
+		},
+	}
+	svc := &EmailService{sender: mockSender, fromEmail: "test@multica.ai"}
+
+	tests := []struct {
+		name        string
+		link        string
+		wantNot     string
+		wantContain string
+	}{
+		{
+			name:        "double quote in link",
+			link:        `https://evil.com/x" onclick="alert(1)`,
+			wantNot:     `href="https://evil.com/x" onclick="alert(1)"`,
+			wantContain: `href="https://evil.com/x&#34; onclick=&#34;alert(1)"`,
+		},
+		{
+			name:        "angle bracket in link",
+			link:        `https://evil.com/<script>`,
+			wantNot:     `href="https://evil.com/<script>"`,
+			wantContain: `&lt;script&gt;`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.SendNotificationEmail("user@example.com", "Test", "Body", tt.link)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.Contains(capturedBody, tt.wantNot) {
+				t.Errorf("body should not contain unescaped link: %s", capturedBody)
+			}
+			if !strings.Contains(capturedBody, tt.wantContain) {
+				t.Errorf("body should contain escaped link segment %q:\n%s", tt.wantContain, capturedBody)
+			}
+		})
+	}
+}
+
 type mockEmailSender struct {
 	sendFn func(from string, to []string, subject, htmlBody string) error
 }
