@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, Link2, Link2Off, Loader2 } from "lucide-react";
+import { BellRing, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type {
@@ -11,7 +11,6 @@ import type {
 } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
-import { Button } from "@multica/ui/components/ui/button";
 import {
   Card,
   CardContent,
@@ -41,8 +40,6 @@ export function NotificationsTab() {
   const [preferences, setPreferences] = useState<NotificationChannelPreference[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [removingBindingId, setRemovingBindingId] = useState<string | null>(null);
-  const [startingBinding, setStartingBinding] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -98,34 +95,6 @@ export function NotificationsTab() {
       setSavingKey(null);
     }
   };
-
-  const handleDisconnect = async (binding: ExternalAccountBinding) => {
-    setRemovingBindingId(binding.id);
-    try {
-      await api.deleteNotificationBinding(binding.id);
-      toast.success(`${channelLabels[binding.provider as NotificationChannel] ?? binding.provider} disconnected`);
-      await loadSettings();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to disconnect account");
-    } finally {
-      setRemovingBindingId(null);
-    }
-  };
-
-  const handleConnect = async () => {
-    setStartingBinding(true);
-    try {
-      const { auth_url } = await api.startDingTalkBinding({
-        next_path: window.location.pathname,
-      });
-      window.location.assign(auth_url);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to start DingTalk binding");
-      setStartingBinding(false);
-    }
-  };
-
-  const dingTalkBinding = bindingByProvider.get("dingtalk");
 
   if (loading) {
     return (
@@ -187,7 +156,7 @@ export function NotificationsTab() {
                     </p>
                     {needsBinding ? (
                       <p className="text-xs text-muted-foreground">
-                        Link a DingTalk account before enabling this channel.
+                        Link a DingTalk account from Profile before enabling this channel.
                       </p>
                     ) : null}
                   </div>
@@ -197,7 +166,7 @@ export function NotificationsTab() {
                     ) : null}
                     <Switch
                       checked={pref.enabled}
-                      disabled={savingKey !== null || removingBindingId !== null || needsBinding}
+                      disabled={savingKey !== null || needsBinding}
                       onCheckedChange={(checked) => {
                         void handleToggle(pref, checked);
                       }}
@@ -209,69 +178,9 @@ export function NotificationsTab() {
             })}
           </CardContent>
         </Card>
-      </section>
-
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold">Linked Accounts</h3>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">DingTalk</CardTitle>
-            <CardDescription>
-              Link your DingTalk account here, then opt into the channel above for mentioned notifications.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">
-                  {dingTalkBinding?.display_name ?? "No DingTalk account connected"}
-                </span>
-                <Badge variant={dingTalkBinding ? "secondary" : "outline"}>
-                  {dingTalkBinding?.status ?? "not connected"}
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {dingTalkBinding
-                  ? `External user: ${dingTalkBinding.external_user_id}`
-                  : "Connect a DingTalk account to unlock external mention delivery for this channel."}
-              </p>
-            </div>
-
-            {dingTalkBinding ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void handleDisconnect(dingTalkBinding);
-                }}
-                disabled={savingKey !== null || removingBindingId !== null}
-              >
-                {removingBindingId === dingTalkBinding.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Link2Off className="h-4 w-4" />
-                )}
-                Disconnect
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void handleConnect();
-                }}
-                disabled={savingKey !== null || removingBindingId !== null || startingBinding}
-              >
-                {startingBinding ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Link2 className="h-4 w-4" />
-                )}
-                Connect
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+        <p className="text-sm text-muted-foreground">
+          Manage DingTalk account linking from <span className="font-medium">Profile → Linked Accounts</span>.
+        </p>
       </section>
     </div>
   );

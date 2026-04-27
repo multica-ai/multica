@@ -436,8 +436,10 @@ func notifyDirect(
 }
 
 // notifyMentionedMembers creates inbox items for each @mentioned member,
-// excluding the actor and any IDs in the skip set. When an @all mention is
-// present, all workspace members are notified (excluding agents).
+// excluding any IDs in the skip set. The actor is skipped for expanded @all
+// mentions, but an explicit self-mention still produces a notification.
+// When an @all mention is present, all workspace members are notified
+// (excluding agents).
 func notifyMentionedMembers(
 	bus *events.Bus,
 	queries *db.Queries,
@@ -455,6 +457,7 @@ func notifyMentionedMembers(
 
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
+	explicitRecipientIDs := map[string]bool{}
 
 	hasAll := false
 	for _, m := range mentions {
@@ -464,6 +467,7 @@ func notifyMentionedMembers(
 		}
 		if m.Type == "member" {
 			recipientIDs[m.ID] = true
+			explicitRecipientIDs[m.ID] = true
 		}
 	}
 
@@ -486,7 +490,10 @@ func notifyMentionedMembers(
 	notificationLink := buildNotificationLink(ctx, queries, e.WorkspaceID, issueID, commentID)
 
 	for id := range recipientIDs {
-		if id == e.ActorID || skip[id] {
+		if skip[id] {
+			continue
+		}
+		if id == e.ActorID && !explicitRecipientIDs[id] {
 			continue
 		}
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
