@@ -61,3 +61,12 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  IntegrationProvider,
+  WorkspaceIntegration,
+  UserIntegrationCredential,
+  ProjectIntegrationLink,
+  IssueIntegrationLink,
+  RedmineProject,
+  RedmineIssue,
+} from "./integration";

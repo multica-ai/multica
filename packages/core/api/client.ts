@@ -71,6 +71,13 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WorkspaceIntegration,
+  UserIntegrationCredential,
+  ProjectIntegrationLink,
+  IssueIntegrationLink,
+  RedmineProject,
+  RedmineIssue,
+  IntegrationProvider,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1106,5 +1113,108 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // ---- Workspace integrations ----
+
+  async listWorkspaceIntegrations(): Promise<{ integrations: WorkspaceIntegration[] }> {
+    return this.fetch("/api/workspaces/integrations");
+  }
+
+  async upsertWorkspaceIntegration(data: { provider: IntegrationProvider; instance_url: string }): Promise<WorkspaceIntegration> {
+    return this.fetch("/api/workspaces/integrations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWorkspaceIntegration(provider: IntegrationProvider): Promise<void> {
+    await this.fetch(`/api/workspaces/integrations/${provider}`, { method: "DELETE" });
+  }
+
+  // ---- User integration credentials ----
+
+  async getMyCredential(provider: IntegrationProvider): Promise<UserIntegrationCredential> {
+    return this.fetch(`/api/workspaces/integrations/${provider}/credential`);
+  }
+
+  async upsertMyCredential(provider: IntegrationProvider, apiKey: string): Promise<UserIntegrationCredential> {
+    return this.fetch(`/api/workspaces/integrations/${provider}/credential`, {
+      method: "PUT",
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+  }
+
+  async deleteMyCredential(provider: IntegrationProvider): Promise<void> {
+    await this.fetch(`/api/workspaces/integrations/${provider}/credential`, { method: "DELETE" });
+  }
+
+  // ---- Redmine proxy ----
+
+  async listRedmineProjects(): Promise<{ projects: RedmineProject[] }> {
+    return this.fetch("/api/workspaces/integrations/redmine/external/projects");
+  }
+
+  async createRedmineProject(data: { name: string; identifier: string; description: string }): Promise<RedmineProject> {
+    return this.fetch("/api/workspaces/integrations/redmine/external/projects", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listRedmineIssues(projectId: number): Promise<{ issues: RedmineIssue[] }> {
+    return this.fetch(`/api/workspaces/integrations/redmine/external/projects/${projectId}/issues`);
+  }
+
+  async createRedmineIssue(data: { project_id: number; subject: string; description: string }): Promise<RedmineIssue> {
+    return this.fetch("/api/workspaces/integrations/redmine/external/issues", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // ---- Project integration links ----
+
+  async listProjectIntegrationLinks(projectId: string): Promise<{ links: ProjectIntegrationLink[] }> {
+    return this.fetch(`/api/projects/${projectId}/integration-links`);
+  }
+
+  async upsertProjectIntegrationLink(
+    projectId: string,
+    data: { provider: IntegrationProvider; external_project_id: string; external_project_name?: string | null },
+  ): Promise<ProjectIntegrationLink> {
+    return this.fetch(`/api/projects/${projectId}/integration-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectIntegrationLink(projectId: string, provider: IntegrationProvider): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/integration-links/${provider}`, { method: "DELETE" });
+  }
+
+  // ---- Issue integration links ----
+
+  async listIssueIntegrationLinks(issueId: string): Promise<{ links: IssueIntegrationLink[] }> {
+    return this.fetch(`/api/issues/${issueId}/integration-links`);
+  }
+
+  async upsertIssueIntegrationLink(
+    issueId: string,
+    data: {
+      provider: IntegrationProvider;
+      external_issue_id: string;
+      external_issue_url?: string | null;
+      external_issue_title?: string | null;
+    },
+  ): Promise<IssueIntegrationLink> {
+    return this.fetch(`/api/issues/${issueId}/integration-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteIssueIntegrationLink(issueId: string, provider: IntegrationProvider): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/integration-links/${provider}`, { method: "DELETE" });
   }
 }

@@ -285,6 +285,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/labels", h.ListLabelsForIssue)
 					r.Post("/labels", h.AttachLabel)
 					r.Delete("/labels/{labelId}", h.DetachLabel)
+					// Integration links
+					r.Get("/integration-links", h.ListIssueIntegrationLinks)
+					r.Post("/integration-links", h.UpsertIssueIntegrationLink)
+					r.Delete("/integration-links/{provider}", h.DeleteIssueIntegrationLink)
 				})
 			})
 
@@ -311,6 +315,28 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					// Integration links
+					r.Get("/integration-links", h.ListProjectIntegrationLinks)
+					r.Post("/integration-links", h.UpsertProjectIntegrationLink)
+					r.Delete("/integration-links/{provider}", h.DeleteProjectIntegrationLink)
+				})
+			})
+
+			// Workspace integrations (Redmine, Jira, ...)
+			r.Route("/api/workspaces/integrations", func(r chi.Router) {
+				r.Get("/", h.ListWorkspaceIntegrations)
+				r.Post("/", h.UpsertWorkspaceIntegration)
+				r.Route("/{provider}", func(r chi.Router) {
+					r.Delete("/", h.DeleteWorkspaceIntegration)
+					r.Get("/credential", h.GetMyCredential)
+					r.Put("/credential", h.UpsertMyCredential)
+					r.Delete("/credential", h.DeleteMyCredential)
+				})
+				r.Route("/redmine/external", func(r chi.Router) {
+					r.Get("/projects", h.ListRedmineProjects)
+					r.Post("/projects", h.CreateRedmineProject)
+					r.Get("/projects/{projectId}/issues", h.ListRedmineIssues)
+					r.Post("/issues", h.CreateRedmineIssue)
 				})
 			})
 

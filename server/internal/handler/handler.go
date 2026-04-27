@@ -57,6 +57,7 @@ type Handler struct {
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
+	RedmineClient         *service.RedmineClient
 	UpdateStore           *UpdateStore
 	ModelListStore        *ModelListStore
 	LocalSkillListStore   LocalSkillListStore
@@ -87,6 +88,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:           taskSvc,
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:          emailService,
+		RedmineClient:         service.NewRedmineClient(),
 		UpdateStore:           NewUpdateStore(),
 		ModelListStore:        NewModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),

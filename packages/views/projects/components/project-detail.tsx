@@ -66,6 +66,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { ProjectRedmineSection } from "./project-redmine-section";
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
@@ -493,92 +494,100 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           />
         </div>}
       </div>
+
+      {/* Redmine integration */}
+      <ProjectRedmineSection
+        wsId={wsId}
+        projectId={projectId}
+        projectTitle={project.title}
+        projectDescription={project.description}
+      />
     </div>
   );
 
   return (
     <>
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="content" minSize="50%">
-        <div className="flex h-full flex-col">
-          <PageHeader className="gap-2 bg-background text-sm">
-            <div className="flex flex-1 items-center gap-1.5 min-w-0">
-              <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                {workspaceName ?? "Projects"}
-              </AppLink>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              <span className="truncate">{project.title}</span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={cn("text-muted-foreground", isPinned && "text-foreground")}
-                title={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-                onClick={() => {
-                  if (isPinned) {
-                    deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                  } else {
-                    createPin.mutate({ item_type: "project", item_id: projectId });
-                  }
-                }}
-              >
-                {isPinned ? <PinOff /> : <Pin />}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                      <MoreHorizontal />
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuItem onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    toast.success("Link copied");
-                  }}>
-                    <Link2 className="h-3.5 w-3.5" />
-                    Copy link
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete project
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant={sidebarOpen ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      className={sidebarOpen ? "" : "text-muted-foreground"}
-                      onClick={() => {
-                        if (isMobile) {
-                          setSidebarOpen(!sidebarOpen);
-                        } else {
-                          const panel = sidebarRef.current;
-                          if (!panel) return;
-                          if (panel.isCollapsed()) panel.expand();
-                          else panel.collapse();
-                        }
-                      }}
+      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+        <ResizablePanel id="content" minSize="50%">
+          <div className="flex h-full flex-col">
+            <PageHeader className="gap-2 bg-background text-sm">
+              <div className="flex flex-1 items-center gap-1.5 min-w-0">
+                <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                  {workspaceName ?? "Projects"}
+                </AppLink>
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                <span className="truncate">{project.title}</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className={cn("text-muted-foreground", isPinned && "text-foreground")}
+                  title={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                  onClick={() => {
+                    if (isPinned) {
+                      deletePinMut.mutate({ itemType: "project", itemId: projectId });
+                    } else {
+                      createPin.mutate({ item_type: "project", item_id: projectId });
+                    }
+                  }}
+                >
+                  {isPinned ? <PinOff /> : <Pin />}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                        <MoreHorizontal />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end" className="w-auto">
+                    <DropdownMenuItem onClick={() => {
+                      navigator.clipboard.writeText(window.location.href);
+                      toast.success("Link copied");
+                    }}>
+                      <Link2 className="h-3.5 w-3.5" />
+                      Copy link
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => setDeleteDialogOpen(true)}
                     >
-                      <PanelRight />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
-              </Tooltip>
-            </div>
-          </PageHeader>
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete project
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant={sidebarOpen ? "secondary" : "ghost"}
+                        size="icon-sm"
+                        className={sidebarOpen ? "" : "text-muted-foreground"}
+                        onClick={() => {
+                          if (isMobile) {
+                            setSidebarOpen(!sidebarOpen);
+                          } else {
+                            const panel = sidebarRef.current;
+                            if (!panel) return;
+                            if (panel.isCollapsed()) panel.expand();
+                            else panel.collapse();
+                          }
+                        }}
+                      >
+                        <PanelRight />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+                </Tooltip>
+              </div>
+            </PageHeader>
 
-          <ViewStoreProvider store={projectViewStore}>
+            <ViewStoreProvider store={projectViewStore}>
               <IssuesHeader scopedIssues={projectIssues} />
               <ProjectIssuesContent
                 projectIssues={projectIssues}
@@ -591,22 +600,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}
         {!isMobile && (
-        <ResizablePanel
-          id="sidebar"
-          defaultSize={sidebarOpen ? 320 : 0}
-          minSize={260}
-          maxSize={420}
-          collapsible
-          groupResizeBehavior="preserve-pixel-size"
-          panelRef={sidebarRef}
-          onResize={(size) => setSidebarOpen(size.inPixels > 0)}
-        >
-          <div className="overflow-y-auto border-l h-full">
-            <div className="p-4">
-              {sidebarContent}
+          <ResizablePanel
+            id="sidebar"
+            defaultSize={sidebarOpen ? 320 : 0}
+            minSize={260}
+            maxSize={420}
+            collapsible
+            groupResizeBehavior="preserve-pixel-size"
+            panelRef={sidebarRef}
+            onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+          >
+            <div className="overflow-y-auto border-l h-full">
+              <div className="p-4">
+                {sidebarContent}
+              </div>
             </div>
-          </div>
-        </ResizablePanel>
+          </ResizablePanel>
         )}
         {isMobile && (
           <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
