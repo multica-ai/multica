@@ -92,10 +92,20 @@ export function myIssueListOptions(
   });
 }
 
+// Safety-net polling: WebSocket events are still the primary update path, but
+// if the WS connection hiccups (see #1637 heartbeat timeouts) the UI can stay
+// stale until manual refresh (#1599). A slow background refetch bridges that
+// gap without materially adding server load — it runs only while the tab is
+// focused and is redundant when the WS layer is healthy.
+const ISSUE_DETAIL_POLL_MS = 60_000;
+const ISSUE_TIMELINE_POLL_MS = 20_000;
+
 export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+    refetchInterval: ISSUE_DETAIL_POLL_MS,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -124,6 +134,8 @@ export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
     queryFn: () => api.listTimeline(issueId),
+    refetchInterval: ISSUE_TIMELINE_POLL_MS,
+    refetchIntervalInBackground: false,
   });
 }
 
