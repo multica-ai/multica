@@ -21,11 +21,6 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      APP_ENV: ${APP_ENV:-production}
-        MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}              
-  +     ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
-  +     ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
-  +     ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}"]
@@ -61,6 +56,9 @@ services:
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
     restart: unless-stopped
 
   frontend:
