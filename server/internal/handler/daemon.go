@@ -768,13 +768,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context. Session is agent-specific
-		// because session IDs are provider-scoped (e.g. Claude Code session IDs are
-		// not portable across agents).
+		// Look up the prior session for this (runtime, issue) pair so the daemon
+		// can resume the Claude Code conversation context. Keyed by runtime_id so
+		// agents sharing the same runtime (e.g. Sonnet + Opus on the same provider
+		// account) can resume each other's sessions.
 		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-			AgentID: task.AgentID,
-			IssueID: task.IssueID,
+			RuntimeID: task.RuntimeID,
+			IssueID:   task.IssueID,
 		}); err == nil && prior.SessionID.Valid {
 			resp.PriorSessionID = prior.SessionID.String
 		}
