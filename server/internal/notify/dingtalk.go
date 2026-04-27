@@ -67,6 +67,7 @@ type DingTalkToken struct {
 }
 
 type DingTalkUserProfile struct {
+	UserID    string
 	UnionID   string
 	OpenID    string
 	Name      string
@@ -319,6 +320,12 @@ func (c DingTalkConfig) ExchangeCode(ctx context.Context, code string) (DingTalk
 }
 
 type dingTalkUserProfileResponse struct {
+	UserIDSnake    string `json:"user_id"`
+	UserIDCamel    string `json:"userId"`
+	UserIDLegacy   string `json:"userid"`
+	StaffIDSnake   string `json:"staff_id"`
+	StaffIDCamel   string `json:"staffId"`
+	StaffIDLegacy  string `json:"staffid"`
 	UnionIDSnake   string `json:"union_id"`
 	UnionIDCamel   string `json:"unionId"`
 	OpenIDSnake    string `json:"open_id"`
@@ -357,6 +364,7 @@ func (c DingTalkConfig) GetUserProfile(ctx context.Context, accessToken string) 
 	}
 
 	profile := DingTalkUserProfile{
+		UserID:    firstNonEmpty(decoded.UserIDCamel, decoded.UserIDSnake, decoded.UserIDLegacy, decoded.StaffIDCamel, decoded.StaffIDSnake, decoded.StaffIDLegacy),
 		UnionID:   firstNonEmpty(decoded.UnionIDCamel, decoded.UnionIDSnake),
 		OpenID:    firstNonEmpty(decoded.OpenIDCamel, decoded.OpenIDSnake),
 		Name:      decoded.Name,
@@ -364,7 +372,7 @@ func (c DingTalkConfig) GetUserProfile(ctx context.Context, accessToken string) 
 		AvatarURL: firstNonEmpty(decoded.AvatarURLCamel, decoded.AvatarURLSnake),
 		Mobile:    decoded.Mobile,
 	}
-	if profile.UnionID == "" && profile.OpenID == "" {
+	if profile.UserID == "" && profile.UnionID == "" && profile.OpenID == "" {
 		return DingTalkUserProfile{}, errors.New("dingtalk user info missing user identifiers")
 	}
 	return profile, nil
@@ -456,13 +464,13 @@ type dingTalkSendResponse struct {
 	ProcessQueryKey string `json:"processQueryKey"`
 }
 
-func (c DingTalkConfig) SendTextMessage(ctx context.Context, corpID, unionID, content string) (DingTalkSendResult, error) {
+func (c DingTalkConfig) SendTextMessage(ctx context.Context, corpID, userID, content string) (DingTalkSendResult, error) {
 	if err := c.ValidateDeliveryConfig(); err != nil {
 		return DingTalkSendResult{}, err
 	}
-	unionID = strings.TrimSpace(unionID)
-	if unionID == "" {
-		return DingTalkSendResult{}, errors.New("missing dingtalk union id")
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return DingTalkSendResult{}, errors.New("missing dingtalk user id")
 	}
 
 	accessToken, err := c.AppAccessToken(ctx, corpID)
@@ -479,7 +487,7 @@ func (c DingTalkConfig) SendTextMessage(ctx context.Context, corpID, unionID, co
 
 	body, err := json.Marshal(map[string]any{
 		"robotCode": c.RobotCode,
-		"userIds":   []string{unionID},
+		"userIds":   []string{userID},
 		"msgKey":    "sampleText",
 		"msgParam":  string(msgParamRaw),
 	})

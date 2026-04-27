@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -41,25 +42,48 @@ func cleanupNotificationDispatchData(t *testing.T) {
 	}
 }
 
-func seedPendingDingTalkDelivery(t *testing.T, corpID, unionID string) (string, string) {
+type dingTalkDeliverySeed struct {
+	CorpID      string
+	UnionID     string
+	UserID      string
+	AccessToken string
+}
+
+func seedPendingDingTalkDelivery(t *testing.T, seed dingTalkDeliverySeed) (string, string, string) {
 	t.Helper()
 
 	queries := db.New(testPool)
-	metadata, err := json.Marshal(map[string]string{
-		"corp_id":  corpID,
-		"union_id": unionID,
-		"open_id":  "open-" + unionID,
-	})
+	metadataMap := map[string]string{
+		"corp_id": seed.CorpID,
+	}
+	if unionID := strings.TrimSpace(seed.UnionID); unionID != "" {
+		metadataMap["union_id"] = unionID
+		metadataMap["open_id"] = "open-" + unionID
+	}
+	if userID := strings.TrimSpace(seed.UserID); userID != "" {
+		metadataMap["user_id"] = userID
+	}
+	metadata, err := json.Marshal(metadataMap)
 	if err != nil {
 		t.Fatalf("marshal metadata: %v", err)
 	}
 
+	accessTokenEncrypted := pgtype.Text{}
+	if accessToken := strings.TrimSpace(seed.AccessToken); accessToken != "" {
+		encrypted, err := notifyutil.EncryptToken(accessToken)
+		if err != nil {
+			t.Fatalf("EncryptToken: %v", err)
+		}
+		accessTokenEncrypted = util.StrToText(encrypted)
+	}
+	externalUserID := firstValue(seed.UnionID, seed.UserID)
+
 	binding, err := queries.UpsertExternalAccountBinding(context.Background(), db.UpsertExternalAccountBindingParams{
 		UserID:                util.ParseUUID(testUserID),
 		Provider:              "dingtalk",
-		ExternalUserID:        unionID,
+		ExternalUserID:        externalUserID,
 		DisplayName:           util.StrToText("Bound DingTalk User"),
-		AccessTokenEncrypted:  pgtype.Text{},
+		AccessTokenEncrypted:  accessTokenEncrypted,
 		RefreshTokenEncrypted: pgtype.Text{},
 		TokenExpiresAt:        pgtype.Timestamptz{},
 		Status:                "active",
@@ -90,7 +114,7 @@ func seedPendingDingTalkDelivery(t *testing.T, corpID, unionID string) (string, 
 	payloadSnapshot, err := json.Marshal(map[string]any{
 		"binding_id":       util.UUIDToString(binding.ID),
 		"provider":         "dingtalk",
-		"external_user_id": unionID,
+		"external_user_id": externalUserID,
 		"notification_event": map[string]any{
 			"type":  "mentioned",
 			"title": "dispatcher issue",
@@ -115,7 +139,7 @@ func seedPendingDingTalkDelivery(t *testing.T, corpID, unionID string) (string, 
 		t.Fatalf("CreateNotificationDelivery: %v", err)
 	}
 
-	return util.UUIDToString(event.ID), util.UUIDToString(delivery.ID)
+	return util.UUIDToString(binding.ID), util.UUIDToString(event.ID), util.UUIDToString(delivery.ID)
 }
 
 func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.NotificationDelivery {
@@ -162,8 +186,8 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 			if body.RobotCode != "ding-robot-code" {
 				t.Fatalf("expected robotCode %q, got %q", "ding-robot-code", body.RobotCode)
 			}
-			if len(body.UserIDs) != 1 || body.UserIDs[0] != "union-success" {
-				t.Fatalf("expected userIds [union-success], got %#v", body.UserIDs)
+			if len(body.UserIDs) != 1 || body.UserIDs[0] != "staff-success" {
+				t.Fatalf("expected userIds [staff-success], got %#v", body.UserIDs)
 			}
 			if body.MsgKey != "sampleText" {
 				t.Fatalf("expected msgKey %q, got %q", "sampleText", body.MsgKey)
@@ -185,7 +209,11 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 	t.Setenv("DINGTALK_APP_TOKEN_URL", apiServer.URL+"/corp/{corpId}/token")
 	t.Setenv("DINGTALK_MESSAGE_URL", apiServer.URL+"/message")
 
-	eventID, _ := seedPendingDingTalkDelivery(t, "corp-success", "union-success")
+	_, eventID, _ := seedPendingDingTalkDelivery(t, dingTalkDeliverySeed{
+		CorpID:  "corp-success",
+		UnionID: "union-success",
+		UserID:  "staff-success",
+	})
 
 	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool))
 
@@ -230,7 +258,11 @@ func TestDispatchPendingDingTalkDeliveries_RequeuesThenFails(t *testing.T) {
 	t.Setenv("DINGTALK_APP_TOKEN_URL", apiServer.URL+"/corp/{corpId}/token")
 	t.Setenv("DINGTALK_MESSAGE_URL", apiServer.URL+"/message")
 
-	eventID, _ := seedPendingDingTalkDelivery(t, "corp-fail", "union-fail")
+	_, eventID, _ := seedPendingDingTalkDelivery(t, dingTalkDeliverySeed{
+		CorpID:  "corp-fail",
+		UnionID: "union-fail",
+		UserID:  "staff-fail",
+	})
 
 	queries := db.New(testPool)
 	dispatchPendingNotificationDeliveries(context.Background(), queries)
@@ -256,5 +288,85 @@ func TestDispatchPendingDingTalkDeliveries_RequeuesThenFails(t *testing.T) {
 	}
 	if delivery.SentAt.Valid {
 		t.Fatal("expected sent_at to remain empty after failures")
+	}
+}
+
+func TestDispatchPendingDingTalkDeliveries_BackfillsMissingUserID(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	var userInfoCalls int
+	var messageCalls int
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/userinfo":
+			userInfoCalls++
+			if got := r.Header.Get("x-acs-dingtalk-access-token"); got != "user-token-backfill" {
+				t.Fatalf("expected x-acs-dingtalk-access-token %q, got %q", "user-token-backfill", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"userId":"staff-backfill",
+				"unionId":"union-backfill",
+				"openId":"open-backfill"
+			}`))
+		case strings.HasPrefix(r.URL.Path, "/corp/") && strings.HasSuffix(r.URL.Path, "/token"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"app-token","expires_in":7200}`))
+		case r.URL.Path == "/message":
+			messageCalls++
+			var body struct {
+				UserIDs []string `json:"userIds"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode message body: %v", err)
+			}
+			if len(body.UserIDs) != 1 || body.UserIDs[0] != "staff-backfill" {
+				t.Fatalf("expected backfilled userIds [staff-backfill], got %#v", body.UserIDs)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"processQueryKey":"query-backfill"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("DINGTALK_CLIENT_ID", "ding-client-id")
+	t.Setenv("DINGTALK_CLIENT_SECRET", "ding-client-secret")
+	t.Setenv("DINGTALK_ROBOT_CODE", "ding-robot-code")
+	t.Setenv("DINGTALK_USERINFO_URL", apiServer.URL+"/userinfo")
+	t.Setenv("DINGTALK_APP_TOKEN_URL", apiServer.URL+"/corp/{corpId}/token")
+	t.Setenv("DINGTALK_MESSAGE_URL", apiServer.URL+"/message")
+
+	bindingID, eventID, _ := seedPendingDingTalkDelivery(t, dingTalkDeliverySeed{
+		CorpID:      "corp-backfill",
+		UnionID:     "union-backfill",
+		AccessToken: "user-token-backfill",
+	})
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool))
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "sent" {
+		t.Fatalf("expected delivery status sent, got %q", delivery.Status)
+	}
+	if userInfoCalls != 1 {
+		t.Fatalf("expected 1 user info call, got %d", userInfoCalls)
+	}
+	if messageCalls != 1 {
+		t.Fatalf("expected 1 message call, got %d", messageCalls)
+	}
+
+	binding, err := db.New(testPool).GetExternalAccountBinding(context.Background(), util.ParseUUID(bindingID))
+	if err != nil {
+		t.Fatalf("GetExternalAccountBinding: %v", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(binding.Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal binding metadata: %v", err)
+	}
+	if metadata["user_id"] != "staff-backfill" {
+		t.Fatalf("expected persisted user_id %q, got %#v", "staff-backfill", metadata["user_id"])
 	}
 }

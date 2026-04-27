@@ -84,6 +84,7 @@ func TestCompleteMyDingTalkBinding(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
+				"userId": "staff-id-123",
 				"unionId": "union-id-123",
 				"openId": "profile-open-id",
 				"name": "Ding User",
@@ -175,5 +176,8 @@ func TestCompleteMyDingTalkBinding(t *testing.T) {
 	}
 	if metadata["corp_id"] != "ding-corp-id" {
 		t.Fatalf("expected metadata corp_id %q, got %#v", "ding-corp-id", metadata["corp_id"])
+	}
+	if metadata["user_id"] != "staff-id-123" {
+		t.Fatalf("expected metadata user_id %q, got %#v", "staff-id-123", metadata["user_id"])
 	}
 }

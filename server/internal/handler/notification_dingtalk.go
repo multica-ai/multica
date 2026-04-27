@@ -152,7 +152,7 @@ func (h *Handler) CompleteMyDingTalkBinding(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	externalUserID := firstNotificationValue(profile.UnionID, profile.OpenID, token.OpenID)
+	externalUserID := firstNotificationValue(profile.UnionID, profile.OpenID, token.OpenID, profile.UserID)
 	displayName := firstNotificationValue(profile.Name, profile.Nick)
 	if externalUserID == "" {
 		writeError(w, http.StatusBadGateway, "DingTalk user info missing supported identifiers")
@@ -161,6 +161,7 @@ func (h *Handler) CompleteMyDingTalkBinding(w http.ResponseWriter, r *http.Reque
 
 	metadata, err := json.Marshal(map[string]any{
 		"corp_id":    token.CorpID,
+		"user_id":    profile.UserID,
 		"open_id":    firstNotificationValue(profile.OpenID, token.OpenID),
 		"union_id":   profile.UnionID,
 		"avatar_url": profile.AvatarURL,

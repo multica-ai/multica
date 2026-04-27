@@ -37,6 +37,7 @@ type notificationEventPayload struct {
 
 type dingTalkBindingMetadata struct {
 	CorpID  string `json:"corp_id"`
+	UserID  string `json:"user_id"`
 	UnionID string `json:"union_id"`
 	OpenID  string `json:"open_id"`
 }
@@ -108,7 +109,7 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 		return
 	}
 
-	payload, eventPayload, binding, err := loadDingTalkDispatchContext(ctx, queries, claimed)
+	_, eventPayload, binding, err := loadDingTalkDispatchContext(ctx, queries, claimed)
 	if err != nil {
 		finalizeFailedDelivery(ctx, queries, claimed, err)
 		return
@@ -123,13 +124,21 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 	}
 
 	corpID := strings.TrimSpace(metadata.CorpID)
-	unionID := firstValue(strings.TrimSpace(metadata.UnionID), strings.TrimSpace(payload.ExternalUserID), strings.TrimSpace(binding.ExternalUserID), strings.TrimSpace(metadata.OpenID))
-	if corpID == "" || unionID == "" {
-		finalizeFailedDelivery(ctx, queries, claimed, errors.New("dingtalk delivery is missing corp_id or union_id"))
+	if corpID == "" {
+		finalizeFailedDelivery(ctx, queries, claimed, errors.New("dingtalk delivery is missing corp_id"))
 		return
 	}
 
-	if _, err := cfg.SendTextMessage(ctx, corpID, unionID, buildDingTalkDeliveryText(eventPayload)); err != nil {
+	targetUserID := strings.TrimSpace(metadata.UserID)
+	if targetUserID == "" {
+		targetUserID, err = backfillDingTalkBindingUserID(ctx, queries, cfg, binding, metadata)
+		if err != nil {
+			finalizeFailedDelivery(ctx, queries, claimed, err)
+			return
+		}
+	}
+
+	if _, err := cfg.SendTextMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryText(eventPayload)); err != nil {
 		finalizeFailedDelivery(ctx, queries, claimed, err)
 		return
 	}
@@ -175,6 +184,65 @@ func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, deliv
 	}
 
 	return payload, eventPayload, binding, nil
+}
+
+func backfillDingTalkBindingUserID(ctx context.Context, queries *db.Queries, cfg notifyutil.DingTalkConfig, binding db.ExternalAccountBinding, metadata dingTalkBindingMetadata) (string, error) {
+	if !binding.AccessTokenEncrypted.Valid || strings.TrimSpace(binding.AccessTokenEncrypted.String) == "" {
+		return "", errors.New("dingtalk delivery is missing bound user_id")
+	}
+
+	accessToken, err := notifyutil.DecryptToken(binding.AccessTokenEncrypted.String)
+	if err != nil {
+		return "", errors.New("failed to decrypt dingtalk access token")
+	}
+	if strings.TrimSpace(accessToken) == "" {
+		return "", errors.New("dingtalk delivery is missing bound user access token")
+	}
+
+	profile, err := cfg.GetUserProfile(ctx, accessToken)
+	if err != nil {
+		return "", err
+	}
+	userID := strings.TrimSpace(profile.UserID)
+	if userID == "" {
+		return "", errors.New("dingtalk user info missing user_id")
+	}
+
+	rawMetadata := map[string]any{}
+	if len(binding.Metadata) > 0 {
+		if err := json.Unmarshal(binding.Metadata, &rawMetadata); err != nil {
+			return "", errors.New("invalid dingtalk binding metadata")
+		}
+	}
+	rawMetadata["corp_id"] = firstValue(metadata.CorpID)
+	rawMetadata["user_id"] = userID
+	if unionID := firstValue(metadata.UnionID, profile.UnionID, binding.ExternalUserID); unionID != "" {
+		rawMetadata["union_id"] = unionID
+	}
+	if openID := firstValue(metadata.OpenID, profile.OpenID); openID != "" {
+		rawMetadata["open_id"] = openID
+	}
+
+	metadataJSON, err := json.Marshal(rawMetadata)
+	if err != nil {
+		return "", errors.New("failed to encode dingtalk binding metadata")
+	}
+
+	if _, err := queries.UpsertExternalAccountBinding(ctx, db.UpsertExternalAccountBindingParams{
+		UserID:                binding.UserID,
+		Provider:              binding.Provider,
+		ExternalUserID:        binding.ExternalUserID,
+		DisplayName:           binding.DisplayName,
+		AccessTokenEncrypted:  binding.AccessTokenEncrypted,
+		RefreshTokenEncrypted: binding.RefreshTokenEncrypted,
+		TokenExpiresAt:        binding.TokenExpiresAt,
+		Status:                binding.Status,
+		Metadata:              metadataJSON,
+	}); err != nil {
+		return "", err
+	}
+
+	return userID, nil
 }
 
 func finalizeFailedDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
