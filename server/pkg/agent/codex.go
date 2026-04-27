@@ -86,7 +86,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
-	semanticActivityCh := make(chan Message, 256)
+	semanticActivityCh := make(chan string, 256)
 
 	var outputMu sync.Mutex
 	var output strings.Builder
@@ -108,7 +108,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				outputMu.Unlock()
 			}
 			trySend(msgCh, msg)
-			trySend(semanticActivityCh, msg)
+			trySendString(semanticActivityCh, describeCodexSemanticActivity(msg))
+		},
+		onSemanticActivity: func(description string) {
+			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
+			trySendString(semanticActivityCh, description)
 		},
 		onTurnDone: func(aborted bool) {
 			select {
@@ -237,9 +241,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 						finalError = errMsg
 					}
 				}
-			case msg := <-semanticActivityCh:
+			case activity := <-semanticActivityCh:
 				lastSemanticActivity = time.Now()
-				lastSemanticActivityDescription = describeCodexSemanticActivity(msg)
+				lastSemanticActivityDescription = activity
 				resetTimer(semanticTimer, semanticInactivityTimeout)
 			case <-semanticTimer.C:
 				waitingForTurn = false
@@ -382,6 +386,13 @@ func resetTimer(timer *time.Timer, d time.Duration) {
 	timer.Reset(d)
 }
 
+func trySendString(ch chan<- string, value string) {
+	select {
+	case ch <- value:
+	default:
+	}
+}
+
 func logCodexAgentMessage(logger *slog.Logger, msg Message) {
 	if logger == nil {
 		return
@@ -417,15 +428,16 @@ func describeCodexSemanticActivity(msg Message) string {
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg        Config
-	stdin      interface{ Write([]byte) (int, error) }
-	mu         sync.Mutex
-	nextID     int
-	pending    map[int]*pendingRPC
-	threadID   string
-	turnID     string
-	onMessage  func(Message)
-	onTurnDone func(aborted bool)
+	cfg                Config
+	stdin              interface{ Write([]byte) (int, error) }
+	mu                 sync.Mutex
+	nextID             int
+	pending            map[int]*pendingRPC
+	threadID           string
+	turnID             string
+	onMessage          func(Message)
+	onSemanticActivity func(description string)
+	onTurnDone         func(aborted bool)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
@@ -816,13 +828,15 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 }
 
 func (c *codexClient) handleItemNotification(method string, params map[string]any) {
-	item, ok := params["item"].(map[string]any)
-	if !ok {
-		return
-	}
-
+	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
+	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
+	}
+	if item == nil {
+		return
+	}
 
 	switch {
 	case method == "item/started" && itemType == "commandExecution":
@@ -877,6 +891,28 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			}
 		}
 	}
+}
+
+func isCodexItemProgressActivity(method string) bool {
+	switch method {
+	case "item/agentMessage/delta",
+		"item/commandExecution/outputDelta",
+		"item/fileChange/outputDelta",
+		"item/mcpToolCall/progress":
+		return true
+	default:
+		return false
+	}
+}
+
+func describeCodexItemProgressActivity(method, itemType, itemID string) string {
+	if itemType == "" {
+		itemType = "unknown"
+	}
+	if itemID == "" {
+		return fmt.Sprintf("%s:%s", method, itemType)
+	}
+	return fmt.Sprintf("%s:%s:%s", method, itemType, itemID)
 }
 
 // extractUsageFromMap extracts token usage from a map that may contain
