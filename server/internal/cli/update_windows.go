@@ -26,6 +26,13 @@ const oldBinarySuffix = ".old"
 func replaceBinary(tmpPath, exePath string) error {
 	oldPath := exePath + oldBinarySuffix
 
+	if _, err := os.Stat(exePath); err != nil {
+		if os.IsNotExist(err) {
+			return os.Rename(tmpPath, exePath)
+		}
+		return fmt.Errorf("stat existing binary: %w", err)
+	}
+
 	// Best-effort cleanup; if this fails (file still locked) the next Rename
 	// will surface a useful error.
 	_ = os.Remove(oldPath)
