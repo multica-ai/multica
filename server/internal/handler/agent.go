@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,8 +42,9 @@ type AgentResponse struct {
 	Skills             []SkillResponse   `json:"skills"`
 	CreatedAt          string            `json:"created_at"`
 	UpdatedAt          string            `json:"updated_at"`
-	ArchivedAt         *string           `json:"archived_at"`
-	ArchivedBy         *string           `json:"archived_by"`
+	ArchivedAt              *string           `json:"archived_at"`
+	ArchivedBy              *string           `json:"archived_by"`
+	CustomEnvCopiedPending  bool              `json:"custom_env_copied_pending"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -100,9 +102,30 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		ArchivedAt:             timestampToPtr(a.ArchivedAt),
+		ArchivedBy:             uuidToPtr(a.ArchivedBy),
+		CustomEnvCopiedPending: a.CustomEnvCopiedPending,
 	}
+}
+
+// stripCustomEnvValuesForCopy keeps env keys from the source but clears all values.
+// The second return is true when the source had at least one non-empty value (secrets
+// that must be re-entered on the copy).
+func stripCustomEnvValuesForCopy(src []byte) ([]byte, bool) {
+	var m map[string]string
+	if err := json.Unmarshal(src, &m); err != nil || len(m) == 0 {
+		return []byte("{}"), false
+	}
+	hadSecret := false
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = ""
+		if strings.TrimSpace(v) != "" {
+			hadSecret = true
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b, hadSecret
 }
 
 // RepoData holds repository information included in claim responses so the
@@ -376,21 +399,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        parseUUID(workspaceID),
-		Name:               req.Name,
-		Description:        req.Description,
-		Instructions:       req.Instructions,
-		AvatarUrl:          ptrToText(req.AvatarURL),
-		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeConfig:      rc,
-		RuntimeID:          runtime.ID,
-		Visibility:         req.Visibility,
-		MaxConcurrentTasks: req.MaxConcurrentTasks,
-		OwnerID:            parseUUID(ownerID),
-		CustomEnv:          ce,
-		CustomArgs:         ca,
-		McpConfig:          mc,
-		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		WorkspaceID:              parseUUID(workspaceID),
+		Name:                     req.Name,
+		Description:              req.Description,
+		Instructions:             req.Instructions,
+		AvatarUrl:                ptrToText(req.AvatarURL),
+		RuntimeMode:              runtime.RuntimeMode,
+		RuntimeConfig:            rc,
+		RuntimeID:                runtime.ID,
+		Visibility:               req.Visibility,
+		MaxConcurrentTasks:       req.MaxConcurrentTasks,
+		OwnerID:                  parseUUID(ownerID),
+		CustomEnv:                ce,
+		CustomArgs:               ca,
+		McpConfig:                mc,
+		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		CustomEnvCopiedPending:   false,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -465,12 +489,7 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rc = append([]byte(nil), rc...)
 	}
-	ce := sourceAgent.CustomEnv
-	if len(ce) == 0 {
-		ce = []byte("{}")
-	} else {
-		ce = append([]byte(nil), ce...)
-	}
+	ce, envCopiedPending := stripCustomEnvValuesForCopy(sourceAgent.CustomEnv)
 	ca := sourceAgent.CustomArgs
 	if len(ca) == 0 {
 		ca = []byte("[]")
@@ -492,21 +511,22 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 
 	newAgent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        sourceAgent.WorkspaceID,
-		Name:               newName,
-		Description:        sourceAgent.Description,
-		Instructions:       sourceAgent.Instructions,
-		AvatarUrl:          sourceAgent.AvatarUrl,
-		RuntimeMode:        sourceAgent.RuntimeMode,
-		RuntimeConfig:      rc,
-		RuntimeID:          sourceAgent.RuntimeID,
-		Visibility:         sourceAgent.Visibility,
-		MaxConcurrentTasks: sourceAgent.MaxConcurrentTasks,
-		OwnerID:            parseUUID(userID),
-		CustomEnv:          ce,
-		CustomArgs:         ca,
-		McpConfig:          mc,
-		Model:              sourceAgent.Model,
+		WorkspaceID:              sourceAgent.WorkspaceID,
+		Name:                     newName,
+		Description:              sourceAgent.Description,
+		Instructions:             sourceAgent.Instructions,
+		AvatarUrl:                sourceAgent.AvatarUrl,
+		RuntimeMode:              sourceAgent.RuntimeMode,
+		RuntimeConfig:            rc,
+		RuntimeID:                sourceAgent.RuntimeID,
+		Visibility:               sourceAgent.Visibility,
+		MaxConcurrentTasks:       sourceAgent.MaxConcurrentTasks,
+		OwnerID:                  parseUUID(userID),
+		CustomEnv:                ce,
+		CustomArgs:               ca,
+		McpConfig:                mc,
+		Model:                    sourceAgent.Model,
+		CustomEnvCopiedPending:   envCopiedPending,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -609,18 +629,15 @@ func redactMcpConfig(resp *AgentResponse) {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
+// Only the agent owner (creator) may change configuration or lifecycle; other
+// members cannot modify someone else's agent.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
-	if !ok {
+	if _, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member"); !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
-	if !isAdmin && !isAgentOwner {
-		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
+	if uuidToString(agent.OwnerID) != requestUserID(r) {
+		writeError(w, http.StatusForbidden, "only the agent owner can modify this agent")
 		return false
 	}
 	return true
@@ -641,6 +658,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	if req.CustomEnv != nil && agent.CustomEnvCopiedPending {
+		if len(*req.CustomEnv) > 0 {
+			for _, v := range *req.CustomEnv {
+				if strings.TrimSpace(v) == "" {
+					writeError(w, http.StatusBadRequest, "环境变量无法被复制，请补充真实配置")
+					return
+				}
+			}
+		}
 	}
 
 	params := db.UpdateAgentParams{
@@ -665,6 +693,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomEnv != nil {
 		ce, _ := json.Marshal(*req.CustomEnv)
 		params.CustomEnv = ce
+		if agent.CustomEnvCopiedPending {
+			params.CustomEnvCopiedPending = pgtype.Bool{Bool: false, Valid: true}
+		}
 	}
 	if req.CustomArgs != nil {
 		ca, _ := json.Marshal(*req.CustomArgs)

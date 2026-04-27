@@ -8,9 +8,11 @@ import { Button } from "@multica/ui/components/ui/button";
 export function InstructionsTab({
   agent,
   onSave,
+  readOnly = false,
 }: {
   agent: Agent;
   onSave: (instructions: string) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
@@ -45,26 +47,29 @@ export function InstructionsTab({
       <textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        readOnly={readOnly}
         placeholder={`Define this agent's role, expertise, and working style.\n\nExample:\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/`}
-        className="w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+        className="w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y read-only:bg-muted/30"
       />
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
           {value.length > 0 ? `${value.length} characters` : "No instructions set"}
         </span>
-        <Button
-          size="xs"
-          onClick={handleSave}
-          disabled={!isDirty || saving}
-        >
-          {saving ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Save className="h-3 w-3" />
-          )}
-          Save
-        </Button>
+        {!readOnly && (
+          <Button
+            size="xs"
+            onClick={handleSave}
+            disabled={!isDirty || saving}
+          >
+            {saving ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Save className="h-3 w-3" />
+            )}
+            Save
+          </Button>
+        )}
       </div>
     </div>
   );

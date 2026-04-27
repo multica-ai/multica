@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Loader2,
   Save,
@@ -11,6 +11,7 @@ import {
   Lock,
 } from "lucide-react";
 import type { Agent } from "@multica/core/types";
+import { ApiError } from "@multica/core/api";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -58,6 +59,10 @@ export function EnvTab({
     envMapToEntries(agent.custom_env ?? {}),
   );
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setEnvEntries(envMapToEntries(agent.custom_env ?? {}));
+  }, [agent.id, agent.updated_at, agent.custom_env_copied_pending]);
 
   const currentEnvMap = entriesToEnvMap(envEntries);
   const originalEnvMap = agent.custom_env ?? {};
@@ -107,8 +112,14 @@ export function EnvTab({
     try {
       await onSave({ custom_env: currentEnvMap });
       toast.success("Environment variables saved");
-    } catch {
-      toast.error("Failed to save environment variables");
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : "Failed to save environment variables";
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -155,6 +166,11 @@ export function EnvTab({
 
   return (
     <div className="max-w-lg space-y-4">
+      {agent.custom_env_copied_pending && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+          环境变量名称已从复制的 Agent 带入，但<strong>密钥值无法复制</strong>，当前值为空。请填写真实配置后保存；若仍有空值，保存时会提示「环境变量无法被复制，请补充真实配置」。
+        </p>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-xs text-muted-foreground">

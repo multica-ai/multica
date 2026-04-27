@@ -33,12 +33,14 @@ export function SettingsTab({
   members,
   currentUserId,
   onSave,
+  readOnly = false,
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
   members: MemberWithUser[];
   currentUserId: string | null;
   onSave: (updates: Partial<Agent>) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
@@ -121,6 +123,11 @@ export function SettingsTab({
 
   return (
     <div className="max-w-lg space-y-6">
+      {readOnly && (
+        <p className="rounded-md border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          你不是该 Agent 的创建者，无法修改其配置；仅创建者可在「Mine」下编辑自己的 Agent。
+        </p>
+      )}
       <div>
         <Label className="text-xs text-muted-foreground">Avatar</Label>
         <div className="mt-1.5 flex items-center gap-4">
@@ -128,7 +135,7 @@ export function SettingsTab({
             type="button"
             className="group relative h-16 w-16 shrink-0 rounded-full bg-muted overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={readOnly || uploading}
           >
             <ActorAvatar actorType="agent" actorId={agent.id} size={64} className="rounded-none" />
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
@@ -157,7 +164,8 @@ export function SettingsTab({
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1"
+          readOnly={readOnly}
+          className="mt-1 read-only:bg-muted/30"
         />
       </div>
 
@@ -167,7 +175,8 @@ export function SettingsTab({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="What does this agent do?"
-          className="mt-1"
+          readOnly={readOnly}
+          className="mt-1 read-only:bg-muted/30"
         />
       </div>
 
@@ -176,7 +185,8 @@ export function SettingsTab({
         <div className="mt-1.5 flex gap-2">
           <button
             type="button"
-            onClick={() => setVisibility("workspace")}
+            onClick={() => !readOnly && setVisibility("workspace")}
+            disabled={readOnly}
             className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
               visibility === "workspace"
                 ? "border-primary bg-primary/5"
@@ -191,7 +201,8 @@ export function SettingsTab({
           </button>
           <button
             type="button"
-            onClick={() => setVisibility("private")}
+            onClick={() => !readOnly && setVisibility("private")}
+            disabled={readOnly}
             className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
               visibility === "private"
                 ? "border-primary bg-primary/5"
@@ -215,7 +226,8 @@ export function SettingsTab({
           max={50}
           value={maxTasks}
           onChange={(e) => setMaxTasks(Number(e.target.value))}
-          className="mt-1 w-24"
+          readOnly={readOnly}
+          className="mt-1 w-24 read-only:bg-muted/30"
         />
       </div>
 
@@ -226,7 +238,8 @@ export function SettingsTab({
             <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
               <button
                 type="button"
-                onClick={() => setRuntimeFilter("mine")}
+                onClick={() => !readOnly && setRuntimeFilter("mine")}
+                disabled={readOnly}
                 className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
                   runtimeFilter === "mine"
                     ? "bg-background text-foreground shadow-sm"
@@ -237,7 +250,8 @@ export function SettingsTab({
               </button>
               <button
                 type="button"
-                onClick={() => setRuntimeFilter("all")}
+                onClick={() => !readOnly && setRuntimeFilter("all")}
+                disabled={readOnly}
                 className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
                   runtimeFilter === "all"
                     ? "bg-background text-foreground shadow-sm"
@@ -249,9 +263,9 @@ export function SettingsTab({
             </div>
           )}
         </div>
-        <Popover open={runtimeOpen} onOpenChange={setRuntimeOpen}>
+        <Popover open={runtimeOpen} onOpenChange={(o) => !readOnly && setRuntimeOpen(o)}>
           <PopoverTrigger
-            disabled={runtimes.length === 0}
+            disabled={readOnly || runtimes.length === 0}
             className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
           >
             {selectedRuntime ? (
@@ -284,7 +298,10 @@ export function SettingsTab({
               return (
                 <button
                   key={device.id}
+                  type="button"
+                  disabled={readOnly}
                   onClick={() => {
+                    if (readOnly) return;
                     setSelectedRuntimeId(device.id);
                     setRuntimeOpen(false);
                   }}
@@ -330,13 +347,15 @@ export function SettingsTab({
         runtimeOnline={selectedRuntime?.status === "online"}
         value={model}
         onChange={setModel}
-        disabled={!selectedRuntime}
+        disabled={readOnly || !selectedRuntime}
       />
 
-      <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
-        {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-        Save Changes
-      </Button>
+      {!readOnly && (
+        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+          {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+          Save Changes
+        </Button>
+      )}
     </div>
   );
 }

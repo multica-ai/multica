@@ -20,8 +20,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function SkillsTab({
   agent,
+  readOnly = false,
 }: {
   agent: Agent;
+  readOnly?: boolean;
 }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -72,7 +74,7 @@ export function SkillsTab({
           variant="outline"
           size="xs"
           onClick={() => setShowPicker(true)}
-          disabled={saving || availableSkills.length === 0}
+          disabled={readOnly || saving || availableSkills.length === 0}
         >
           <Plus className="h-3 w-3" />
           Add Skill
@@ -93,7 +95,7 @@ export function SkillsTab({
           <p className="mt-1 text-xs text-muted-foreground">
             Add workspace skills to share team knowledge with this agent. Local skills are already used automatically.
           </p>
-          {availableSkills.length > 0 && (
+          {availableSkills.length > 0 && !readOnly && (
             <Button
               onClick={() => setShowPicker(true)}
               size="xs"
@@ -127,7 +129,7 @@ export function SkillsTab({
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => handleRemove(skill.id)}
-                disabled={saving}
+                disabled={readOnly || saving}
                 className="text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="h-3.5 w-3.5" />
