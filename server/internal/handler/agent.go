@@ -629,15 +629,18 @@ func redactMcpConfig(resp *AgentResponse) {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner (creator) may change configuration or lifecycle; other
-// members cannot modify someone else's agent.
+// Only the agent owner or workspace owner/admin can manage any agent,
+// regardless of whether it is public or private.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
-	if _, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member"); !ok {
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	if !ok {
 		return false
 	}
-	if uuidToString(agent.OwnerID) != requestUserID(r) {
-		writeError(w, http.StatusForbidden, "only the agent owner can modify this agent")
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
+	if !isAdmin && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
 		return false
 	}
 	return true

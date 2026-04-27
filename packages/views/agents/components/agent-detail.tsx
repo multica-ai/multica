@@ -87,7 +87,6 @@ export function AgentDetail({
     (agent.owner_id === currentUserId ||
       myMembership.role === "owner" ||
       myMembership.role === "admin");
-  const canEditConfig = !!currentUserId && agent.owner_id === currentUserId;
 
   return (
     <div className="flex h-full flex-col">
@@ -96,11 +95,9 @@ export function AgentDetail({
         <div className="flex items-center gap-2 bg-muted/50 px-4 py-2 text-xs text-muted-foreground border-b">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1">This agent is archived. It cannot be assigned or mentioned.</span>
-          {canEditConfig && (
-            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
-              Restore
-            </Button>
-          )}
+          <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
+            Restore
+          </Button>
         </div>
       )}
 
@@ -130,7 +127,7 @@ export function AgentDetail({
             </span>
           </div>
         </div>
-        {!isArchived && canEditConfig && (
+        {!isArchived && (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -181,18 +178,17 @@ export function AgentDetail({
         {activeTab === "instructions" && (
           <InstructionsTab
             agent={agent}
-            readOnly={!canEditConfig}
             onSave={(instructions) => onUpdate(agent.id, { instructions })}
           />
         )}
         {activeTab === "skills" && (
-          <SkillsTab agent={agent} readOnly={!canEditConfig} />
+          <SkillsTab agent={agent} />
         )}
         {activeTab === "tasks" && <TasksTab agent={agent} />}
         {activeTab === "env" && (
           <EnvTab
             agent={agent}
-            readOnly={agent.custom_env_redacted || !canEditConfig}
+            readOnly={agent.custom_env_redacted}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
@@ -200,7 +196,6 @@ export function AgentDetail({
           <CustomArgsTab
             agent={agent}
             runtimeDevice={runtimeDevice}
-            readOnly={!canEditConfig}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
@@ -210,7 +205,6 @@ export function AgentDetail({
             runtimes={runtimes}
             members={members}
             currentUserId={currentUserId}
-            readOnly={!canEditConfig}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />
         )}
