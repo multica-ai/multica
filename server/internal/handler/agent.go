@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -445,6 +447,37 @@ type CopyAgentRequest struct {
 	Name string `json:"name"`
 }
 
+// Matches a trailing " (N)" suffix where N is a non-negative integer (e.g. "Agent (12)").
+var agentNumberedNameSuffix = regexp.MustCompile(`^(.+?) \((\d+)\)$`)
+
+func agentDuplicateBaseName(name string) string {
+	if m := agentNumberedNameSuffix.FindStringSubmatch(name); m != nil {
+		return m[1]
+	}
+	return name
+}
+
+// nextDuplicateAgentName picks the next "base (N)" name not colliding with existing agent
+// names in the workspace. The base is derived from sourceName by stripping one trailing
+// " (N)" suffix if present (so duplicating "Agent (1)" uses base "Agent").
+func nextDuplicateAgentName(existingNames []string, sourceName string) string {
+	base := agentDuplicateBaseName(sourceName)
+	maxN := 0
+	prefix := base + " ("
+	for _, n := range existingNames {
+		if n == base {
+			continue
+		}
+		if strings.HasPrefix(n, prefix) && strings.HasSuffix(n, ")") {
+			inner := n[len(prefix) : len(n)-1]
+			if num, err := strconv.Atoi(inner); err == nil && num > maxN {
+				maxN = num
+			}
+		}
+	}
+	return fmt.Sprintf("%s (%d)", base, maxN+1)
+}
+
 func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	sourceAgent, ok := h.loadAgentForUser(w, r, id)
@@ -471,9 +504,19 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newName := req.Name
+	newName := strings.TrimSpace(req.Name)
 	if newName == "" {
-		newName = "Copy of " + sourceAgent.Name
+		allAgents, err := h.Queries.ListAllAgents(r.Context(), sourceAgent.WorkspaceID)
+		if err != nil {
+			slog.Warn("failed to list agents for duplicate name", "workspace_id", wsID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to duplicate agent: "+err.Error())
+			return
+		}
+		names := make([]string, len(allAgents))
+		for i, a := range allAgents {
+			names[i] = a.Name
+		}
+		newName = nextDuplicateAgentName(names, sourceAgent.Name)
 	}
 
 	skills, err := h.Queries.ListAgentSkills(r.Context(), sourceAgent.ID)
@@ -661,17 +704,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
-	}
-
-	if req.CustomEnv != nil && agent.CustomEnvCopiedPending {
-		if len(*req.CustomEnv) > 0 {
-			for _, v := range *req.CustomEnv {
-				if strings.TrimSpace(v) == "" {
-					writeError(w, http.StatusBadRequest, "环境变量无法被复制，请补充真实配置")
-					return
-				}
-			}
-		}
 	}
 
 	params := db.UpdateAgentParams{

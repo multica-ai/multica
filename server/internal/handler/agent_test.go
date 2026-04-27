@@ -8,6 +8,44 @@ import (
 	"testing"
 )
 
+func TestAgentDuplicateBaseName(t *testing.T) {
+	t.Parallel()
+	if got, want := agentDuplicateBaseName("Agent"), "Agent"; got != want {
+		t.Fatalf("agentDuplicateBaseName(%q) = %q, want %q", "Agent", got, want)
+	}
+	if got, want := agentDuplicateBaseName("Agent (1)"), "Agent"; got != want {
+		t.Fatalf("agentDuplicateBaseName(%q) = %q, want %q", "Agent (1)", got, want)
+	}
+	if got, want := agentDuplicateBaseName("My Bot (99)"), "My Bot"; got != want {
+		t.Fatalf("agentDuplicateBaseName(%q) = %q, want %q", "My Bot (99)", got, want)
+	}
+	if got, want := agentDuplicateBaseName("x (notnum)"), "x (notnum)"; got != want {
+		t.Fatalf("agentDuplicateBaseName(%q) = %q, want %q", "x (notnum)", got, want)
+	}
+}
+
+func TestNextDuplicateAgentName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		existing []string
+		source   string
+		want     string
+	}{
+		{[]string{"Other"}, "Agent", "Agent (1)"},
+		{[]string{"Agent"}, "Agent", "Agent (1)"},
+		{[]string{"Agent", "Agent (1)"}, "Agent", "Agent (2)"},
+		{[]string{"Agent (1)", "Agent (2)"}, "Agent (1)", "Agent (3)"},
+		{[]string{"Agent (1)", "Agent (3)"}, "Agent (1)", "Agent (4)"},
+		{[]string{"Agent", "Agent (1)", "Agent (2)"}, "Agent (1)", "Agent (3)"},
+		{[]string{"Alpha", "Alpha (1)"}, "Alpha (1)", "Alpha (2)"},
+	}
+	for _, tc := range cases {
+		if got := nextDuplicateAgentName(tc.existing, tc.source); got != tc.want {
+			t.Fatalf("nextDuplicateAgentName(%v, %q) = %q, want %q", tc.existing, tc.source, got, tc.want)
+		}
+	}
+}
+
 func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

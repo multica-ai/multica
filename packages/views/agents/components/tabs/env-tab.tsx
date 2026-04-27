@@ -168,7 +168,7 @@ export function EnvTab({
     <div className="max-w-lg space-y-4">
       {agent.custom_env_copied_pending && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
-          环境变量名称已从复制的 Agent 带入，但<strong>密钥值无法复制</strong>，当前值为空。请填写真实配置后保存；若仍有空值，保存时会提示「环境变量无法被复制，请补充真实配置」。
+          环境变量名称已从复制的 Agent 带入，但<strong>密钥值无法复制</strong>，当前值为空。请填写真实配置后保存。
         </p>
       )}
       <div className="flex items-center justify-between">
