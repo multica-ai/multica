@@ -285,6 +285,14 @@ WHERE id = (
             AND (
               (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
               OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.issue_id IS NULL
+                AND atq.chat_session_id IS NULL
+                AND atq.autopilot_run_id IS NULL
+                AND active.issue_id IS NULL
+                AND active.chat_session_id IS NULL
+                AND active.autopilot_run_id IS NULL
+              )
             )
       )
     ORDER BY atq.priority DESC, atq.created_at ASC
@@ -299,6 +307,10 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // already dispatched or running. This allows different agents to work on the same
 // issue in parallel while preventing a single agent from running duplicate tasks.
 // Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+// Quick-create tasks have no issue / chat / autopilot link, so they serialize on
+// "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
+// otherwise a user mashing the create button could fire concurrent quick-creates
+// whose completion lookup would race over "most recent issue by this agent".
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue

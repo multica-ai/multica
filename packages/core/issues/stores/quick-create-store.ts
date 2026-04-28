@@ -7,8 +7,11 @@ import { defaultStorage } from "../../platform/storage";
 
 // Per-workspace memory of the last agent the user picked in the Quick Create
 // modal. Defaulted to that agent on next open so frequent users skip the
-// picker entirely. Persisted with a workspace-aware key so switching
-// workspaces shows the right default automatically.
+// picker entirely. Persisted with the workspace-aware StateStorage so
+// switching workspaces shows the right default automatically. Per-user
+// scoping comes for free from localStorage being browser-profile-local —
+// matches how draft-store / issues-scope-store / comment-collapse-store
+// already namespace themselves.
 interface QuickCreateState {
   lastAgentId: string | null;
   setLastAgentId: (id: string | null) => void;

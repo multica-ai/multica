@@ -896,18 +896,28 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Make sure the picked agent belongs to this workspace before we even
-	// look at runtime liveness — prevents cross-workspace task injection.
-	agent, ok := h.loadAgentForUser(w, r, req.AgentID)
-	if !ok {
+	// Reuse the same workspace-membership / archived / private-agent
+	// ownership rules as `validateAssigneePair` so a user can't POST a
+	// private agent_id they shouldn't be able to dispatch (the frontend
+	// filters them out, but the handler is the trust boundary).
+	if status, msg := h.validateAssigneePair(
+		r.Context(), r, workspaceID,
+		pgtype.Text{String: "agent", Valid: true},
+		agentUUID,
+	); status != 0 {
+		writeError(w, status, msg)
 		return
 	}
-	if uuidToString(agent.WorkspaceID) != workspaceID {
-		writeError(w, http.StatusBadRequest, "agent does not belong to the active workspace")
-		return
-	}
-	if agent.ArchivedAt.Valid {
-		writeAgentUnavailable(w, "agent is archived")
+
+	// Re-load the agent for the runtime liveness check below. Safe by
+	// construction: validateAssigneePair just confirmed it exists in this
+	// workspace and the caller has visibility.
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	if !agent.RuntimeID.Valid {
