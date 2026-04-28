@@ -127,10 +127,13 @@ var issueAssignCmd = &cobra.Command{
 }
 
 var issueStatusCmd = &cobra.Command{
-	Use:   "status <id> <status>",
+	Use:   "status <id> [<status>]",
 	Short: "Change issue status",
-	Args:  exactArgs(2),
-	RunE:  runIssueStatus,
+	// Accept either:
+	//   multica issue status <id> <status>     (positional, original form)
+	//   multica issue status <id> --to <status> (flag form, consistent with `issue assign --to`)
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runIssueStatus,
 }
 
 // Comment subcommands.
@@ -283,6 +286,7 @@ func init() {
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
+	issueStatusCmd.Flags().String("to", "", "New status (alternative to positional argument; see `multica issue status --help`)")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue assign
@@ -683,7 +687,23 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 
 func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
-	status := args[1]
+
+	// Accept the new status from either the positional argument or the --to flag.
+	// Positional takes precedence when both are provided; this preserves the
+	// original behavior verbatim and makes `multica issue status <id> done` work
+	// identically to before.
+	var status string
+	if len(args) >= 2 {
+		status = args[1]
+	}
+	if flagVal, _ := cmd.Flags().GetString("to"); flagVal != "" {
+		if status == "" {
+			status = flagVal
+		}
+	}
+	if status == "" {
+		return fmt.Errorf("status required: pass as positional argument or via --to")
+	}
 
 	valid := false
 	for _, s := range validIssueStatuses {
