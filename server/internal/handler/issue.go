@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/mention"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -934,6 +935,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
+	// Expand bare issue identifiers (e.g. MUL-117) in the description to mention
+	// links so the editor renders them as capsules immediately after save,
+	// consistent with how the comment handler expands identifiers.
+	if req.Description != nil && *req.Description != "" {
+		expanded := mention.ExpandIssueIdentifiers(r.Context(), h.Queries, parseUUID(workspaceID), *req.Description)
+		req.Description = &expanded
+	}
+
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Title:              req.Title,
@@ -1050,7 +1059,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		// Expand bare issue identifiers (e.g. MUL-117) in the description to mention
+		// links so the editor renders them as capsules immediately after save,
+		// consistent with how the comment handler expands identifiers.
+		expanded := mention.ExpandIssueIdentifiers(r.Context(), h.Queries, prevIssue.WorkspaceID, *req.Description)
+		params.Description = pgtype.Text{String: expanded, Valid: true}
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}

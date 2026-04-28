@@ -174,6 +174,16 @@ export function useUpdateIssue() {
         );
       }
     },
+    onSuccess: (serverIssue, vars) => {
+      // Merge the authoritative server response into the detail cache. This is
+      // required for fields that the server rewrites on save — e.g. bare issue
+      // identifiers (`MUL-117`) in the description are expanded into mention
+      // links server-side, and the editor needs to pick up the expanded content
+      // so the capsules render immediately instead of only after a reload.
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, vars.id), (old) =>
+        old ? { ...old, ...serverIssue } : serverIssue,
+      );
+    },
     onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });

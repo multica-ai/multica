@@ -202,11 +202,26 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
-    // Readonly content update: when defaultValue changes and editor is readonly,
-    // re-set the content (e.g. after editing a comment, the readonly view updates)
+    // External content update: when defaultValue changes from outside, re-set
+    // the editor content. Two scenarios:
+    //   1. Readonly mode — e.g. after editing a comment, the readonly view
+    //      should reflect the new content.
+    //   2. Editable mode — the server may rewrite the content on save (e.g.
+    //      expanding bare issue identifiers like `MUL-117` into mention
+    //      capsules). We pick those changes up as long as the user is not
+    //      actively typing and the new value differs from what we last
+    //      emitted — otherwise we'd clobber in-progress edits.
     useEffect(() => {
-      if (!editor || editable) return;
+      if (!editor) return;
       if (defaultValue === prevContentRef.current) return;
+      if (editable) {
+        // Skip if the user is still typing — resyncing would steal focus and
+        // reset the cursor.
+        if (editor.isFocused) return;
+        // Skip if the incoming value matches what we last emitted (no external
+        // change to apply).
+        if (defaultValue === lastEmittedRef.current) return;
+      }
       prevContentRef.current = defaultValue;
       const processed = defaultValue ? preprocessMarkdown(defaultValue) : "";
       if (processed) {
@@ -214,6 +229,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       } else {
         editor.commands.clearContent();
       }
+      // Keep the emitted marker in sync so the next onUpdate diff is accurate.
+      lastEmittedRef.current = stripBlobUrls(editor.getMarkdown());
     }, [editor, editable, defaultValue]);
 
     useImperativeHandle(ref, () => ({
