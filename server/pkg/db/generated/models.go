@@ -86,6 +86,21 @@ type AgentTaskQueue struct {
 	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
 }
 
+type Artifact struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Kind        string             `json:"kind"`
+	Title       string             `json:"title"`
+	Body        string             `json:"body"`
+	Metadata    []byte             `json:"metadata"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Attachment struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`

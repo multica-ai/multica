@@ -78,6 +78,8 @@ func persistSession(gitRoot string, session *mcpSessionState) {
 }
 
 func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionState, workspaceID, projectID, gitRoot string) {
+	registerArtifactTools(srv, client)
+
 	// -----------------------------------------------------------------------
 	// list_issues
 	// -----------------------------------------------------------------------

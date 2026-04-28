@@ -243,6 +243,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					r.Get("/artifacts", h.ListArtifactsForIssue)
 					r.Get("/children", h.ListChildIssues)
 					r.Get("/work-sessions", h.ListWorkSessions)
 				})
@@ -275,6 +276,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Get("/artifacts", h.ListArtifactsForProject)
 				})
 			})
 
@@ -382,6 +384,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
+
+			// Artifacts
+			r.Route("/api/artifacts", func(r chi.Router) {
+				r.Post("/", h.CreateArtifact)
+				r.Get("/{id}", h.GetArtifact)
+				r.Put("/{id}", h.UpdateArtifact)
+				r.Delete("/{id}", h.DeleteArtifact)
+			})
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
