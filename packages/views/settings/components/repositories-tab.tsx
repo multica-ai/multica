@@ -138,7 +138,9 @@ export function RepositoriesTab() {
 
             {repos.map((repo, index) => {
               const draft = getMachineDraft(index);
-              const ownerRuntimes = runtimes.filter((runtime) => runtime.owner_id === draft.ownerId);
+              const ownerRuntimes = runtimes
+                .filter((runtime) => runtime.owner_id === draft.ownerId)
+                .filter((runtime, idx, arr) => arr.findIndex((r) => deviceNameForRuntime(r) === deviceNameForRuntime(runtime)) === idx);
               const machinePathEntries = Object.entries(repo.machine_paths ?? {});
 
               return (
