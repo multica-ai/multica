@@ -408,6 +408,7 @@ type googleTokenResponse struct {
 }
 
 type googleUserInfo struct {
+	ID      string `json:"id"`
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
@@ -541,6 +542,24 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 			user = updated
 		}
 	}
+
+	// Auto-create Google binding so the account shows in Settings → Linked Accounts
+	// and can be used for notification preferences.
+	googleExternalID := gUser.ID
+	if googleExternalID == "" {
+		googleExternalID = email // fallback to email if Google ID is missing
+	}
+	_, _ = h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
+		UserID:                user.ID,
+		Provider:              "google",
+		ExternalUserID:        googleExternalID,
+		DisplayName:           strToText(gUser.Name),
+		AccessTokenEncrypted:  pgtype.Text{},
+		RefreshTokenEncrypted: pgtype.Text{},
+		TokenExpiresAt:        pgtype.Timestamptz{},
+		Status:                "active",
+		Metadata:              []byte("{}"),
+	})
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {

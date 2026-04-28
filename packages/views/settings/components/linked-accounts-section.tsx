@@ -59,6 +59,7 @@ export function LinkedAccountsSection() {
 
   const dingTalkBinding = bindingByProvider.get("dingtalk");
   const emailBinding = bindingByProvider.get("email");
+  const googleBinding = bindingByProvider.get("google");
 
   const handleDisconnect = async (binding: ExternalAccountBinding) => {
     setRemovingBindingId(binding.id);
@@ -306,6 +307,53 @@ export function LinkedAccountsSection() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Google Card — binding is created automatically at login */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Google</CardTitle>
+              <CardDescription>
+                {googleBinding
+                  ? "Your Google account is linked. It was connected when you signed in with Google."
+                  : "Sign in with Google to link your account automatically."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">
+                    {googleBinding?.display_name ?? "No Google account connected"}
+                  </span>
+                  <Badge variant={googleBinding ? "secondary" : "outline"}>
+                    {googleBinding?.status ?? "not connected"}
+                  </Badge>
+                </div>
+                {googleBinding && (
+                  <p className="text-sm text-muted-foreground">
+                    ID: {googleBinding.external_user_id}
+                  </p>
+                )}
+              </div>
+
+              {googleBinding ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void handleDisconnect(googleBinding);
+                  }}
+                  disabled={removingBindingId !== null}
+                >
+                  {removingBindingId === googleBinding.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Link2Off className="h-4 w-4" />
+                  )}
+                  Disconnect
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         </>
