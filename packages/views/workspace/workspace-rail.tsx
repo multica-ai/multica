@@ -15,7 +15,7 @@ import { workspaceColor } from "@multica/core/workspace/color";
 import type { Workspace } from "@multica/core/types";
 import { AppLink, useNavigation } from "../navigation";
 
-const RAIL_WIDTH_PX = 56;
+export const WORKSPACE_RAIL_WIDTH_PX = 56;
 
 /**
  * Persistent left sidebar shown on every authenticated dashboard route.
@@ -44,8 +44,11 @@ export function WorkspaceRail() {
   return (
     <nav
       aria-label="Workspaces"
-      className="flex h-svh shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar py-2"
-      style={{ width: RAIL_WIDTH_PX }}
+      // `relative z-20` keeps the rail above the AppSidebar (z-10) during the
+      // sidebar's open/close slide transition; otherwise the fixed sidebar
+      // briefly paints over the rail's icons mid-animation.
+      className="relative z-20 flex h-svh shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar py-2"
+      style={{ width: WORKSPACE_RAIL_WIDTH_PX }}
     >
       <RailLink
         href={paths.global()}
