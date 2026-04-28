@@ -8,14 +8,22 @@ SELECT * FROM inbox_folder
 WHERE id = $1 AND workspace_id = $2 AND user_id = $3;
 
 -- name: CreateInboxFolder :one
-INSERT INTO inbox_folder (workspace_id, user_id, name, position)
-VALUES ($1, $2, $3, $4)
+INSERT INTO inbox_folder (workspace_id, user_id, name, position, parent_id)
+VALUES ($1, $2, $3, $4, sqlc.narg('parent_id'))
 RETURNING *;
 
 -- name: RenameInboxFolder :one
 UPDATE inbox_folder SET name = $1
 WHERE id = $2 AND workspace_id = $3 AND user_id = $4
 RETURNING *;
+
+-- name: UpdateInboxFolderParent :one
+-- Sets or clears the folder's parent. NULL parent = top-level. Cycle prevention
+-- is enforced in application code via IsInboxFolderDescendant before update.
+UPDATE inbox_folder SET parent_id = sqlc.narg('parent_id')
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3
+RETURNING *;
+
 
 -- name: UpdateInboxFolderPosition :exec
 UPDATE inbox_folder SET position = $1
@@ -62,7 +70,8 @@ WHERE f.workspace_id = $1 AND f.user_id = $2;
 -- name: ListInboxItemsUnfiled :many
 -- Inbox items that are not archived and not in any folder.
 SELECT i.*,
-       iss.status as issue_status
+       iss.status as issue_status,
+       iss.project_id as project_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1
@@ -78,7 +87,8 @@ ORDER BY i.created_at DESC;
 -- name: ListInboxItemsInFolder :many
 -- Inbox items in a specific folder (regardless of archived flag).
 SELECT i.*,
-       iss.status as issue_status
+       iss.status as issue_status,
+       iss.project_id as project_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 JOIN inbox_folder_membership m

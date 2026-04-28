@@ -398,6 +398,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Post("/folders", h.CreateInboxFolder)
 				r.Get("/folder-memberships", h.ListInboxFolderMemberships)
 				r.Patch("/folders/{folderId}", h.UpdateInboxFolder)
+				r.Put("/folders/{folderId}/parent", h.SetInboxFolderParent)
 				r.Delete("/folders/{folderId}", h.DeleteInboxFolder)
 				r.Post("/folders/{folderId}/items", h.AddInboxFolderItem)
 				r.Delete("/folders/{folderId}/items/{itemType}/{itemId}", h.RemoveInboxFolderItem)

@@ -562,10 +562,10 @@ export class ApiClient {
     return this.fetch("/api/inbox/folders");
   }
 
-  async createInboxFolder(name: string): Promise<InboxFolder> {
+  async createInboxFolder(name: string, parentId?: string | null): Promise<InboxFolder> {
     return this.fetch("/api/inbox/folders", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, parent_id: parentId ?? null }),
     });
   }
 
@@ -573,6 +573,13 @@ export class ApiClient {
     return this.fetch(`/api/inbox/folders/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
+    });
+  }
+
+  async setInboxFolderParent(id: string, parentId: string | null): Promise<InboxFolder> {
+    return this.fetch(`/api/inbox/folders/${id}/parent`, {
+      method: "PUT",
+      body: JSON.stringify({ parent_id: parentId ?? "" }),
     });
   }
 

@@ -222,6 +222,7 @@ type InboxFolder struct {
 	Name        string             `json:"name"`
 	Position    float64            `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
 }
 
 type InboxFolderMembership struct {

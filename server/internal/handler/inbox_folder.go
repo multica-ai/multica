@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -17,6 +18,7 @@ type InboxFolderResponse struct {
 	Name        string  `json:"name"`
 	Position    float64 `json:"position"`
 	CreatedAt   string  `json:"created_at"`
+	ParentID    *string `json:"parent_id"`
 }
 
 func inboxFolderToResponse(f db.InboxFolder) InboxFolderResponse {
@@ -27,15 +29,22 @@ func inboxFolderToResponse(f db.InboxFolder) InboxFolderResponse {
 		Name:        f.Name,
 		Position:    f.Position,
 		CreatedAt:   timestampToString(f.CreatedAt),
+		ParentID:    uuidToPtr(f.ParentID),
 	}
 }
 
 type CreateInboxFolderRequest struct {
-	Name string `json:"name"`
+	Name     string  `json:"name"`
+	ParentID *string `json:"parent_id"`
 }
 
 type UpdateInboxFolderRequest struct {
 	Name *string `json:"name"`
+}
+
+type SetInboxFolderParentRequest struct {
+	// Empty string = top-level (no parent).
+	ParentID string `json:"parent_id"`
 }
 
 type AddInboxFolderItemRequest struct {
@@ -104,11 +113,25 @@ func (h *Handler) CreateInboxFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	parentID := pgtype.UUID{}
+	if req.ParentID != nil && *req.ParentID != "" {
+		if _, err := h.Queries.GetInboxFolder(r.Context(), db.GetInboxFolderParams{
+			ID:          parseUUID(*req.ParentID),
+			WorkspaceID: parseUUID(workspaceID),
+			UserID:      parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "parent folder not found")
+			return
+		}
+		parentID = parseUUID(*req.ParentID)
+	}
+
 	folder, err := h.Queries.CreateInboxFolder(r.Context(), db.CreateInboxFolderParams{
 		WorkspaceID: parseUUID(workspaceID),
 		UserID:      parseUUID(userID),
 		Name:        name,
 		Position:    maxPos + 1,
+		ParentID:    parentID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create folder")
@@ -151,6 +174,83 @@ func (h *Handler) UpdateInboxFolder(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "folder not found")
+		return
+	}
+
+	resp := inboxFolderToResponse(folder)
+	h.publish(protocol.EventInboxFolderUpdated, workspaceID, "member", userID, map[string]any{"folder": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) SetInboxFolderParent(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	folderID := chi.URLParam(r, "folderId")
+
+	var req SetInboxFolderParentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if _, err := h.Queries.GetInboxFolder(r.Context(), db.GetInboxFolderParams{
+		ID:          parseUUID(folderID),
+		WorkspaceID: parseUUID(workspaceID),
+		UserID:      parseUUID(userID),
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "folder not found")
+		return
+	}
+
+	parentID := pgtype.UUID{}
+	if req.ParentID != "" {
+		if req.ParentID == folderID {
+			writeError(w, http.StatusBadRequest, "folder cannot be its own parent")
+			return
+		}
+		// Verify the proposed parent exists and belongs to the same user.
+		parent, err := h.Queries.GetInboxFolder(r.Context(), db.GetInboxFolderParams{
+			ID:          parseUUID(req.ParentID),
+			WorkspaceID: parseUUID(workspaceID),
+			UserID:      parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "parent folder not found")
+			return
+		}
+		// Walk up from the proposed parent. If we ever reach folderID, the move
+		// would create a cycle (i.e. parent is a descendant of folderID).
+		// Bounded loop guards against pre-existing data corruption.
+		current := parent
+		for i := 0; i < 100 && current.ParentID.Valid; i++ {
+			if uuidToString(current.ParentID) == folderID {
+				writeError(w, http.StatusBadRequest, "cannot move folder into its own descendant")
+				return
+			}
+			next, err := h.Queries.GetInboxFolder(r.Context(), db.GetInboxFolderParams{
+				ID:          current.ParentID,
+				WorkspaceID: parseUUID(workspaceID),
+				UserID:      parseUUID(userID),
+			})
+			if err != nil {
+				break
+			}
+			current = next
+		}
+		parentID = parseUUID(req.ParentID)
+	}
+
+	folder, err := h.Queries.UpdateInboxFolderParent(r.Context(), db.UpdateInboxFolderParentParams{
+		ID:          parseUUID(folderID),
+		WorkspaceID: parseUUID(workspaceID),
+		UserID:      parseUUID(userID),
+		ParentID:    parentID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update folder parent")
 		return
 	}
 

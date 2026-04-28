@@ -35,10 +35,25 @@ export function useCreateInboxFolder() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (name: string) => api.createInboxFolder(name),
+    mutationFn: ({ name, parentId }: { name: string; parentId?: string | null }) =>
+      api.createInboxFolder(name, parentId ?? null),
     onSuccess: (folder) => {
       qc.setQueryData<InboxFolder[]>(inboxFolderKeys.list(wsId), (old) =>
         old ? [...old, folder] : [folder],
+      );
+    },
+  });
+}
+
+export function useSetInboxFolderParent() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, parentId }: { id: string; parentId: string | null }) =>
+      api.setInboxFolderParent(id, parentId),
+    onSuccess: (folder) => {
+      qc.setQueryData<InboxFolder[]>(inboxFolderKeys.list(wsId), (old) =>
+        old?.map((f) => (f.id === folder.id ? folder : f)),
       );
     },
   });

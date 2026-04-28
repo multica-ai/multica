@@ -21,6 +21,7 @@ type InboxItemResponse struct {
 	Type          string          `json:"type"`
 	Severity      string          `json:"severity"`
 	IssueID       *string         `json:"issue_id"`
+	ProjectID     *string         `json:"project_id"`
 	Title         string          `json:"title"`
 	Body          *string         `json:"body"`
 	Read          bool            `json:"read"`
@@ -113,6 +114,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 				Type:          item.Type,
 				Severity:      item.Severity,
 				IssueID:       uuidToPtr(item.IssueID),
+				ProjectID:     uuidToPtr(item.ProjectID),
 				Title:         item.Title,
 				Body:          textToPtr(item.Body),
 				Read:          item.Read,
@@ -148,6 +150,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 			Type:          item.Type,
 			Severity:      item.Severity,
 			IssueID:       uuidToPtr(item.IssueID),
+			ProjectID:     uuidToPtr(item.ProjectID),
 			Title:         item.Title,
 			Body:          textToPtr(item.Body),
 			Read:          item.Read,

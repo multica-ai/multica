@@ -29,9 +29,9 @@ func (q *Queries) AddItemToFolder(ctx context.Context, arg AddItemToFolderParams
 }
 
 const createInboxFolder = `-- name: CreateInboxFolder :one
-INSERT INTO inbox_folder (workspace_id, user_id, name, position)
-VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, user_id, name, position, created_at
+INSERT INTO inbox_folder (workspace_id, user_id, name, position, parent_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, user_id, name, position, created_at, parent_id
 `
 
 type CreateInboxFolderParams struct {
@@ -39,6 +39,7 @@ type CreateInboxFolderParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 	Name        string      `json:"name"`
 	Position    float64     `json:"position"`
+	ParentID    pgtype.UUID `json:"parent_id"`
 }
 
 func (q *Queries) CreateInboxFolder(ctx context.Context, arg CreateInboxFolderParams) (InboxFolder, error) {
@@ -47,6 +48,7 @@ func (q *Queries) CreateInboxFolder(ctx context.Context, arg CreateInboxFolderPa
 		arg.UserID,
 		arg.Name,
 		arg.Position,
+		arg.ParentID,
 	)
 	var i InboxFolder
 	err := row.Scan(
@@ -56,6 +58,7 @@ func (q *Queries) CreateInboxFolder(ctx context.Context, arg CreateInboxFolderPa
 		&i.Name,
 		&i.Position,
 		&i.CreatedAt,
+		&i.ParentID,
 	)
 	return i, err
 }
@@ -77,7 +80,7 @@ func (q *Queries) DeleteInboxFolder(ctx context.Context, arg DeleteInboxFolderPa
 }
 
 const getInboxFolder = `-- name: GetInboxFolder :one
-SELECT id, workspace_id, user_id, name, position, created_at FROM inbox_folder
+SELECT id, workspace_id, user_id, name, position, created_at, parent_id FROM inbox_folder
 WHERE id = $1 AND workspace_id = $2 AND user_id = $3
 `
 
@@ -97,6 +100,7 @@ func (q *Queries) GetInboxFolder(ctx context.Context, arg GetInboxFolderParams) 
 		&i.Name,
 		&i.Position,
 		&i.CreatedAt,
+		&i.ParentID,
 	)
 	return i, err
 }
@@ -293,7 +297,7 @@ func (q *Queries) ListInboxFolderMemberships(ctx context.Context, arg ListInboxF
 }
 
 const listInboxFolders = `-- name: ListInboxFolders :many
-SELECT id, workspace_id, user_id, name, position, created_at FROM inbox_folder
+SELECT id, workspace_id, user_id, name, position, created_at, parent_id FROM inbox_folder
 WHERE workspace_id = $1 AND user_id = $2
 ORDER BY position ASC, created_at ASC
 `
@@ -319,6 +323,7 @@ func (q *Queries) ListInboxFolders(ctx context.Context, arg ListInboxFoldersPara
 			&i.Name,
 			&i.Position,
 			&i.CreatedAt,
+			&i.ParentID,
 		); err != nil {
 			return nil, err
 		}
@@ -332,7 +337,8 @@ func (q *Queries) ListInboxFolders(ctx context.Context, arg ListInboxFoldersPara
 
 const listInboxItemsInFolder = `-- name: ListInboxItemsInFolder :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
-       iss.status as issue_status
+       iss.status as issue_status,
+       iss.project_id as project_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 JOIN inbox_folder_membership m
@@ -365,6 +371,7 @@ type ListInboxItemsInFolderRow struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
 // Inbox items in a specific folder (regardless of archived flag).
@@ -394,6 +401,7 @@ func (q *Queries) ListInboxItemsInFolder(ctx context.Context, arg ListInboxItems
 			&i.ActorID,
 			&i.Details,
 			&i.IssueStatus,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -407,7 +415,8 @@ func (q *Queries) ListInboxItemsInFolder(ctx context.Context, arg ListInboxItems
 
 const listInboxItemsUnfiled = `-- name: ListInboxItemsUnfiled :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
-       iss.status as issue_status
+       iss.status as issue_status,
+       iss.project_id as project_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1
@@ -444,6 +453,7 @@ type ListInboxItemsUnfiledRow struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
 // Inbox items that are not archived and not in any folder.
@@ -473,6 +483,7 @@ func (q *Queries) ListInboxItemsUnfiled(ctx context.Context, arg ListInboxItemsU
 			&i.ActorID,
 			&i.Details,
 			&i.IssueStatus,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -533,7 +544,7 @@ func (q *Queries) RemoveItemFromFolder(ctx context.Context, arg RemoveItemFromFo
 const renameInboxFolder = `-- name: RenameInboxFolder :one
 UPDATE inbox_folder SET name = $1
 WHERE id = $2 AND workspace_id = $3 AND user_id = $4
-RETURNING id, workspace_id, user_id, name, position, created_at
+RETURNING id, workspace_id, user_id, name, position, created_at, parent_id
 `
 
 type RenameInboxFolderParams struct {
@@ -558,6 +569,42 @@ func (q *Queries) RenameInboxFolder(ctx context.Context, arg RenameInboxFolderPa
 		&i.Name,
 		&i.Position,
 		&i.CreatedAt,
+		&i.ParentID,
+	)
+	return i, err
+}
+
+const updateInboxFolderParent = `-- name: UpdateInboxFolderParent :one
+UPDATE inbox_folder SET parent_id = $4
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3
+RETURNING id, workspace_id, user_id, name, position, created_at, parent_id
+`
+
+type UpdateInboxFolderParentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	ParentID    pgtype.UUID `json:"parent_id"`
+}
+
+// Sets or clears the folder's parent. NULL parent = top-level. Cycle prevention
+// is enforced in application code via IsInboxFolderDescendant before update.
+func (q *Queries) UpdateInboxFolderParent(ctx context.Context, arg UpdateInboxFolderParentParams) (InboxFolder, error) {
+	row := q.db.QueryRow(ctx, updateInboxFolderParent,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.ParentID,
+	)
+	var i InboxFolder
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Name,
+		&i.Position,
+		&i.CreatedAt,
+		&i.ParentID,
 	)
 	return i, err
 }

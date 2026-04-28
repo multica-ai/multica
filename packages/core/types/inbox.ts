@@ -25,6 +25,7 @@ export interface InboxFolder {
   name: string;
   position: number;
   created_at: string;
+  parent_id: string | null;
 }
 
 export type InboxFolderItemType = "chat_session" | "notification";
@@ -46,6 +47,7 @@ export interface InboxItem {
   type: InboxItemType;
   severity: InboxSeverity;
   issue_id: string | null;
+  project_id: string | null;
   title: string;
   body: string | null;
   issue_status: IssueStatus | null;
