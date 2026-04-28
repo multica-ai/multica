@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
@@ -22,7 +22,11 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
-import { LoginPage, validateCliCallback } from "@multica/views/auth";
+import {
+  LoginPage,
+  buildCliOAuthStatePart,
+  validateCliCallback,
+} from "@multica/views/auth";
 
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 const buildTimeDingTalkClientId = process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID;
@@ -43,6 +47,20 @@ function LoginPageContent() {
 
   const cliCallbackRaw = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state") || "";
+  const hasValidCliCallback = Boolean(
+    cliCallbackRaw && validateCliCallback(cliCallbackRaw),
+  );
+  const cliCallback = useMemo(
+    () =>
+      cliCallbackRaw && hasValidCliCallback
+        ? { url: cliCallbackRaw, state: cliState }
+        : undefined,
+    [cliCallbackRaw, cliState, hasValidCliCallback],
+  );
+  const cliOAuthStatePart = useMemo(
+    () => (cliCallback ? buildCliOAuthStatePart(cliCallback) : ""),
+    [cliCallback],
+  );
   const platform = searchParams.get("platform");
   const isDesktopHandoff = platform === "desktop" && !cliCallbackRaw;
   // `next` carries a protected URL the user was originally headed to
@@ -82,7 +100,7 @@ function LoginPageContent() {
   // (or /onboarding if the user has none). Skip this entire path when
   // the user arrived to authorize the CLI.
   useEffect(() => {
-    if (isLoading || !user || cliCallbackRaw) return;
+    if (isLoading || !user || hasValidCliCallback) return;
     if (isDesktopHandoff) {
       // Desktop opened the browser for login but the web session is already
       // authenticated — mint a bearer token from the cookie session and hand
@@ -110,7 +128,7 @@ function LoginPageContent() {
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
     router.replace(resolvePostAuthDestination(list, hasOnboarded));
-  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
+  }, [isLoading, user, router, nextUrl, hasValidCliCallback, isDesktopHandoff, hasOnboarded, qc]);
 
   const handleSuccess = () => {
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
@@ -134,6 +152,7 @@ function LoginPageContent() {
   const googleState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
+    cliOAuthStatePart,
   ]
     .filter(Boolean)
     .join(",") || undefined;
@@ -141,6 +160,7 @@ function LoginPageContent() {
   const dingtalkState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
+    cliOAuthStatePart,
   ]
     .filter(Boolean)
     .join(",") || undefined;
@@ -214,11 +234,7 @@ function LoginPageContent() {
           : undefined
       }
       hideEmailLogin={hideEmailLogin}
-      cliCallback={
-        cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-          ? { url: cliCallbackRaw, state: cliState }
-          : undefined
-      }
+      cliCallback={cliCallback}
       onTokenObtained={setLoggedInCookie}
     />
   );
