@@ -21,7 +21,12 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, runtimeID := range runtimeIDs {
-		if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+		rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+		if !ok {
+			return
+		}
+		if daemonID := middleware.DaemonIDFromContext(r.Context()); daemonID != "" && rt.DaemonID.Valid && rt.DaemonID.String != daemonID {
+			writeError(w, http.StatusNotFound, "runtime not found")
 			return
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"sort"
@@ -41,7 +42,7 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}
 			d.logger.Debug("task wakeup websocket unavailable; polling fallback remains active", "error", err, "retry_in", backoff)
 		}
 
-		if err := sleepWithContextOrRuntimeChange(ctx, backoff, d.runtimeSetCh); err != nil {
+		if err := sleepWithContextOrRuntimeChange(ctx, jitterDuration(backoff), d.runtimeSetCh); err != nil {
 			return
 		}
 		if backoff < 30*time.Second {
@@ -51,6 +52,18 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}
 			}
 		}
 	}
+}
+
+func jitterDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	spread := d / 5
+	if spread <= 0 {
+		return d
+	}
+	delta := time.Duration(rand.Int63n(int64(spread)*2+1)) - spread
+	return d + delta
 }
 
 func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}) error {
@@ -81,6 +94,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	defer conn.Close()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
+	signalTaskWakeup(taskWakeups)
 
 	errCh := make(chan error, 1)
 	go func() {

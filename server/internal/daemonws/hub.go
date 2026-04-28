@@ -49,7 +49,9 @@ func NewHub() *Hub {
 		upgrader: websocket.Upgrader{
 			// Daemon clients authenticate with Authorization headers before the
 			// upgrade. Browsers cannot set those headers through the native WS API,
-			// so cookie-based CSWSH does not apply to this endpoint.
+			// and DaemonAuth does not accept cookies, so cookie-based CSWSH does
+			// not apply to this endpoint. Re-evaluate this if DaemonAuth ever
+			// grows cookie fallback.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 		clients:   make(map[*client]bool),
@@ -99,23 +101,54 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 	if h == nil || runtimeID == "" {
 		return
 	}
-	data, err := json.Marshal(protocol.Message{
-		Type: protocol.EventDaemonTaskAvailable,
-		Payload: mustMarshalRaw(protocol.TaskAvailablePayload{
-			RuntimeID: runtimeID,
-			TaskID:    taskID,
-		}),
-	})
+	data, err := taskAvailableFrame(runtimeID, taskID)
 	if err != nil {
 		return
 	}
+	if h.notifyFrame(runtimeID, data) {
+		M.WakeupDeliveredHit.Add(1)
+	} else {
+		M.WakeupDeliveredMiss.Add(1)
+	}
+}
 
+func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {
+	if h == nil {
+		return
+	}
+	M.WakeupReceivedTotal.Add(1)
+	var msg protocol.Message
+	if err := json.Unmarshal(frame, &msg); err != nil {
+		slog.Debug("daemon websocket relay: invalid frame", "error", err, "scope_id", scopeID, "event_id", eventID)
+		M.WakeupDeliveredMiss.Add(1)
+		return
+	}
+	if msg.Type != protocol.EventDaemonTaskAvailable {
+		M.WakeupDeliveredMiss.Add(1)
+		return
+	}
+	var payload protocol.TaskAvailablePayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+		slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+		M.WakeupDeliveredMiss.Add(1)
+		return
+	}
+	if h.notifyFrame(payload.RuntimeID, frame) {
+		M.WakeupDeliveredHit.Add(1)
+	} else {
+		M.WakeupDeliveredMiss.Add(1)
+	}
+}
+
+func (h *Hub) notifyFrame(runtimeID string, data []byte) bool {
 	h.mu.RLock()
 	clients := h.byRuntime[runtimeID]
 	slow := make([]*client, 0)
+	delivered := false
 	for c := range clients {
 		select {
 		case c.send <- data:
+			delivered = true
 		default:
 			slow = append(slow, c)
 		}
@@ -126,6 +159,20 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 		h.unregister(c)
 		c.conn.Close()
 	}
+	if len(slow) > 0 {
+		M.SlowEvictionsTotal.Add(int64(len(slow)))
+	}
+	return delivered
+}
+
+func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonTaskAvailable,
+		Payload: mustMarshalRaw(protocol.TaskAvailablePayload{
+			RuntimeID: runtimeID,
+			TaskID:    taskID,
+		}),
+	})
 }
 
 func mustMarshalRaw(v any) json.RawMessage {
@@ -156,6 +203,8 @@ func (h *Hub) register(c *client) {
 	total := len(h.clients)
 	h.mu.Unlock()
 
+	M.ConnectsTotal.Add(1)
+	M.ActiveConnections.Add(1)
 	slog.Info("daemon websocket connected",
 		"daemon_id", c.identity.DaemonID,
 		"user_id", c.identity.UserID,
@@ -185,6 +234,8 @@ func (h *Hub) unregister(c *client) {
 	total := len(h.clients)
 	h.mu.Unlock()
 
+	M.DisconnectsTotal.Add(1)
+	M.ActiveConnections.Add(-1)
 	slog.Info("daemon websocket disconnected",
 		"daemon_id", c.identity.DaemonID,
 		"user_id", c.identity.UserID,

@@ -7,12 +7,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/realtime"
 )
 
 type RegistryOptions struct {
 	Pool     *pgxpool.Pool
 	Realtime *realtime.Metrics
+	DaemonWS *daemonws.Metrics
 	Version  string
 	Commit   string
 }
@@ -42,6 +44,9 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	}
 	if opts.Realtime != nil {
 		reg.MustRegister(NewRealtimeCollector(opts.Realtime))
+	}
+	if opts.DaemonWS != nil {
+		reg.MustRegister(NewDaemonWSCollector(opts.DaemonWS))
 	}
 
 	return &Registry{

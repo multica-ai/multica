@@ -8,6 +8,9 @@ const (
 	ScopeUser      = "user"
 	ScopeTask      = "task"
 	ScopeChat      = "chat"
+	// ScopeDaemonRuntime routes daemon wakeup frames through the Redis relay.
+	// It is consumed by the daemon WebSocket hub, not by browser clients.
+	ScopeDaemonRuntime = "daemon_runtime"
 )
 
 // Broadcaster is the abstraction every realtime event producer should depend
@@ -36,6 +39,11 @@ type Broadcaster interface {
 	// Broadcast fans a message out to every connection on this node.
 	// Used for daemon:* events that have no workspace scope.
 	Broadcast(message []byte)
+}
+
+// DaemonRuntimeDeliverer consumes daemon-runtime scoped relay frames.
+type DaemonRuntimeDeliverer interface {
+	DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 }
 
 // Compile-time assertion that *Hub continues to satisfy Broadcaster.
