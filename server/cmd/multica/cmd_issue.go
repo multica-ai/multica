@@ -1104,9 +1104,35 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
 
-	nameLower := strings.ToLower(name)
-	var matches []assigneeMatch
+	input := strings.TrimSpace(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no member or agent found matching %q", name)
+	}
+	inputLower := strings.ToLower(input)
+
+	// Matches are collected into three priority buckets. Higher-priority buckets
+	// short-circuit lower-priority matching so that, e.g., an exact name match
+	// always wins over a substring collision with another candidate.
+	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
+	//   2. exactMatches     — case-insensitive full name equality.
+	//   3. substringMatches — preserves the existing partial-name UX.
+	var idMatches, exactMatches, substringMatches []assigneeMatch
 	var errs []error
+
+	classify := func(entityType, id, displayName string) {
+		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
+		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
+			idMatches = append(idMatches, match)
+			return
+		}
+		if strings.EqualFold(displayName, input) {
+			exactMatches = append(exactMatches, match)
+			return
+		}
+		if strings.Contains(strings.ToLower(displayName), inputLower) {
+			substringMatches = append(substringMatches, match)
+		}
+	}
 
 	// Search members.
 	var members []map[string]any
@@ -1114,14 +1140,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		errs = append(errs, fmt.Errorf("fetch members: %w", err))
 	} else {
 		for _, m := range members {
-			mName := strVal(m, "name")
-			if strings.Contains(strings.ToLower(mName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "member",
-					ID:   strVal(m, "user_id"),
-					Name: mName,
-				})
-			}
+			classify("member", strVal(m, "user_id"), strVal(m, "name"))
 		}
 	}
 
@@ -1132,14 +1151,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 	} else {
 		for _, a := range agents {
-			aName := strVal(a, "name")
-			if strings.Contains(strings.ToLower(aName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "agent",
-					ID:   strVal(a, "id"),
-					Name: aName,
-				})
-			}
+			classify("agent", strVal(a, "id"), strVal(a, "name"))
 		}
 	}
 
@@ -1148,18 +1160,25 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", errs[0], errs[1])
 	}
 
-	switch len(matches) {
-	case 0:
-		return "", "", fmt.Errorf("no member or agent found matching %q", name)
-	case 1:
-		return matches[0].Type, matches[0].ID, nil
-	default:
-		var parts []string
-		for _, m := range matches {
-			parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {
+		switch len(bucket) {
+		case 0:
+			continue
+		case 1:
+			return bucket[0].Type, bucket[0].ID, nil
+		default:
+			return "", "", ambiguousAssigneeError(input, bucket)
 		}
-		return "", "", fmt.Errorf("ambiguous assignee %q; matches:\n%s", name, strings.Join(parts, "\n"))
 	}
+	return "", "", fmt.Errorf("no member or agent found matching %q", input)
+}
+
+func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
+	parts := make([]string, 0, len(matches))
+	for _, m := range matches {
+		parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+	}
+	return fmt.Errorf("ambiguous assignee %q; matches:\n%s", input, strings.Join(parts, "\n"))
 }
 
 func formatAssignee(issue map[string]any) string {

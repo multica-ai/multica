@@ -22,7 +22,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | Dynamic discovery |
 | **OpenCode** | SST | ✅ | ❌ | `.config/opencode/skills/` | Dynamic discovery |
 | **OpenClaw** | Open source | ✅ | ❌ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
-| **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/agent/skills/` | Dynamic discovery |
+| **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
 
 ## What each tool is for
 
@@ -98,7 +98,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Cursor | `.cursor/skills/` | ✅ Native |
 | Kimi | `.kimi/skills/` | ✅ Native |
 | OpenCode | `.config/opencode/skills/` | ✅ Native |
-| Pi | `.pi/agent/skills/` | ✅ Native |
+| Pi | `.pi/skills/` | ✅ Native |
 | Gemini | `.agent_context/skills/` | ⚠️ Generic fallback |
 | Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |

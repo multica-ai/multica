@@ -49,6 +49,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   SORT_OPTIONS,
@@ -353,9 +354,7 @@ function ProjectSubContent({
               className={FILTER_ITEM_CLASS}
             >
               <HoverCheck checked={checked} />
-              <span className="size-3.5 flex items-center justify-center shrink-0">
-                {p.icon || <FolderKanban className="size-3.5 text-muted-foreground" />}
-              </span>
+              <ProjectIcon project={p} size="sm" />
               <span className="truncate">{p.title}</span>
               {count > 0 && (
                 <span className="ml-auto text-xs text-muted-foreground">

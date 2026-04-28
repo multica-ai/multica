@@ -32,12 +32,15 @@ type Metrics struct {
 	scopeRooms           sync.Map
 
 	// Redis relay counters. Zero unless the Redis broadcaster is enabled.
-	RedisXAddTotal    atomic.Int64
-	RedisXAddErrors   atomic.Int64
-	RedisXReadTotal   atomic.Int64
-	RedisXReadErrors  atomic.Int64
-	RedisAckTotal     atomic.Int64
-	RedisLastXAddLagMicros atomic.Int64
+	RedisXAddTotal             atomic.Int64
+	RedisXAddErrors            atomic.Int64
+	RedisXReadTotal            atomic.Int64
+	RedisXReadErrors           atomic.Int64
+	RedisAckTotal              atomic.Int64
+	RedisLastXAddLagMicros     atomic.Int64
+	RedisMirrorPrimaryErrors   atomic.Int64
+	RedisMirrorSecondaryErrors atomic.Int64
+	RedisMirrorDivergenceTotal atomic.Int64
 
 	// RedisConnected is set by the relay on startup / reconnect.
 	RedisConnected atomic.Bool
@@ -141,15 +144,18 @@ func (m *Metrics) Snapshot() map[string]any {
 		"subscribe_denied_total": snapshotCounters(&m.subscribeDeniedTotal),
 		"active_scope_rooms":     snapshotCounters(&m.scopeRooms),
 		"redis": map[string]any{
-			"connected":             m.RedisConnected.Load(),
-			"node_id":               nodeID,
-			"xadd_total":            m.RedisXAddTotal.Load(),
-			"xadd_errors":           m.RedisXAddErrors.Load(),
-			"xread_total":           m.RedisXReadTotal.Load(),
-			"xread_errors":          m.RedisXReadErrors.Load(),
-			"ack_total":             m.RedisAckTotal.Load(),
-			"last_xadd_lag_micros":  m.RedisLastXAddLagMicros.Load(),
-			"last_error":            m.lastRedisErr(),
+			"connected":               m.RedisConnected.Load(),
+			"node_id":                 nodeID,
+			"xadd_total":              m.RedisXAddTotal.Load(),
+			"xadd_errors":             m.RedisXAddErrors.Load(),
+			"xread_total":             m.RedisXReadTotal.Load(),
+			"xread_errors":            m.RedisXReadErrors.Load(),
+			"ack_total":               m.RedisAckTotal.Load(),
+			"last_xadd_lag_micros":    m.RedisLastXAddLagMicros.Load(),
+			"mirror_primary_errors":   m.RedisMirrorPrimaryErrors.Load(),
+			"mirror_secondary_errors": m.RedisMirrorSecondaryErrors.Load(),
+			"mirror_divergence_total": m.RedisMirrorDivergenceTotal.Load(),
+			"last_error":              m.lastRedisErr(),
 		},
 	}
 }
@@ -173,6 +179,9 @@ func (m *Metrics) Reset() {
 	m.RedisXReadErrors.Store(0)
 	m.RedisAckTotal.Store(0)
 	m.RedisLastXAddLagMicros.Store(0)
+	m.RedisMirrorPrimaryErrors.Store(0)
+	m.RedisMirrorSecondaryErrors.Store(0)
+	m.RedisMirrorDivergenceTotal.Store(0)
 	m.RedisConnected.Store(false)
 	m.SetRedisLastError("")
 }

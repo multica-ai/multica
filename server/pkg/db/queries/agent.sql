@@ -89,10 +89,16 @@ FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
 
--- name: CancelAgentTasksByIssue :exec
+-- name: CancelAgentTasksByIssue :many
+-- Cancels every active task on the issue and returns the affected rows so the
+-- caller can reconcile each agent's status and broadcast task:cancelled events
+-- (#1587). Prior :exec form silently dropped that info, so internal cancel
+-- paths (issue status flips to cancelled/done, etc.) left agents stuck at
+-- status="working" with no self-correction.
 UPDATE agent_task_queue
-SET status = 'cancelled'
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
+SET status = 'cancelled', completed_at = now()
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
 
 -- name: CancelAgentTasksByIssueAndAgent :many
 -- Cancels active tasks for a single (issue, agent) pair without touching
@@ -268,4 +274,14 @@ ORDER BY created_at DESC;
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: RefreshAgentStatusFromTasks :one
+UPDATE agent AS a
+SET status = CASE WHEN EXISTS (
+    SELECT 1 FROM agent_task_queue q
+    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running')
+) THEN 'working' ELSE 'idle' END,
+    updated_at = now()
+WHERE a.id = $1
 RETURNING *;

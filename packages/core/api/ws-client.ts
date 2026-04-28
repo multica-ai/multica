@@ -13,21 +13,6 @@ export interface WSClientIdentity {
   os?: string;
 }
 
-// How often to check whether a heartbeat has been received (ms).
-const HEARTBEAT_CHECK_INTERVAL = 30_000;
-// If no message arrives within this window, the connection is considered
-// half-open and is force-closed so the existing reconnect logic can run.
-//
-// Coupled to server/internal/realtime/hub.go:
-//   pongWait   = 60 s  (server drops clients that miss a pong within this window)
-//   pingPeriod = 54 s  (server sends a TCP ping + app heartbeat frame every 54 s)
-//
-// This value must be > pingPeriod (54 s) to avoid false positives, and
-// < 2 × pingPeriod (108 s) so a half-open connection is caught within one
-// extra check interval after the missed heartbeat.  If hub.go's pongWait
-// changes, adjust this constant to stay in the (pingPeriod, 2×pingPeriod) range.
-const HEARTBEAT_TIMEOUT = 75_000;
-
 export class WSClient {
   private ws: WebSocket | null = null;
   private baseUrl: string;
@@ -37,8 +22,6 @@ export class WSClient {
   private identity: WSClientIdentity | undefined;
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private lastMessageTime = 0;
   private hasConnectedBefore = false;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
@@ -79,7 +62,6 @@ export class WSClient {
       url.searchParams.set("client_os", this.identity.os);
 
     this.ws = new WebSocket(url.toString());
-    this.startHeartbeatTimer();
 
     this.ws.onopen = () => {
       if (!this.cookieAuth && this.token) {
@@ -93,7 +75,6 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
-      this.lastMessageTime = Date.now();
       const msg = JSON.parse(event.data as string) as WSMessage;
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
@@ -140,7 +121,6 @@ export class WSClient {
   }
 
   disconnect() {
-    this.stopHeartbeatTimer();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -156,24 +136,6 @@ export class WSClient {
     this.handlers.clear();
     this.anyHandlers.clear();
     this.onReconnectCallbacks.clear();
-  }
-
-  private startHeartbeatTimer() {
-    this.stopHeartbeatTimer();
-    this.lastMessageTime = Date.now();
-    this.heartbeatTimer = setInterval(() => {
-      if (this.ws && Date.now() - this.lastMessageTime > HEARTBEAT_TIMEOUT) {
-        this.logger.warn("heartbeat timeout, forcing reconnect");
-        this.ws.close();
-      }
-    }, HEARTBEAT_CHECK_INTERVAL);
-  }
-
-  private stopHeartbeatTimer() {
-    if (this.heartbeatTimer !== null) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
   }
 
   on(event: WSEventType, handler: EventHandler) {

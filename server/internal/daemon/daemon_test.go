@@ -421,6 +421,34 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 }
 
+// blockingBackend returns a Session whose Result channel is never written to,
+// so executeAndDrain can only exit via the drainCtx.Done() path.
+type blockingBackend struct{}
+
+func (blockingBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result)
+	close(msgCh)
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "cancelled" {
+		t.Fatalf("expected status=cancelled when parent ctx is cancelled, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
 func TestEnsureRepoReadyFastPathDoesNotRefresh(t *testing.T) {
 	t.Parallel()
 

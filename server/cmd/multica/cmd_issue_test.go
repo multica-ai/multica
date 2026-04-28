@@ -137,6 +137,140 @@ func TestResolveAssignee(t *testing.T) {
 	})
 }
 
+// TestResolveAssigneeExactMatchWins covers the substring-collision scenario from
+// multica-ai/multica#1620: when one name is a substring of another (e.g.
+// "reviewer" vs "peer-reviewer"), an exact match on the shorter name must
+// short-circuit substring matching instead of erroring out as ambiguous.
+func TestResolveAssigneeExactMatchWins(t *testing.T) {
+	agentsResp := []map[string]any{
+		{"id": "f656eab8-1111-1111-1111-111111111111", "name": "reviewer"},
+		{"id": "9b0ff9a2-2222-2222-2222-222222222222", "name": "peer-reviewer"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	t.Run("exact shorter name resolves to shorter agent", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "reviewer")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want (agent, f656eab8-...)", aType, aID)
+		}
+	})
+
+	t.Run("exact longer name still resolves unambiguously", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "peer-reviewer")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "9b0ff9a2-2222-2222-2222-222222222222" {
+			t.Errorf("got (%q, %q), want (agent, 9b0ff9a2-...)", aType, aID)
+		}
+	})
+
+	t.Run("exact match is case-insensitive and tolerates whitespace", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "  Reviewer  ")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want exact reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("substring-only input falls back and stays ambiguous", func(t *testing.T) {
+		// "review" matches both agents via substring and neither via exact name,
+		// so the existing ambiguity error is preserved.
+		_, _, err := resolveAssignee(ctx, client, "review")
+		if err == nil {
+			t.Fatal("expected error for ambiguous substring match")
+		}
+		if got := err.Error(); !strings.Contains(got, "ambiguous") {
+			t.Errorf("expected ambiguous error, got: %s", got)
+		}
+	})
+}
+
+// TestResolveAssigneeByID covers the ID/ShortID escape hatch from
+// multica-ai/multica#1620: passing a full UUID or its 8-char prefix must
+// resolve directly without going through name matching.
+func TestResolveAssigneeByID(t *testing.T) {
+	membersResp := []map[string]any{
+		{"user_id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "Alice"},
+	}
+	agentsResp := []map[string]any{
+		{"id": "f656eab8-1111-1111-1111-111111111111", "name": "reviewer"},
+		{"id": "9b0ff9a2-2222-2222-2222-222222222222", "name": "peer-reviewer"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode(membersResp)
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	t.Run("full UUID resolves agent", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "f656eab8-1111-1111-1111-111111111111")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("8-char ShortID resolves agent", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "f656eab8")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("uppercase ShortID still resolves", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "F656EAB8")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("ShortID resolves a member", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "aaaaaaaa")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "aaaaaaaa-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want Alice", aType, aID)
+		}
+	})
+}
+
 func TestIssueSubscriberList(t *testing.T) {
 	subscribersResp := []map[string]any{
 		{

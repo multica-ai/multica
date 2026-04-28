@@ -77,7 +77,7 @@ type TokenUsage struct {
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout"
+	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
 	Output     string // accumulated text output
 	Error      string // error message if failed
 	DurationMs int64

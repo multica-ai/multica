@@ -78,6 +78,15 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
+import { ProjectIcon } from "../projects/components/project-icon";
+
+// Top-level nav items stay active when the user is on a child route
+// (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
+// strict equality elsewhere — a pinned project shouldn't highlight on
+// sub-pages of itself.
+function isNavActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(href + "/");
+}
 
 // Stable empty arrays for query defaults. Using an inline `= []` default on
 // `useQuery` creates a new array reference on every render when `data` is
@@ -269,11 +278,7 @@ function PinRow({
   if (projectQuery.isPending) return <PinSkeleton />;
   if (projectQuery.isError || !projectQuery.data) return null;
   const project = projectQuery.data;
-  const iconNode = (
-    <span className="flex size-3.5 shrink-0 items-center justify-center text-xs leading-none">
-      {project.icon || "📁"}
-    </span>
-  );
+  const iconNode = <ProjectIcon project={project} size="sm" />;
   return (
     <SortablePinItem
       pin={pin}
@@ -447,7 +452,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <DropdownMenuTrigger
                   render={
                     <SidebarMenuButton>
-                      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                      <span className="relative">
+                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                        {myInvitations.length > 0 && (
+                          <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
+                        )}
+                      </span>
                       <span className="flex-1 truncate font-medium">
                         {workspace?.name ?? "Multica"}
                       </span>
@@ -583,7 +593,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {personalNav.map((item) => {
                   const href = p[item.key]();
-                  const isActive = pathname === href;
+                  const isActive = isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
@@ -653,7 +663,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
-                  const isActive = pathname === href;
+                  const isActive = isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
@@ -677,7 +687,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {configureNav.map((item) => {
                   const href = p[item.key]();
-                  const isActive = pathname === href;
+                  const isActive = isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton

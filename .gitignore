@@ -57,8 +57,3 @@ server/server
 data/
 .kilo
 .idea
-
-# secrets / keys — never commit private keys. cf-*.pem are the CloudFront
-# signing keypair local to operator workstations during one-time setup.
-*.pem
-cf-*.pem

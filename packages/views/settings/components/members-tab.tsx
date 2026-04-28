@@ -310,10 +310,12 @@ export function MembersTab() {
                   }}
                 />
                 <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
-                  <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger size="sm">
+                    <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="member">{roleConfig.member.label}</SelectItem>
+                    <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button

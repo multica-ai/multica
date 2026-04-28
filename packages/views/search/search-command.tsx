@@ -36,6 +36,7 @@ import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { StatusIcon } from "../issues/components";
+import { ProjectIcon } from "../projects/components/project-icon";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
@@ -573,9 +574,7 @@ export function SearchCommand() {
                     className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="size-4 shrink-0 text-center text-sm leading-4">
-                        {project.icon || <FolderKanban className="size-4 text-muted-foreground" />}
-                      </span>
+                      <ProjectIcon project={project} size="md" />
                       <span className="truncate">
                         <HighlightText text={project.title} query={query} />
                       </span>

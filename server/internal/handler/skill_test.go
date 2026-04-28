@@ -303,6 +303,160 @@ func TestFetchFromSkillsSh_ResolvesAliasedSkillNamesViaFrontmatter(t *testing.T)
 	}
 }
 
+func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/alchaincyf/huashu-design":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "master"})
+			case "/repos/alchaincyf/huashu-design/git/trees/master":
+				if got := r.URL.Query().Get("recursive"); got != "1" {
+					t.Fatalf("tree recursive = %q, want 1", got)
+				}
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "README.md", Type: "blob"},
+						{Path: "SKILL.md", Type: "blob"},
+						{Path: "assets", Type: "tree"},
+						{Path: "assets/logo.png", Type: "blob"},
+					},
+				})
+			case "/repos/alchaincyf/huashu-design/contents":
+				if got := r.URL.Query().Get("ref"); got != "master" {
+					t.Fatalf("root contents ref = %q, want master", got)
+				}
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "README.md",
+						Path:        "README.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/alchaincyf/huashu-design/master/README.md",
+					},
+					{
+						Name:        "SKILL.md",
+						Path:        "SKILL.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/alchaincyf/huashu-design/master/SKILL.md",
+					},
+					{
+						Name: "assets",
+						Path: "assets",
+						Type: "dir",
+						URL:  "https://api.github.com/repos/alchaincyf/huashu-design/contents/assets?ref=master",
+					},
+				})
+			case "/repos/alchaincyf/huashu-design/contents/assets":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "logo.png",
+						Path:        "assets/logo.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/alchaincyf/huashu-design/master/assets/logo.png",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/alchaincyf/huashu-design/master/SKILL.md":
+				w.Write([]byte("---\nname: huashu-design\ndescription: hi-fi HTML prototypes\n---\nbody"))
+			case "/alchaincyf/huashu-design/master/README.md":
+				w.Write([]byte("# Readme"))
+			case "/alchaincyf/huashu-design/master/assets/logo.png":
+				w.Write([]byte("PNGBYTES"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/alchaincyf/huashu-design/huashu-design")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+	if result.name != "huashu-design" {
+		t.Fatalf("name = %q, want huashu-design", result.name)
+	}
+	if !strings.HasPrefix(result.content, "---\nname: huashu-design") {
+		t.Fatalf("SKILL.md content not populated, got %q", result.content)
+	}
+	gotPaths := importedFilePaths(result.files)
+	wantPaths := []string{"README.md", "assets/logo.png"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
+	}
+	if !containsString(*requests, "api.github.com /repos/alchaincyf/huashu-design/contents?ref=master") {
+		t.Fatalf("expected root contents listing, got %v", *requests)
+	}
+}
+
+func TestFetchFromSkillsSh_RootSkillMdFastPathSkipsFrontmatterMismatch(t *testing.T) {
+	// Multi-skill repo with an unrelated root SKILL.md (skill "other") plus a
+	// subdir skill "wanted". URL requests "wanted". The fast-path must reject
+	// the root SKILL.md on frontmatter mismatch and fall through to the tree
+	// fallback, which then resolves "wanted" correctly.
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/multi":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/multi/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "SKILL.md", Type: "blob"},
+						{Path: "extras/wanted/SKILL.md", Type: "blob"},
+					},
+				})
+			case "/repos/acme/multi/contents/extras/wanted":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "ref.md",
+						Path:        "extras/wanted/ref.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/multi/main/extras/wanted/ref.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/multi/main/SKILL.md":
+				w.Write([]byte("---\nname: other\n---\ncontent"))
+			case "/acme/multi/main/extras/wanted/SKILL.md":
+				w.Write([]byte("---\nname: wanted\ndescription: the right one\n---\ncontent"))
+			case "/acme/multi/main/extras/wanted/ref.md":
+				w.Write([]byte("ref"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/multi/wanted")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+	if result.name != "wanted" {
+		t.Fatalf("name = %q, want wanted (root SKILL.md must not hijack the mismatched request)", result.name)
+	}
+	gotPaths := importedFilePaths(result.files)
+	wantPaths := []string{"ref.md"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
+	}
+	if !containsString(*requests, "api.github.com /repos/acme/multi/git/trees/main?recursive=1") {
+		t.Fatalf("expected tree fallback to run after fast-path frontmatter miss, got %v", *requests)
+	}
+}
+
 func TestFetchFromSkillsSh_ReturnsActionableErrorForTruncatedTrees(t *testing.T) {
 	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
