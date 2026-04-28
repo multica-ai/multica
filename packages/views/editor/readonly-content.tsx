@@ -40,6 +40,7 @@ import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
+import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------

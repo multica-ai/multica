@@ -34,6 +34,7 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropRow } from "../../common/prop-row";
 import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
@@ -128,28 +129,6 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
-
-// ---------------------------------------------------------------------------
-// Property row
-// ---------------------------------------------------------------------------
-
-function PropRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs truncate">
-        {children}
-      </div>
-    </div>
-  );
-}
-
 
 // ---------------------------------------------------------------------------
 // Props
@@ -448,8 +427,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </button>
         {detailsOpen && <div className="space-y-0.5 pl-2">
           <PropRow label="Created by">
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} />
-            <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
+            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
           <PropRow label="Created">
             <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
@@ -749,6 +728,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                               actorId={child.assignee_id}
                               size={20}
                               className="shrink-0"
+                              enableHoverCard
                             />
                           ) : (
                             <span
@@ -790,6 +770,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                             actorType={sub.user_type}
                             actorId={sub.user_id}
                             size={24}
+                            enableHoverCard
                           />
                         ))}
                         {subscribers.length > 4 && (
@@ -839,7 +820,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                                   className="flex items-center gap-2.5"
                                 >
                                   <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={22} />
+                                  <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
                                   <span className="truncate flex-1">{a.name}</span>
 
                                 </CommandItem>

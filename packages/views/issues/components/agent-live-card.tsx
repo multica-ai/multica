@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2 } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
@@ -11,20 +11,12 @@ import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { redactSecrets } from "../utils/redact";
-import { AgentTranscriptDialog } from "./agent-transcript-dialog";
-
-// ─── Shared types & helpers ─────────────────────────────────────────────────
-
-/** A unified timeline entry: tool calls, thinking, text, and errors in chronological order. */
-interface TimelineItem {
-  seq: number;
-  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
-  tool?: string;
-  content?: string;
-  input?: Record<string, unknown>;
-  output?: string;
-}
+import {
+  TranscriptButton,
+  buildTimeline,
+  redactSecrets,
+  type TimelineItem,
+} from "../../common/task-transcript";
 
 function formatElapsed(startedAt: string): string {
   const elapsed = Date.now() - new Date(startedAt).getTime();
@@ -78,22 +70,6 @@ function getToolSummary(item: TimelineItem): string {
     if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
   }
   return "";
-}
-
-/** Build a chronologically ordered timeline from raw messages. */
-function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
-  const items: TimelineItem[] = [];
-  for (const msg of msgs) {
-    items.push({
-      seq: msg.seq,
-      type: msg.type,
-      tool: msg.tool,
-      content: msg.content ? redactSecrets(msg.content) : msg.content,
-      input: msg.input,
-      output: msg.output ? redactSecrets(msg.output) : msg.output,
-    });
-  }
-  return items.sort((a, b) => a.seq - b.seq);
 }
 
 // ─── Per-task state ─────────────────────────────────────────────────────────
@@ -274,7 +250,6 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [open, setOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [cancelling, setCancelling] = useState(false);
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Elapsed time
@@ -333,7 +308,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         }}
       >
         {task.agent_id ? (
-          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} />
+          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
         ) : (
           <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
             <Bot className="h-3 w-3" />
@@ -341,20 +316,20 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          <span className="cursor-pointer font-medium text-foreground truncate">{agentName} is working</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); setTranscriptOpen(true); }}
-            className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-            title="Expand transcript"
-          >
-            <Maximize2 className="h-3 w-3" />
-          </button>
+          <TranscriptButton
+            task={task}
+            agentName={agentName}
+            items={items}
+            isLive
+            title="View transcript"
+          />
           <button
             onClick={(e) => { e.stopPropagation(); handleCancel(); }}
             disabled={cancelling}
@@ -412,15 +387,6 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         </div>
       </div>
 
-      {/* Fullscreen transcript dialog */}
-      <AgentTranscriptDialog
-        open={transcriptOpen}
-        onOpenChange={setTranscriptOpen}
-        task={task}
-        items={items}
-        agentName={agentName}
-        isLive
-      />
     </div>
   );
 }
@@ -493,7 +459,6 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
   const { getActorName } = useActorName();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TimelineItem[] | null>(null);
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
 
   const loadMessages = useCallback(() => {
     if (items !== null) return; // already loaded
@@ -508,6 +473,8 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
   useEffect(() => {
     if (open) loadMessages();
   }, [open, loadMessages]);
+
+  const agentName = task.agent_id ? getActorName("agent", task.agent_id) : "Agent";
 
   const duration = task.started_at && task.completed_at
     ? formatDuration(task.started_at, task.completed_at)
@@ -529,33 +496,12 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
         <span className={cn("ml-auto capitalize", task.status === "completed" ? "text-success" : "text-destructive")}>
           {task.status}
         </span>
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={(e) => {
-            e.stopPropagation();
-            // Load messages before opening the transcript dialog
-            if (items === null) {
-              api.listTaskMessages(task.id).then((msgs) => {
-                setItems(buildTimeline(msgs));
-                setTranscriptOpen(true);
-              }).catch(console.error);
-            } else {
-              setTranscriptOpen(true);
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              e.stopPropagation();
-              e.currentTarget.click();
-            }
-          }}
-          className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-          title="Expand transcript"
-        >
-          <Maximize2 className="h-3 w-3" />
-        </span>
+        <TranscriptButton
+          task={task}
+          agentName={agentName}
+          items={items ?? undefined}
+          title="View transcript"
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-5 mt-1 max-h-64 overflow-y-auto rounded border bg-muted/30 px-3 py-2 space-y-0.5">
@@ -573,17 +519,6 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           )}
         </div>
       </CollapsibleContent>
-
-      {/* Fullscreen transcript dialog */}
-      {items !== null && (
-        <AgentTranscriptDialog
-          open={transcriptOpen}
-          onOpenChange={setTranscriptOpen}
-          task={task}
-          items={items}
-          agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
-        />
-      )}
     </Collapsible>
   );
 }

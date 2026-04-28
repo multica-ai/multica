@@ -52,7 +52,7 @@ export function AgentPicker({
           <>
             {selected ? (
               <>
-                <ActorAvatar actorType="agent" actorId={selected.id} size={16} disableHoverCard />
+                <ActorAvatar actorType="agent" actorId={selected.id} size={16} showStatusDot />
                 <span className="truncate">{selected.name}</span>
               </>
             ) : (
@@ -77,7 +77,7 @@ export function AgentPicker({
               setOpen(false);
             }}
           >
-            <ActorAvatar actorType="agent" actorId={a.id} size={16} disableHoverCard />
+            <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
             <span className="truncate">{a.name}</span>
           </PickerItem>
         ))

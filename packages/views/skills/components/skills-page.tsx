@@ -82,26 +82,29 @@ function SourceCell({
     label = "From Skills.sh";
   }
 
+  // Two grid cells: leading icon track, then the text block. The icon needs
+  // `self-start` + a 1-line top inset so it lands on the top text row instead
+  // of the cell's vertical middle (the cell is 2-line when `creator` exists).
   return (
-    <div className="min-w-0">
-      {/* `flex min-w-0` (NOT inline-flex) so truncate on the inner span fires
-          when the label is longer than the grid cell. */}
-      <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-        {icon}
-        <span className="min-w-0 truncate">{label}</span>
-      </div>
-      {creator && (
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <ActorAvatar
-            name={creator.name}
-            initials={creator.name.slice(0, 2).toUpperCase()}
-            avatarUrl={creator.avatar_url}
-            size={14}
-          />
-          <span className="min-w-0 truncate">by {creator.name}</span>
+    <>
+      <span className="self-start pt-[3px] text-muted-foreground">{icon}</span>
+      <div className="min-w-0">
+        <div className="min-w-0 truncate text-xs text-muted-foreground">
+          {label}
         </div>
-      )}
-    </div>
+        {creator && (
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <ActorAvatar
+              name={creator.name}
+              initials={creator.name.slice(0, 2).toUpperCase()}
+              avatarUrl={creator.avatar_url}
+              size={14}
+            />
+            <span className="min-w-0 truncate">by {creator.name}</span>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -148,8 +151,24 @@ function AgentAssignees({ agents }: { agents: Agent[] }) {
 // Row + header
 // ---------------------------------------------------------------------------
 
+// Source column has a leading 12px icon (HardDrive / Download / Pencil) that
+// would otherwise push its text 18px right of the column header, so we extract
+// the icon into its own 0.875rem track. `<SourceCell>` returns two cells (icon
+// + body) and the header inserts a placeholder cell to match.
+//
+// Same pattern as Agents (avatar) and Runtimes (icon-box, Health dot) — header
+// label and row primary text share the same x without per-column padding hacks.
+// Responsive column strategy:
+//   <md  → Name + Used by + Chevron (drop Source / Updated to free room)
+//   md+  → adds Source · Added by + Updated
+// Source icon leading slot (0.875rem) is part of the Source group, hidden
+// together at <md. Each visible column uses minmax(0,…fr) so it can shrink
+// and the cell content (with min-w-0 + truncate) trims gracefully instead
+// of overflowing into adjacent cells.
 const ROW_GRID =
-  "grid grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,6rem)_auto] items-center gap-4";
+  "grid items-center gap-4 " +
+  "grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] " +
+  "md:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_0.875rem_minmax(0,1.2fr)_minmax(0,6rem)_auto]";
 
 function SkillRow({
   skill,
@@ -204,8 +223,12 @@ function SkillRow({
       <div className="min-w-0">
         <AgentAssignees agents={agents} />
       </div>
-      <SourceCell skill={skill} creator={creator} runtime={runtime} />
-      <div className="min-w-0 whitespace-nowrap text-xs text-muted-foreground">
+      {/* Source group (icon + label) — md+. The icon is its own grid cell
+          for header alignment; both hide together at <md. */}
+      <span className="hidden md:contents">
+        <SourceCell skill={skill} creator={creator} runtime={runtime} />
+      </span>
+      <div className="hidden min-w-0 whitespace-nowrap text-xs text-muted-foreground md:block">
         {timeAgo(skill.updated_at)}
       </div>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
@@ -220,8 +243,12 @@ function ListColumnHeader() {
     >
       <span>Name</span>
       <span>Used by</span>
-      <span>Source · Added by</span>
-      <span>Updated</span>
+      {/* Source icon leading slot — empty in header so the label below
+          aligns with the row's "From X" / "Created manually" text.
+          Hidden together with the Source label at <md. */}
+      <span aria-hidden className="hidden md:block" />
+      <span className="hidden md:block">Source · Added by</span>
+      <span className="hidden md:block">Updated</span>
       <span className="w-4" />
     </div>
   );
@@ -260,6 +287,19 @@ function PageHeaderBar({
             {totalCount}
           </span>
         )}
+        {/* Tagline next to the title — single sentence + docs link. Hidden
+            below md so it never collides with the title on narrow screens. */}
+        <p className="ml-2 hidden text-xs text-muted-foreground md:block">
+          Instructions any agent in this workspace can use.{" "}
+          <a
+            href="https://multica.ai/docs/skills"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
+          >
+            Learn more →
+          </a>
+        </p>
       </div>
       <Button type="button" size="sm" onClick={onCreate}>
         <Plus className="h-3 w-3" />
@@ -507,35 +547,10 @@ export default function SkillsPage() {
         </div>
       )}
 
-      {/* Page body — padding here keeps the card from touching the chrome,
-          and `gap-4` separates the intro block from the table card. */}
+      {/* Page body — padding here keeps the card from touching the chrome.
+          The "what is a skill" tagline now lives in the page header (right
+          of the title); body starts directly with the table card. */}
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
-        {!showEmpty && (
-          <div className="space-y-3 pl-4">
-            <p className="text-base text-foreground">
-              Instructions any agent in this workspace can use.{" "}
-              <a
-                href="https://multica.ai/docs/skills"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-muted-foreground underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
-              >
-                Learn more about Skills →
-              </a>
-            </p>
-            <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-              <span className="font-medium text-foreground">
-                Shared with your workspace.
-              </span>{" "}
-              Anyone can create a skill, import one from a URL, or copy one
-              from their local runtime — and every agent can use it.{" "}
-              <span className="font-semibold text-brand">
-                Local runtime skills stay private until you copy one here.
-              </span>
-            </div>
-          </div>
-        )}
-
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState onCreate={() => setCreateOpen(true)} />
