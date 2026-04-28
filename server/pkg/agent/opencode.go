@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
@@ -85,7 +87,8 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
@@ -103,6 +106,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap any grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 

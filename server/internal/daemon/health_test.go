@@ -65,6 +65,52 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 }
 
+func TestHealthHandlerExposesProcgroupCounters(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		cfg: Config{
+			CLIVersion:    "v9.9.9",
+			DaemonID:      "daemon-test",
+			DeviceName:    "dev",
+			ServerBaseURL: "http://localhost:8080",
+		},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Verify procgroup field exists at the right wire-level path
+	// with snake_case keys. Operators / Grafana scrape these names
+	// — silent renames must fail here.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	pg, ok := raw["procgroup"].(map[string]any)
+	if !ok {
+		t.Fatalf("procgroup field missing or wrong type: %v", raw["procgroup"])
+	}
+	for _, key := range []string{"jobs_created", "jobs_closed", "create_failures", "attach_failures"} {
+		v, ok := pg[key]
+		if !ok {
+			t.Errorf("procgroup.%s missing", key)
+			continue
+		}
+		// Counters are uint64 → JSON number → float64 in map[string]any
+		if _, ok := v.(float64); !ok {
+			t.Errorf("procgroup.%s is not a number: %T %v", key, v, v)
+		}
+	}
+}
+
 func TestHealthHandlerActiveTaskCountTracksCounter(t *testing.T) {
 	t.Parallel()
 

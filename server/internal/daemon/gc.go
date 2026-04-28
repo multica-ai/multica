@@ -213,6 +213,11 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 	}
 }
 
+// pruneWorktree intentionally does not use procgroup.Start: the git
+// worktree prune subcommand has no long-lived descendants and runs
+// for at most gitCmdTimeout (30s). Adding procgroup here would
+// require restructuring the cmd.CombinedOutput() call to cmd.Start
+// + manual stdout/stderr collection, without addressing a real bug.
 func (d *Daemon) pruneWorktree(barePath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
 	defer cancel()

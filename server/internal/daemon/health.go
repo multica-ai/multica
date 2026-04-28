@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -25,11 +26,23 @@ type HealthResponse struct {
 	ActiveTaskCount int64             `json:"active_task_count"`
 	Agents          []string          `json:"agents"`
 	Workspaces      []healthWorkspace `json:"workspaces"`
+	Procgroup       healthProcgroup   `json:"procgroup"`
 }
 
 type healthWorkspace struct {
 	ID       string   `json:"id"`
 	Runtimes []string `json:"runtimes"`
+}
+
+// healthProcgroup mirrors procgroup.Stats for /health output.
+// Each counter is monotonic and atomic; cross-field arithmetic
+// (jobs_created - jobs_closed to estimate "in-flight Jobs") may
+// briefly observe inconsistent values during concurrent activity.
+type healthProcgroup struct {
+	JobsCreated    uint64 `json:"jobs_created"`
+	JobsClosed     uint64 `json:"jobs_closed"`
+	CreateFailures uint64 `json:"create_failures"`
+	AttachFailures uint64 `json:"attach_failures"`
 }
 
 // listenHealth binds the health port. Returns the listener or an error if
@@ -71,6 +84,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			agents = append(agents, name)
 		}
 
+		stats := procgroup.Counters()
 		resp := HealthResponse{
 			Status:          "running",
 			PID:             os.Getpid(),
@@ -82,6 +96,12 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ActiveTaskCount: d.activeTasks.Load(),
 			Agents:          agents,
 			Workspaces:      wsList,
+			Procgroup: healthProcgroup{
+				JobsCreated:    stats.JobsCreated,
+				JobsClosed:     stats.JobsClosed,
+				CreateFailures: stats.CreateFailures,
+				AttachFailures: stats.AttachFailures,
+			},
 		}
 
 		w.Header().Set("Content-Type", "application/json")

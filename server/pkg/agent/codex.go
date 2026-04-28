@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -77,7 +79,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), codexStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start codex: %w", err)
 	}
@@ -160,6 +163,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// readerDone closes → lifecycle goroutine collects final output and sends Result.
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap any grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 		defer drainAndWait()

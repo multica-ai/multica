@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // claudeBackend implements Backend by spawning the Claude Code CLI
@@ -92,7 +94,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
@@ -107,6 +110,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		closeStdin()
 		cancel()
 		_ = cmd.Wait()
+		cleanup() // release Job handle on early failure path
 		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
 	}
 	closeStdin()
@@ -121,6 +125,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap pwsh/kd grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 		if mcpConfigPath != "" {

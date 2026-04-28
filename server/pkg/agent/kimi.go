@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // kimiBlockedArgs are flags hardcoded by the daemon that must not be
@@ -78,7 +80,8 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	providerErr := newACPProviderErrorSniffer("kimi")
 	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[kimi:stderr] "), providerErr)
 
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start kimi: %w", err)
 	}
@@ -145,6 +148,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
 		defer cancel()
+		defer cleanup() // procgroup: close Job → reap any grandchildren
 		defer close(msgCh)
 		defer close(resCh)
 		defer func() {

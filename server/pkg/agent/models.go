@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/procgroup"
 )
 
 // Model describes a single LLM model exposed by an agent provider.
@@ -410,14 +412,20 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	cleanup, err := procgroup.Start(cmd)
+	if err != nil {
 		return []Model{}, nil
 	}
-	// Ensure the child process is always reaped.
+	// Ensure the child process tree is always reaped. Kill+Wait
+	// joins the immediate child; cleanup() closes the procgroup
+	// Job so any grandchildren spawned during the ACP handshake
+	// (rare but possible — some backends fork subprocesses on
+	// initialize) are also reaped.
 	defer func() {
 		_ = stdin.Close()
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+		cleanup()
 	}()
 
 	writeACP := func(id int, method string, params map[string]any) error {
