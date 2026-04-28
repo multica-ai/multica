@@ -90,13 +90,6 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 			pr.Title = project.Title
 			pr.Icon = textToPtr(project.Icon)
 			pr.Status = project.Status
-		case "chat_session":
-			session, err := h.Queries.GetChatSession(r.Context(), p.ItemID)
-			if err != nil {
-				continue // Skip deleted items
-			}
-			pr.Title = session.Title
-			pr.Status = session.Status
 		}
 		resp = append(resp, pr)
 	}
@@ -116,8 +109,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.ItemType != "issue" && req.ItemType != "project" && req.ItemType != "chat_session" {
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', or 'chat_session'")
+	if req.ItemType != "issue" && req.ItemType != "project" {
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'project'")
 		return
 	}
 	if req.ItemID == "" {
@@ -139,13 +132,6 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
 		}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
-			return
-		}
-	case "chat_session":
-		if _, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
-			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
-		}); err != nil {
-			writeError(w, http.StatusNotFound, "chat session not found")
 			return
 		}
 	}

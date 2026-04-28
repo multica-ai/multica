@@ -24,7 +24,14 @@ export type {
   WorkSession,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
-export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
+export type {
+  InboxItem,
+  InboxSeverity,
+  InboxItemType,
+  InboxFolder,
+  InboxFolderMembership,
+  InboxFolderItemType,
+} from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";

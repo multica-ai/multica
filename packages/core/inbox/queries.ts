@@ -5,12 +5,22 @@ import type { InboxItem } from "../types";
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
+  folderList: (wsId: string, folderId: string) =>
+    [...inboxKeys.all(wsId), "folder", folderId] as const,
 };
 
 export function inboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.list(wsId),
     queryFn: () => api.listInbox(),
+  });
+}
+
+export function inboxListInFolderOptions(wsId: string, folderId: string) {
+  return queryOptions({
+    queryKey: inboxKeys.folderList(wsId, folderId),
+    queryFn: () => api.listInbox({ folder: folderId }),
+    enabled: !!folderId,
   });
 }
 

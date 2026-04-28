@@ -37,6 +37,15 @@ export function allChatSessionsOptions(wsId: string) {
   });
 }
 
+export function chatSessionsInFolderOptions(wsId: string, folderId: string) {
+  return queryOptions({
+    queryKey: [...chatKeys.all(wsId), "sessions", "folder", folderId] as const,
+    queryFn: () => api.listChatSessions({ folder: folderId }),
+    enabled: !!folderId,
+    staleTime: Infinity,
+  });
+}
+
 export function chatSessionOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: chatKeys.session(wsId, id),

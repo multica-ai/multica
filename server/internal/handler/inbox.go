@@ -92,7 +92,43 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
 
-	items, err := h.Queries.ListInboxItems(r.Context(), db.ListInboxItemsParams{
+	folderID := r.URL.Query().Get("folder")
+	if folderID != "" {
+		rows, err := h.Queries.ListInboxItemsInFolder(r.Context(), db.ListInboxItemsInFolderParams{
+			ID:          parseUUID(folderID),
+			WorkspaceID: parseUUID(workspaceID),
+			UserID:      parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list inbox")
+			return
+		}
+		resp := make([]InboxItemResponse, len(rows))
+		for i, item := range rows {
+			resp[i] = InboxItemResponse{
+				ID:            uuidToString(item.ID),
+				WorkspaceID:   uuidToString(item.WorkspaceID),
+				RecipientType: item.RecipientType,
+				RecipientID:   uuidToString(item.RecipientID),
+				Type:          item.Type,
+				Severity:      item.Severity,
+				IssueID:       uuidToPtr(item.IssueID),
+				Title:         item.Title,
+				Body:          textToPtr(item.Body),
+				Read:          item.Read,
+				Archived:      item.Archived,
+				CreatedAt:     timestampToString(item.CreatedAt),
+				IssueStatus:   textToPtr(item.IssueStatus),
+				ActorType:     textToPtr(item.ActorType),
+				ActorID:       uuidToPtr(item.ActorID),
+				Details:       json.RawMessage(item.Details),
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	items, err := h.Queries.ListInboxItemsUnfiled(r.Context(), db.ListInboxItemsUnfiledParams{
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: "member",
 		RecipientID:   parseUUID(userID),
@@ -104,7 +140,24 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]InboxItemResponse, len(items))
 	for i, item := range items {
-		resp[i] = inboxRowToResponse(item)
+		resp[i] = InboxItemResponse{
+			ID:            uuidToString(item.ID),
+			WorkspaceID:   uuidToString(item.WorkspaceID),
+			RecipientType: item.RecipientType,
+			RecipientID:   uuidToString(item.RecipientID),
+			Type:          item.Type,
+			Severity:      item.Severity,
+			IssueID:       uuidToPtr(item.IssueID),
+			Title:         item.Title,
+			Body:          textToPtr(item.Body),
+			Read:          item.Read,
+			Archived:      item.Archived,
+			CreatedAt:     timestampToString(item.CreatedAt),
+			IssueStatus:   textToPtr(item.IssueStatus),
+			ActorType:     textToPtr(item.ActorType),
+			ActorID:       uuidToPtr(item.ActorID),
+			Details:       json.RawMessage(item.Details),
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)

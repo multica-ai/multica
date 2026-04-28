@@ -35,6 +35,7 @@
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
     "./inbox/ws-updaters": "./inbox/ws-updaters.ts",
+    "./inbox/folders": "./inbox/folders.ts",
     "./chat": "./chat/index.ts",
     "./chat/queries": "./chat/queries.ts",
     "./chat/mutations": "./chat/mutations.ts",

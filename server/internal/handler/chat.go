@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -72,12 +73,32 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 
 	status := r.URL.Query().Get("status")
+	folderID := r.URL.Query().Get("folder")
 
-	// Two call sites → two row types with identical shape. Collect into a
-	// common response slice via small per-branch loops.
-	var resp []ChatSessionResponse
-	if status == "all" {
-		rows, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
+	type listed struct {
+		ID, WorkspaceID, AgentID, CreatorID pgtype.UUID
+		Title, Status                       string
+		HasUnread                           bool
+		CreatedAt, UpdatedAt                pgtype.Timestamptz
+	}
+	var rows []listed
+
+	switch {
+	case folderID != "":
+		raw, err := h.Queries.ListChatSessionsInFolder(r.Context(), db.ListChatSessionsInFolderParams{
+			ID:          parseUUID(folderID),
+			WorkspaceID: parseUUID(workspaceID),
+			UserID:      parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
+			return
+		}
+		for _, s := range raw {
+			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
+		}
+	case status == "all":
+		raw, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
 			WorkspaceID: parseUUID(workspaceID),
 			CreatorID:   parseUUID(userID),
 		})
@@ -85,22 +106,11 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
 			return
 		}
-		resp = make([]ChatSessionResponse, len(rows))
-		for i, s := range rows {
-			resp[i] = ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.HasUnread,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
-			}
+		for _, s := range raw {
+			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
 		}
-	} else {
-		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
+	default:
+		raw, err := h.Queries.ListChatSessionsUnfiled(r.Context(), db.ListChatSessionsUnfiledParams{
 			WorkspaceID: parseUUID(workspaceID),
 			CreatorID:   parseUUID(userID),
 		})
@@ -108,19 +118,23 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
 			return
 		}
-		resp = make([]ChatSessionResponse, len(rows))
-		for i, s := range rows {
-			resp[i] = ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.HasUnread,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
-			}
+		for _, s := range raw {
+			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
+		}
+	}
+
+	resp := make([]ChatSessionResponse, len(rows))
+	for i, s := range rows {
+		resp[i] = ChatSessionResponse{
+			ID:          uuidToString(s.ID),
+			WorkspaceID: uuidToString(s.WorkspaceID),
+			AgentID:     uuidToString(s.AgentID),
+			CreatorID:   uuidToString(s.CreatorID),
+			Title:       s.Title,
+			Status:      s.Status,
+			HasUnread:   s.HasUnread,
+			CreatedAt:   timestampToString(s.CreatedAt),
+			UpdatedAt:   timestampToString(s.UpdatedAt),
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

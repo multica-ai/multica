@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica System Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #0f1117; color: #e4e4e7; padding: 40px; }
+
+  .page { max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  h2 { font-size: 16px; font-weight: 600; color: #a1a1aa; margin: 40px 0 16px; }
+  .subtitle { font-size: 14px; color: #71717a; margin-bottom: 32px; }
+
+  /* Architecture diagram */
+  .diagram { position: relative; }
+
+  /* Layers */
+  .layer {
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .layer-label {
+    position: absolute;
+    top: -10px;
+    left: 16px;
+    padding: 0 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+
+  /* Color schemes */
+  .consumer-layer { background: #0a1a12; border-color: #166534; }
+  .consumer-layer .layer-label { background: #0a1a12; color: #4ade80; }
+
+  .api-layer { background: #0f172a; border-color: #1e40af; }
+  .api-layer .layer-label { background: #0f172a; color: #60a5fa; }
+
+  .core-layer { background: linear-gradient(135deg, #18181b 0%, #1e1b4b 100%); border-color: #6366f1; }
+  .core-layer .layer-label { background: #1a1840; color: #a5b4fc; }
+
+  .runtime-layer { background: #1a1206; border-color: #a16207; }
+  .runtime-layer .layer-label { background: #1a1206; color: #fbbf24; }
+
+  .platform-layer { background: #18181b; border-color: #27272a; }
+  .platform-layer .layer-label { background: #18181b; color: #71717a; }
+
+  .data-layer { background: #170f1e; border-color: #7c3aed; }
+  .data-layer .layer-label { background: #170f1e; color: #a78bfa; }
+
+  /* Service boxes */
+  .box {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1.5px solid;
+    margin: 4px;
+    vertical-align: top;
+  }
+  .box.green { background: #0f2a1a; border-color: #22c55e; color: #86efac; }
+  .box.purple { background: #1e1b4b; border-color: #818cf8; color: #c7d2fe; }
+  .box.blue { background: #0f172a; border-color: #3b82f6; color: #93c5fd; }
+  .box.yellow { background: #1a1206; border-color: #eab308; color: #fde68a; }
+  .box.gray { background: #1c1c22; border-color: #3f3f46; color: #a1a1aa; }
+  .box.red { background: #1f0a0a; border-color: #ef4444; color: #fca5a5; }
+  .box.teal { background: #0a1a1a; border-color: #14b8a6; color: #5eead4; }
+  .box.dashed { border-style: dashed; }
+
+  .status { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; }
+  .status.built { background: #166534; color: #86efac; }
+  .status.new { background: #312e81; color: #a5b4fc; }
+
+  /* Flow sections */
+  .flow-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    margin: 8px 0;
+  }
+  .flow-col {
+    flex: 1;
+    min-width: 0;
+  }
+  .flow-col.narrow { flex: 0.6; }
+  .flow-col.wide { flex: 1.4; }
+
+  .section-box {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 12px;
+    height: 100%;
+  }
+  .section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #52525b;
+    margin-bottom: 8px;
+  }
+
+  /* Arrows */
+  .arrow-row {
+    display: flex;
+    justify-content: center;
+    padding: 6px 0;
+    color: #3f3f46;
+    font-size: 12px;
+    gap: 8px;
+    align-items: center;
+  }
+  .arrow-row .label { color: #52525b; font-size: 10px; }
+
+  /* Legend */
+  .legend { display: flex; gap: 20px; margin-bottom: 24px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #71717a; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; border: 1.5px solid; }
+
+  /* Execution pipeline */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 12px 0;
+    flex-wrap: wrap;
+  }
+  .pipeline-step {
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1.5px solid;
+    position: relative;
+  }
+  .pipeline-step:first-child { border-radius: 6px 0 0 6px; }
+  .pipeline-step:last-child { border-radius: 0 6px 6px 0; }
+  .pipeline-arrow {
+    color: #3f3f46;
+    font-size: 14px;
+    padding: 0 2px;
+  }
+
+  /* Two column layout for bottom */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  @media (max-width: 900px) {
+    .flow-row { flex-direction: column; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Multica System Architecture</h1>
+<p class="subtitle">Fuldt system flow: consumer &rarr; API &rarr; agent execution &rarr; response</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#0f2a1a;border-color:#22c55e;"></div> Bygget</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1e1b4b;border-color:#818cf8;"></div> Bygges (roadmap)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1a1206;border-color:#eab308;"></div> Agent Runtime</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1c1c22;border-color:#3f3f46;"></div> Platform (ej Multica)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1c1c22;border-color:#3b82f6;border-style:dashed"></div> Platform (planlagt)</div>
+</div>
+
+<!-- ============================================ -->
+<!-- CONSUMER LAYER -->
+<!-- ============================================ -->
+<div class="layer consumer-layer">
+  <div class="layer-label">Consumers &mdash; hvem kalder agenterne?</div>
+  <div class="box green">Web App <span class="status built">BUILT</span></div>
+  <div class="box green">Desktop App <span class="status built">BUILT</span></div>
+  <div class="box green">CLI <span class="status built">BUILT</span></div>
+  <div class="box purple">Slack Bot <span class="status new">NEW</span></div>
+  <div class="box purple">Andre Firtal Apps <span class="status new">NEW</span></div>
+  <div class="box purple">Cron / Scheduled <span class="status new">NEW</span></div>
+  <div class="box purple">MCP Clients <span class="status new">NEW</span></div>
+  <div class="box purple">Event Bus Triggers <span class="status new">NEW</span></div>
+</div>
+
+<div class="arrow-row">&darr; HTTP / WebSocket / MCP &darr;</div>
+
+<!-- ============================================ -->
+<!-- API LAYER -->
+<!-- ============================================ -->
+<div class="layer api-layer">
+  <div class="layer-label">API Layer &mdash; indgange til Multica</div>
+  <div class="flow-row">
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">REST API (173 routes) <span class="status built">BUILT</span></div>
+        <div class="box green">Issues CRUD</div>
+        <div class="box green">Comments</div>
+        <div class="box green">Agents CRUD</div>
+        <div class="box green">Chat Sessions</div>
+        <div class="box green">Files / Attachments</div>
+        <div class="box green">Workspaces</div>
+        <div class="box green">Skills CRUD</div>
+      </div>
+    </div>
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Nye API endpoints <span class="status new">NEW</span></div>
+        <div class="box purple">Agent Chat API<br><small style="color:#818cf8">POST /agents/:id/chat &rarr; SSE</small></div>
+        <div class="box purple">Agent Discovery<br><small style="color:#818cf8">GET /agents?capabilities=...</small></div>
+        <div class="box purple">Skill Marketplace API<br><small style="color:#818cf8">publish / install / search</small></div>
+        <div class="box purple">Schedule API<br><small style="color:#818cf8">CRUD + trigger</small></div>
+        <div class="box purple">Governance API<br><small style="color:#818cf8">policies / approvals</small></div>
+      </div>
+    </div>
+    <div class="flow-col narrow">
+      <div class="section-box">
+        <div class="section-title">MCP Server <span class="status new">NEW</span></div>
+        <div class="box purple" style="display:block; text-align:center; margin-bottom:8px;">
+          Multica som MCP Server
+        </div>
+        <div style="font-size:11px; color:#71717a; padding:4px;">
+          Eksponerer agenter som MCP tools:<br><br>
+          <code style="color:#93c5fd; font-size:10px;">multica_agent_chat(agent, msg)</code><br>
+          <code style="color:#93c5fd; font-size:10px;">multica_agent_list()</code><br>
+          <code style="color:#93c5fd; font-size:10px;">multica_skill_run(skill, input)</code><br>
+          <code style="color:#93c5fd; font-size:10px;">multica_issue_create(...)</code>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:8px;">
+    <div class="box green">JWT Auth <span class="status built">BUILT</span></div>
+    <div class="box green">PAT Auth (mul_*) <span class="status built">BUILT</span></div>
+    <div class="box purple">Rate Limiting <span class="status new">NEW</span></div>
+    <div class="box purple">API Key Management <span class="status new">NEW</span></div>
+  </div>
+</div>
+
+<div class="arrow-row">&darr; Request routed to handler &darr;</div>
+
+<!-- ============================================ -->
+<!-- CORE LAYER -->
+<!-- ============================================ -->
+<div class="layer core-layer">
+  <div class="layer-label">Multica Core &mdash; agent-livscyklussen</div>
+
+  <h2 style="margin:0 0 12px; font-size:13px; color:#a5b4fc;">Agent Execution Pipeline</h2>
+  <p style="font-size:11px; color:#71717a; margin-bottom:12px;">Hvert agent-kald (fra UI, API, Slack, cron, MCP) g&aring;r igennem denne pipeline:</p>
+
+  <div class="pipeline">
+    <div class="pipeline-step blue">1. Request<br><small>Chat API / Issue assign / Cron trigger</small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step purple">2. Governance<br><small>Policy check: m&aring; agenten dette? <span class="status new">NEW</span></small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step green">3. Context Build<br><small>Issue + skills + MCP tools <span class="status built">BUILT</span></small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step purple">4. Memory Inject<br><small>User + agent + workspace memory <span class="status new">NEW</span></small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step green">5. Prompt Build<br><small>CLAUDE.md + context + skills <span class="status built">BUILT</span></small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step yellow">6. Execute<br><small>Code: CLI/Daemon | Knowledge: Direct LLM</small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step purple">7. Eval<br><small>Output quality check <span class="status new">NEW</span></small></div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-step green">8. Stream<br><small>SSE / WebSocket <span class="status built">BUILT</span></small></div>
+  </div>
+
+  <div class="flow-row" style="margin-top:20px;">
+    <!-- Agent Identity -->
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Agent Identity & Capabilities</div>
+        <div class="box green">Agent Profiles <span class="status built">BUILT</span></div>
+        <div class="box green">Agent Status <span class="status built">BUILT</span></div>
+        <div class="box green">Skills Loader <span class="status built">BUILT</span></div>
+        <div class="box green">Skill Assignment <span class="status built">BUILT</span></div>
+        <div class="box purple">Skill Marketplace <span class="status new">NEW</span></div>
+        <div class="box purple">Skill Discovery <span class="status new">NEW</span></div>
+        <div class="box purple">Skill Versioning <span class="status new">NEW</span></div>
+        <div class="box purple">Skill Usage Stats <span class="status new">NEW</span></div>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Agent Memory <span class="status new">NEW</span></div>
+        <div class="box purple">Per-agent memory</div>
+        <div class="box purple">Per-user memory</div>
+        <div class="box purple">Per-workspace memory</div>
+        <div class="box purple">Memory Synthesis (24h)</div>
+        <div class="box purple">Memory API<br><small style="color:#818cf8">Andre apps kan skrive til memory</small></div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px; padding:4px;">
+          Injiceres i pipeline step 4.<br>
+          Tr&aelig;kker fra Registry API + Ontology API.
+        </div>
+      </div>
+    </div>
+
+    <!-- Governance -->
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Governance & Quality <span class="status new">NEW</span></div>
+        <div class="box purple">Policy Engine</div>
+        <div class="box purple">Action Classification<br><small style="color:#818cf8">read / mutate / destructive</small></div>
+        <div class="box purple">Approval Queue</div>
+        <div class="box purple">Kill Switch</div>
+        <div class="box purple">Audit Trail</div>
+        <div class="box purple">Budget Caps</div>
+        <div class="box purple">Agent Evals (L1+L2)</div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px; padding:4px;">
+          Policy check i pipeline step 2.<br>
+          Eval i pipeline step 7.
+        </div>
+      </div>
+    </div>
+
+    <!-- MCP -->
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">MCP Integration <span class="status new">NEW</span></div>
+        <div class="box purple">MCP Server Registry</div>
+        <div class="box purple">MCP Connection Manager<br><small style="color:#818cf8">start / stop / health</small></div>
+        <div class="box purple">MCP Credential Injection</div>
+        <div class="box purple">Per-agent MCP Config</div>
+        <div class="box purple">MCP Tool Discovery</div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px; padding:4px;">
+          Agenter f&aring;r MCP tools i pipeline step 3.<br>
+          Bruger eksisterende community MCP servers.
+        </div>
+        <div style="margin-top:8px;">
+          <div class="box teal" style="font-size:10px;">Slack MCP</div>
+          <div class="box teal" style="font-size:10px;">GitHub MCP</div>
+          <div class="box teal" style="font-size:10px;">Google MCP</div>
+          <div class="box teal" style="font-size:10px;">Linear MCP</div>
+          <div class="box teal" style="font-size:10px;">Notion MCP</div>
+          <div class="box teal" style="font-size:10px;">+ enhver MCP</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scheduling -->
+  <div style="margin-top:12px;">
+    <div class="section-box">
+      <div class="section-title">Scheduling & Automation <span class="status new">NEW</span></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div class="box purple">Cron Scheduler</div>
+        <div class="box purple">Headless Execution</div>
+        <div class="box purple">Output Routing<br><small style="color:#818cf8">Slack / Email / Issue / Event Bus</small></div>
+        <div class="box purple">Run History</div>
+        <div class="box purple">External Triggers<br><small style="color:#818cf8">API / webhook / event</small></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Real-time -->
+  <div style="margin-top:12px;">
+    <div class="section-box">
+      <div class="section-title">Real-time & Streaming</div>
+      <div class="box green">WebSocket Hub <span class="status built">BUILT</span></div>
+      <div class="box green">Event Broadcasting <span class="status built">BUILT</span></div>
+      <div class="box green">Task Progress Streaming <span class="status built">BUILT</span></div>
+      <div class="box purple">Event Bus Publishing <span class="status new">NEW</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-row">&darr; Agent kald &darr; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &uarr; Streaming response &uarr;</div>
+
+<!-- ============================================ -->
+<!-- RUNTIME LAYER -->
+<!-- ============================================ -->
+<div class="layer runtime-layer">
+  <div class="layer-label">Agent Runtimes &mdash; hvor agenter eksekverer</div>
+  <div class="flow-row">
+    <div class="flow-col">
+      <div class="section-box" style="border: 2px solid #ef4444; border-radius:8px;">
+        <div class="section-title" style="color:#fca5a5;">Direct LLM Runtime (Knowledge Agents) <span class="status new">BUILD 0</span></div>
+        <div class="box red">Direct LLM Backend<br><small style="color:#fca5a5">Prompt + MCP tools &rarr; LLM API &rarr; stream</small></div>
+        <div style="font-size:11px; color:#fca5a5; margin-top:8px; padding:4px; line-height:1.6;">
+          <strong>Ingen CLI. Ingen daemon. Ingen git repo.</strong><br>
+          Server kalder LLM direkte med skills + memory + MCP tools.<br>
+          Bruges til: CFO, CX, Sales, Ops &mdash; alle non-code agenter.<br>
+          Serverless. Skalerer horisontalt. Millisekunder, ikke sekunder.
+        </div>
+      </div>
+    </div>
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Code Agent Runtimes <span class="status built">BUILT</span></div>
+        <div class="box yellow" style="font-size:11px;">Claude Code CLI</div>
+        <div class="box yellow" style="font-size:11px;">Codex CLI</div>
+        <div class="box yellow" style="font-size:11px;">OpenCode CLI</div>
+        <div class="box yellow" style="font-size:11px;">OpenClaw CLI</div>
+        <div class="box yellow" style="font-size:11px;">Hermes CLI</div>
+        <div style="font-size:10px; color:#92400e; margin-top:8px; padding:4px;">
+          Daemon poller &rarr; claimer &rarr; spawn CLI i git repo &rarr; stream.<br>
+          Bruges til: code review, bug fix, feature build.
+        </div>
+      </div>
+    </div>
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Cloud Code Runtimes <span class="status new">NEW</span></div>
+        <div class="box purple">Claude Remote<br><small style="color:#818cf8">Anthropic cloud sandbox</small></div>
+        <div class="box purple">Pi Agents<br><small style="color:#818cf8">Model-agnostisk via OpenRouter</small></div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px; padding:4px;">
+          Code agents i cloud. Ingen lokal maskine.<br>
+          Stadig git repo + CLI, bare hosted.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Runtime interface -->
+  <div style="margin-top:12px;">
+    <div class="section-box">
+      <div class="section-title">Shared Interface &mdash; alle 3 runtime-typer bag samme interface</div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="font-size:11px; color:#a1a1aa; font-family:monospace; padding:12px; background:rgba(0,0,0,0.3); border-radius:6px; flex:1; min-width:200px;">
+          <span style="color:#fde68a">type</span> Backend <span style="color:#fde68a">interface</span> {<br>
+          &nbsp;&nbsp;Execute(ctx, prompt, opts)<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;&rarr; (*Session, error)<br>
+          }<br><br>
+          <span style="color:#52525b">// 3 runtime categories:</span><br>
+          <span style="color:#fca5a5">// Direct LLM &nbsp;(knowledge agents)</span><br>
+          <span style="color:#fde68a">// Local CLI &nbsp;&nbsp;(code agents)</span><br>
+          <span style="color:#c7d2fe">// Cloud CLI &nbsp;&nbsp;(code agents, hosted)</span>
+        </div>
+        <div style="font-size:11px; color:#71717a; flex:1; min-width:200px; line-height:1.8;">
+          <strong style="color:#a1a1aa;">Agent config v&aelig;lger runtime:</strong><br>
+          <code style="color:#fca5a5">type: knowledge</code> &rarr; Direct LLM<br>
+          <code style="color:#fde68a">type: code, runtime: local</code> &rarr; CLI daemon<br>
+          <code style="color:#c7d2fe">type: code, runtime: cloud</code> &rarr; Claude Remote / Pi<br><br>
+          <strong style="color:#a1a1aa;">Resten af pipelinen er identisk.</strong><br>
+          Skills, memory, governance, eval &mdash;<br>
+          alt virker ens uanset runtime.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-row">&darr; Reads / Writes &darr;</div>
+
+<!-- ============================================ -->
+<!-- DATA LAYER -->
+<!-- ============================================ -->
+<div class="layer data-layer">
+  <div class="layer-label">Data Layer</div>
+  <div class="flow-row">
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">PostgreSQL (pgvector) <span class="status built">BUILT</span></div>
+        <div class="box green" style="font-size:10px;">users</div>
+        <div class="box green" style="font-size:10px;">workspaces</div>
+        <div class="box green" style="font-size:10px;">issues</div>
+        <div class="box green" style="font-size:10px;">comments</div>
+        <div class="box green" style="font-size:10px;">agents</div>
+        <div class="box green" style="font-size:10px;">skills</div>
+        <div class="box green" style="font-size:10px;">tasks</div>
+        <div class="box green" style="font-size:10px;">chat_sessions</div>
+        <div class="box green" style="font-size:10px;">runtimes</div>
+        <div class="box green" style="font-size:10px;">inbox</div>
+        <div class="box purple" style="font-size:10px;">memories</div>
+        <div class="box purple" style="font-size:10px;">policies</div>
+        <div class="box purple" style="font-size:10px;">approvals</div>
+        <div class="box purple" style="font-size:10px;">schedules</div>
+        <div class="box purple" style="font-size:10px;">mcp_servers</div>
+        <div class="box purple" style="font-size:10px;">eval_results</div>
+        <div class="box purple" style="font-size:10px;">knowledge_chunks</div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px;">32 tabeller i dag &rarr; ~40 efter roadmap. sqlc for type-safe queries.</div>
+      </div>
+    </div>
+    <div class="flow-col narrow">
+      <div class="section-box">
+        <div class="section-title">File Storage <span class="status built">BUILT</span></div>
+        <div class="box green">S3 + CloudFront CDN</div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px;">Attachments, avatars, skill files</div>
+      </div>
+      <div class="section-box" style="margin-top:12px;">
+        <div class="section-title">Vector Search <span class="status new">NEW</span></div>
+        <div class="box purple">pgvector embeddings</div>
+        <div style="font-size:10px; color:#52525b; margin-top:8px;">Knowledge chunks. pgvector allerede i DB image.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-row">&darr; Platform services Multica bruger &darr;</div>
+
+<!-- ============================================ -->
+<!-- PLATFORM LAYER -->
+<!-- ============================================ -->
+<div class="layer platform-layer">
+  <div class="layer-label">Firtal Platform Services (Multica consumer)</div>
+  <div class="flow-row">
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Multica bruger i dag</div>
+        <div class="box gray">Central Auth (Google OAuth)</div>
+        <div class="box gray">Resend (Email)</div>
+        <div class="box gray">S3 (File storage)</div>
+      </div>
+    </div>
+    <div class="flow-col">
+      <div class="section-box">
+        <div class="section-title">Multica vil bruge (n&aring;r klar)</div>
+        <div class="box gray dashed">Credentials Vault</div>
+        <div class="box gray dashed">Event Bus</div>
+        <div class="box gray dashed">PII Guard</div>
+        <div class="box gray dashed">LLM Gateway</div>
+        <div class="box gray dashed">Knowledge Engine</div>
+        <div class="box gray dashed">Anti-hallucination</div>
+        <div class="box gray dashed">Registry API</div>
+        <div class="box gray dashed">Permission Engine</div>
+      </div>
+    </div>
+    <div class="flow-col narrow">
+      <div class="section-box">
+        <div class="section-title">Fallback strategi</div>
+        <div style="font-size:11px; color:#71717a; line-height:1.6;">
+          Hvis platform service ikke eksisterer:<br><br>
+          <strong style="color:#a1a1aa;">Credentials</strong> &rarr; .env / DB<br>
+          <strong style="color:#a1a1aa;">Event Bus</strong> &rarr; WebSocket (allerede bygget)<br>
+          <strong style="color:#a1a1aa;">PII Guard</strong> &rarr; regex-baseret filter<br>
+          <strong style="color:#a1a1aa;">LLM Gateway</strong> &rarr; direkte model-kald<br>
+          <strong style="color:#a1a1aa;">Knowledge</strong> &rarr; pgvector i egen DB<br><br>
+          <em>Designes med interfaces s&aring; platform kan swappes ind.</em>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Key flows -->
+<h2>Nøgle-flows</h2>
+
+<div class="two-col">
+  <div class="layer" style="background:#18181b;">
+    <div class="section-title" style="color:#60a5fa;">Flow 1: App kalder CFO-agent via API</div>
+    <div style="font-size:12px; color:#a1a1aa; line-height:2;">
+      <code style="color:#93c5fd;">POST /api/v1/agents/cfo/chat</code><br>
+      &rarr; Auth (JWT/PAT) &rarr; Rate limit check<br>
+      &rarr; Governance: m&aring; caller kalde CFO?<br>
+      &rarr; Context: CFO's skills loaded<br>
+      &rarr; Memory: user + agent memory injected<br>
+      &rarr; MCP: Slack + Google MCP servers attached<br>
+      &rarr; Prompt built (CLAUDE.md + context)<br>
+      &rarr; Execute via daemon/cloud runtime<br>
+      &rarr; Eval: output quality check<br>
+      &rarr; SSE stream &rarr; caller<br>
+      &rarr; Event Bus: agent.responded published
+    </div>
+  </div>
+
+  <div class="layer" style="background:#18181b;">
+    <div class="section-title" style="color:#fbbf24;">Flow 2: Scheduled daily report</div>
+    <div style="font-size:12px; color:#a1a1aa; line-height:2;">
+      <code style="color:#fde68a;">Cron trigger: 08:00 daily</code><br>
+      &rarr; Schedule entry loaded from DB<br>
+      &rarr; Same pipeline as Flow 1<br>
+      &rarr; Output routing: post til Slack #finance<br>
+      &rarr; Run logged in schedule history<br>
+      &rarr; Event Bus: schedule.completed<br>
+      <br>
+      <em style="color:#52525b;">Ingen human i loopet.<br>
+      Headless approval hvis governance kr&aelig;ver det.</em>
+    </div>
+  </div>
+
+  <div class="layer" style="background:#18181b;">
+    <div class="section-title" style="color:#34d399;">Flow 3: Slack bot @mention</div>
+    <div style="font-size:12px; color:#a1a1aa; line-height:2;">
+      <code style="color:#86efac;">@multica-cfo hvad er MER i dag?</code><br>
+      &rarr; Slack webhook &rarr; Multica API<br>
+      &rarr; Route til CFO agent<br>
+      &rarr; Same pipeline as Flow 1<br>
+      &rarr; Response posted som Slack thread reply<br>
+      <br>
+      <em style="color:#52525b;">Bruger fuld agent setup:<br>
+      skills + memory + MCP tools + governance.</em>
+    </div>
+  </div>
+
+  <div class="layer" style="background:#18181b;">
+    <div class="section-title" style="color:#a78bfa;">Flow 4: MCP client kalder agent</div>
+    <div style="font-size:12px; color:#a1a1aa; line-height:2;">
+      <code style="color:#c7d2fe;">multica_agent_chat("cfo", "MER?")</code><br>
+      &rarr; MCP server modtager tool_use<br>
+      &rarr; Maps til Agent Chat API<br>
+      &rarr; Same pipeline as Flow 1<br>
+      &rarr; Response returneres som MCP result<br>
+      <br>
+      <em style="color:#52525b;">Enhver MCP-klient (Claude Code, Cursor, etc.)<br>
+      kan kalde Multica agenter som tools.</em>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

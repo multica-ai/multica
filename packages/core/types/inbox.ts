@@ -18,6 +18,24 @@ export type InboxItemType =
   | "agent_completed"
   | "reaction_added";
 
+export interface InboxFolder {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  name: string;
+  position: number;
+  created_at: string;
+}
+
+export type InboxFolderItemType = "chat_session" | "notification";
+
+export interface InboxFolderMembership {
+  folder_id: string;
+  item_type: InboxFolderItemType;
+  item_id: string;
+  added_at: string;
+}
+
 export interface InboxItem {
   id: string;
   workspace_id: string;

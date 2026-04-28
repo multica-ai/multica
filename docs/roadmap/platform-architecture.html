@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica i Firtal Platform Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #0f1117; color: #e4e4e7; padding: 40px; min-height: 100vh; }
+  h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; color: #fff; }
+  .subtitle { font-size: 14px; color: #71717a; margin-bottom: 40px; }
+
+  .architecture { display: flex; flex-direction: column; gap: 24px; max-width: 1200px; margin: 0 auto; }
+
+  /* Layer containers */
+  .layer { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; position: relative; }
+  .layer-label { position: absolute; top: -10px; left: 20px; background: #18181b; padding: 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+  .layer-label.platform { color: #71717a; }
+  .layer-label.multica { color: #818cf8; }
+  .layer-label.consumers { color: #34d399; }
+
+  /* Service grid */
+  .services { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  /* Service boxes */
+  .service { padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1.5px solid; min-width: 140px; text-align: center; }
+
+  /* Platform services */
+  .service.platform { background: #1c1c22; border-color: #3f3f46; color: #a1a1aa; }
+  .service.platform.exists { border-color: #22c55e; color: #86efac; }
+  .service.platform.planned { border-color: #3b82f6; border-style: dashed; color: #93c5fd; }
+
+  /* Multica services */
+  .service.multica { background: #1e1b4b; border-color: #6366f1; color: #c7d2fe; }
+  .service.multica.exists { border-color: #22c55e; background: #0f2a1a; color: #86efac; }
+  .service.multica.new { border-color: #818cf8; }
+
+  /* Consumer boxes */
+  .service.consumer { background: #0f291a; border-color: #34d399; color: #a7f3d0; }
+
+  /* Multica highlight */
+  .multica-layer { border-color: #6366f1; background: linear-gradient(135deg, #18181b 0%, #1e1b4b 100%); }
+
+  /* Connector lines */
+  .connectors { display: flex; justify-content: center; gap: 40px; padding: 8px 0; }
+  .connector { display: flex; flex-direction: column; align-items: center; color: #3f3f46; font-size: 18px; }
+  .connector-label { font-size: 10px; color: #52525b; margin-top: 2px; }
+
+  /* Section headers within layers */
+  .section-header { font-size: 11px; font-weight: 600; color: #52525b; text-transform: uppercase; letter-spacing: 1px; margin: 16px 0 8px 0; width: 100%; }
+  .section-header:first-child { margin-top: 0; }
+
+  /* Legend */
+  .legend { display: flex; gap: 24px; margin-bottom: 24px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #a1a1aa; }
+  .legend-swatch { width: 24px; height: 14px; border-radius: 4px; border: 1.5px solid; }
+  .legend-swatch.exists { border-color: #22c55e; background: #0f2a1a; }
+  .legend-swatch.new { border-color: #818cf8; background: #1e1b4b; }
+  .legend-swatch.platform-planned { border-color: #3b82f6; border-style: dashed; background: #1c1c22; }
+  .legend-swatch.platform-exists { border-color: #3f3f46; background: #1c1c22; }
+  .legend-swatch.consumer { border-color: #34d399; background: #0f291a; }
+
+  /* Ownership badge */
+  .ownership { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 4px; vertical-align: middle; }
+  .ownership.multica-owns { background: #312e81; color: #a5b4fc; }
+  .ownership.platform-owns { background: #1c1c22; color: #71717a; }
+
+  /* Identity statement */
+  .identity { background: linear-gradient(135deg, #1e1b4b, #312e81); border: 1px solid #6366f1; border-radius: 12px; padding: 24px; margin-bottom: 24px; text-align: center; }
+  .identity p { font-size: 16px; color: #c7d2fe; line-height: 1.6; }
+  .identity strong { color: #fff; }
+
+  /* Divider */
+  .divider { text-align: center; color: #3f3f46; font-size: 12px; padding: 4px 0; letter-spacing: 2px; }
+
+  /* Groups within multica */
+  .multica-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+
+  /* Flow arrows */
+  .flow { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 0; color: #52525b; }
+  .flow .arrow { font-size: 20px; }
+  .flow .label { font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="architecture">
+
+  <h1>Multica i Firtal Platform Architecture</h1>
+  <p class="subtitle">Hvad Multica ejer vs. hvad platformen leverer</p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch exists"></div> Multica — bygget</div>
+    <div class="legend-item"><div class="legend-swatch new"></div> Multica — bygges (roadmap)</div>
+    <div class="legend-item"><div class="legend-swatch platform-exists"></div> Platform service</div>
+    <div class="legend-item"><div class="legend-swatch platform-planned"></div> Platform — planlagt</div>
+    <div class="legend-item"><div class="legend-swatch consumer"></div> Consumer apps</div>
+  </div>
+
+  <div class="identity">
+    <p><strong>Multica ejer agent-livscyklussen:</strong><br>hvem er agenten, hvad kan den, hvad husker den, hvornår kører den, hvad m&aring; den, og hvem kan kalde den.</p>
+  </div>
+
+  <!-- PLATFORM LAYER -->
+  <div class="layer">
+    <div class="layer-label platform">Platform Services (Multica bruger, ejer ikke)</div>
+    <div class="services">
+      <div class="service platform">Central Auth</div>
+      <div class="service platform">Credentials Vault</div>
+      <div class="service platform">Event Bus</div>
+      <div class="service platform">PII Guard</div>
+      <div class="service platform">Permission Engine</div>
+      <div class="service platform planned">LLM Gateway</div>
+      <div class="service platform planned">Knowledge Engine</div>
+      <div class="service platform planned">Document Intelligence</div>
+      <div class="service platform planned">Anti-hallucination</div>
+      <div class="service platform">Registry API</div>
+      <div class="service platform">Ontology API</div>
+      <div class="service platform planned">Unstructured Ingestion</div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <span class="arrow">&#x2191;&#x2193;</span>
+    <span class="label">Multica bruger platform services via API / Event Bus</span>
+  </div>
+
+  <!-- MULTICA LAYER -->
+  <div class="layer multica-layer">
+    <div class="layer-label multica">Multica — Agent Platform</div>
+
+    <div class="section-header">Agent Execution (kernen)</div>
+    <div class="multica-grid">
+      <div class="service multica exists">Agent Runtime</div>
+      <div class="service multica exists">Task Queue</div>
+      <div class="service multica exists">Prompt Builder</div>
+      <div class="service multica new">Cloud Runtimes</div>
+    </div>
+
+    <div class="section-header">Agent Identity & Capabilities</div>
+    <div class="multica-grid">
+      <div class="service multica exists">Agent Profiler</div>
+      <div class="service multica exists">Skills Loader</div>
+      <div class="service multica new">Skill Marketplace</div>
+      <div class="service multica new">Agent Memory</div>
+    </div>
+
+    <div class="section-header">Agent API & Integration</div>
+    <div class="multica-grid">
+      <div class="service multica new">Agent Chat API</div>
+      <div class="service multica new">MCP Gateway</div>
+      <div class="service multica new">MCP Server Registry</div>
+      <div class="service multica new">Scheduled Automations</div>
+    </div>
+
+    <div class="section-header">Agent Governance & Quality</div>
+    <div class="multica-grid">
+      <div class="service multica new">Governance Engine</div>
+      <div class="service multica new">Approval Queue</div>
+      <div class="service multica new">Agent Evals</div>
+      <div class="service multica new">Usage Analytics</div>
+    </div>
+
+    <div class="section-header">Agent UI</div>
+    <div class="multica-grid">
+      <div class="service multica exists">Web App (Next.js)</div>
+      <div class="service multica exists">Desktop App (Electron)</div>
+      <div class="service multica exists">CLI + Daemon</div>
+      <div class="service multica new">Slack Bot</div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <span class="arrow">&#x2191;&#x2193;</span>
+    <span class="label">Agent Chat API / MCP Gateway</span>
+  </div>
+
+  <!-- CONSUMER LAYER -->
+  <div class="layer">
+    <div class="layer-label consumers">Consumers (kalder Multica agenter)</div>
+    <div class="services">
+      <div class="service consumer">Multica UI</div>
+      <div class="service consumer">Slack Bot</div>
+      <div class="service consumer">Andre Firtal Apps</div>
+      <div class="service consumer">Cron / Scheduled Tasks</div>
+      <div class="service consumer">MCP Clients</div>
+      <div class="service consumer">Webhooks / Event Bus</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Stats bar -->
+<div style="max-width: 1200px; margin: 40px auto 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+  <div style="background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 16px; text-align: center;">
+    <div style="font-size: 28px; font-weight: 700; color: #22c55e;">8</div>
+    <div style="font-size: 11px; color: #71717a; margin-top: 4px;">BYGGET</div>
+  </div>
+  <div style="background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 16px; text-align: center;">
+    <div style="font-size: 28px; font-weight: 700; color: #818cf8;">12</div>
+    <div style="font-size: 11px; color: #71717a; margin-top: 4px;">BYGGES (ROADMAP)</div>
+  </div>
+  <div style="background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 16px; text-align: center;">
+    <div style="font-size: 28px; font-weight: 700; color: #f59e0b;">~27</div>
+    <div style="font-size: 11px; color: #71717a; margin-top: 4px;">BUILDS</div>
+  </div>
+  <div style="background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 16px; text-align: center;">
+    <div style="font-size: 28px; font-weight: 700; color: #ef4444;">12</div>
+    <div style="font-size: 11px; color: #71717a; margin-top: 4px;">PLATFORM DEPS</div>
+  </div>
+</div>
+
+</body>
+</html>

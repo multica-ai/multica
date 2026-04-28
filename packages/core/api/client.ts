@@ -15,6 +15,9 @@ import type {
   AgentTask,
   AgentRuntime,
   InboxItem,
+  InboxFolder,
+  InboxFolderMembership,
+  InboxFolderItemType,
   IssueSubscriber,
   Comment,
   Reaction,
@@ -521,8 +524,9 @@ export class ApiClient {
   }
 
   // Inbox
-  async listInbox(): Promise<InboxItem[]> {
-    return this.fetch("/api/inbox");
+  async listInbox(params?: { folder?: string }): Promise<InboxItem[]> {
+    const query = params?.folder ? `?folder=${params.folder}` : "";
+    return this.fetch(`/api/inbox${query}`);
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {
@@ -551,6 +555,55 @@ export class ApiClient {
 
   async archiveCompletedInbox(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+  }
+
+  // Inbox folders
+  async listInboxFolders(): Promise<InboxFolder[]> {
+    return this.fetch("/api/inbox/folders");
+  }
+
+  async createInboxFolder(name: string): Promise<InboxFolder> {
+    return this.fetch("/api/inbox/folders", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async renameInboxFolder(id: string, name: string): Promise<InboxFolder> {
+    return this.fetch(`/api/inbox/folders/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteInboxFolder(id: string): Promise<void> {
+    return this.fetch(`/api/inbox/folders/${id}`, { method: "DELETE" });
+  }
+
+  async listInboxFolderMemberships(): Promise<InboxFolderMembership[]> {
+    return this.fetch("/api/inbox/folder-memberships");
+  }
+
+  async addInboxFolderItem(
+    folderId: string,
+    itemType: InboxFolderItemType,
+    itemId: string,
+  ): Promise<void> {
+    return this.fetch(`/api/inbox/folders/${folderId}/items`, {
+      method: "POST",
+      body: JSON.stringify({ item_type: itemType, item_id: itemId }),
+    });
+  }
+
+  async removeInboxFolderItem(
+    folderId: string,
+    itemType: InboxFolderItemType,
+    itemId: string,
+  ): Promise<void> {
+    return this.fetch(
+      `/api/inbox/folders/${folderId}/items/${itemType}/${itemId}`,
+      { method: "DELETE" },
+    );
   }
 
   // App Config
@@ -740,8 +793,11 @@ export class ApiClient {
   }
 
   // Chat Sessions
-  async listChatSessions(params?: { status?: string }): Promise<ChatSession[]> {
-    const query = params?.status ? `?status=${params.status}` : "";
+  async listChatSessions(params?: { status?: string; folder?: string }): Promise<ChatSession[]> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.folder) qs.set("folder", params.folder);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
     return this.fetch(`/api/chat/sessions${query}`);
   }
 
