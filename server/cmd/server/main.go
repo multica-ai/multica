@@ -14,10 +14,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
+)
+
+var (
+	version = "dev"
+	commit  = "unknown"
 )
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
@@ -233,7 +239,29 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
-	r := NewRouter(pool, hub, bus, analyticsClient, storeRedis)
+	metricsConfig := obsmetrics.ConfigFromEnv()
+	var metricsServer *http.Server
+	var httpMetrics *obsmetrics.HTTPMetrics
+	if metricsConfig.Enabled() {
+		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
+			Pool:     pool,
+			Realtime: realtime.M,
+			Version:  version,
+			Commit:   commit,
+		})
+		httpMetrics = metricsRegistry.HTTP
+		metricsServer = obsmetrics.NewServer(metricsConfig.Addr, metricsRegistry.Gatherer)
+		if !obsmetrics.IsLoopbackAddr(metricsConfig.Addr) {
+			slog.Warn(
+				"metrics listener is not loopback-only; restrict access with private networking, allowlists, or proxy auth",
+				"addr", metricsConfig.Addr,
+			)
+		}
+	}
+
+	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+		HTTPMetrics: httpMetrics,
+	})
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -252,7 +280,16 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runDBStatsLogger(sweepCtx, pool)
 
-	// Graceful shutdown
+	if metricsServer != nil {
+		go func() {
+			slog.Info("metrics server starting", "addr", metricsConfig.Addr)
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server error", "error", err)
+				os.Exit(1)
+			}
+		}()
+	}
+
 	go func() {
 		slog.Info("server starting", "port", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -271,6 +308,12 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("metrics server forced to shutdown", "error", err)
+			os.Exit(1)
+		}
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
 		os.Exit(1)

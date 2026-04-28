@@ -79,6 +79,7 @@ The `Secure` flag on session cookies is derived automatically from the scheme of
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend server port |
+| `METRICS_ADDR` | empty | Optional Prometheus metrics listener, for example `127.0.0.1:9090` |
 | `FRONTEND_PORT` | `3000` | Frontend port |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -307,6 +308,27 @@ Use `/health` for basic liveness / reachability checks. Use `/readyz` for
 dependency-aware readiness probes and external monitoring that should fail when
 the database is unavailable or migrations are not fully applied. `/healthz` is
 kept as an alias for operator familiarity.
+
+## Prometheus Metrics
+
+The backend can expose Prometheus metrics on a separate management listener:
+
+```bash
+METRICS_ADDR=127.0.0.1:9090 ./server/bin/server
+curl http://127.0.0.1:9090/metrics
+```
+
+`METRICS_ADDR` is empty by default, so no metrics listener is started. The
+public API port does not serve `/metrics`; keep it that way for internet-facing
+deployments. Metrics can reveal internal routes, traffic volume, dependency
+state, and runtime health.
+
+For Docker or Kubernetes deployments, prefer a private scrape path: bind the
+metrics listener to an internal interface and protect it with private
+networking, allowlists, NetworkPolicy, or proxy authentication. If you bind
+`METRICS_ADDR=0.0.0.0:9090` inside a container, only publish that port to a
+trusted network, for example a host-local mapping such as
+`127.0.0.1:9090:9090`.
 
 ## Upgrading
 

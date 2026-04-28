@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -62,6 +63,14 @@ func allowedOrigins() []string {
 // keeps the default in-memory stores which are fine for single-node dev and
 // tests.
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client) chi.Router {
+	return NewRouterWithOptions(pool, hub, bus, analyticsClient, rdb, RouterOptions{})
+}
+
+type RouterOptions struct {
+	HTTPMetrics *obsmetrics.HTTPMetrics
+}
+
+func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -97,6 +106,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	r.Use(chimw.RequestID)
 	r.Use(middleware.ClientMetadata)
 	r.Use(middleware.RequestLogger)
+	if opts.HTTPMetrics != nil {
+		r.Use(opts.HTTPMetrics.Middleware)
+	}
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.ContentSecurityPolicy)
 	origins := allowedOrigins()
