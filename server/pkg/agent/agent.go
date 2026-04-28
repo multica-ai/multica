@@ -92,8 +92,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &codexBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
+	case "codebuddy":
+		return &codebuddyBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, codebuddy)", agentType)
 	}
 }
 
