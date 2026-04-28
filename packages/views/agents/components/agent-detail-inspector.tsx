@@ -26,11 +26,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { PropRow } from "../../common/prop-row";
-import {
-  availabilityConfig,
-  failureReasonLabel,
-  taskStateConfig,
-} from "../presence";
+import { availabilityConfig } from "../presence";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
@@ -460,13 +456,8 @@ function PresenceBadge({
     );
   }
   const av = availabilityConfig[presence.availability];
-  const ts = taskStateConfig[presence.lastTask];
-  const showQueue =
-    presence.lastTask === "running" && presence.queuedCount > 0;
-  const failureCopy =
-    presence.lastTask === "failed" && presence.failureReason
-      ? failureReasonLabel[presence.failureReason]
-      : null;
+  // Last-task chip / failure copy intentionally omitted on the detail page
+  // — the Recent work panel below shows the same data with full context.
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -476,20 +467,6 @@ function PresenceBadge({
         <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
         {av.label}
       </span>
-      {presence.lastTask !== "idle" && (
-        <span className={`inline-flex items-center gap-1 text-xs ${ts.textClass}`}>
-          <ts.icon className="h-3 w-3" />
-          {ts.label}
-          {showQueue && (
-            <span className="font-mono tabular-nums text-muted-foreground">
-              +{presence.queuedCount}
-            </span>
-          )}
-        </span>
-      )}
-      {failureCopy && (
-        <span className="text-xs text-muted-foreground">{failureCopy}</span>
-      )}
     </div>
   );
 }

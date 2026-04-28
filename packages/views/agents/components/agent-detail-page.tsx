@@ -42,11 +42,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink, useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import {
-  availabilityConfig,
-  failureReasonLabel,
-  taskStateConfig,
-} from "../presence";
+import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentOverviewPane } from "./agent-overview-pane";
 
@@ -267,11 +263,10 @@ function DetailHeader({
 }) {
   const isArchived = !!agent.archived_at;
   const av = presence ? availabilityConfig[presence.availability] : null;
-  const ts = presence ? taskStateConfig[presence.lastTask] : null;
-  const failureCopy =
-    presence?.lastTask === "failed" && presence.failureReason
-      ? failureReasonLabel[presence.failureReason]
-      : null;
+  // Last-task state is intentionally not surfaced in the header — the
+  // Recent work section on this page already shows the same information
+  // (and richer: titles, timestamps, error messages). Showing "Completed"
+  // up here was redundant chrome.
 
   return (
     <PageHeader className="justify-between gap-3 px-5">
@@ -292,20 +287,6 @@ function DetailHeader({
             <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
             {av.label}
           </span>
-        )}
-        {!isArchived && ts && presence && presence.lastTask !== "idle" && (
-          <span className={`inline-flex items-center gap-1 text-xs ${ts.textClass}`}>
-            <ts.icon className="h-3 w-3" />
-            {ts.label}
-            {presence.lastTask === "running" && presence.queuedCount > 0 && (
-              <span className="font-mono tabular-nums text-muted-foreground">
-                +{presence.queuedCount}
-              </span>
-            )}
-          </span>
-        )}
-        {failureCopy && (
-          <span className="text-xs text-muted-foreground">{failureCopy}</span>
         )}
       </div>
 
