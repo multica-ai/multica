@@ -52,13 +52,17 @@ export function chatMessagesOptions(sessionId: string) {
     queryFn: () => api.listChatMessages(sessionId),
     enabled: !!sessionId,
     staleTime: Infinity,
+    // With staleTime:Infinity, default focus refetch is a no-op; "always"
+    // recovers missed WS events when the user returns to the tab.
+    refetchOnWindowFocus: "always",
   });
 }
 
 /**
  * Pending task for a chat session — the "is something still running?" signal.
- * Refetched via WS invalidation in useRealtimeSync when chat:message / chat:done
- * / task:completed / task:failed arrive.
+ * Primary updates: WS invalidation in useRealtimeSync (chat:message / chat:done /
+ * task:completed / task:failed). refetchOnWindowFocus is a fallback when events
+ * were missed (e.g. tab backgrounded) while staleTime is Infinity.
  */
 export function pendingChatTaskOptions(sessionId: string) {
   return queryOptions({
@@ -66,6 +70,7 @@ export function pendingChatTaskOptions(sessionId: string) {
     queryFn: () => api.getPendingChatTask(sessionId),
     enabled: !!sessionId,
     staleTime: Infinity,
+    refetchOnWindowFocus: "always",
   });
 }
 
@@ -80,6 +85,9 @@ export function taskMessagesOptions(taskId: string) {
     queryFn: () => api.listTaskMessages(taskId),
     enabled: !!taskId,
     staleTime: Infinity,
+    // This cache is also shared by issue agent cards; always refetch on focus
+    // so partial timelines recover when WS events were missed in background tabs.
+    refetchOnWindowFocus: "always",
   });
 }
 
