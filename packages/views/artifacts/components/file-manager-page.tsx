@@ -16,6 +16,14 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -62,6 +70,7 @@ import {
   useUpdateArtifactFolder,
   useDeleteArtifactFolder,
   useMoveArtifactToFolder,
+  useDeleteArtifact,
 } from "@multica/core/artifacts/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -343,10 +352,23 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const [renameDraft, setRenameDraft] = React.useState("");
   const [deleteFolderTarget, setDeleteFolderTarget] =
     React.useState<ArtifactFolder | null>(null);
+  const [selectedFolders, setSelectedFolders] = React.useState<Set<string>>(
+    new Set(),
+  );
+  const [selectedArtifacts, setSelectedArtifacts] = React.useState<Set<string>>(
+    new Set(),
+  );
+  const [batchDeleteOpen, setBatchDeleteOpen] = React.useState(false);
 
   React.useEffect(() => {
     setFolderId(initialFolderId ?? null);
   }, [initialFolderId]);
+
+  // Selection is per-folder-view; navigating away clears it.
+  React.useEffect(() => {
+    setSelectedFolders(new Set());
+    setSelectedArtifacts(new Set());
+  }, [folderId]);
 
   const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
   const { data: allArtifacts = [], isLoading } = useQuery(
@@ -356,6 +378,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const updateFolder = useUpdateArtifactFolder();
   const deleteFolder = useDeleteArtifactFolder();
   const moveArtifact = useMoveArtifactToFolder();
+  const deleteArtifact = useDeleteArtifact();
 
   const tree = React.useMemo(() => buildFolderTree(folders), [folders]);
   const breadcrumbs = React.useMemo(
@@ -413,6 +436,78 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     await deleteFolder.mutateAsync({ id: deleteFolderTarget.id });
     if (folderId === deleteFolderTarget.id) setFolderId(null);
     setDeleteFolderTarget(null);
+  };
+
+  // ---- Selection helpers ----
+  const totalSelected = selectedFolders.size + selectedArtifacts.size;
+  const allInViewSelected =
+    childFolders.length + artifacts.length > 0 &&
+    selectedFolders.size === childFolders.length &&
+    selectedArtifacts.size === artifacts.length;
+
+  const toggleSelectFolder = (id: string) => {
+    setSelectedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectArtifact = (id: string) => {
+    setSelectedArtifacts((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectAllInView = () => {
+    if (allInViewSelected) {
+      setSelectedFolders(new Set());
+      setSelectedArtifacts(new Set());
+    } else {
+      setSelectedFolders(new Set(childFolders.map((f) => f.id)));
+      setSelectedArtifacts(new Set(artifacts.map((a) => a.id)));
+    }
+  };
+  const clearSelection = () => {
+    setSelectedFolders(new Set());
+    setSelectedArtifacts(new Set());
+  };
+
+  const handleBatchMove = async (target: string | null) => {
+    const promises: Promise<unknown>[] = [];
+    selectedArtifacts.forEach((id) => {
+      promises.push(
+        moveArtifact.mutateAsync({ id, data: { folder_id: target } }),
+      );
+    });
+    selectedFolders.forEach((id) => {
+      // Don't move a folder into itself or one of its descendants. Server
+      // would reject self-parenting; descendant-cycle is not currently
+      // detected — for v1 we just let the server return an error.
+      if (target !== id) {
+        promises.push(
+          updateFolder.mutateAsync({ id, data: { parent_id: target } }),
+        );
+      }
+    });
+    await Promise.allSettled(promises);
+    clearSelection();
+  };
+
+  const handleBatchDelete = async () => {
+    const promises: Promise<unknown>[] = [];
+    selectedArtifacts.forEach((id) => {
+      const a = artifacts.find((x) => x.id === id);
+      if (a) promises.push(deleteArtifact.mutateAsync(a));
+    });
+    selectedFolders.forEach((id) => {
+      promises.push(deleteFolder.mutateAsync({ id }));
+    });
+    await Promise.allSettled(promises);
+    clearSelection();
+    setBatchDeleteOpen(false);
   };
 
   return (
@@ -535,6 +630,47 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
           </div>
         </div>
 
+        {totalSelected > 0 && (
+          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-6 py-1.5 text-sm">
+            <span className="text-muted-foreground">
+              {totalSelected} selected
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="sm" />}
+              >
+                <ArrowLeftRight className="mr-1 size-4" /> Move to
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => handleBatchMove(null)}>
+                  All documents (root)
+                </DropdownMenuItem>
+                {folders.length > 0 && <DropdownMenuSeparator />}
+                {folders.map((f) => (
+                  <DropdownMenuItem
+                    key={f.id}
+                    onSelect={() => handleBatchMove(f.id)}
+                  >
+                    <FolderIcon className="mr-2 size-3.5" />
+                    {f.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setBatchDeleteOpen(true)}
+            >
+              <Trash2 className="mr-1 size-4" /> Delete
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto">
           {isLoading ? (
             <div className="px-6 py-6 text-sm text-muted-foreground">Loading…</div>
@@ -551,8 +687,15 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-[minmax(0,1fr)_120px_120px_140px_120px] text-sm">
-              <div className="col-span-5 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
+            <div className="grid grid-cols-[40px_minmax(0,1fr)_120px_120px_140px_120px] text-sm">
+              <div className="col-span-6 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
+                <div className="flex items-center">
+                  <Checkbox
+                    checked={allInViewSelected}
+                    onCheckedChange={selectAllInView}
+                    aria-label="Select all"
+                  />
+                </div>
                 <div>Name</div>
                 <div>Kind</div>
                 <div>Format</div>
@@ -569,8 +712,18 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       const id = e.dataTransfer.getData("text/multica-artifact");
                       if (id) handleMoveArtifact(id, f.id);
                     }}
-                    className="col-span-5 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="col-span-6 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
                   >
+                    <div
+                      className="flex items-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={selectedFolders.has(f.id)}
+                        onCheckedChange={() => toggleSelectFolder(f.id)}
+                        aria-label={`Select ${f.name}`}
+                      />
+                    </div>
                     <div className="flex items-center gap-2 truncate">
                       <FolderIcon className="size-4 text-muted-foreground" />
                       <span className="truncate font-medium">{f.name}</span>
@@ -610,8 +763,18 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onClick={() => router.push(wsPaths.documentDetail(a.id))}
-                    className="col-span-5 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="col-span-6 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
                   >
+                    <div
+                      className="flex items-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={selectedArtifacts.has(a.id)}
+                        onCheckedChange={() => toggleSelectArtifact(a.id)}
+                        aria-label={`Select ${a.title}`}
+                      />
+                    </div>
                     <div className="flex items-center gap-2 truncate">
                       <KindIcon
                         kind={a.kind}
@@ -731,6 +894,33 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               disabled={deleteFolder.isPending}
             >
               {deleteFolder.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {totalSelected} item(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedFolders.size > 0 && selectedArtifacts.size > 0
+                ? `${selectedFolders.size} folder(s) and ${selectedArtifacts.size} document(s) will be deleted.`
+                : selectedFolders.size > 0
+                  ? `${selectedFolders.size} folder(s) will be deleted. Documents inside move back to the root.`
+                  : `${selectedArtifacts.size} document(s) will be deleted.`}
+              {" "}This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBatchDelete}
+              disabled={deleteFolder.isPending || deleteArtifact.isPending}
+            >
+              {deleteFolder.isPending || deleteArtifact.isPending
+                ? "Deleting…"
+                : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
