@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -627,7 +626,7 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("file too large: %d bytes (max 5MB)", len(fileData))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	// Agent existence pre-check.
@@ -636,12 +635,7 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get agent: %w", err)
 	}
 
-	// Temporarily extend HTTP client timeout for the upload; the default
-	// 15s is too short for larger files on slower connections.
-	origClient := client.HTTPClient
-	client.HTTPClient = &http.Client{Timeout: 60 * time.Second}
 	id, url, err := client.UploadFileWithURL(ctx, fileData, filePath)
-	client.HTTPClient = origClient
 	if err != nil {
 		return fmt.Errorf("upload avatar: %w", err)
 	}
