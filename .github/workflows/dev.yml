@@ -1,0 +1,81 @@
+name: Dev cluster Deployment
+
+on:
+  pull_request:
+    types:
+      - labeled
+      - synchronize
+      - opened
+
+concurrency:
+  group: dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  bake-build-backend:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: dev
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.backend.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
+  bake-build-web:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: dev
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.web.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
+  extract-tags:
+    needs: [bake-build-backend, bake-build-web]
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tag: ${{ steps.extract.outputs.backend_tag }}
+      web_tag: ${{ steps.extract.outputs.web_tag }}
+    steps:
+      - name: Extract tags from image_name
+        id: extract
+        env:
+          BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
+          WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
+        run: |
+          echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+
+  commit-to-gitops-backend:
+    needs: [bake-build-backend, bake-build-web, extract-tags]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-tags.outputs.backend_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/development/kustomization.yaml
+      image_yq_matcher: .images[0].newTag
+
+  commit-to-gitops-web:
+    needs: [bake-build-backend, bake-build-web, extract-tags, commit-to-gitops-backend]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-tags.outputs.web_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/development/kustomization.yaml
+      image_yq_matcher: .images[1].newTag
