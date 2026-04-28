@@ -392,8 +392,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/{id}", h.GetArtifact)
 				r.Put("/{id}", h.UpdateArtifact)
 				r.Put("/{id}/scope", h.UpdateArtifactScope)
+				r.Put("/{id}/folder", h.MoveArtifactToFolder)
 				r.Delete("/{id}", h.DeleteArtifact)
 			})
+			r.Route("/api/artifact-folders", func(r chi.Router) {
+				r.Get("/", h.ListArtifactFolders)
+				r.Post("/", h.CreateArtifactFolder)
+				r.Put("/{id}", h.UpdateArtifactFolder)
+				r.Delete("/{id}", h.DeleteArtifactFolder)
+			})
+			r.Post("/api/artifact-uploads", h.UploadArtifactFile)
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

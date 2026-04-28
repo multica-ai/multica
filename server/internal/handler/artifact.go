@@ -28,19 +28,29 @@ var validArtifactKinds = map[string]bool{
 	"note":     true,
 }
 
+var validArtifactFormats = map[string]bool{
+	"md":   true,
+	"html": true,
+	"pdf":  true,
+}
+
 type ArtifactResponse struct {
-	ID          string         `json:"id"`
-	WorkspaceID string         `json:"workspace_id"`
-	ProjectID   *string        `json:"project_id"`
-	IssueID     *string        `json:"issue_id"`
-	Kind        string         `json:"kind"`
-	Title       string         `json:"title"`
-	Body        string         `json:"body"`
-	Metadata    map[string]any `json:"metadata"`
-	AuthorType  string         `json:"author_type"`
-	AuthorID    string         `json:"author_id"`
-	CreatedAt   string         `json:"created_at"`
-	UpdatedAt   string         `json:"updated_at"`
+	ID            string         `json:"id"`
+	WorkspaceID   string         `json:"workspace_id"`
+	ProjectID     *string        `json:"project_id"`
+	IssueID       *string        `json:"issue_id"`
+	FolderID      *string        `json:"folder_id"`
+	Kind          string         `json:"kind"`
+	Format        string         `json:"format"`
+	Title         string         `json:"title"`
+	Body          string         `json:"body"`
+	FileURL       *string        `json:"file_url"`
+	FileSizeBytes *int64         `json:"file_size_bytes"`
+	Metadata      map[string]any `json:"metadata"`
+	AuthorType    string         `json:"author_type"`
+	AuthorID      string         `json:"author_id"`
+	CreatedAt     string         `json:"created_at"`
+	UpdatedAt     string         `json:"updated_at"`
 }
 
 func artifactToResponse(a db.Artifact) ArtifactResponse {
@@ -48,6 +58,7 @@ func artifactToResponse(a db.Artifact) ArtifactResponse {
 		ID:          uuidToString(a.ID),
 		WorkspaceID: uuidToString(a.WorkspaceID),
 		Kind:        a.Kind,
+		Format:      a.Format,
 		Title:       a.Title,
 		Body:        a.Body,
 		Metadata:    map[string]any{},
@@ -64,6 +75,18 @@ func artifactToResponse(a db.Artifact) ArtifactResponse {
 		s := uuidToString(a.IssueID)
 		resp.IssueID = &s
 	}
+	if a.FolderID.Valid {
+		s := uuidToString(a.FolderID)
+		resp.FolderID = &s
+	}
+	if a.FileUrl.Valid {
+		s := a.FileUrl.String
+		resp.FileURL = &s
+	}
+	if a.FileSizeBytes.Valid {
+		s := a.FileSizeBytes.Int64
+		resp.FileSizeBytes = &s
+	}
 	if len(a.Metadata) > 0 {
 		_ = json.Unmarshal(a.Metadata, &resp.Metadata)
 	}
@@ -75,12 +98,16 @@ func artifactToResponse(a db.Artifact) ArtifactResponse {
 // ---------------------------------------------------------------------------
 
 type CreateArtifactRequest struct {
-	Kind      string         `json:"kind"`
-	Title     string         `json:"title"`
-	Body      string         `json:"body"`
-	Metadata  map[string]any `json:"metadata"`
-	ProjectID *string        `json:"project_id"`
-	IssueID   *string        `json:"issue_id"`
+	Kind          string         `json:"kind"`
+	Format        string         `json:"format"`
+	Title         string         `json:"title"`
+	Body          string         `json:"body"`
+	FileURL       *string        `json:"file_url"`
+	FileSizeBytes *int64         `json:"file_size_bytes"`
+	Metadata      map[string]any `json:"metadata"`
+	ProjectID     *string        `json:"project_id"`
+	IssueID       *string        `json:"issue_id"`
+	FolderID      *string        `json:"folder_id"`
 }
 
 func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +134,18 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid kind; expected one of report|plan|decision|diagram|note")
 		return
 	}
+	format := req.Format
+	if format == "" {
+		format = "md"
+	}
+	if !validArtifactFormats[format] {
+		writeError(w, http.StatusBadRequest, "invalid format; expected one of md|html|pdf")
+		return
+	}
+	if format == "pdf" && (req.FileURL == nil || *req.FileURL == "") {
+		writeError(w, http.StatusBadRequest, "pdf format requires file_url (upload via /api/artifact-uploads first)")
+		return
+	}
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
@@ -117,7 +156,7 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate scope target belongs to workspace.
-	var projectID, issueID pgtype.UUID
+	var projectID, issueID, folderID pgtype.UUID
 	if req.ProjectID != nil {
 		project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 			ID:          parseUUID(*req.ProjectID),
@@ -140,6 +179,17 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		issueID = issue.ID
 	}
+	if req.FolderID != nil {
+		folder, err := h.Queries.GetArtifactFolder(r.Context(), db.GetArtifactFolderParams{
+			ID:          parseUUID(*req.FolderID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "folder not found")
+			return
+		}
+		folderID = folder.ID
+	}
 
 	authorType, authorID := h.resolveActor(r, userID, workspaceID)
 
@@ -150,18 +200,31 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var fileURL pgtype.Text
+	if req.FileURL != nil && *req.FileURL != "" {
+		fileURL = pgtype.Text{String: *req.FileURL, Valid: true}
+	}
+	var fileSize pgtype.Int8
+	if req.FileSizeBytes != nil {
+		fileSize = pgtype.Int8{Int64: *req.FileSizeBytes, Valid: true}
+	}
+
 	id, _ := uuid.NewV7()
 	artifact, err := h.Queries.CreateArtifact(r.Context(), db.CreateArtifactParams{
-		ID:          pgtype.UUID{Bytes: id, Valid: true},
-		WorkspaceID: parseUUID(workspaceID),
-		ProjectID:   projectID,
-		IssueID:     issueID,
-		Kind:        req.Kind,
-		Title:       req.Title,
-		Body:        req.Body,
-		Metadata:    metadata,
-		AuthorType:  authorType,
-		AuthorID:    parseUUID(authorID),
+		ID:            pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID:   parseUUID(workspaceID),
+		ProjectID:     projectID,
+		IssueID:       issueID,
+		FolderID:      folderID,
+		Kind:          req.Kind,
+		Format:        format,
+		Title:         req.Title,
+		Body:          req.Body,
+		FileUrl:       fileURL,
+		FileSizeBytes: fileSize,
+		Metadata:      metadata,
+		AuthorType:    authorType,
+		AuthorID:      parseUUID(authorID),
 	})
 	if err != nil {
 		slog.Error("create artifact failed", "error", err)
@@ -276,9 +339,11 @@ func (h *Handler) ListArtifactsForProject(w http.ResponseWriter, r *http.Request
 // ---------------------------------------------------------------------------
 
 type UpdateArtifactRequest struct {
-	Title    *string        `json:"title"`
-	Body     *string        `json:"body"`
-	Metadata map[string]any `json:"metadata"`
+	Title         *string        `json:"title"`
+	Body          *string        `json:"body"`
+	FileURL       *string        `json:"file_url"`
+	FileSizeBytes *int64         `json:"file_size_bytes"`
+	Metadata      map[string]any `json:"metadata"`
 }
 
 func (h *Handler) UpdateArtifact(w http.ResponseWriter, r *http.Request) {
@@ -340,12 +405,27 @@ func (h *Handler) UpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	fileURL := existing.FileUrl
+	if req.FileURL != nil {
+		if *req.FileURL == "" {
+			fileURL = pgtype.Text{}
+		} else {
+			fileURL = pgtype.Text{String: *req.FileURL, Valid: true}
+		}
+	}
+	fileSize := existing.FileSizeBytes
+	if req.FileSizeBytes != nil {
+		fileSize = pgtype.Int8{Int64: *req.FileSizeBytes, Valid: true}
+	}
+
 	updated, err := h.Queries.UpdateArtifact(r.Context(), db.UpdateArtifactParams{
-		ID:          existing.ID,
-		Title:       title,
-		Body:        body,
-		Metadata:    metadata,
-		WorkspaceID: existing.WorkspaceID,
+		ID:            existing.ID,
+		Title:         title,
+		Body:          body,
+		Metadata:      metadata,
+		WorkspaceID:   existing.WorkspaceID,
+		FileUrl:       fileURL,
+		FileSizeBytes: fileSize,
 	})
 	if err != nil {
 		slog.Error("update artifact failed", "error", err)
@@ -529,6 +609,84 @@ func (h *Handler) UpdateArtifactScope(w http.ResponseWriter, r *http.Request) {
 		"artifact": previous,
 	})
 	h.publish(EventArtifactCreated, workspaceID, authorType, authorID, map[string]any{
+		"artifact": resp,
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// MoveArtifactToFolder — PUT /api/artifacts/{id}/folder
+// ---------------------------------------------------------------------------
+
+type MoveArtifactToFolderRequest struct {
+	FolderID *string `json:"folder_id"`
+}
+
+func (h *Handler) MoveArtifactToFolder(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	existing, err := h.Queries.GetArtifact(r.Context(), db.GetArtifactParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+
+	authorType, authorID := h.resolveActor(r, userID, workspaceID)
+	isAuthor := existing.AuthorType == authorType && uuidToString(existing.AuthorID) == authorID
+	isAdmin := member.Role == "admin" || member.Role == "owner"
+	if !isAuthor && !isAdmin {
+		writeError(w, http.StatusForbidden, "not authorized to move this artifact")
+		return
+	}
+
+	var req MoveArtifactToFolderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var folderID pgtype.UUID
+	if req.FolderID != nil && *req.FolderID != "" {
+		folder, err := h.Queries.GetArtifactFolder(r.Context(), db.GetArtifactFolderParams{
+			ID:          parseUUID(*req.FolderID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "folder not found")
+			return
+		}
+		folderID = folder.ID
+	}
+
+	updated, err := h.Queries.MoveArtifactToFolder(r.Context(), db.MoveArtifactToFolderParams{
+		ID:          existing.ID,
+		WorkspaceID: existing.WorkspaceID,
+		FolderID:    folderID,
+	})
+	if err != nil {
+		slog.Error("move artifact to folder failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to move artifact")
+		return
+	}
+
+	resp := artifactToResponse(updated)
+	h.publish(EventArtifactUpdated, workspaceID, authorType, authorID, map[string]any{
 		"artifact": resp,
 	})
 	writeJSON(w, http.StatusOK, resp)
