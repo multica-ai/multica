@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Multicam",
+    "slug": "multicam",
+    "scheme": "wujieai_multicam",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "android": {
+      "package": "com.wujieai.multica",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#111111"
+      }
+    },
+    "extra": {
+      "apiBaseUrl": "https://multica.wujieai.com",
+      "wsUrl": "wss://multica.wujieai.com/ws"
+    }
+  }
+}

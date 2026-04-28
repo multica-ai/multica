@@ -60,6 +60,7 @@ export function CoreProvider({
   wsUrl = "ws://localhost:8080/ws",
   storage = defaultStorage,
   cookieAuth,
+  fetchConfig,
   onLogin,
   onLogout,
 }: CoreProviderProps) {
@@ -70,7 +71,13 @@ export function CoreProvider({
 
   return (
     <QueryProvider>
-      <AuthInitializer onLogin={onLogin} onLogout={onLogout} storage={storage} cookieAuth={cookieAuth}>
+      <AuthInitializer
+        onLogin={onLogin}
+        onLogout={onLogout}
+        storage={storage}
+        cookieAuth={cookieAuth}
+        fetchConfig={fetchConfig}
+      >
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}

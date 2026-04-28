@@ -16,6 +16,10 @@ catalog:
   # State Management
   zustand: "^5.0.0"
   "@tanstack/react-query": "^5.96.2"
+  "@react-navigation/core": "^7.17.2"
+  "@react-navigation/native": "^7.1.26"
+  "@react-navigation/native-stack": "^7.8.7"
+  "@react-navigation/bottom-tabs": "^7.8.4"
 
   # UI & Styling
   tailwindcss: "^4"

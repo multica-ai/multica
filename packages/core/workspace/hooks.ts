@@ -2,7 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "../hooks";
-import { memberListOptions, agentListOptions } from "./queries";
+import { memberListOptions, agentListOptions, workspaceListOptions } from "./queries";
+
+export function useWorkspaceList() {
+  return useQuery(workspaceListOptions());
+}
 
 export function useActorName() {
   const wsId = useWorkspaceId();
