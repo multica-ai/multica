@@ -29,7 +29,8 @@ type ExecOptions struct {
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	ResumeSessionID           string          // if non-empty, resume a previous agent session
-	CustomArgs                []string        // additional CLI arguments appended to the agent command
+	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs
+	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 }
 

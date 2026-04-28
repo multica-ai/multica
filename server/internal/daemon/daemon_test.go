@@ -700,3 +700,39 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
 	}
 }
+
+func TestShellArgsFromEnv(t *testing.T) {
+	t.Setenv("MULTICA_CLAUDE_ARGS", `--max-turns 60 --append-system-prompt "multi word"`)
+	got, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
+	if err != nil {
+		t.Fatalf("shellArgsFromEnv: %v", err)
+	}
+	want := []string{"--max-turns", "60", "--append-system-prompt", "multi word"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestShellArgsFromEnvEmptyIsNil(t *testing.T) {
+	t.Setenv("MULTICA_CODEX_ARGS", "   ")
+	got, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
+	if err != nil {
+		t.Fatalf("shellArgsFromEnv: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil for empty env, got %#v", got)
+	}
+}
+
+func TestDefaultArgsForProvider(t *testing.T) {
+	cfg := Config{ClaudeArgs: []string{"--max-turns", "60"}, CodexArgs: []string{"--sandbox", "workspace-write"}}
+	if got := defaultArgsForProvider(cfg, "claude"); strings.Join(got, " ") != "--max-turns 60" {
+		t.Fatalf("unexpected claude args: %#v", got)
+	}
+	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
+		t.Fatalf("unexpected codex args: %#v", got)
+	}
+	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+		t.Fatalf("expected nil for unsupported provider, got %#v", got)
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mattn/go-shellwords"
 )
 
 const (
@@ -48,6 +50,8 @@ type Config struct {
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
+	ClaudeArgs                     []string
+	CodexArgs                      []string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -161,6 +165,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if len(agents) == 0 {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+	}
+
+	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	codexArgs, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
+	if err != nil {
+		return Config{}, err
 	}
 
 	// Host info
@@ -326,6 +339,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		HeartbeatInterval:              heartbeatInterval,
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
+		ClaudeArgs:                     claudeArgs,
+		CodexArgs:                      codexArgs,
 	}, nil
 }
 
@@ -351,4 +366,16 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func shellArgsFromEnv(name string) ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil, nil
+	}
+	args, err := shellwords.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return args, nil
 }
