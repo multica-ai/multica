@@ -140,6 +140,12 @@ export function BoardColumn({
                   }
                 />
                 <DropdownMenuContent align="end">
+                  {hasInstructions && (
+                    <DropdownMenuItem onClick={() => setInstructionsOpen(true)}>
+                      <BookOpen className="size-3.5" />
+                      View instructions
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status as IssueStatus)}>
                     <EyeOff className="size-3.5" />
                     Hide column
