@@ -1,10 +1,15 @@
 -- name: CreateArtifact :one
 INSERT INTO artifact (
-    id, workspace_id, project_id, issue_id, kind, title, body, metadata,
+    id, workspace_id, project_id, issue_id, folder_id,
+    kind, format, title, body, file_url, file_size_bytes, metadata,
     author_type, author_id
 )
 VALUES (
-    $1, $2, sqlc.narg(project_id), sqlc.narg(issue_id), $3, $4, $5, $6, $7, $8
+    $1, $2,
+    sqlc.narg(project_id), sqlc.narg(issue_id), sqlc.narg(folder_id),
+    $3, $4, $5, $6,
+    sqlc.narg(file_url), sqlc.narg(file_size_bytes),
+    $7, $8, $9
 )
 RETURNING *;
 
@@ -27,11 +32,25 @@ SELECT * FROM artifact
 WHERE workspace_id = $1 AND project_id IS NULL AND issue_id IS NULL
 ORDER BY created_at DESC;
 
+-- name: ListArtifactsByFolder :many
+-- Lists artifacts inside a specific folder (or root when folder_id is NULL).
+-- Includes artifacts of any scope (workspace/project/issue) — folders are
+-- orthogonal to scope.
+SELECT * FROM artifact
+WHERE workspace_id = $1
+  AND (
+        (sqlc.narg('folder_id')::uuid IS NULL AND folder_id IS NULL)
+     OR (folder_id = sqlc.narg('folder_id'))
+  )
+ORDER BY title ASC;
+
 -- name: UpdateArtifact :one
 UPDATE artifact SET
     title = $2,
     body = $3,
     metadata = $4,
+    file_url = sqlc.narg(file_url),
+    file_size_bytes = sqlc.narg(file_size_bytes),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $5
 RETURNING *;
@@ -68,6 +87,14 @@ LIMIT $2 OFFSET $3;
 UPDATE artifact SET
     project_id = sqlc.narg('project_id'),
     issue_id   = sqlc.narg('issue_id'),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: MoveArtifactToFolder :one
+-- Move an artifact to a different folder (or to root when folder_id is NULL).
+UPDATE artifact SET
+    folder_id  = sqlc.narg('folder_id'),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
