@@ -346,6 +346,7 @@ type Project struct {
 	Title       string             `json:"title"`
 	Description pgtype.Text        `json:"description"`
 	Icon        pgtype.Text        `json:"icon"`
+	LocalPath   pgtype.Text        `json:"local_path"`
 	Status      string             `json:"status"`
 	LeadType    pgtype.Text        `json:"lead_type"`
 	LeadID      pgtype.UUID        `json:"lead_id"`
@@ -428,6 +429,7 @@ type Workspace struct {
 	Name         string             `json:"name"`
 	Slug         string             `json:"slug"`
 	Description  pgtype.Text        `json:"description"`
+	LocalPath    pgtype.Text        `json:"local_path"`
 	Settings     []byte             `json:"settings"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`

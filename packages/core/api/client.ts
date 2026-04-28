@@ -726,14 +726,14 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`);
   }
 
-  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
+  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; local_path?: string }): Promise<Workspace> {
     return this.fetch("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; local_path?: string | null; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
