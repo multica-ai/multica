@@ -52,22 +52,17 @@ func loadAllowedOrigins() []string {
 	if raw == "" {
 		raw = strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	}
-	if raw == "" {
-		return []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://localhost:5174",
-		}
-	}
 
 	parts := strings.Split(raw, ",")
-	origins := make([]string, 0, len(parts))
+	origins := make([]string, 0, len(parts)+3)
 	for _, part := range parts {
 		origin := strings.TrimSpace(part)
 		if origin != "" {
 			origins = append(origins, origin)
 		}
 	}
+	// Always allow localhost dev origins for self-hosting convenience.
+	origins = append(origins, "http://localhost:3000", "http://localhost:5173", "http://localhost:5174")
 	return origins
 }
 
