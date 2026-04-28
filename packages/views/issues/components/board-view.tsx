@@ -19,7 +19,17 @@ import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { MyIssuesFilter } from "@multica/core/issues/queries";
+import type { IssueListFilter, MyIssuesFilter } from "@multica/core/issues/queries";
+
+/**
+ * Threaded between BoardView and its inner components — selects which list
+ * cache `useLoadMoreByStatus` paginates. The workspace list path keys on
+ * `filter`; the My Issues path keys on `(scope, filter)` because each scope
+ * has its own cache entry.
+ */
+type LoadMoreOptions =
+  | { filter?: IssueListFilter; myIssues?: never }
+  | { filter?: never; myIssues: { scope: string; filter: MyIssuesFilter } };
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -103,6 +113,7 @@ export function BoardView({
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  listFilter,
   myIssuesScope,
   myIssuesFilter,
 }: {
@@ -115,15 +126,17 @@ export function BoardView({
     newPosition?: number
   ) => void;
   childProgressMap?: Map<string, ChildProgress>;
+  /** Filter that keys the workspace list cache. Threaded into useLoadMoreByStatus so pagination targets the same filtered bucket the page is rendering. */
+  listFilter?: IssueListFilter;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
+  const loadMoreOptions = myIssuesScope
+    ? { myIssues: { scope: myIssuesScope, filter: myIssuesFilter ?? {} } }
+    : { filter: listFilter };
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -287,14 +300,14 @@ export function BoardView({
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
-            myIssuesOpts={myIssuesOpts}
+            loadMoreOptions={loadMoreOptions}
           />
         ))}
 
         {hiddenStatuses.length > 0 && (
           <HiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            myIssuesOpts={myIssuesOpts}
+            loadMoreOptions={loadMoreOptions}
           />
         )}
       </div>
@@ -315,17 +328,17 @@ function PaginatedBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
-  myIssuesOpts,
+  loadMoreOptions,
 }: {
   status: IssueStatus;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  loadMoreOptions: LoadMoreOptions;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    myIssuesOpts,
+    loadMoreOptions,
   );
   return (
     <BoardColumn
@@ -345,10 +358,10 @@ function PaginatedBoardColumn({
 
 function HiddenColumnsPanel({
   hiddenStatuses,
-  myIssuesOpts,
+  loadMoreOptions,
 }: {
   hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  loadMoreOptions: LoadMoreOptions;
 }) {
   return (
     <div className="flex w-[240px] shrink-0 flex-col">
@@ -362,7 +375,7 @@ function HiddenColumnsPanel({
           <HiddenColumnRow
             key={status}
             status={status}
-            myIssuesOpts={myIssuesOpts}
+            loadMoreOptions={loadMoreOptions}
           />
         ))}
       </div>
@@ -372,14 +385,14 @@ function HiddenColumnsPanel({
 
 function HiddenColumnRow({
   status,
-  myIssuesOpts,
+  loadMoreOptions,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  loadMoreOptions: LoadMoreOptions;
 }) {
   const cfg = STATUS_CONFIG[status];
   const viewStoreApi = useViewStoreApi();
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  const { total } = useLoadMoreByStatus(status, loadMoreOptions);
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">

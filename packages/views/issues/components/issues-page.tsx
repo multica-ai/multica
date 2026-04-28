@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../utils/filter";
+import { buildIssueListFilter } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
@@ -25,7 +25,6 @@ import { BatchActionToolbar } from "./batch-action-toolbar";
 
 export function IssuesPage() {
   const wsId = useWorkspaceId();
-  const { data: allIssues = [], isLoading: loading } = useQuery(issueListOptions(wsId));
 
   const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -37,6 +36,7 @@ export function IssuesPage() {
   const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
+  const labelFilters = useIssueViewStore((s) => s.labelFilters);
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(useIssueViewStore, wsId);
@@ -45,19 +45,39 @@ export function IssuesPage() {
     useIssueSelectionStore.getState().clear();
   }, [viewMode, scope]);
 
-  // Scope pre-filter: narrow by assignee type
-  const scopedIssues = useMemo(() => {
+  // Server-side filter: every active filter goes into the GET /api/issues
+  // query string so each status bucket fetches the *correct first 50*. With
+  // client-side filtering issues outside the first page silently fell out of
+  // view (#1491). Status is intentionally not part of the wire filter — each
+  // bucket fetches its own status, and we hide buckets via `visibleStatuses`.
+  const listFilter = useMemo(
+    () =>
+      buildIssueListFilter({
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters,
+        includeNoProject,
+        labelFilters,
+      }),
+    [priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters],
+  );
+  const { data: allIssues = [], isLoading: loading } = useQuery(
+    issueListOptions(wsId, listFilter),
+  );
+
+  // Scope pre-filter: narrow by assignee type client-side. Scope subdivides
+  // the server-fetched buckets — applying it here keeps the header's count
+  // chips honest about how many of the (already-filtered) results belong to
+  // each scope.
+  const issues = useMemo(() => {
     if (scope === "members")
       return allIssues.filter((i) => i.assignee_type === "member");
     if (scope === "agents")
       return allIssues.filter((i) => i.assignee_type === "agent");
     return allIssues;
   }, [allIssues, scope]);
-
-  const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject],
-  );
 
   // Fetch sub-issue progress from the backend so counts are accurate
   // regardless of client-side pagination or filtering of done issues.
@@ -150,10 +170,10 @@ export function IssuesPage() {
 
       <ViewStoreProvider store={useIssueViewStore}>
         {/* Header 2: Scope tabs + filters */}
-        <IssuesHeader scopedIssues={scopedIssues} />
+        <IssuesHeader issues={issues} />
 
         {/* Content: scrollable */}
-        {scopedIssues.length === 0 ? (
+        {issues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">No issues yet</p>
@@ -168,9 +188,15 @@ export function IssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                listFilter={listFilter}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
+              <ListView
+                issues={issues}
+                visibleStatuses={visibleStatuses}
+                childProgressMap={childProgressMap}
+                listFilter={listFilter}
+              />
             )}
           </div>
         )}

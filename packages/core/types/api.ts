@@ -34,11 +34,16 @@ export interface ListIssuesParams {
   offset?: number;
   workspace_id?: string;
   status?: IssueStatus;
-  priority?: IssuePriority;
-  assignee_id?: string;
+  priorities?: IssuePriority[];
   assignee_ids?: string[];
-  creator_id?: string;
-  project_id?: string;
+  /** When true, also include issues with no assignee (OR'd with assignee_ids). */
+  include_no_assignee?: boolean;
+  creator_ids?: string[];
+  project_ids?: string[];
+  /** When true, also include issues with no project (OR'd with project_ids). */
+  include_no_project?: boolean;
+  /** Match issues that have at least one of these labels. */
+  label_ids?: string[];
   open_only?: boolean;
 }
 

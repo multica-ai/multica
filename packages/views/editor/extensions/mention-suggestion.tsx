@@ -254,8 +254,22 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
-    const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-    const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
+    // List caches are filter-keyed, so a single workspace can have multiple
+    // entries. Pull from whichever caches exist and dedupe — the goal is just
+    // an instant first paint; the server search below fills in misses.
+    const cachedListEntries = qc.getQueriesData<ListIssuesCache>({
+      queryKey: issueKeys.listPrefix(wsId),
+    });
+    const seen = new Set<string>();
+    const cachedIssues: Issue[] = [];
+    for (const [, cache] of cachedListEntries) {
+      if (!cache) continue;
+      for (const issue of flattenIssueBuckets(cache)) {
+        if (seen.has(issue.id)) continue;
+        seen.add(issue.id);
+        cachedIssues.push(issue);
+      }
+    }
 
     const q = query.toLowerCase();
 
