@@ -201,6 +201,21 @@ function ScopeBadge({ artifact }: { artifact: Artifact }) {
   );
 }
 
+function MobileMeta({ artifact }: { artifact: Artifact }) {
+  const { getActorName } = useActorName();
+  const parts: string[] = [
+    KIND_LABELS[artifact.kind],
+    artifact.format.toUpperCase(),
+    getActorName(artifact.author_type, artifact.author_id),
+    formatDate(artifact.updated_at),
+  ];
+  return (
+    <div className="truncate text-xs text-muted-foreground md:hidden">
+      {parts.join(" · ")}
+    </div>
+  );
+}
+
 function AuthorCell({ artifact }: { artifact: Artifact }) {
   const { getActorName, getMemberName } = useActorName();
   const showRequester =
@@ -674,8 +689,10 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
 
       {/* Main: breadcrumbs, toolbar, list */}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 md:px-6">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* Toolbar — single row on desktop, two-row stack on mobile */}
+        <div className="flex flex-col gap-2 border-b border-border px-4 py-2 md:flex-row md:items-center md:justify-between md:gap-3 md:px-6">
+          {/* Row 1: folder access + breadcrumb + primary action */}
+          <div className="flex min-w-0 items-center gap-2">
             <Sheet open={foldersSheetOpen} onOpenChange={setFoldersSheetOpen}>
               <SheetTrigger
                 render={
@@ -735,27 +752,47 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 ))}
               </BreadcrumbList>
             </Breadcrumb>
+            {/* Primary action stays on the breadcrumb row on mobile so it's
+                always reachable above the search bar. */}
+            <Button
+              size="sm"
+              onClick={() => router.push(wsPaths.documentNew(folderId))}
+              className="md:hidden"
+            >
+              <Plus className="mr-1 size-4" /> New
+            </Button>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+          {/* Row 2: search + author + actions */}
+          <div className="flex items-center gap-2 md:flex-shrink-0">
+            <div className="relative flex-1 md:flex-initial">
               <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search…"
-                className="h-8 w-40 pl-7 sm:w-56"
+                placeholder="Search documents…"
+                className="h-8 w-full pl-7 md:w-56"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="outline" size="sm" />}
+                aria-label="Filter by author"
               >
-                Author:{" "}
-                {authorFilter === "all"
-                  ? "Anyone"
-                  : authorFilter === "agent"
-                    ? "Agents"
-                    : "Members"}
+                <span className="hidden sm:inline">
+                  Author:{" "}
+                  {authorFilter === "all"
+                    ? "Anyone"
+                    : authorFilter === "agent"
+                      ? "Agents"
+                      : "Members"}
+                </span>
+                <span className="sm:hidden">
+                  {authorFilter === "all"
+                    ? "All"
+                    : authorFilter === "agent"
+                      ? "Agents"
+                      : "Members"}
+                </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => setAuthorFilter("all")}>
@@ -773,18 +810,17 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               size="sm"
               variant="outline"
               onClick={() => setNewFolderOpen(true)}
-              aria-label="New folder"
             >
-              <FolderPlus className="size-4 sm:mr-1" />
+              <FolderPlus className="mr-1 size-4" />
               <span className="hidden sm:inline">New folder</span>
+              <span className="sm:hidden">Folder</span>
             </Button>
             <Button
               size="sm"
               onClick={() => router.push(wsPaths.documentNew(folderId))}
-              aria-label="New document"
+              className="hidden md:inline-flex"
             >
-              <Plus className="size-4 sm:mr-1" />
-              <span className="hidden sm:inline">New document</span>
+              <Plus className="mr-1 size-4" /> New document
             </Button>
           </div>
         </div>
@@ -846,8 +882,24 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-[56px_minmax(0,1fr)_100px_80px_160px_120px_110px_44px] text-sm">
-              <div className="col-span-8 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
+            <div className="flex flex-col text-sm md:grid md:grid-cols-[56px_minmax(0,1fr)_100px_80px_160px_120px_110px_44px]">
+              {/* Mobile-only header: just select-all */}
+              <div className="flex items-center justify-between border-b border-border bg-muted/20 px-4 py-1.5 text-xs font-medium uppercase text-muted-foreground md:hidden">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <Checkbox
+                    checked={allInViewSelected}
+                    onCheckedChange={selectAllInView}
+                    aria-label="Select all"
+                  />
+                  Select all
+                </label>
+                <span className="normal-case">
+                  {childFolders.length + artifacts.length} item
+                  {childFolders.length + artifacts.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              {/* Desktop table header */}
+              <div className="col-span-8 hidden grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground md:grid">
                 <div className="flex items-center">
                   <Checkbox
                     checked={allInViewSelected}
@@ -873,7 +925,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       const id = e.dataTransfer.getData("text/multica-artifact");
                       if (id) handleMoveArtifact(id, f.id);
                     }}
-                    className="col-span-8 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-2.5 text-left hover:bg-accent/50 md:col-span-8 md:grid md:grid-cols-subgrid md:gap-0 md:border-b-0 md:px-6 md:py-2"
                   >
                     <div
                       className="flex items-center"
@@ -885,15 +937,22 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         aria-label={`Select ${f.name}`}
                       />
                     </div>
-                    <div className="flex items-center gap-2 truncate">
-                      <FolderIcon className="size-4 text-muted-foreground" />
-                      <span className="truncate font-medium">{f.name}</span>
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{f.name}</div>
+                        <div className="truncate text-xs text-muted-foreground md:hidden">
+                          Folder · {formatDate(f.updated_at)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">Folder</div>
-                    <div />
-                    <div />
-                    <div />
-                    <div className="text-xs text-muted-foreground">
+                    <div className="hidden text-xs text-muted-foreground md:block">
+                      Folder
+                    </div>
+                    <div className="hidden md:block" />
+                    <div className="hidden md:block" />
+                    <div className="hidden md:block" />
+                    <div className="hidden text-xs text-muted-foreground md:block">
                       {formatDate(f.updated_at)}
                     </div>
                     <div
@@ -961,7 +1020,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onClick={() => router.push(wsPaths.documentDetail(a.id))}
-                    className="col-span-8 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-2.5 text-left hover:bg-accent/50 md:col-span-8 md:grid md:grid-cols-subgrid md:items-center md:gap-0 md:border-b-0 md:px-6 md:py-2"
                   >
                     <div
                       className="flex items-center"
@@ -973,27 +1032,32 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         aria-label={`Select ${a.title}`}
                       />
                     </div>
-                    <div className="flex items-center gap-2 truncate">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
                       <KindIcon
                         kind={a.kind}
-                        className="size-4 text-muted-foreground"
+                        className="size-4 shrink-0 text-muted-foreground"
                       />
-                      <span className="truncate font-medium">{a.title}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{a.title}</div>
+                        <MobileMeta artifact={a} />
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="hidden text-xs text-muted-foreground md:block">
                       {KIND_LABELS[a.kind]}
                     </div>
-                    <div className="text-xs uppercase text-muted-foreground">
+                    <div className="hidden text-xs uppercase text-muted-foreground md:block">
                       {a.format}
                       {a.format === "pdf" && a.file_size_bytes
                         ? ` · ${formatBytes(a.file_size_bytes)}`
                         : ""}
                     </div>
-                    <AuthorCell artifact={a} />
-                    <div>
+                    <div className="hidden md:block">
+                      <AuthorCell artifact={a} />
+                    </div>
+                    <div className="hidden md:block">
                       <ScopeBadge artifact={a} />
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="hidden text-xs text-muted-foreground md:block">
                       {formatDate(a.updated_at)}
                     </div>
                     <div
