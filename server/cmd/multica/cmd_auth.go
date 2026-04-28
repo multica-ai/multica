@@ -20,6 +20,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+type browserCommand struct {
+	name string
+	args []string
+}
+
 var authCmd = &cobra.Command{
 	Use:   "auth",
 	Short: "Authenticate multica with Multica",
@@ -69,23 +74,40 @@ func resolveAppURL(cmd *cobra.Command) string {
 	return "" // unreachable
 }
 
-func openBrowser(url string) error {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
+func browserCommandsForOS(goos, target string) ([]browserCommand, error) {
+	switch goos {
 	case "darwin":
-		cmd = "open"
-		args = []string{url}
+		return []browserCommand{{name: "open", args: []string{target}}}, nil
 	case "linux":
-		cmd = "xdg-open"
-		args = []string{url}
+		return []browserCommand{{name: "xdg-open", args: []string{target}}}, nil
 	case "windows":
-		cmd = "rundll32"
-		args = []string{"url.dll,FileProtocolHandler", url}
+		psCommand := fmt.Sprintf("Start-Process -FilePath '%s'", strings.ReplaceAll(target, "'", "''"))
+		return []browserCommand{
+			{name: "rundll32", args: []string{"url.dll,FileProtocolHandler", target}},
+			{name: "cmd", args: []string{"/c", "start", "", target}},
+			{name: "powershell", args: []string{"-NoProfile", "-NonInteractive", "-Command", psCommand}},
+		}, nil
 	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+		return nil, fmt.Errorf("unsupported platform: %s", goos)
 	}
-	return exec.Command(cmd, args...).Start()
+}
+
+func openBrowser(target string) error {
+	commands, err := browserCommandsForOS(runtime.GOOS, target)
+	if err != nil {
+		return err
+	}
+
+	var errs []string
+	for _, candidate := range commands {
+		if err := exec.Command(candidate.name, candidate.args...).Start(); err == nil {
+			return nil
+		} else {
+			errs = append(errs, fmt.Sprintf("%s: %v", candidate.name, err))
+		}
+	}
+
+	return fmt.Errorf("failed to open browser (%s)", strings.Join(errs, "; "))
 }
 
 func runAuthLogin(cmd *cobra.Command, _ []string) error {
