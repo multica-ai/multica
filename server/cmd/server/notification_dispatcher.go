@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ const (
 	dingTalkDeliveryMaxAttempts   = 3
 	emailDeliveryMaxAttempts      = 3
 )
+
+var dingtalkMentionLinkPattern = regexp.MustCompile(`\[@([^\]]+)\]\(mention://[^)]+\)`)
 
 type dingtalkDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
@@ -153,7 +156,7 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 		}
 	}
 
-	if _, err := cfg.SendTextMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryText(eventPayload)); err != nil {
+	if _, err := cfg.SendActionCardMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryActionCard(eventPayload)); err != nil {
 		finalizeFailedDelivery(ctx, queries, claimed, err)
 		return
 	}
@@ -411,6 +414,55 @@ func buildDingTalkDeliveryText(event notificationEventPayload) string {
 		parts = append(parts, "Link: "+link)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func buildDingTalkDeliveryActionCard(event notificationEventPayload) notifyutil.DingTalkActionCardMessage {
+	title := strings.TrimSpace(event.Title)
+	if title == "" {
+		title = "Multica Notification"
+	}
+
+	body := sanitizeDingTalkMessageText(event.Body)
+	link := strings.TrimSpace(event.Link)
+	parts := []string{"### Multica Notification"}
+	if title != "" && title != "Multica Notification" {
+		parts = append(parts, "**Issue**\n"+title)
+	}
+	if body != "" {
+		parts = append(parts, "**Message**\n"+body)
+	}
+	if link != "" {
+		parts = append(parts, "[Open in Multica]("+link+")")
+	}
+
+	return notifyutil.DingTalkActionCardMessage{
+		Title:       truncateDingTalkCardText(title, 80),
+		Text:        truncateDingTalkCardText(strings.Join(parts, "\n\n"), 1800),
+		SingleTitle: "Open in Multica",
+		SingleURL:   link,
+	}
+}
+
+func sanitizeDingTalkMessageText(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	return strings.TrimSpace(dingtalkMentionLinkPattern.ReplaceAllString(text, "@$1"))
+}
+
+func truncateDingTalkCardText(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func truncateError(err error) string {

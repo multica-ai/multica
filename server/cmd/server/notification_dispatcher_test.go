@@ -160,6 +160,30 @@ func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.Notificati
 	return deliveries[0]
 }
 
+func TestBuildDingTalkDeliveryActionCard_SanitizesMentionLinks(t *testing.T) {
+	card := buildDingTalkDeliveryActionCard(notificationEventPayload{
+		Title: "1. Install a runtime (Desktop app or CLI)",
+		Body:  "[@guodage003](mention://member/04e19961-c5c1-4757-a114-1355a1049ea4) hello",
+		Link:  "http://localhost:3000/guodage/issues/a77996be-cab2-4bc1-95bc-fbf4a33d5188?comment=5b0050c5-0575-4c5d-9ffb-9803c43af196",
+	})
+
+	if card.Title != "1. Install a runtime (Desktop app or CLI)" {
+		t.Fatalf("unexpected title: %q", card.Title)
+	}
+	if !strings.Contains(card.Text, "@guodage003 hello") {
+		t.Fatalf("expected sanitized mention in card text, got %q", card.Text)
+	}
+	if strings.Contains(card.Text, "mention://") {
+		t.Fatalf("card text should not expose internal mention links: %q", card.Text)
+	}
+	if card.SingleTitle != "Open in Multica" {
+		t.Fatalf("unexpected action title: %q", card.SingleTitle)
+	}
+	if card.SingleURL == "" {
+		t.Fatal("expected action URL")
+	}
+}
+
 func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 	cleanupNotificationDispatchData(t)
 	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
@@ -193,11 +217,14 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 			if len(body.UserIDs) != 1 || body.UserIDs[0] != "staff-success" {
 				t.Fatalf("expected userIds [staff-success], got %#v", body.UserIDs)
 			}
-			if body.MsgKey != "sampleText" {
-				t.Fatalf("expected msgKey %q, got %q", "sampleText", body.MsgKey)
+			if body.MsgKey != "sampleActionCard" {
+				t.Fatalf("expected msgKey %q, got %q", "sampleActionCard", body.MsgKey)
 			}
 			if !strings.Contains(body.MsgParam, "dispatcher issue") {
 				t.Fatalf("expected msgParam to include notification title, got %q", body.MsgParam)
+			}
+			if !strings.Contains(body.MsgParam, "Open in Multica") {
+				t.Fatalf("expected msgParam to include action title, got %q", body.MsgParam)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"processQueryKey":"query-123"}`))

@@ -574,7 +574,8 @@ func notifyMentionedMembers(
 	notificationLink := buildNotificationLink(ctx, queries, e.WorkspaceID, issueID, commentID)
 
 	for id := range recipientIDs {
-		if skip[id] {
+		isExplicitSelfMention := id == e.ActorID && explicitRecipientIDs[id]
+		if skip[id] && !isExplicitSelfMention {
 			continue
 		}
 		if id == e.ActorID && !explicitRecipientIDs[id] {

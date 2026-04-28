@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -43,13 +44,19 @@ type dingtalkTokenResponse struct {
 }
 
 type dingtalkUserInfo struct {
-	UnionID   string `json:"unionId"`
-	OpenID    string `json:"openId"`
-	Nick      string `json:"nick"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatarUrl"`
-	Mobile    string `json:"mobile"`
-	Email     string `json:"email"`
+	UserID        string `json:"userId"`
+	UserIDSnake   string `json:"user_id"`
+	UserIDLegacy  string `json:"userid"`
+	StaffID       string `json:"staffId"`
+	StaffIDSnake  string `json:"staff_id"`
+	StaffIDLegacy string `json:"staffid"`
+	UnionID       string `json:"unionId"`
+	OpenID        string `json:"openId"`
+	Nick          string `json:"nick"`
+	Name          string `json:"name"`
+	AvatarURL     string `json:"avatarUrl"`
+	Mobile        string `json:"mobile"`
+	Email         string `json:"email"`
 }
 
 // dingtalkBaseURL is the DingTalk API base URL. Overridden in tests.
@@ -159,12 +166,16 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 	// 3. If still not found, create new user
 	var user db.User
 	var isNew bool
+	var existingBinding db.ExternalAccountBinding
+	var hasExistingBinding bool
 
 	binding, err := h.Queries.GetExternalAccountBindingByProviderAndExternalID(r.Context(), db.GetExternalAccountBindingByProviderAndExternalIDParams{
 		Provider:       "dingtalk",
 		ExternalUserID: dtUser.UnionID,
 	})
 	if err == nil {
+		existingBinding = binding
+		hasExistingBinding = true
 		// Found existing binding — load the user
 		user, err = h.Queries.GetUser(r.Context(), binding.UserID)
 		if err != nil {
@@ -200,6 +211,18 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to check account binding")
 		return
 	}
+	if !hasExistingBinding {
+		existing, err := h.Queries.GetExternalAccountBindingByUserAndProvider(r.Context(), db.GetExternalAccountBindingByUserAndProviderParams{
+			UserID:   user.ID,
+			Provider: "dingtalk",
+		})
+		if err == nil {
+			existingBinding = existing
+			hasExistingBinding = true
+		} else if !isNotFound(err) {
+			slog.Warn("dingtalk login: failed to load existing notification binding metadata", "error", err)
+		}
+	}
 
 	// Upsert external_account_binding
 	displayName := dtUser.Nick
@@ -207,13 +230,27 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		displayName = dtUser.Name
 	}
 
-	encryptedAccess := encryptToken(dtToken.AccessToken)
-	encryptedRefresh := encryptToken(dtToken.RefreshToken)
+	encryptedAccess, err := notifyutil.EncryptToken(dtToken.AccessToken)
+	if err != nil {
+		slog.Warn("dingtalk login: failed to encrypt DingTalk access token", "error", err)
+		encryptedAccess = ""
+	}
+	encryptedRefresh, err := notifyutil.EncryptToken(dtToken.RefreshToken)
+	if err != nil {
+		slog.Warn("dingtalk login: failed to encrypt DingTalk refresh token", "error", err)
+		encryptedRefresh = ""
+	}
 
 	var tokenExpires pgtype.Timestamptz
 	if dtToken.ExpireIn > 0 {
 		tokenExpires = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(dtToken.ExpireIn) * time.Second), Valid: true}
 	}
+
+	var existingMetadata []byte
+	if hasExistingBinding {
+		existingMetadata = existingBinding.Metadata
+	}
+	metadata := buildDingTalkLoginBindingMetadata(existingMetadata, dtToken, dtUser)
 
 	_, err = h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
 		UserID:                user.ID,
@@ -224,7 +261,7 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		RefreshTokenEncrypted: pgtype.Text{String: encryptedRefresh, Valid: encryptedRefresh != ""},
 		TokenExpiresAt:        tokenExpires,
 		Status:                "active",
-		Metadata:              []byte("{}"),
+		Metadata:              metadata,
 	})
 	if err != nil {
 		slog.Error("dingtalk login: failed to upsert binding", "error", err)
@@ -283,6 +320,43 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func buildDingTalkLoginBindingMetadata(existing []byte, token dingtalkTokenResponse, profile dingtalkUserInfo) []byte {
+	metadata := map[string]any{}
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &metadata); err != nil {
+			metadata = map[string]any{}
+		}
+	}
+
+	setDingTalkMetadataValue(metadata, "corp_id", token.CorpID)
+	setDingTalkMetadataValue(metadata, "user_id", firstNotificationValue(
+		profile.UserID,
+		profile.UserIDSnake,
+		profile.UserIDLegacy,
+		profile.StaffID,
+		profile.StaffIDSnake,
+		profile.StaffIDLegacy,
+	))
+	setDingTalkMetadataValue(metadata, "open_id", profile.OpenID)
+	setDingTalkMetadataValue(metadata, "union_id", profile.UnionID)
+	setDingTalkMetadataValue(metadata, "avatar_url", profile.AvatarURL)
+	setDingTalkMetadataValue(metadata, "mobile", profile.Mobile)
+
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return []byte("{}")
+	}
+	return raw
+}
+
+func setDingTalkMetadataValue(metadata map[string]any, key, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	metadata[key] = value
 }
 
 // tokenEncryptionKey returns the AES-256 key for encrypting DingTalk tokens.
