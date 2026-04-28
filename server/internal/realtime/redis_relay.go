@@ -537,6 +537,7 @@ func (d *DualWriteBroadcaster) SendToUser(userID string, message []byte, exclude
 func (d *DualWriteBroadcaster) Broadcast(message []byte) {
 	id := ulid.Make().String()
 	frame := injectEventID(message, id)
+	d.local.fanoutAllDedup(frame, "", id)
 	_ = d.relay.PublishWithID("global", "all", "", message, id)
 }
 
