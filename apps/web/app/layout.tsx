@@ -109,16 +109,6 @@ export default function RootLayout({
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
-        {/* One-shot reset: force-sets the stored theme to light so existing
-            users pick up the new default even if v1 left them on dark/system.
-            Runs synchronously before next-themes hydrates — no first-paint flash.
-            Bump the version suffix to re-fire for everyone. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              "try{if(localStorage.getItem('theme-reset-v2')!=='1'){localStorage.setItem('theme','light');localStorage.setItem('theme-reset-v2','1')}}catch(e){}",
-          }}
-        />
         <LocaleSync />
         <ThemeProvider>
           <WebProviders>

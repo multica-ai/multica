@@ -11,8 +11,6 @@ const {
   mockSearchProjects,
   mockRecentItems,
   mockAllIssues,
-  mockSetTheme,
-  mockTheme,
   mockPathname,
   mockGetShareableUrl,
   mockWorkspaces,
@@ -26,8 +24,6 @@ const {
   mockSearchProjects: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
-  mockSetTheme: vi.fn(),
-  mockTheme: { current: "system" as "light" | "dark" | "system" },
   mockPathname: { current: "/ws-test/issues" as string },
   mockGetShareableUrl: vi.fn((p: string) => `https://app.multica/${p}`),
   mockWorkspaces: {
@@ -124,10 +120,6 @@ vi.mock("../navigation", () => ({
   }),
 }));
 
-vi.mock("@multica/ui/components/common/theme-provider", () => ({
-  useTheme: () => ({ theme: mockTheme.current, setTheme: mockSetTheme }),
-}));
-
 vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));
@@ -139,8 +131,6 @@ describe("SearchCommand", () => {
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
-    mockSetTheme.mockReset();
-    mockTheme.current = "system";
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
     mockWorkspaces.current = [];
@@ -181,15 +171,12 @@ describe("SearchCommand", () => {
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch Workspace")).not.toBeInTheDocument();
     // Only the primary creation action surfaces on empty query; everything
-    // else (theme, copy, New Project) must be revealed by typing.
+    // else (copy actions, New Project) must be revealed by typing.
     expect(screen.getByText("Commands")).toBeInTheDocument();
     expect(
       screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
     ).toBeInTheDocument();
     expect(screen.queryByText("New Project")).not.toBeInTheDocument();
-    expect(screen.queryByText("Switch to Light Theme")).not.toBeInTheDocument();
-    expect(screen.queryByText("Switch to Dark Theme")).not.toBeInTheDocument();
-    expect(screen.queryByText("Use System Theme")).not.toBeInTheDocument();
   });
 
   it("filters navigation pages by query", async () => {
@@ -317,62 +304,6 @@ describe("SearchCommand", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("Copied MUL-42");
 
     writeSpy.mockRestore();
-  });
-
-  it("filters theme commands by query keywords", async () => {
-    const user = userEvent.setup();
-    render(<SearchCommand />);
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "dark");
-
-    await waitFor(() => {
-      expect(screen.getByText("Commands")).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Switch to Dark Theme" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-    });
-    expect(screen.queryByText("Switch to Light Theme")).not.toBeInTheDocument();
-    expect(screen.queryByText("Use System Theme")).not.toBeInTheDocument();
-  });
-
-  it("applies the selected theme and closes the palette", async () => {
-    const user = userEvent.setup();
-    mockTheme.current = "light";
-    render(<SearchCommand />);
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "dark");
-
-    const darkItem = await screen.findByText(
-      (_, el) => el?.textContent === "Switch to Dark Theme" && el?.tagName === "SPAN",
-    );
-    await user.click(darkItem);
-
-    expect(mockSetTheme).toHaveBeenCalledWith("dark");
-    expect(useSearchStore.getState().open).toBe(false);
-  });
-
-  it("matches theme action via generic 'theme' keyword and marks current theme", async () => {
-    const user = userEvent.setup();
-    mockTheme.current = "dark";
-    render(<SearchCommand />);
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "theme");
-
-    await waitFor(() => {
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Switch to Light Theme" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Switch to Dark Theme" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Use System Theme" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-    });
-    expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
   });
 
   it("lists other workspaces under Switch Workspace and navigates on select", async () => {
