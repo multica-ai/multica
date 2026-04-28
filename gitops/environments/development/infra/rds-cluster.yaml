@@ -1,0 +1,40 @@
+# Low-provisioned dev profile: fixed-capacity cluster (no serverless v2 scaling).
+# $patch: replace on spec.forProvider removes serverlessv2ScalingConfiguration
+# that the tools base cluster uses, keeping all other cluster settings.
+apiVersion: rds.aws.upbound.io/v1beta2
+kind: Cluster
+metadata:
+  name: agentfarm-postgres-cluster
+spec:
+  forProvider:
+    $patch: replace
+    region: us-east-1
+    engine: aurora-postgresql
+    engineVersion: "16.4"
+    allowMajorVersionUpgrade: true
+    applyImmediately: false
+    databaseName: agentfarm
+    masterUsername: agentfarmadmin
+    masterPasswordSecretRef:
+      key: POSTGRES_MASTER_PASSWORD
+      name: agentfarm-secret-store
+      namespace: agentfarm
+    dbSubnetGroupNameRef:
+      name: agentfarm-db-subnet-group
+    vpcSecurityGroupIdRefs:
+      - name: agentfarm-postgresql-sg
+    backupRetentionPeriod: 7
+    preferredBackupWindow: "03:00-04:00"
+    preferredMaintenanceWindow: "sun:04:00-sun:05:00"
+    storageEncrypted: true
+    skipFinalSnapshot: false
+    finalSnapshotIdentifier: agentfarm-postgres-dev-final-snapshot
+    enabledCloudwatchLogsExports:
+      - postgresql
+    tags:
+      Owner: DevOps
+      Production: "false"
+      Name: agentfarm-postgres-cluster
+      Environment: development
+      Application: agentfarm
+      Purpose: "agentfarm application database (dev)"

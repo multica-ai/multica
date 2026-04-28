@@ -1,0 +1,13 @@
+# Dev subnet IDs (us-east-1a/b/c) sourced from devlake-db-subnet-group (canonical dev pattern).
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: agentfarm-db-subnet-group
+spec:
+  forProvider:
+    subnetIds:
+      - subnet-0ca1d3afb80b03952
+      - subnet-0e1136ee89c66bb50
+      - subnet-07efac23e23791afb
+    tags:
+      Environment: development

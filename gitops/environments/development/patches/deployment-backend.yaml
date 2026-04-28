@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentfarm-backend
+  namespace: agentfarm
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend
+          env:
+            - name: APP_ENV
+              value: development
+            - name: S3_BUCKET
+              value: g2-agentfarm-dev-uploads

@@ -1,0 +1,10 @@
+# Low-provisioned dev profile: db.t3.medium fixed-class instead of db.serverless.
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ClusterInstance
+metadata:
+  name: agentfarm-postgres-instance
+spec:
+  forProvider:
+    instanceClass: db.t3.medium
+    tags:
+      Environment: development

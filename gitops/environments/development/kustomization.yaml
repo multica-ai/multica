@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentfarm
+labels:
+  - pairs:
+      app: agentfarm-development
+    includeSelectors: true
+    includeTemplates: true
+resources:
+  - ../../base/
+  - infra/s3-uploads-bucket.yaml
+patchesStrategicMerge:
+  # Infra patches — override env-specific values from base (VPC, subnets, OIDC, tags)
+  - infra/iam-resources.yaml
+  - infra/iam-backend.yaml
+  - infra/rds-security-group.yaml
+  - infra/rds-subnet-group.yaml
+  - infra/rds-cluster.yaml
+  - infra/rds-instance.yaml
+  - infra/elasticache-security-group.yaml
+  - infra/elasticache-subnet-group.yaml
+  - infra/elasticache-replication-group.yaml
+  # App patches — env-specific service accounts, secrets, ingress, deployments
+  - patches/service-account.yaml
+  - patches/service-account-backend.yaml
+  - patches/secret-store.yaml
+  - patches/deployment-backend.yaml
+  - patches/ingress.yaml
+  # Delete patches — remove resources not needed in dev
+  - patches/delete-hpa-pdb.yaml
+  - patches/delete-cloudfront.yaml
+images:
+  - name: ghcr.io/g2crowd/agentfarm-backend-prod
+    newTag: "SET_BY_CI"
+  - name: ghcr.io/g2crowd/agentfarm-web-prod
+    newTag: "SET_BY_CI"

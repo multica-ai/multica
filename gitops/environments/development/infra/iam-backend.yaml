@@ -1,0 +1,52 @@
+# Dev OIDC trust + dev S3 bucket ARN — overrides base (tools) values.
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-backend-role
+spec:
+  forProvider:
+    assumeRolePolicyDocument: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::975049976121:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:sub": "system:serviceaccount:agentfarm:agentfarm-backend",
+              "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:aud": "sts.amazonaws.com"
+            }
+          }
+        }]
+      }
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-backend-policy
+spec:
+  forProvider:
+    description: "Allow agentfarm-backend to read/write S3 dev uploads bucket"
+    document: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowS3ObjectAccess",
+            "Effect": "Allow",
+            "Action": [
+              "s3:PutObject",
+              "s3:GetObject",
+              "s3:DeleteObject",
+              "s3:ListBucket"
+            ],
+            "Resource": [
+              "arn:aws:s3:::g2-agentfarm-dev-uploads",
+              "arn:aws:s3:::g2-agentfarm-dev-uploads/*"
+            ]
+          }
+        ]
+      }

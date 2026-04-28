@@ -1,0 +1,21 @@
+# Dev VPC + CIDR overrides for RDS PostgreSQL security group.
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroup
+metadata:
+  name: agentfarm-postgresql-sg
+spec:
+  forProvider:
+    vpcId: vpc-0867b48d03f1c33bc
+    tags:
+      Environment: development
+---
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroupRule
+metadata:
+  name: agentfarm-postgres-allow-vpc
+spec:
+  forProvider:
+    cidrBlocks:
+      - 10.221.0.0/16
+      - 10.219.0.0/16
+    description: Allow PostgreSQL access from dev VPC and VPN

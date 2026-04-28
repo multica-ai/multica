@@ -1,0 +1,21 @@
+# Dev VPC + CIDR overrides for ElastiCache Valkey security group.
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroup
+metadata:
+  name: agentfarm-redis-sg
+spec:
+  forProvider:
+    vpcId: vpc-0867b48d03f1c33bc
+    tags:
+      Environment: development
+---
+apiVersion: ec2.aws.upbound.io/v1beta1
+kind: SecurityGroupRule
+metadata:
+  name: agentfarm-redis-allow-vpc
+spec:
+  forProvider:
+    cidrBlocks:
+      - 10.221.0.0/16
+      - 10.219.0.0/16
+    description: Allow Valkey access from dev VPC and VPN

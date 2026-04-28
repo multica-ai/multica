@@ -1,0 +1,9 @@
+# Dev environment tag override — sizing (cache.t4g.small, 1 node) matches base.
+apiVersion: elasticache.aws.upbound.io/v1beta2
+kind: ReplicationGroup
+metadata:
+  name: agentfarm-redis
+spec:
+  forProvider:
+    tags:
+      Environment: development

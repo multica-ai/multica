@@ -1,0 +1,35 @@
+$patch: delete
+apiVersion: cloudfront.aws.upbound.io/v1beta2
+kind: Distribution
+metadata:
+  name: agentfarm-uploads-cdn
+---
+$patch: delete
+apiVersion: cloudfront.aws.upbound.io/v1beta1
+kind: OriginAccessControl
+metadata:
+  name: agentfarm-uploads-oac
+---
+$patch: delete
+apiVersion: cloudfront.aws.upbound.io/v1beta1
+kind: PublicKey
+metadata:
+  name: agentfarm-cloudfront-signing-key
+---
+$patch: delete
+apiVersion: cloudfront.aws.upbound.io/v1beta1
+kind: KeyGroup
+metadata:
+  name: agentfarm-cloudfront-key-group
+---
+$patch: delete
+apiVersion: s3.aws.crossplane.io/v1alpha3
+kind: BucketPolicy
+metadata:
+  name: g2-agentfarm-tools-uploads-policy
+---
+$patch: delete
+apiVersion: s3.aws.crossplane.io/v1beta1
+kind: Bucket
+metadata:
+  name: g2-agentfarm-tools-uploads

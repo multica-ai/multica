@@ -1,0 +1,54 @@
+# Dev OIDC trust + SSM resource ARNs — overrides base (tools) values.
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-role
+spec:
+  forProvider:
+    assumeRolePolicyDocument: |
+      {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Effect": "Allow",
+                  "Principal": {
+                      "Federated": "arn:aws:iam::975049976121:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                      "StringEquals": {
+                          "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:sub": "system:serviceaccount:agentfarm:agentfarm",
+                          "oidc.eks.us-east-1.amazonaws.com/id/61752071A894EC141875218139B18C3F:aud": "sts.amazonaws.com"
+                      }
+                  }
+              }
+          ]
+      }
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-policy
+spec:
+  forProvider:
+    description: Allow agentfarm to read SSM parameters at /agentfarm/development/*
+    document: |-
+      {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Sid": "AllowSSMParamReadScoped",
+                  "Effect": "Allow",
+                  "Action": [
+                      "ssm:GetParameter",
+                      "ssm:GetParameters",
+                      "ssm:GetParametersByPath",
+                      "ssm:DescribeParameters"
+                  ],
+                  "Resource": [
+                      "arn:aws:ssm:us-east-1:975049976121:parameter/agentfarm/development",
+                      "arn:aws:ssm:us-east-1:975049976121:parameter/agentfarm/development/*"
+                  ]
+              }
+          ]
+      }

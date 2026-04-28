@@ -1,0 +1,33 @@
+apiVersion: s3.aws.crossplane.io/v1beta1
+kind: Bucket
+metadata:
+  name: g2-agentfarm-dev-uploads
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    locationConstraint: us-east-1
+    publicAccessBlockConfiguration:
+      blockPublicAcls: true
+      blockPublicPolicy: true
+      ignorePublicAcls: true
+      restrictPublicBuckets: true
+    serverSideEncryptionConfiguration:
+      rules:
+        - applyServerSideEncryptionByDefault:
+            sseAlgorithm: AES256
+    tagging:
+      tagSet:
+        - key: Owner
+          value: DevOps
+        - key: Production
+          value: "false"
+        - key: Application
+          value: agentfarm
+        - key: Environment
+          value: development
+        - key: Purpose
+          value: "User-uploaded attachments for agentfarm dev environment"
+    versioningConfiguration:
+      status: Enabled
+  providerConfigRef:
+    name: provider-aws-config

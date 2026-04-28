@@ -1,0 +1,13 @@
+# Dev subnet IDs — same 3 subnets used for RDS (us-east-1a/b/c).
+apiVersion: elasticache.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: agentfarm-cache-subnet-group
+spec:
+  forProvider:
+    subnetIds:
+      - subnet-0ca1d3afb80b03952
+      - subnet-0e1136ee89c66bb50
+      - subnet-07efac23e23791afb
+    tags:
+      Environment: development

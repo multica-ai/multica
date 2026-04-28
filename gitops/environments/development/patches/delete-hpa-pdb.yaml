@@ -1,0 +1,27 @@
+$patch: delete
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agentfarm-backend
+  namespace: agentfarm
+---
+$patch: delete
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agentfarm-web
+  namespace: agentfarm
+---
+$patch: delete
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentfarm-backend
+  namespace: agentfarm
+---
+$patch: delete
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentfarm-web
+  namespace: agentfarm
