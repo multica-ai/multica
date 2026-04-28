@@ -3,8 +3,11 @@ import { issueKeys } from "./queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
+  getIssueFromDetailCache,
+  patchIssueDetailQueries,
   patchIssueInBuckets,
   removeIssueFromBuckets,
+  removeIssueDetailQueries,
 } from "./cache-helpers";
 import type { Issue } from "../types";
 import type { ListIssuesCache } from "../types";
@@ -33,7 +36,7 @@ export function onIssueUpdated(
   // the parent's children cache in sync (powers the sub-issues list
   // shown on the parent issue page).
   const listData = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-  const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
+  const detailData = getIssueFromDetailCache(qc, wsId, issue.id);
   const oldParentId =
     detailData?.parent_issue_id ??
     (listData ? findIssueLocation(listData, issue.id)?.issue.parent_issue_id : null) ??
@@ -47,9 +50,7 @@ export function onIssueUpdated(
     old ? patchIssueInBuckets(old, issue.id, issue) : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
-    old ? { ...old, ...issue } : old,
-  );
+  patchIssueDetailQueries(qc, wsId, issue.id, issue);
 
   // Invalidate old parent's children (issue was removed from it)
   if (oldParentId) {
@@ -85,7 +86,7 @@ export function onIssueDeleted(
     old ? removeIssueFromBuckets(old, issueId) : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  qc.removeQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+  removeIssueDetailQueries(qc, wsId, issueId);
   qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
   qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });
   qc.removeQueries({ queryKey: issueKeys.subscribers(issueId) });
