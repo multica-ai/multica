@@ -125,16 +125,17 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
-// KiloCode — compact "K" glyph on the project's teal accent. This keeps the
-// runtime list visually distinct until an official standalone SVG is added.
+// KiloCode — official pixel-style mark from Kilo Code brand assets.
 function KiloCodeLogo({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect width="24" height="24" rx="5" fill="#0F766E" />
-      <path
-        d="M7 6h2.6v5.12L14.14 6H17.4l-4.8 5.42L17.7 18h-3.23l-3.57-4.86-1.3 1.43V18H7V6z"
-        fill="#F8FAFC"
-      />
+    <svg viewBox="0 0 32 32" fill="currentColor" className={className}>
+      <path d="M23,26v-2h3v-5l-2-2h-4v2h-3v5l2,2h4ZM20,20h3v3h-3v-3Z" />
+      <rect x="12" y="17" width="3" height="3" />
+      <polygon points="26 12 23 12 23 9 20 6 17 6 17 9 20 9 20 12 17 12 17 15 26 15 26 12" />
+      <path d="M0,0v32h32V0H0ZM29,29H3V3h26v26Z" />
+      <polygon points="15 26 15 23 9 23 9 17 6 17 6 23.1875 8.8125 26 15 26" />
+      <rect x="12" y="6" width="3" height="3" />
+      <polygon points="9 12 12 12 12 15 15 15 15 12 12 9 9 9 9 6 6 6 6 15 9 15 9 12" />
     </svg>
   );
 }
