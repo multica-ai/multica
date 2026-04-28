@@ -12,6 +12,7 @@ import {
   Pencil,
   Trash2,
   ArrowLeftRight,
+  MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -22,6 +23,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -777,8 +781,8 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-[40px_minmax(0,1fr)_100px_80px_160px_120px_110px] text-sm">
-              <div className="col-span-7 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
+            <div className="grid grid-cols-[56px_minmax(0,1fr)_100px_80px_160px_120px_110px_44px] text-sm">
+              <div className="col-span-8 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
                 <div className="flex items-center">
                   <Checkbox
                     checked={allInViewSelected}
@@ -792,6 +796,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 <div>Author</div>
                 <div>Linked to</div>
                 <div>Modified</div>
+                <div />
               </div>
               {childFolders.map((f) => (
                 <ContextMenu key={f.id}>
@@ -803,7 +808,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       const id = e.dataTransfer.getData("text/multica-artifact");
                       if (id) handleMoveArtifact(id, f.id);
                     }}
-                    className="col-span-7 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="col-span-8 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
                   >
                     <div
                       className="flex items-center"
@@ -825,6 +830,42 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     <div />
                     <div className="text-xs text-muted-foreground">
                       {formatDate(f.updated_at)}
+                    </div>
+                    <div
+                      className="flex items-center justify-end"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-muted-foreground"
+                              aria-label={`Actions for ${f.name}`}
+                            />
+                          }
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setRenameTarget(f);
+                              setRenameDraft(f.name);
+                            }}
+                          >
+                            <Pencil className="mr-2 size-3.5" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onSelect={() => setDeleteFolderTarget(f)}
+                          >
+                            <Trash2 className="mr-2 size-3.5" /> Delete folder
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
@@ -855,7 +896,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onClick={() => router.push(wsPaths.documentDetail(a.id))}
-                    className="col-span-7 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="col-span-8 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
                   >
                     <div
                       className="flex items-center"
@@ -889,6 +930,74 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {formatDate(a.updated_at)}
+                    </div>
+                    <div
+                      className="flex items-center justify-end"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-muted-foreground"
+                              aria-label={`Actions for ${a.title}`}
+                            />
+                          }
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setRenameArtifactTarget(a);
+                              setRenameArtifactDraft(a.title);
+                            }}
+                          >
+                            <Pencil className="mr-2 size-3.5" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              router.push(wsPaths.documentEdit(a.id))
+                            }
+                          >
+                            <Pencil className="mr-2 size-3.5" /> Edit body
+                          </DropdownMenuItem>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <ArrowLeftRight className="mr-2 size-3.5" /> Move
+                              to
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              <DropdownMenuItem
+                                onSelect={() => handleMoveArtifact(a.id, null)}
+                              >
+                                All documents (root)
+                              </DropdownMenuItem>
+                              {folders.length > 0 && <DropdownMenuSeparator />}
+                              {folders.map((f) => (
+                                <DropdownMenuItem
+                                  key={f.id}
+                                  onSelect={() =>
+                                    handleMoveArtifact(a.id, f.id)
+                                  }
+                                >
+                                  <FolderIcon className="mr-2 size-3.5" />
+                                  {f.name}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onSelect={() => setDeleteArtifactTarget(a)}
+                          >
+                            <Trash2 className="mr-2 size-3.5" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
