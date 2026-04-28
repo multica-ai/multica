@@ -78,12 +78,13 @@ type TokenUsage struct {
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
-	Output     string // accumulated text output
-	Error      string // error message if failed
-	DurationMs int64
-	SessionID  string
-	Usage      map[string]TokenUsage // keyed by model name
+	Status        string           // "completed", "failed", "aborted", "timeout", "cancelled"
+	Output        string           // accumulated text output
+	Error         string           // error message if failed
+	ProviderError *ProviderError   // structured provider-level error (rate limit, gateway, etc.)
+	DurationMs    int64
+	SessionID     string
+	Usage         map[string]TokenUsage // keyed by model name
 }
 
 // Config configures a Backend instance.

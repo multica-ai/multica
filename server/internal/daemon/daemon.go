@@ -1333,13 +1333,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		// model reject, …). Without this the chat_session resume pointer
 		// would either be left stale or overwritten with NULL on the
 		// server, causing the next chat turn to lose context.
+		var failureReason string
+		var retryAfter time.Duration
+		if result.ProviderError != nil {
+			failureReason = string(result.ProviderError.Code)
+			retryAfter = result.ProviderError.RetryAfter
+		}
 		return TaskResult{
-			Status:    "blocked",
-			Comment:   errMsg,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:        "blocked",
+			Comment:       errMsg,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: failureReason,
+			RetryAfter:    retryAfter,
+			Usage:         usageEntries,
 		}, nil
 	}
 }

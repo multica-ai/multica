@@ -281,8 +281,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		finalOutput := output.String()
 		outputMu.Unlock()
 
+		var providerError *ProviderError
 		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
+			if pe, ok := providerErr.classify(); ok {
+				finalStatus = "failed"
+				finalError = pe.Error()
+				providerError = pe
+			} else if msg := providerErr.message(); msg != "" {
 				finalStatus = "failed"
 				finalError = msg
 			}
@@ -302,12 +307,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:        finalStatus,
+			Output:        finalOutput,
+			Error:         finalError,
+			ProviderError: providerError,
+			DurationMs:    duration.Milliseconds(),
+			SessionID:     sessionID,
+			Usage:         usageMap,
 		}
 	}()
 

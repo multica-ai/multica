@@ -1,6 +1,9 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
@@ -32,6 +35,7 @@ type Task struct {
 	WorkspaceID             string          `json:"workspace_id"`
 	Agent                   *AgentData      `json:"agent,omitempty"`
 	Repos                   []RepoData      `json:"repos,omitempty"`
+	DefaultRepoURL          string          `json:"default_repo_url,omitempty"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
@@ -93,5 +97,6 @@ type TaskResult struct {
 	WorkDir       string           `json:"work_dir,omitempty"`   // working directory used during execution
 	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
 	FailureReason string           `json:"-"`                    // internal server failure classification
+	RetryAfter    time.Duration    `json:"-"`                    // hint from provider (e.g. Retry-After header)
 	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
 }

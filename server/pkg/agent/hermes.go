@@ -292,8 +292,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// daemon reports a cryptic "hermes returned empty output"
 		// and the actionable error (e.g. "model X not supported
 		// with your ChatGPT account") stays buried in daemon logs.
+		var providerError *ProviderError
 		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
+			if pe, ok := providerErr.classify(); ok {
+				finalStatus = "failed"
+				finalError = pe.Error()
+				providerError = pe
+			} else if msg := providerErr.message(); msg != "" {
 				finalStatus = "failed"
 				finalError = msg
 			}
@@ -314,12 +319,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:        finalStatus,
+			Output:        finalOutput,
+			Error:         finalError,
+			ProviderError: providerError,
+			DurationMs:    duration.Milliseconds(),
+			SessionID:     sessionID,
+			Usage:         usageMap,
 		}
 	}()
 
@@ -1167,6 +1173,12 @@ var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadReque
 // "Details:" tag actually spells out what happened).
 var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
 
+// acpHTTPStatusRe extracts an HTTP status code from a sniffed line.
+var acpHTTPStatusRe = regexp.MustCompile(`HTTP\s+([0-9]{3})`)
+
+// acpRetryAfterRe extracts a Retry-After value (seconds) from a sniffed line.
+var acpRetryAfterRe = regexp.MustCompile(`(?i)retry[-_]after[:=\s]+(\d+)`)
+
 const acpMaxErrorLines = 8
 
 // newACPProviderErrorSniffer returns a sniffer that tags its messages
@@ -1199,7 +1211,7 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
+		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line) || acpRetryAfterRe.MatchString(line)) {
 			continue
 		}
 		if s.seen[line] {
@@ -1237,4 +1249,70 @@ func (s *acpProviderErrorSniffer) message() string {
 		}
 	}
 	return ""
+}
+
+// classify inspects the sniffed stderr lines and returns a structured
+// ProviderError when a transient provider failure is detected.
+// It also extracts Retry-After hints when present.
+func (s *acpProviderErrorSniffer) classify() (*ProviderError, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.lines) == 0 {
+		return nil, false
+	}
+
+	var code ErrorCode
+	var retryAfter time.Duration
+
+	for _, line := range s.lines {
+		if m := acpHTTPStatusRe.FindStringSubmatch(line); m != nil {
+			status := m[1]
+			switch status {
+			case "429":
+				code = ErrRateLimited
+			case "502", "503", "504":
+				code = ErrGatewayError
+			case "500":
+				code = ErrServiceUnavailable
+			}
+		}
+		if strings.Contains(line, "RateLimitError") {
+			code = ErrRateLimited
+		}
+		if strings.Contains(line, "timeout") || strings.Contains(line, "timed out") {
+			code = ErrTimeout
+		}
+		if strings.Contains(line, "context deadline exceeded") || strings.Contains(line, "context canceled") {
+			code = ErrContextExceeded
+		}
+		if strings.Contains(line, "quota") || strings.Contains(line, "Quota exceeded") || strings.Contains(line, "insufficient_quota") {
+			code = ErrQuotaExhausted
+		}
+		if m := acpRetryAfterRe.FindStringSubmatch(line); m != nil {
+			if secs, err := strconv.Atoi(m[1]); err == nil {
+				retryAfter = time.Duration(secs) * time.Second
+			}
+		}
+	}
+
+	if code == "" {
+		return nil, false
+	}
+
+	msg := s.provider + " provider error"
+	for _, line := range s.lines {
+		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
+			if detail := strings.TrimSpace(m[1]); detail != "" {
+				msg = s.provider + " provider error: " + detail
+				break
+			}
+		}
+	}
+
+	pe := &ProviderError{Code: code, Message: msg}
+	if retryAfter > 0 {
+		pe.RetryAfter = retryAfter
+	}
+	return pe, true
 }

@@ -302,8 +302,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// real reason. Without this the daemon reports a cryptic
 		// "completed + empty output" and the actionable error
 		// stays buried in daemon logs.
+		var providerError *ProviderError
 		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
+			if pe, ok := providerErr.classify(); ok {
+				finalStatus = "failed"
+				finalError = pe.Error()
+				providerError = pe
+			} else if msg := providerErr.message(); msg != "" {
 				finalStatus = "failed"
 				finalError = msg
 			}
@@ -323,12 +328,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:        finalStatus,
+			Output:        finalOutput,
+			Error:         finalError,
+			ProviderError: providerError,
+			DurationMs:    duration.Milliseconds(),
+			SessionID:     sessionID,
+			Usage:         usageMap,
 		}
 	}()
 

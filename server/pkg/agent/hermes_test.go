@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsHermesBackend(t *testing.T) {
@@ -866,5 +867,158 @@ func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	}
 	if len(s.lines) > acpMaxErrorLines {
 		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyRateLimited verifies that HTTP 429
+// maps to ErrRateLimited and parses Retry-After when present.
+func TestHermesProviderErrorSnifferClassifyRateLimited(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte(`⚠️  API call failed (attempt 1/3): RateLimitError [HTTP 429]` + "\n"))
+	s.Write([]byte(`   🔌 Provider: openai  Model: gpt-4o` + "\n"))
+	s.Write([]byte(`   📝 Error: HTTP 429: Rate limit exceeded` + "\n"))
+	s.Write([]byte(`   retry-after: 42` + "\n"))
+
+	pe, ok := s.classify()
+	if !ok {
+		t.Fatal("expected classify to match")
+	}
+	if pe.Code != ErrRateLimited {
+		t.Errorf("code: got %q, want %q", pe.Code, ErrRateLimited)
+	}
+	if pe.RetryAfter != 42*time.Second {
+		t.Errorf("retry after: got %s, want 42s", pe.RetryAfter)
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyGatewayErrors verifies that HTTP
+// 502/503/504 map to ErrGatewayError.
+func TestHermesProviderErrorSnifferClassifyGatewayErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		status string
+	}{
+		{"502"},
+		{"503"},
+		{"504"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("hermes")
+			s.Write([]byte(`⚠️  API call failed (attempt 1/3): BadGatewayError [HTTP ` + tc.status + `]` + "\n"))
+			s.Write([]byte(`   📝 Error: upstream error` + "\n"))
+
+			pe, ok := s.classify()
+			if !ok {
+				t.Fatal("expected classify to match")
+			}
+			if pe.Code != ErrGatewayError {
+				t.Errorf("code: got %q, want %q", pe.Code, ErrGatewayError)
+			}
+		})
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyServiceUnavailable verifies that
+// HTTP 500 maps to ErrServiceUnavailable.
+func TestHermesProviderErrorSnifferClassifyServiceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte(`⚠️  API call failed (attempt 1/3): InternalServerError [HTTP 500]` + "\n"))
+	s.Write([]byte(`   📝 Error: internal server error` + "\n"))
+
+	pe, ok := s.classify()
+	if !ok {
+		t.Fatal("expected classify to match")
+	}
+	if pe.Code != ErrServiceUnavailable {
+		t.Errorf("code: got %q, want %q", pe.Code, ErrServiceUnavailable)
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyTimeout verifies that timeout strings
+// map to ErrTimeout.
+func TestHermesProviderErrorSnifferClassifyTimeout(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{
+		"request timeout",
+		"connection timed out",
+	}
+
+	for _, msg := range cases {
+		t.Run(msg, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("hermes")
+			s.Write([]byte(`⚠️  API call failed: ` + msg + "\n"))
+
+			pe, ok := s.classify()
+			if !ok {
+				t.Fatal("expected classify to match")
+			}
+			if pe.Code != ErrTimeout {
+				t.Errorf("code: got %q, want %q", pe.Code, ErrTimeout)
+			}
+		})
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyQuotaExhausted verifies that quota
+// strings map to ErrQuotaExhausted.
+func TestHermesProviderErrorSnifferClassifyQuotaExhausted(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{
+		"quota exceeded",
+		"insufficient_quota",
+		"You have exceeded your quota",
+	}
+
+	for _, msg := range cases {
+		t.Run(msg, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("hermes")
+			s.Write([]byte(`⚠️  API call failed: ` + msg + "\n"))
+
+			pe, ok := s.classify()
+			if !ok {
+				t.Fatal("expected classify to match")
+			}
+			if pe.Code != ErrQuotaExhausted {
+				t.Errorf("code: got %q, want %q", pe.Code, ErrQuotaExhausted)
+			}
+		})
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyUnknown verifies that unrelated
+// stderr lines produce no ProviderError.
+func TestHermesProviderErrorSnifferClassifyUnknown(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte(`2026-04-20 23:41:45 [INFO] acp_adapter.entry: Loaded env` + "\n"))
+
+	pe, ok := s.classify()
+	if ok {
+		t.Fatalf("expected no match, got %+v", pe)
+	}
+}
+
+// TestHermesProviderErrorSnifferClassifyNoMatch verifies that error headers
+// without a recognised status code do not produce a ProviderError.
+func TestHermesProviderErrorSnifferClassifyNoMatch(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte(`⚠️  API call failed (attempt 1/3): BadRequestError [HTTP 400]` + "\n"))
+	s.Write([]byte(`   📝 Error: model not supported` + "\n"))
+
+	pe, ok := s.classify()
+	if ok {
+		t.Fatalf("expected no match for HTTP 400, got %+v", pe)
 	}
 }

@@ -769,6 +769,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+			// If the issue is bound to a project with a repo_url, promote that
+			// repo to position 0 in the list so the agent sees it as default.
+			if issue.ProjectID.Valid {
+				if project, perr := h.Queries.GetProject(r.Context(), issue.ProjectID); perr == nil && project.RepoUrl.Valid {
+					repoURL := project.RepoUrl.String
+					foundIdx := -1
+					for i, r := range resp.Repos {
+						if r.URL == repoURL {
+							foundIdx = i
+							break
+						}
+					}
+					if foundIdx >= 0 {
+						if foundIdx > 0 {
+							repo := resp.Repos[foundIdx]
+							copy(resp.Repos[1:foundIdx+1], resp.Repos[0:foundIdx])
+							resp.Repos[0] = repo
+						}
+						resp.DefaultRepoURL = repoURL
+					}
+					// if not found in workspace repos, graceful fallback: leave list unchanged
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1134,6 +1157,7 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	RetryAfterMs  int64  `json:"retry_after_ms,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -1150,14 +1174,19 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
+	var retryAfter time.Duration
+	if req.RetryAfterMs > 0 {
+		retryAfter = time.Duration(req.RetryAfterMs) * time.Millisecond
+	}
+
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, retryAfter)
 	if err != nil {
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
+	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason, "retry_after_ms", req.RetryAfterMs)
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 

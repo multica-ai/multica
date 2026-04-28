@@ -22,11 +22,12 @@ import (
 )
 
 type TaskService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Hub       *realtime.Hub
-	Bus       *events.Bus
-	Wakeup    TaskWakeupNotifier
+	Queries       *db.Queries
+	TxStarter     TxStarter
+	Hub           *realtime.Hub
+	Bus           *events.Bus
+	Wakeup        TaskWakeupNotifier
+	RetryExecutor *RetryExecutor
 }
 
 type TaskWakeupNotifier interface {
@@ -540,7 +541,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 //
 // failureReason is a coarse classifier consumed by the auto-retry path.
 // Pass "" when unknown (treated as 'agent_error').
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+// retryAfter is an optional provider hint (e.g. parsed from Retry-After header).
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string, retryAfter time.Duration) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
@@ -592,12 +594,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		return nil, fmt.Errorf("fail task: %w", err)
 	}
 
-	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
+	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason, "retry_after", retryAfter)
 
-	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
-	// runtime_recovery). The helper itself enforces attempt < max_attempts
-	// and only triggers for issue/chat tasks.
-	retried, _ := s.MaybeRetryFailedTask(ctx, task)
+	// Auto-retry eligible failures via the unified retry executor.
+	retried, _ := s.MaybeRetryFailedTask(ctx, task, failureReason, retryAfter)
 
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
@@ -615,16 +615,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	return &task, nil
 }
 
-// retryableReasons enumerates failure reasons that the auto-retry path is
-// allowed to act on. Agent-side errors (compile failures, model rejections,
-// etc.) are intentionally excluded — those are real problems that the user
-// should see, not infrastructure flakiness.
-var retryableReasons = map[string]bool{
-	"runtime_offline":  true,
-	"runtime_recovery": true,
-	"timeout":          true,
-}
-
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -635,12 +625,22 @@ var retryableReasons = map[string]bool{
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
-func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
+func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue, failureReason string, retryAfter time.Duration) (*db.AgentTaskQueue, error) {
+	if s.RetryExecutor != nil {
+		child, err := s.RetryExecutor.MaybeRetry(ctx, parent, failureReason, retryAfter)
+		if child != nil {
+			s.notifyTaskAvailable(*child)
+			s.broadcastTaskEvent(ctx, protocol.EventTaskDispatch, *child)
+		}
+		return child, err
+	}
+
+	// Legacy fast path when no retry executor is configured.
 	if parent.Status != "failed" {
 		return nil, nil
 	}
-	reason := ""
-	if parent.FailureReason.Valid {
+	reason := failureReason
+	if reason == "" && parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
@@ -655,14 +655,16 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		return nil, nil
 	}
 	if parent.AutopilotRunID.Valid {
-		// Autopilot has its own retry semantics; do not double-trigger.
 		return nil, nil
 	}
 	if !parent.IssueID.Valid && !parent.ChatSessionID.Valid {
 		return nil, nil
 	}
 
-	child, err := s.Queries.CreateRetryTask(ctx, parent.ID)
+	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+		ID:          parent.ID,
+		ScheduledAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
@@ -754,7 +756,11 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		reason := "agent_error"
+		if t.FailureReason.Valid && t.FailureReason.String != "" {
+			reason = t.FailureReason.String
+		}
+		if child, _ := s.MaybeRetryFailedTask(ctx, t, reason, 0); child != nil {
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
