@@ -1,4 +1,12 @@
 # Low-provisioned dev profile: db.t3.medium fixed-class instead of db.serverless.
+#
+# clusterIdentifier override: dev's Upbound provider observed the Cluster as
+# Synced=True but never populated status.atProvider, so clusterIdentifierRef
+# in the base manifest stayed unresolved and the ClusterInstance was stuck in
+# ReconcileError ("referenced field was empty") for 35+ minutes. The canonical
+# working dev RDS resources (agent-eval-tool, ai-playbooks) all use a literal
+# clusterIdentifier instead of a ref. Match that pattern for dev only — tools
+# resolves the ref fine and stays on the base manifest.
 apiVersion: rds.aws.upbound.io/v1beta1
 kind: ClusterInstance
 metadata:
@@ -6,5 +14,7 @@ metadata:
 spec:
   forProvider:
     instanceClass: db.t3.medium
+    clusterIdentifier: agentfarm-postgres-cluster
+    clusterIdentifierRef: null
     tags:
       Environment: development
