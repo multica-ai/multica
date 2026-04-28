@@ -16,19 +16,12 @@ import type {
 function invalidateArtifactScopes(
   qc: ReturnType<typeof useQueryClient>,
   wsId: string,
-  artifact: Pick<Artifact, "id" | "issue_id" | "project_id">,
+  // The artifact arg is kept for API symmetry with prior callers but is no
+  // longer needed — invalidating the workspace-wide artifact key catches
+  // detail, byIssue, byProject, search, and folder-list together.
+  _artifact?: Pick<Artifact, "id" | "issue_id" | "project_id">,
 ) {
-  qc.invalidateQueries({ queryKey: artifactKeys.detail(wsId, artifact.id) });
-  if (artifact.issue_id) {
-    qc.invalidateQueries({
-      queryKey: artifactKeys.byIssue(wsId, artifact.issue_id),
-    });
-  }
-  if (artifact.project_id) {
-    qc.invalidateQueries({
-      queryKey: artifactKeys.byProject(wsId, artifact.project_id),
-    });
-  }
+  qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
 }
 
 export function useCreateArtifact() {
