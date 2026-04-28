@@ -28,6 +28,7 @@
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
     "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",
+    "./workspace/workspace-rail": "./workspace/workspace-rail.tsx",
     "./workspace/create-workspace-form": "./workspace/create-workspace-form.tsx",
     "./workspace/no-access-page": "./workspace/no-access-page.tsx",
     "./workspace/new-workspace-page": "./workspace/new-workspace-page.tsx",
