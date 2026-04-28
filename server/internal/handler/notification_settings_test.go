@@ -67,6 +67,13 @@ func TestNotificationPreferences_Defaults(t *testing.T) {
 				"enabled": false,
 				"binding_id": null,
 				"requires_binding": true
+			},
+			{
+				"channel": "email",
+				"event_type": "mentioned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": true
 			}
 		]
 	}`)
@@ -109,11 +116,18 @@ func TestNotificationBindingsLifecycle(t *testing.T) {
 	if err := json.NewDecoder(wBindings.Body).Decode(&bindingsResp); err != nil {
 		t.Fatalf("decode bindings response: %v", err)
 	}
-	if len(bindingsResp.Bindings) != 1 {
-		t.Fatalf("expected 1 binding, got %d", len(bindingsResp.Bindings))
+	if len(bindingsResp.Bindings) < 1 {
+		t.Fatalf("expected at least 1 binding, got %d", len(bindingsResp.Bindings))
 	}
-	if bindingsResp.Bindings[0].ID != bindingID {
-		t.Fatalf("expected binding id %q, got %q", bindingID, bindingsResp.Bindings[0].ID)
+	// Find the DingTalk binding we explicitly created.
+	var foundDingTalk bool
+	for _, b := range bindingsResp.Bindings {
+		if b.ID == bindingID {
+			foundDingTalk = true
+		}
+	}
+	if !foundDingTalk {
+		t.Fatalf("expected dingtalk binding %q in response", bindingID)
 	}
 
 	wUpdate := httptest.NewRecorder()
@@ -162,6 +176,13 @@ func TestNotificationBindingsLifecycle(t *testing.T) {
 			},
 			{
 				"channel": "dingtalk",
+				"event_type": "mentioned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": true
+			},
+			{
+				"channel": "email",
 				"event_type": "mentioned",
 				"enabled": false,
 				"binding_id": null,

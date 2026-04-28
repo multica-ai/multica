@@ -1,4 +1,4 @@
-export type NotificationChannel = "inbox" | "dingtalk";
+export type NotificationChannel = "inbox" | "dingtalk" | "email";
 export type NotificationEventType = "mentioned";
 export type ExternalAccountBindingStatus = "active" | "expired" | "revoked" | "error";
 
@@ -46,4 +46,21 @@ export interface StartDingTalkBindingResponse {
 export interface CompleteDingTalkBindingResponse {
   binding: ExternalAccountBinding;
   next_path: string | null;
+}
+
+export interface StartEmailBindingRequest {
+  email: string;
+}
+
+export interface StartEmailBindingResponse {
+  message: string;
+}
+
+export interface VerifyEmailBindingRequest {
+  email: string;
+  code: string;
+}
+
+export interface VerifyEmailBindingResponse {
+  binding: ExternalAccountBinding;
 }

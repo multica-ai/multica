@@ -15,12 +15,14 @@ const {
   mockSendCode,
   mockVerifyCode,
   mockIssueCliToken,
+  mockGetConfig,
   searchParamsState,
   authStateRef,
 } = vi.hoisted(() => ({
   mockSendCode: vi.fn(),
   mockVerifyCode: vi.fn(),
   mockIssueCliToken: vi.fn(),
+  mockGetConfig: vi.fn(),
   searchParamsState: { params: new URLSearchParams() },
   authStateRef: {
     state: {
@@ -70,6 +72,7 @@ vi.mock("@multica/core/api", () => ({
     verifyCode: vi.fn(),
     setToken: vi.fn(),
     getMe: vi.fn(),
+    getConfig: mockGetConfig,
     issueCliToken: mockIssueCliToken,
   },
 }));
@@ -82,6 +85,9 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    mockGetConfig.mockResolvedValue({
+      cdn_domain: "",
+    });
   });
 
   it("renders login form with email input and continue button", () => {
@@ -140,6 +146,20 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Check your email")).toBeInTheDocument();
     });
+  });
+
+  it("renders DingTalk login from runtime config while keeping email login", async () => {
+    mockGetConfig.mockResolvedValueOnce({
+      cdn_domain: "",
+      dingtalk_client_id: "ding-client-id",
+    });
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /continue with dingtalk/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows error when sendCode fails", async () => {

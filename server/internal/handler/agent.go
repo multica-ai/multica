@@ -216,7 +216,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			OwnerID:     parseUUID(userID),
 		}
 		if includeArchived {
-			agents, err = h.Queries.ListAllAgentsByOwner(r.Context(), byOwner)
+			agents, err = h.Queries.ListAllAgentsByOwner(r.Context(), db.ListAllAgentsByOwnerParams{
+				WorkspaceID: byOwner.WorkspaceID,
+				OwnerID:     byOwner.OwnerID,
+			})
 		} else {
 			agents, err = h.Queries.ListAgentsByOwner(r.Context(), byOwner)
 		}

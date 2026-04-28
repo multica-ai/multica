@@ -62,6 +62,10 @@ import type {
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
   CompleteDingTalkBindingResponse,
+  StartEmailBindingRequest,
+  StartEmailBindingResponse,
+  VerifyEmailBindingRequest,
+  VerifyEmailBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -262,6 +266,13 @@ export class ApiClient {
     });
   }
 
+  async dingtalkLogin(code: string, redirectUri: string): Promise<LoginResponse> {
+    return this.fetch("/auth/dingtalk", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }
@@ -355,6 +366,24 @@ export class ApiClient {
     return this.fetch("/api/me/notification-bindings/dingtalk/callback", {
       method: "POST",
       body: JSON.stringify({ code, state }),
+    });
+  }
+
+  async startEmailBinding(
+    payload: StartEmailBindingRequest,
+  ): Promise<StartEmailBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/email/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async verifyEmailBinding(
+    payload: VerifyEmailBindingRequest,
+  ): Promise<VerifyEmailBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/email/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 
@@ -706,6 +735,9 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    dingtalk_client_id?: string;
+    dingtalk_oauth_scope?: string;
+    hide_email_login?: boolean;
     posthog_key?: string;
     posthog_host?: string;
   }> {

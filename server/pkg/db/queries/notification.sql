@@ -73,6 +73,14 @@ ORDER BY created_at ASC;
 SELECT * FROM external_account_binding
 WHERE id = $1;
 
+-- name: GetExternalAccountBindingByProviderAndExternalID :one
+SELECT * FROM external_account_binding
+WHERE provider = $1 AND external_user_id = $2;
+
+-- name: GetExternalAccountBindingByUserAndProvider :one
+SELECT * FROM external_account_binding
+WHERE user_id = $1 AND provider = $2;
+
 -- name: UpsertExternalAccountBinding :one
 INSERT INTO external_account_binding (
     user_id,

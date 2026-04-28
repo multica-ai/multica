@@ -6,13 +6,17 @@ const {
   mockPush,
   mockSearchParams,
   mockLoginWithGoogle,
+  mockLoginWithDingTalk,
   mockListWorkspaces,
+  mockDingtalkLogin,
   mockCompleteDingTalkBinding,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchParams: new URLSearchParams(),
   mockLoginWithGoogle: vi.fn(),
+  mockLoginWithDingTalk: vi.fn(),
   mockListWorkspaces: vi.fn(),
+  mockDingtalkLogin: vi.fn(),
   mockCompleteDingTalkBinding: vi.fn(),
 }));
 
@@ -47,7 +51,7 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({ loginWithGoogle: mockLoginWithGoogle, loginWithDingTalk: mockLoginWithDingTalk }),
   };
 });
 
@@ -59,6 +63,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockListWorkspaces,
     googleLogin: vi.fn(),
+    dingtalkLogin: mockDingtalkLogin,
     completeDingTalkBinding: mockCompleteDingTalkBinding,
   },
 }));
@@ -71,6 +76,7 @@ describe("CallbackPage", () => {
     mockSearchParams.forEach((_v, k) => mockSearchParams.delete(k));
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
     mockCompleteDingTalkBinding.mockResolvedValue({
       binding: {
@@ -130,6 +136,47 @@ describe("CallbackPage", () => {
     });
   });
 
+  // DingTalk login tests (provider:dingtalk in state)
+  it("routes to loginWithDingTalk when state contains provider:dingtalk", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
+    mockSearchParams.set("state", "provider:dingtalk");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockLoginWithDingTalk).toHaveBeenCalledWith(
+        "test-code",
+        expect.stringContaining("/auth/callback"),
+      );
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("unonboarded DingTalk user lands on /onboarding", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
+    mockSearchParams.set("state", "provider:dingtalk");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("onboarded DingTalk user honors safe next= from state", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockSearchParams.set("state", "provider:dingtalk,next:/invite/xyz");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/invite/xyz");
+    });
+  });
+
+  // DingTalk binding tests (dingtalk. prefix in state — from OPE-20 notification flow)
   it("routes dingtalk callback through the binding completion API", async () => {
     mockSearchParams.set("state", "dingtalk.signed-state");
 
